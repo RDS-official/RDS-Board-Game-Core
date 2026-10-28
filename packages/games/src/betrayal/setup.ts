@@ -20,7 +20,7 @@ import {
   TraitKey,
   TRAIT_KEYS
 } from './cards';
-import { addRoomNode, connectRooms, FLOOR_ANCHORS, makeCardEntity } from './helpers';
+import { addRoomNode, connectRooms, FLOOR_ANCHORS, makeCardEntity, resetTurnResources } from './helpers';
 
 export interface CharacterDef {
   id: string;
@@ -386,6 +386,11 @@ export function setupBetrayal(seed: number = 42, roster: string[] = DEFAULT_ROST
     omen: omenShuffle.result.length,
     room: roomShuffle.result.length
   };
+
+  // The first turn gets its movement the same way every later turn does: a Speed
+  // roll. Without this the opening turn moved the raw Speed value while every
+  // following turn rolled, which is both inconsistent and off-rules.
+  resetTurnResources(state, state.activePlayerId);
 
   return state;
 }

@@ -1124,7 +1124,11 @@ export class BetrayalRules {
     // Nothing to decide: keep the single-dispatch path so ordinary play is
     // unchanged and no extra clicks are forced.
     if (declares.length === 0 && reacts.length === 0) {
-      const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 6, reason: 'vault' });
+      const check = rollTraitCheck(state, pid, 'knowledge', {
+        threshold: 6,
+        reason: 'vault',
+        effect: '成功：撬开金库并取走 2 件物品；失败：锁芯纹丝不动'
+      });
       trace(ctx, 'DICE_ROLL', `金库 · 知识检定 ${check.total} vs 6`, 600);
       this.settleVault(state, pid, ctx, player, check.success === true, check.total);
       return;
@@ -1180,7 +1184,14 @@ export class BetrayalRules {
       this.consumeDef(state, pid, 'angel_feather', ctx);
     }
 
-    const check = rollTraitCheck(state, pid, trait, { threshold, reason: window.label, allowLuck: false });
+    const check = rollTraitCheck(state, pid, trait, {
+      threshold,
+      reason: window.label,
+      allowLuck: false,
+      effect: window.payload?.kind === 'VAULT'
+        ? `成功：达到 ${threshold} 即撬开金库；失败：这次没能撬开`
+        : `达到 ${threshold} 即成功`
+    });
     trace(ctx, 'DICE_ROLL', `${window.label} ${check.total} vs ${threshold}`, 600);
 
     const recorded = RollWindowManager.record(state, {
@@ -1318,7 +1329,11 @@ export class BetrayalRules {
         }
       }
       if (special === 'COLLAPSED') {
-        const check = rollTraitCheck(state, pid, 'speed', { threshold: 5, reason: 'collapsed room' });
+        const check = rollTraitCheck(state, pid, 'speed', {
+          threshold: 5,
+          reason: 'collapsed room',
+          effect: '成功：安全滑下；失败：受到 2 点物理伤害'
+        });
         trace(ctx, 'DICE_ROLL', `坍塌之室 · 速度检定 ${check.total} vs 5`, 600);
         if (!check.success) {
           damagePlayer(state, pid, 'PHYSICAL', 1);
@@ -2513,7 +2528,11 @@ export class BetrayalRules {
     const player = state.players[pid];
     if (!player) return;
     player.customProps.brewUsed = true;
-    const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 4, reason: '配制圣水' });
+    const check = rollTraitCheck(state, pid, 'knowledge', {
+      threshold: 4,
+      reason: '配制圣水',
+      effect: '成功：获得一瓶圣水；失败：材料白费'
+    });
     trace(ctx, 'DICE_ROLL', `调配圣水 · 知识 [${check.dice.join('+')}] = ${check.total} vs 4`, 800);
     if (check.success) {
       grantScenarioItem(state, pid, 'holy_water', {
@@ -2533,7 +2552,11 @@ export class BetrayalRules {
     const haunt = currentHaunt(state);
     if (!player || !haunt || haunt.id !== 'living_dead') return;
     player.customProps.sanctifyUsed = true;
-    const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 4, reason: '圣化洋馆' });
+    const check = rollTraitCheck(state, pid, 'knowledge', {
+      threshold: 4,
+      reason: '圣化洋馆',
+      effect: '成功：圣化进度 +1（需 2 次）；失败：仪式中断'
+    });
     trace(ctx, 'DICE_ROLL', `圣水池注圣 · 知识 [${check.dice.join('+')}] = ${check.total} vs 4`, 900);
     if (check.success) {
       haunt.progress = Number(haunt.progress ?? 0) + 1;
@@ -2548,7 +2571,11 @@ export class BetrayalRules {
     const player = state.players[pid];
     if (!player) return;
     player.customProps.forgeUsed = true;
-    const check = rollTraitCheck(state, pid, 'might', { threshold: 4, reason: '打造银弹' });
+    const check = rollTraitCheck(state, pid, 'might', {
+      threshold: 4,
+      reason: '打造银弹',
+      effect: '成功：得到银弹；失败：银料报废'
+    });
     trace(ctx, 'DICE_ROLL', `打造银弹 · 力量 [${check.dice.join('+')}] = ${check.total} vs 4`, 800);
     if (check.success) {
       grantScenarioItem(state, pid, 'silver_bullets', {

@@ -404,6 +404,12 @@ export interface CheckOptions {
   threshold?: number;
   reason?: string;
   allowLuck?: boolean;
+  /**
+   * What this check is for, in the player's words ("成功：撬开金库并取走 2 件物品").
+   * Display-only: the dice overlay shows it before the dice land. The module owns
+   * the wording so the presentation layer never imports game content.
+   */
+  effect?: string;
 }
 
 export interface CheckResult {
@@ -429,7 +435,9 @@ export function rollTraitCheck(
   const player = state.players[playerId];
   const modifiers: string[] = [];
 
-  let count = traitValue(player, trait);
+  const baseValue = traitValue(player, trait);
+  state.globalVars.rollSeq = Number(state.globalVars.rollSeq ?? 0) + 1;
+  let count = baseValue;
   count += Number(player.customProps.checkBonus ?? 0);
   count += Number(options.extraDice ?? 0);
 
@@ -462,7 +470,15 @@ export function rollTraitCheck(
       success: options.threshold === undefined ? undefined : total >= options.threshold,
       modifiers
     };
-    state.globalVars.lastRoll = { playerId, trait, ...result, reason: options.reason ?? 'check' };
+    state.globalVars.lastRoll = {
+      playerId,
+      trait,
+      traitValue: baseValue,
+      seq: Number(state.globalVars.rollSeq ?? 0),
+      effect: options.effect,
+      ...result,
+      reason: options.reason ?? 'check'
+    };
     return result;
   }
 
@@ -507,7 +523,15 @@ export function rollTraitCheck(
     success: options.threshold === undefined ? undefined : total >= options.threshold,
     modifiers
   };
-  state.globalVars.lastRoll = { playerId, trait, ...result, reason: options.reason ?? 'check' };
+  state.globalVars.lastRoll = {
+    playerId,
+    trait,
+    traitValue: baseValue,
+      seq: Number(state.globalVars.rollSeq ?? 0),
+    effect: options.effect,
+    ...result,
+    reason: options.reason ?? 'check'
+  };
   return result;
 }
 
@@ -1230,10 +1254,17 @@ export function addFrost(state: GameState, roomId: string): void {
 export function resetTurnResources(state: GameState, playerId: PlayerId): void {
   const player = state.players[playerId];
   if (!player) return;
-  const speed = traitValue(player, 'speed');
   const frozen = frostRooms(state).includes(player.customProps.currentRoomId);
 
-  player.customProps.movesLeft = frozen ? Math.max(1, Math.floor(speed / 2)) : speed;
+  // Rules: movement is decided by a Speed roll at the start of the turn, not by
+  // the Speed value itself. Rolled here so the number of steps is a real dice
+  // result the player can see (and so luck items apply to it).
+  const speedRoll = rollTraitCheck(state, playerId, 'speed', {
+    reason: '移动力',
+    effect: frozen ? '本回合移动力减半（冰冻）' : '掷出的点数即本回合可移动步数'
+  });
+  const rolled = Math.max(1, speedRoll.total);
+  player.customProps.movesLeft = frozen ? Math.max(1, Math.floor(rolled / 2)) : rolled;
   player.customProps.attacksLeft = state.globalVars.hauntTriggered ? 1 : 0;
   player.customProps.usedItems = [];
   player.customProps.checkBonus = 0;

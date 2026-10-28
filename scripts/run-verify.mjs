@@ -42,7 +42,17 @@ const run = file =>
 const results = [];
 for (const file of scripts) {
   process.stdout.write(`· ${file} … `);
-  const result = await run(file);
+  let result = await run(file);
+
+  // The shared dev server can still be shutting down from the previous script,
+  // which surfaces as ERR_CONNECTION_REFUSED instead of a failed assertion.
+  const transient = /ERR_CONNECTION_REFUSED|ECONNREFUSED/.test(result.output);
+  if (result.code !== 0 && transient) {
+    process.stdout.write('retry … ');
+    await new Promise(r => setTimeout(r, 1500));
+    result = await run(file);
+  }
+
   results.push(result);
   console.log(result.code === 0 ? `ok (${result.ms}ms)` : `FAIL (${result.ms}ms)`);
   if (result.code !== 0) {

@@ -67,29 +67,66 @@ await page.waitForTimeout(2600);
 if (await page.locator('#boot-enter').count()) await page.click('#boot-enter');
 await page.waitForTimeout(900);
 
-const attacked = await page.evaluate(() => {
+const attacked = await page.evaluate(async () => {
   const app = window.__boardGameApp;
-  const snap = app.session.getSnapshot();
-  const action = snap.actions.find(a => a.label.includes('攻击') || a.icon === '⚔');
-  if (!action) return { ok: false, reason: `no attack action among ${snap.actions.map(a => a.label).join(' | ')}` };
-  const res = app.session.perform(action.id, {}, undefined);
-  return { ok: res.ok, id: action.id, label: action.label, error: res.error };
+  // Two things to absorb here:
+  //  - the turn-start Speed roll shifted the PRNG, so one scripted attack can miss;
+  //  - the damage feedback elements live for ~200ms, so a single sample after a
+  //    fixed wait misses them.
+  // Swing until something lands, polling fast enough to see the effects.
+  const damageRows = () => document.querySelectorAll('#activity-feed .af-row.kind-damage').length;
+  const before = damageRows();
+  const seen = { screenHit: false, cardShake: false, pipFlash: false, cardBurst: false, worldBurst: false };
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  const sample = () => {
+    if (document.querySelector('#screen-hit.mental, #screen-hit.physical')) seen.screenHit = true;
+    if (document.querySelector('.pc.trait-hit, .pc.trait-heal')) seen.cardShake = true;
+    if (document.querySelector('.trait-row.flash-down, .trait-row.flash-up')) seen.pipFlash = true;
+    if (document.querySelector('.trait-burst')) seen.cardBurst = true;
+    if (document.querySelector('.label-burst')) seen.worldBurst = true;
+  };
+
+  let lastError;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const raw = app.session.engine.getRawState();
+    const active = raw.activeActorId ?? raw.activePlayerId;
+    if (raw.players?.[active]) raw.players[active].customProps.attacksLeft = 1;
+    app.session.setViewer('GOD');
+    const snap = app.session.getSnapshot();
+    const action = snap.actions.find(a => a.label.includes('攻击') || a.icon === '⚔');
+    if (!action) {
+      return { ok: false, reason: `no attack action among ${snap.actions.map(a => a.label).join(' | ')}` };
+    }
+    const res = app.session.perform(action.id, {}, undefined);
+    if (!res.ok) lastError = res.error;
+
+    // Poll through the effect lifetime instead of sampling once.
+    for (let tick = 0; tick < 10; tick++) {
+      await sleep(40);
+      sample();
+    }
+    if (damageRows() > before) {
+      return { ok: true, id: action.id, label: action.label, attempts: attempt + 1, seen };
+    }
+  }
+  return { ok: false, reason: 'attack never dealt damage', error: lastError, seen };
 });
 await page.waitForTimeout(260);
 
-const feedback = await page.evaluate(() => {
+const feedback = await page.evaluate(seen => {
   const snap = window.__boardGameApp.session.getSnapshot();
   return {
-    screenHit: !!document.querySelector('#screen-hit.mental, #screen-hit.physical'),
+    screenHit: seen.screenHit ?? false,
     screenClass: document.querySelector('#screen-hit')?.className ?? '',
-    cardShake: !!document.querySelector('.pc.trait-hit, .pc.trait-heal'),
-    pipFlash: !!document.querySelector('.trait-row.flash-down, .trait-row.flash-up'),
-    cardBurst: document.querySelector('.trait-burst')?.textContent ?? null,
-    worldBurst: document.querySelector('.label-burst')?.textContent ?? null,
+    cardShake: seen.cardShake ?? false,
+    pipFlash: seen.pipFlash ?? false,
+    cardBurst: seen.cardBurst ?? false,
+    worldBurst: seen.worldBurst ?? false,
     feedDamage: [...document.querySelectorAll('#activity-feed .af-row.kind-damage')].length,
     historyTop: snap.history.slice(0, 2).map(h => `${h.kind}:${h.title}`)
   };
-});
+}, attacked.seen ?? {});
 
 await page.screenshot({ path: 'shots/trait-damage-feedback.png' });
 

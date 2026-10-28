@@ -22,7 +22,8 @@ import {
   UiSpatialInfo,
   UiStackFrame,
   UiTraitChange,
-  ViewerId
+  ViewerId,
+  UiRoll
 } from './contracts';
 
 /** Visual event type → activity-feed bucket. */
@@ -993,7 +994,8 @@ export class UniversalSession implements GamePresenter {
           ? this.engine.getActorName(state.winner)
           : ''
         : '',
-      winnerReason: state.gameOver ? state.winnerReason : undefined
+      winnerReason: state.gameOver ? state.winnerReason : undefined,
+      lastRoll: this.buildLastRoll(state)
     };
 
     // Diff trait ladders last: the snapshot above already carries the new
@@ -1002,6 +1004,40 @@ export class UniversalSession implements GamePresenter {
   }
 
 
+
+  /**
+   * Most recent trait check, for the dice animation. `lastRoll` lives in
+   * `globalVars` and persists until the next check, so the stamp includes the
+   * action cursor: that makes two identical totals in a row distinguishable.
+   */
+  private buildLastRoll(state: ProjectedGameState): UiRoll | undefined {
+    const roll = state.globalVars?.lastRoll as
+      | {
+          dice?: number[];
+          total?: number;
+          threshold?: number;
+          success?: boolean;
+          trait?: string;
+          traitValue?: number;
+          seq?: number;
+          effect?: string;
+          reason?: string;
+        }
+      | undefined;
+    if (!roll || !Array.isArray(roll.dice) || typeof roll.total !== 'number') return undefined;
+    return {
+      dice: [...roll.dice],
+      total: roll.total,
+      threshold: roll.threshold,
+      success: roll.success,
+      trait: roll.trait,
+      traitValue: typeof roll.traitValue === 'number' ? roll.traitValue : undefined,
+      seq: typeof roll.seq === 'number' ? roll.seq : undefined,
+      effect: roll.effect,
+      reason: roll.reason,
+      stamp: `${roll.seq ?? 0}:${roll.trait ?? ''}:${roll.total}:${roll.dice.join(',')}`
+    };
+  }
 
   private buildPlacement(
     raw: ReturnType<UniversalGameEngine['getRawState']>,

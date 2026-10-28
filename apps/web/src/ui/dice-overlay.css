@@ -1,0 +1,559 @@
+/* ============================================================
+   Dice roll overlay
+   ------------------------------------------------------------
+   A house silhouette in fog. The fog is clear in the middle and heavily
+   blurred at the edges so the dice read as emerging from it.
+
+   Timeline (1s appear / 2s lock / 3s gone) is driven from
+   dice-overlay.ts; these rules only describe each state.
+   ============================================================ */
+
+.dice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(120% 100% at 50% 45%, rgba(2, 3, 6, 0.72), rgba(0, 0, 0, 0.94));
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 620ms var(--ease-standard), backdrop-filter 620ms var(--ease-standard);
+  backdrop-filter: blur(2px);
+}
+
+.dice-overlay.is-in {
+  opacity: 1;
+  backdrop-filter: blur(6px);
+}
+
+.dice-overlay.is-out {
+  opacity: 0;
+  backdrop-filter: blur(0);
+}
+
+/* ---- fog ---------------------------------------------------------------
+   Two layers: a still one that is clear in the centre and murky at the rim,
+   and a slowly drifting one for texture. */
+
+.dice-fog {
+  position: absolute;
+  inset: -15%;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      closest-side at 50% 48%,
+      rgba(120, 140, 175, 0.05) 0%,
+      rgba(60, 74, 96, 0.05) 22%,
+      rgba(8, 10, 16, 0.22) 40%,
+      rgba(4, 5, 9, 0.78) 64%,
+      rgba(2, 3, 6, 0.97) 100%
+    );
+  filter: blur(24px);
+}
+
+.dice-fog::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(closest-side at 50% 46%, rgba(168, 188, 220, 0.16), rgba(150, 170, 200, 0.07) 34%, transparent 60%),
+    radial-gradient(closest-side at 34% 58%, rgba(150, 170, 200, 0.09), transparent 55%),
+    radial-gradient(closest-side at 66% 40%, rgba(150, 170, 200, 0.08), transparent 52%);
+  filter: blur(30px);
+  animation: diceFogDrift 9s ease-in-out infinite alternate;
+}
+
+@keyframes diceFogDrift {
+  from {
+    transform: translate3d(-2%, 1%, 0) scale(1);
+  }
+  to {
+    transform: translate3d(2%, -1.5%, 0) scale(1.06);
+  }
+}
+
+/* ---- stage ------------------------------------------------------------- */
+
+.dice-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-7);
+  transform: translateY(14px) scale(0.94);
+  opacity: 0;
+  transition: transform 760ms var(--ease-out), opacity 760ms var(--ease-out);
+}
+
+.dice-overlay.is-in .dice-stage {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+
+/* The house sits behind the dice: a dark silhouette, softened by the fog. */
+.house-wrap {
+  position: absolute;
+  width: min(460px, 78vw);
+  aspect-ratio: 260 / 200;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -54%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+.dice-house {
+  width: 100%;
+  height: 100%;
+  fill: #05060a;
+  opacity: 0.9;
+  filter: blur(2.5px) drop-shadow(0 0 26px rgba(0, 0, 0, 0.9));
+}
+
+.house-trees {
+  opacity: 0.85;
+}
+
+/* A dim red lamp in the tower window. Rendered outside the SVG so it keeps its
+   glow instead of inheriting the silhouette's blur. */
+.house-lamp {
+  position: absolute;
+  left: 79.2%;
+  top: 45%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ff7a5e 0%, #d33a28 46%, rgba(170, 36, 24, 0) 74%);
+  box-shadow:
+    0 0 16px 5px rgba(214, 58, 40, 0.42),
+    0 0 46px 18px rgba(150, 28, 20, 0.26);
+  animation: lampFlicker 5s ease-in-out infinite;
+}
+
+@keyframes lampFlicker {
+  0%,
+  100% {
+    opacity: 0.78;
+  }
+  38% {
+    opacity: 1;
+  }
+  52% {
+    opacity: 0.62;
+  }
+  70% {
+    opacity: 0.92;
+  }
+}
+
+.dice-house-hole {
+  fill: rgba(120, 140, 175, 0.055);
+}
+
+.dice-caption {
+  font-family: var(--font-ui);
+  font-size: var(--type-sm);
+  letter-spacing: 0.16em;
+  color: rgba(200, 212, 230, 0.62);
+  text-transform: uppercase;
+  min-height: 1em;
+}
+
+/* ---- dice -------------------------------------------------------------- */
+
+.dice-row {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  justify-content: center;
+  min-height: 72px;
+  perspective: 620px;
+}
+
+.die {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+  background: linear-gradient(160deg, #f3efe6, #cdc6b8 62%, #a9a294);
+  box-shadow:
+    inset 0 -3px 6px rgba(0, 0, 0, 0.28),
+    inset 0 2px 0 rgba(255, 255, 255, 0.65),
+    0 14px 26px -12px rgba(0, 0, 0, 0.9);
+  /* Faint at first so the dice read as emerging from the fog. */
+  opacity: 0.82;
+  filter: blur(0.5px);
+  transition: opacity 420ms ease, filter 420ms ease;
+}
+
+.dice-overlay.is-in .die {
+  animation: diceTumble 780ms cubic-bezier(0.3, 0.1, 0.2, 1) infinite;
+  animation-delay: calc(var(--i) * 70ms);
+}
+
+.dice-overlay.is-settled .die {
+  animation: diceLock 520ms cubic-bezier(0.2, 1.3, 0.4, 1) 1 both;
+  animation-delay: calc(var(--i) * 90ms);
+  opacity: 1;
+  filter: blur(0);
+}
+
+@keyframes diceTumble {
+  0% {
+    transform: rotate(-14deg) translateY(-6px) rotateY(0deg);
+  }
+  50% {
+    transform: rotate(12deg) translateY(6px) rotateY(180deg);
+  }
+  100% {
+    transform: rotate(-14deg) translateY(-6px) rotateY(360deg);
+  }
+}
+
+@keyframes diceLock {
+  0% {
+    transform: scale(1.16) rotate(-6deg);
+  }
+  60% {
+    transform: scale(0.96) rotate(2deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+/* Pips: Betrayal dice are printed 0 / 1 / 2. */
+.pip {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 32%, #4a463d, #17150f 72%);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.18);
+}
+
+.pip.mid {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.pip.tl {
+  top: 14px;
+  left: 14px;
+}
+
+.pip.br {
+  right: 14px;
+  bottom: 14px;
+}
+
+/* A blank Betrayal face is a real face: an engraved ring instead of nothing. */
+.pip.ring {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 17px;
+  height: 17px;
+  background: transparent;
+  box-shadow: inset 0 0 0 2.5px rgba(74, 70, 61, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.12);
+}
+
+/* ---- result ------------------------------------------------------------ */
+
+.dice-total {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 400ms ease, transform 400ms ease;
+}
+
+.dice-overlay.is-settled .dice-total {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.dice-total b {
+  font-family: var(--font-display);
+  font-size: var(--type-2xl);
+  line-height: 1;
+  color: #f4e9cd;
+  text-shadow: 0 0 22px rgba(217, 180, 91, 0.45);
+  font-variant-numeric: tabular-nums;
+}
+
+.dice-total span {
+  font-family: var(--font-ui);
+  font-size: var(--type-xs);
+  letter-spacing: 0.14em;
+  color: rgba(190, 202, 220, 0.55);
+}
+
+.dice-verdict-slot {
+  min-height: 1.4em;
+}
+
+.dice-verdict-slot {
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 380ms ease, transform 380ms ease;
+}
+
+.dice-overlay.is-settled .dice-verdict-slot {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.dice-verdict {
+  font-family: var(--font-ui);
+  font-size: var(--type-xs);
+  letter-spacing: 0.08em;
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-pill);
+}
+
+.dice-verdict.ok {
+  color: #9fe6c0;
+  background: rgba(87, 192, 139, 0.14);
+}
+
+.dice-verdict.fail {
+  color: #ffb0a6;
+  background: rgba(224, 96, 78, 0.16);
+}
+
+.dice-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 6%;
+  transform: translateX(-50%);
+  font-family: var(--font-ui);
+  font-size: var(--type-xs);
+  letter-spacing: 0.2em;
+  color: rgba(170, 182, 200, 0.42);
+  animation: diceHintPulse 2.4s ease-in-out infinite;
+}
+
+@keyframes diceHintPulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Reduced motion: no tumble, no drift, no pulse — just the result. */
+@media (prefers-reduced-motion: reduce) {
+  .dice-overlay,
+  .dice-stage,
+  .die,
+  .dice-total {
+    transition: none !important;
+  }
+
+  .dice-overlay.is-in .die,
+  .dice-overlay.is-settled .die,
+  .dice-fog::after,
+  .dice-hint,
+  .confirm-rail .cr-line::after,
+  .confirm-rail .cr-knob,
+  .house-lamp {
+    animation: none !important;
+  }
+
+  /* With no countdown animation the briefing would sit forever, so the rail is
+     hidden and the panel is told to move on immediately. */
+  .confirm-rail {
+    visibility: hidden;
+  }
+}
+
+/* ============================================================
+   Stage 1 · confirmation card
+   ------------------------------------------------------------
+   Borderless text block on the left, a progress rail on the right. The rail
+   drains over the countdown and the knob rides the line.
+   ============================================================ */
+
+.dice-overlay.is-confirm .dice-panel {
+  display: none;
+}
+
+.dice-overlay.is-dice .confirm-panel,
+.dice-overlay.is-settled .confirm-panel {
+  display: none;
+}
+
+.confirm-panel {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-5);
+  max-width: min(560px, 82vw);
+}
+
+/* Borderless text box: no frame, no fill — the fog is the backdrop. */
+.confirm-text {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  text-align: left;
+  /* Keep the copy clear of the progress rail. */
+  padding-right: var(--space-4);
+}
+
+.confirm-value {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.confirm-value .cv-label {
+  font-family: var(--font-ui);
+  font-size: var(--type-base);
+  letter-spacing: 0.06em;
+  color: rgba(200, 212, 230, 0.7);
+}
+
+.confirm-value b {
+  font-family: var(--font-display);
+  font-size: var(--type-3xl);
+  line-height: 1;
+  color: #f6e6b8;
+  text-shadow: 0 0 26px rgba(217, 180, 91, 0.5);
+  font-variant-numeric: tabular-nums;
+}
+
+.confirm-need {
+  font-family: var(--font-ui);
+  font-size: var(--type-base);
+  color: rgba(205, 216, 232, 0.82);
+}
+
+.confirm-need b {
+  font-size: var(--type-lg);
+  color: #f4e9cd;
+  font-variant-numeric: tabular-nums;
+}
+
+.confirm-effect {
+  margin: var(--space-1) 0 0;
+  font-family: var(--font-ui);
+  font-size: var(--type-base);
+  line-height: 1.55;
+  color: rgba(186, 199, 218, 0.86);
+}
+
+/* Progress rail: a dim line with a bright knob riding down it. */
+.confirm-rail {
+  position: relative;
+  flex: 0 0 10px;
+  width: 10px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.confirm-rail .cr-line {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.confirm-rail .cr-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, #f6e2a8, #d9b45b 60%, rgba(217, 180, 91, 0.25));
+  transform-origin: 50% 0%;
+  animation: railDrain var(--confirm-ms, 10s) linear forwards;
+}
+
+.confirm-rail .cr-knob {
+  position: absolute;
+  left: 50%;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  border-radius: 50%;
+  background: #fdf3d4;
+  box-shadow: 0 0 16px 4px rgba(217, 180, 91, 0.55);
+  animation: knobRide var(--confirm-ms, 10s) linear forwards;
+}
+
+@keyframes railDrain {
+  from {
+    transform: scaleY(1);
+  }
+  to {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes knobRide {
+  from {
+    top: -9px;
+  }
+  to {
+    top: calc(100% - 9px);
+  }
+}
+
+/* ---- bigger type overall ------------------------------------------------ */
+
+.dice-caption {
+  font-size: var(--type-md);
+  letter-spacing: 0.2em;
+}
+
+.dice-total b {
+  font-size: var(--type-3xl);
+}
+
+.dice-total span {
+  font-size: var(--type-sm);
+}
+
+.dice-verdict {
+  font-size: var(--type-sm);
+  padding: 3px var(--space-4);
+}
+
+.dice-hint {
+  font-size: var(--type-sm);
+  letter-spacing: 0.24em;
+}
+
+.die {
+  width: 78px;
+  height: 78px;
+  border-radius: 16px;
+}
+
+.pip {
+  width: 16px;
+  height: 16px;
+}
+
+.pip.tl {
+  top: 17px;
+  left: 17px;
+}
+
+.pip.br {
+  right: 17px;
+  bottom: 17px;
+}
+
+.pip.ring {
+  width: 21px;
+  height: 21px;
+}

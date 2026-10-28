@@ -1,6 +1,7 @@
 import confetti from 'canvas-confetti';
 import { cardArtSvg } from './cardArt';
 import { hash, reconcileKeyed, reconcileKeyedPreservingScroll } from './dom/keyed';
+import { DiceRollOverlay } from './dice-overlay';
 import {
   CameraView,
   GAME_TABS,
@@ -63,6 +64,9 @@ export class BoardGameHUD {
   /** Phone shell: whether the action drawer is expanded. */
   private dockOpen = false;
   private shellMedia?: MediaQueryList;
+  private diceOverlay?: DiceRollOverlay;
+  /** The setup roll is not animated: opening a scenario should not play a dice cutscene. */
+  private rollPrimed = false;
   /** Minimap can be collapsed to conserve screen space. */
   private minimapCollapsed = false;
 
@@ -91,6 +95,7 @@ export class BoardGameHUD {
     this.options = options;
 
     this.renderSkeleton();
+    this.diceOverlay = new DiceRollOverlay(this.container);
     this.syncSoundButton();
     this.bindPresenter(presenter);
   }
@@ -950,6 +955,7 @@ export class BoardGameHUD {
 
   private render(snapshot: GameSnapshot): void {
     this.latest = snapshot;
+    this.maybeAnimateRoll(snapshot);
     // Betrayal uses a candle-lit parchment palette; other fixtures stay slate.
     this.container.dataset.theme = snapshot.gameId === 'betrayal' ? 'gothic' : '';
     this.container.querySelectorAll<HTMLElement>('.game-pill').forEach(button => {
@@ -1121,6 +1127,34 @@ export class BoardGameHUD {
    * Recent activity feed: newest event on top, grouped by kind colour so a
    * glance separates damage from movement, cards and haunt beats.
    */
+  /**
+   * Animate a fresh trait check. `lastRoll` persists between snapshots, so the
+   * overlay dedupes on its stamp and a plain re-render never replays the roll.
+   */
+  private maybeAnimateRoll(snapshot: GameSnapshot): void {
+    const roll = snapshot.lastRoll;
+    if (!roll || !this.diceOverlay) return;
+    // The first snapshot can already carry the setup's turn-start Speed roll.
+    // Playing a cutscene the moment a scenario opens is noise, so prime the
+    // overlay with it and animate only rolls that happen from here on.
+    if (!this.rollPrimed) {
+      this.rollPrimed = true;
+      return;
+    }
+    this.diceOverlay.show({ roll, label: this.rollLabel(roll) });
+  }
+
+  private rollLabel(roll: NonNullable<GameSnapshot['lastRoll']>): string {
+    const traitZh: Record<string, string> = {
+      speed: '速度',
+      might: '力量',
+      sanity: '神智',
+      knowledge: '知识'
+    };
+    const trait = roll.trait ? traitZh[roll.trait] ?? roll.trait : '';
+    return trait ? `${trait}检定` : '检定';
+  }
+
   private renderHistory(snapshot: GameSnapshot): void {
     const feed = this.container.querySelector('#activity-feed') as HTMLElement | null;
     if (!feed) return;
