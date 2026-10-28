@@ -277,6 +277,81 @@ if (!mounted) {
   }
 }
 
+/* ---- 7. the player rail is reused across an unchanged repaint -------- */
+{
+  const rail = await page.evaluate(async () => {
+    const app = window.__boardGameApp;
+    const card = document.querySelector('#player-rail .pc');
+    if (!card) return { skipped: true };
+
+    card.setAttribute('data-probe-tag', 'pc');
+    card.focus?.();
+    const focusedBefore = document.activeElement === card;
+    const idsBefore = [...document.querySelectorAll('#player-rail .pc')].map(el => el.dataset.playerId ?? el.className);
+
+    app.hud.renderPlayers(app.session.getSnapshot());
+    await new Promise(r => setTimeout(r, 200));
+
+    const after = document.querySelector('#player-rail .pc');
+    return {
+      skipped: false,
+      reused: after === card,
+      markerSurvived: !!document.querySelector('[data-probe-tag="pc"]'),
+      idsStable: JSON.stringify([...document.querySelectorAll('#player-rail .pc')].map(el => el.dataset.playerId ?? el.className)) === JSON.stringify(idsBefore),
+      cards: document.querySelectorAll('#player-rail .pc').length
+    };
+  });
+
+  if (rail.skipped) {
+    failures.push('the player rail has no cards to probe');
+  } else {
+    console.log('rail:', JSON.stringify(rail));
+    record('rail', rail.reused, 'an unchanged repaint replaced the player cards');
+    record('rail', rail.markerSurvived, 'a marker attribute on a player card did not survive');
+    record('rail', rail.idsStable, 'an unchanged repaint changed the player card order');
+  }
+}
+
+/* ---- 8. guarded panels skip the repaint entirely -------------------- */
+{
+  const guarded = await page.evaluate(async () => {
+    const app = window.__boardGameApp;
+    const snap = app.session.getSnapshot();
+
+    const mini = document.querySelector('#mansion-minimap');
+    const room = document.querySelector('#room-card');
+    if (!mini && !room) return { skipped: true };
+
+    // Tag a descendant of each panel; if the panel is repainted the tag dies.
+    const miniChild = mini?.querySelector('.mm-head') ?? null;
+    const roomChild = room?.querySelector('.rc-head') ?? null;
+    if (miniChild) miniChild.setAttribute('data-probe-tag', 'mini');
+    if (roomChild) roomChild.setAttribute('data-probe-tag', 'room');
+
+    app.hud.renderMinimap(snap);
+    app.hud.renderRoomCard(snap);
+    await new Promise(r => setTimeout(r, 150));
+
+    return {
+      skipped: false,
+      miniKept: miniChild ? !!document.querySelector('[data-probe-tag="mini"]') : null,
+      roomKept: roomChild ? !!document.querySelector('[data-probe-tag="room"]') : null
+    };
+  });
+
+  if (guarded.skipped) {
+    failures.push('no guarded panel to probe');
+  } else {
+    console.log('guarded:', JSON.stringify(guarded));
+    if (guarded.miniKept !== null) {
+      record('minimap', guarded.miniKept, 'an unchanged repaint rebuilt the minimap');
+    }
+    if (guarded.roomKept !== null) {
+      record('dossier', guarded.roomKept, 'an unchanged repaint rebuilt the room dossier');
+    }
+  }
+}
+
 console.log(`\nDOM stability probe: ${checks} checks`);
 if (failures.length) {
   console.log(`\nFAILURES (${failures.length}):`);
