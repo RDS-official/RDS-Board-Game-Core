@@ -16,3 +16,6 @@ shots/
 Thumbs.db
 
 apps/server/data/
+
+# tsc incremental build info
+*.tsbuildinfo
