@@ -1910,7 +1910,9 @@ test('fixture betrayal: armor reduces physical damage before allocation', () => 
 test('fixture betrayal: revolver shoots along a floor line and never suffers retaliation', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'haunt_phantom' });
   const raw = engine.getRawState();
-  addExploredRoom(raw, 'wine_cellar', 2, 2, 'room_catacombs');
+  // (0,2) keeps the wine cellar on the same basement row as the catacombs at
+  // (1,2) so the shot has a line, without landing on the stairwell cell (2,2).
+  addExploredRoom(raw, 'wine_cellar', 0, 2, 'room_catacombs');
   movePlayerTo(raw, 'p1', 'room_wine_cellar');
   grantItem(raw, 'p2', 'revolver');
   raw.activePlayerId = 'p2';

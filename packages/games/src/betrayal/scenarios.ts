@@ -251,7 +251,9 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
     setup: seed => {
       const state = setupBetrayal(seed);
       addExploredRoom(state, 'pentagram_chamber', 2, 1, 'room_basement_landing');
-      addExploredRoom(state, 'laboratory', 2, 2, 'room_basement_landing');
+      // 实验室不能放在 (2,2)：那里是地下平台（楼梯井）的格子，两块房块会
+      // 叠在一起。放到 (1,2)，与其他剧本把地下室房间摆在平台两侧一致。
+      addExploredRoom(state, 'laboratory', 1, 2, 'room_basement_landing');
       addExploredRoom(state, 'kitchen', 1, 0, 'room_entrance_hall');
       connectRooms(state, 'room_pentagram_chamber', 'room_laboratory', 'DOOR');
 
