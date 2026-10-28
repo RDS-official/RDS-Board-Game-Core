@@ -26,8 +26,8 @@ jobs:
 
       - name: Pack deployment bundle
         run: |
-          tar -czf app.tar.gz --exclude=.git --exclude=node_modules --exclude=.github .
-          ls -la app.tar.gz
+          tar -czf /tmp/rds-deploy.tar.gz --exclude=.git --exclude=node_modules --exclude=.github .
+          ls -la /tmp/rds-deploy.tar.gz
 
       - name: Load SSH key
         run: |
@@ -38,7 +38,7 @@ jobs:
 
       - name: Ship and deploy
         run: |
-          scp -i ~/.ssh/id_rsa -P ${{ secrets.SSH_PORT }} app.tar.gz ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/tmp/rds-deploy.tar.gz
+          scp -i ~/.ssh/id_rsa -P ${{ secrets.SSH_PORT }} /tmp/rds-deploy.tar.gz ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/tmp/rds-deploy.tar.gz
           ssh -i ~/.ssh/id_rsa -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} '
             set -e
             cd /opt/rds-board/app
