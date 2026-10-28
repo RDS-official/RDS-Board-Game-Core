@@ -1255,16 +1255,12 @@ export function resetTurnResources(state: GameState, playerId: PlayerId): void {
   const player = state.players[playerId];
   if (!player) return;
   const frozen = frostRooms(state).includes(player.customProps.currentRoomId);
+  const speed = traitValue(player, 'speed');
 
-  // Rules: movement is decided by a Speed roll at the start of the turn, not by
-  // the Speed value itself. Rolled here so the number of steps is a real dice
-  // result the player can see (and so luck items apply to it).
-  const speedRoll = rollTraitCheck(state, playerId, 'speed', {
-    reason: '移动力',
-    effect: frozen ? '本回合移动力减半（冰冻）' : '掷出的点数即本回合可移动步数'
-  });
-  const rolled = Math.max(1, speedRoll.total);
-  player.customProps.movesLeft = frozen ? Math.max(1, Math.floor(rolled / 2)) : rolled;
+  // Official rule (Betrayal 2nd ed, Moving): "Move up to a number of spaces equal
+  // to your current Speed." No dice are rolled for movement. Frost is a module
+  // effect that halves it.
+  player.customProps.movesLeft = frozen ? Math.max(1, Math.floor(speed / 2)) : speed;
   player.customProps.attacksLeft = state.globalVars.hauntTriggered ? 1 : 0;
   player.customProps.usedItems = [];
   player.customProps.checkBonus = 0;

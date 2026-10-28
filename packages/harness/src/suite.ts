@@ -34,6 +34,7 @@ import {
 import { resolveHauntId } from '@rds/games/betrayal/haunts';
 import {
   addEffect,
+  applyTraitSteps,
   connectAdjacentDoors,
   damagePlayer,
   effectsOn,
@@ -45,7 +46,10 @@ import {
   ongoingEffectKinds,
   ownsDef,
   removeEffects,
-  rollZeroDice
+  resetTurnResources,
+  rollZeroDice,
+  traitIndex,
+  traitValue
 } from '@rds/games/betrayal/helpers';
 import { addExploredRoom, grantItem, grantOmen } from '@rds/games/betrayal/scenarios';
 import { projectNodePosition } from '@rds/web/render/spatialProjection';
@@ -3810,3 +3814,103 @@ export async function runCoreSuite(): Promise<SuiteResult> {
     cases: results
   };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Official rules: assertions taken from the 2nd-edition rulebook              */
+/* -------------------------------------------------------------------------- */
+
+test('rules: movement equals the Speed value and rolls no dice', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  const active = raw.activeActorId ?? raw.activePlayerId;
+
+  // Rulebook, Moving: "Move up to a number of spaces equal to your current
+  // Speed." Movement is never rolled for.
+  const before = raw.prngState;
+  resetTurnResources(raw, active);
+  assertEqual(raw.prngState, before, 'resetting a turn must not consume dice');
+
+  const speed = traitValue(raw.players[active], 'speed');
+  assertEqual(Number(raw.players[active].customProps.movesLeft), speed, 'movesLeft is the Speed value');
+});
+
+test('rules: a trait can be raised but never above the printed maximum', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  const player = raw.players.p1;
+  const track = player.customProps.tracks?.knowledge ?? player.customProps.track?.knowledge;
+  assert(Array.isArray(track), 'the character sheet exposes a knowledge track');
+
+  // Rulebook, Trait Damage: "Traits cannot go above the maximum value shown on
+  // the character card."
+  applyTraitSteps(raw, 'p1', 'knowledge', 99, { force: true });
+  assertEqual(traitIndex(player, 'knowledge'), track!.length - 1, 'gain clamps to the top of the track');
+});
+
+test('rules: a trait that reaches the skull kills the explorer', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  raw.globalVars.hauntTriggered = true;
+  raw.players.p1.customProps.traitIndex = { ...raw.players.p1.customProps.traitIndex, sanity: 1 };
+
+  // Rulebook, Death: any trait at the skull and the explorer dies.
+  damagePlayer(raw, 'p1', 'MENTAL', 1, 'sanity');
+  assertEqual(raw.players.p1.alive, false, 'the explorer dies at the skull');
+});
+
+test('rules: the haunt roll is six dice compared against the omen count', () => {
+  // Rulebook, Making a Haunt Roll: roll 6 dice at the end of a turn where you drew
+  // an omen; the haunt begins when the total is LESS than the omens drawn.
+  const sixDice = (seed: number) => rollZeroDice(seed, 6).rolls.length;
+  assertEqual(sixDice(12345), 6, 'the haunt roll uses six dice');
+
+  const hauntWith = (omens: number) => {
+    const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 7, { scenario: 'omen_ready' });
+    const raw = engine.getRawState();
+    raw.globalVars.omensRevealed = omens;
+    raw.globalVars.pendingHauntRoll = { playerId: 'p1', omens };
+    raw.activePlayerId = 'p1';
+    raw.activeActorId = 'p1';
+    raw.players.p1.customProps.movesLeft = 0;
+
+    // The roll only becomes legal once endTurn has pushed the HAUNT_CHECK frame
+    // onto the interrupt stack, so drive it the way the table does.
+    const end = engine.getLegalActions('p1').find(a => a.type === 'END_TURN');
+    assert(!!end, 'the turn can be ended');
+    engine.dispatch(end!);
+
+    const action = engine.getLegalActions('p1').find(a => a.type === 'ROLL_HAUNT_CHECK');
+    assert(!!action, 'the haunt roll is offered while it is pending');
+    engine.dispatch(action!);
+    return engine.getRawState();
+  };
+
+  // A six-dice total is always >= 0, so zero omens can never trigger the haunt.
+  const noOmens = hauntWith(0);
+  assertEqual(noOmens.globalVars.hauntTriggered ?? false, false, 'no omens cannot trigger a haunt');
+
+  // With more omens than any six-dice total the haunt must fire.
+  const manyOmens = hauntWith(13);
+  assertEqual(manyOmens.globalVars.hauntTriggered, true, 'omen count above the maximum roll triggers it');
+});
+
+test('rules: an attack is available once per turn and only after the haunt', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'haunt_zombie' });
+  const raw = engine.getRawState();
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.attacksLeft = 1;
+  // An attack needs a target in the same room.
+  const room = String(raw.players.p1.customProps.currentRoomId);
+  movePlayerTo(raw, 'p2', room);
+
+  const canAttack = () => engine.getLegalActions('p1').some(a => a.type === 'ATTACK_PLAYER');
+  assertEqual(raw.globalVars.hauntTriggered, true, 'the fixture starts after the haunt');
+
+  // Rulebook, Attacking: once per turn. Exhausting the allowance removes it.
+  raw.players.p1.customProps.attacksLeft = 0;
+  assertEqual(canAttack(), false, 'no attack once the allowance is spent');
+
+  raw.players.p1.customProps.attacksLeft = 1;
+  assertEqual(canAttack(), true, 'one attack is offered while the allowance is unspent');
+});

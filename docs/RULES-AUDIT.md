@@ -1,0 +1,131 @@
+# 官方规则一致性审计
+
+> 目的：把《Betrayal at House on the Hill》（第二版）的核心规则逐条对照实现，
+> 标出「一致 / 偏离 / 未实现」，并为可判定的规则补断言测试。
+>
+> 规则依据：[官方规则书整理（Lehi-Innovation/boardgame-rules）](https://github.com/Lehi-Innovation/boardgame-rules/blob/484028e5354456ad347f750e57d8470f05a67bc4/rules/betrayal-at-house-on-the-hill.md)
+> 审计日期：2026-10-28。**范围**：核心回合循环规则；44 张房间与 50 个剧本的具体内容不在本次范围内。
+
+---
+
+## 1. 结论摘要
+
+| 状态 | 数量 | 说明 |
+| --- | --- | --- |
+| ✅ 一致 | 9 | 有断言锁定 |
+| ⚠️ 曾偏离，已修正 | 1 | 移动力曾按口述误改为掷骰（见 §3） |
+| ⚠️ 一致但无断言 | 3 | 建议后续补测 |
+| ❌ 未实现 | 1 | 大门上锁 |
+| ❌ 偏离 | 1 | 神秘电梯未掷 2 骰，改为玩家自选 |
+
+---
+
+## 2. 逐条对照
+
+### 2.1 回合结构
+
+| 官方规则 | 实现 | 状态 |
+| --- | --- | --- |
+| 回合内可任意顺序：移动、发现房间、使用物品/预兆（各每回合一次）、按需掷骰、作祟后攻击一次 | `getPlayerLegalActions` 按阶段放行；`usedItems`/`attacksLeft` 限制次数 | ✅ |
+| 发现房间抽到卡后**本回合必须停止移动** | 抽卡处 `movesLeft = 0`（rules.ts 776/1343/1361/1453/1462） | ✅ |
+
+### 2.2 移动
+
+| 官方规则 | 实现 | 状态 |
+| --- | --- | --- |
+| **「Move up to a number of spaces equal to your current Speed」——不掷骰** | `resetTurnResources`：`movesLeft = traitValue(player,'speed')` | ✅ **曾偏离，已修正** |
+| 冰冻房间移动力减半（模块效果，非官方规则） | `frozen ? Math.max(1, floor(speed/2)) : speed` | 模块扩展，已标注 |
+
+### 2.3 作祟检定
+
+| 官方规则 | 实现 | 状态 |
+| --- | --- | --- |
+| 抽到预兆的回合结束时，**掷 6 颗骰**；总和 **小于** 全场已抽预兆数则作祟开始 | `hauntRoll`：`rollZeroDice(prngState, 6)`，`sum < omens` 触发 | ✅ |
+| 作祟检定**不涉及任何属性** | 无 trait 参数 | ✅ |
+
+> 注：用户曾反馈「应由玩家选属性」，与官方规则不符，未采纳（见对话记录）。
+
+### 2.4 属性与死亡
+
+| 官方规则 | 实现 | 状态 |
+| --- | --- | --- |
+| 属性不可超过角色卡印刷上限 | `applyTraitSteps`：`upper = track.length - 1`（force 或负向时） | ✅ |
+| 任一属性到达骷髅符号即死亡 | `damagePlayer`：任一 `traitIndex === 0` 且已作祟 → 死亡 | ✅ |
+| 死亡后物品掉落在所在房间 | `killPlayer` 掉落 + `itemSlotId` 放置 | ✅ |
+
+### 2.5 攻击与伤害
+
+| 官方规则 | 实现 | 状态 |
+| --- | --- | --- |
+| 作祟后每回合可攻击一次 | `attacksLeft` 门控（rules.ts 437-438） | ✅ |
+| 攻击需与目标同房间 | 合法性检查 | ✅ |
+| 攻守双方各掷力量骰，差值即伤害 | `attackPlayer` 掷双方 Might | ✅ |
+| **物理伤害由防御方选择减速度或力量**；精神伤害选知识或神智 | 伤害分配走 `decision` 窗口（`combat opens a damage-allocation decision`） | ✅ |
+| 护甲先减伤 | `armor reduces physical damage before allocation` | ✅ |
+
+### 2.6 特殊房间
+
+| 官方规则 | 实现 | 状态 |
+| --- | --- | --- |
+| 大门始终锁着（除剧本另说） | 全局搜索 `front_door` 无命中，没有门锁状态 | ❌ **未实现** |
+| 大楼梯直通二楼平台 | `grand_staircase` special=STAIRS + 连接 | ✅ |
+| 地下室楼梯经暗门通往门厅 | 有对应实现（`STAIRS` 标签 + 规则） | ✅ 无断言 |
+| 坍塌之室：**仅发现者**需掷速度 | `rollTraitCheck(..., 'speed', threshold 5)` 仅对进入者 | ✅ |
+| 煤槽：滑落算 1 步；**回合不可停在煤槽** | `enterRoom` 中 `COAL_CHUTE`：进入即受伤（有绳免伤）并**立刻转移到地下平台**，因此结构上不可能停在煤槽 | ✅ 无断言 |
+| 神秘电梯：进入时**掷 2 骰**决定楼层 | `USE_ELEVATOR` 直接把玩家移动到**指定**房间，**没有 2 骰** | ❌ **偏离** |
+
+### 2.7 物品
+
+| 官方规则 | 实现 | 状态 |
+| --- | --- | --- |
+| 每件物品每回合限用一次 | `usedThisTurn` / `markUsed` | ✅ |
+| 可与同房间探索者交换（需双方同意） | `PROPOSE_ITEM_TRADE` / `ACCEPT_TRADE` | ✅ |
+| 可丢下、可拾取 | `drop` / `PICK_UP_ITEM` / 房间物品槽 | ✅ |
+
+---
+
+## 3. 本次审计修正的偏离
+
+**移动力被误改为掷骰**（我在上一轮按用户口述实现，与官方规则冲突）：
+
+```diff
+- const speedRoll = rollTraitCheck(state, playerId, 'speed', { reason: '移动力' });
+- player.customProps.movesLeft = Math.max(1, speedRoll.total);
++ player.customProps.movesLeft = frozen ? Math.max(1, Math.floor(speed / 2)) : speed;
+```
+
+同时移除了 `scenarios.ts` 中 6 处 `movesLeft = 4` 硬编码 —— 那些覆盖会盖掉速度值，属于夹具便利而非规则。
+
+---
+
+## 4. 新增断言测试（`packages/harness/src/suite.ts`）
+
+| 测试 | 锁定的规则 |
+| --- | --- |
+| `rules: movement equals the Speed value and rolls no dice` | 移动力 = 速度值，且 `resetTurnResources` **不消耗 PRNG** |
+| `rules: a trait can be raised but never above the printed maximum` | 属性增益钳制在轨道顶端 |
+| `rules: a trait that reaches the skull kills the explorer` | 属性归零即死亡 |
+| `rules: the haunt roll is six dice compared against the omen count` | 6 颗骰；预兆 0 必不触發、预兆 13 必触發 |
+| `rules: an attack is available once per turn and only after the haunt` | 攻击次数门控 |
+
+`pnpm test` 由 141 增至 **146**。
+
+---
+
+## 5. 尚未覆盖 / 建议后续
+
+1. **大门上锁**：官方规则要求大门在作祟前始终锁着。当前没有门锁状态，任何剧本都能从前门离开。需要产品决策是否实现。
+2. **神秘电梯的 2 骰**：规则为「进入时掷 2 骰决定目标楼层」。实现是 `USE_ELEVATOR` 让玩家**自选**目标房间（`rules.ts:761-769`），没有掷骰。这是明确的偏离，需要决策：按官方改为掷骰随机，还是保留自选（更好操作但非官方）。
+3. **大楼梯 / 地下室暗门 / 煤槽**：实现存在但无断言，建议补三条测试。
+4. **房间与剧本内容**（44 房间文本效果、50 个剧本目标）未审计：这些是模块内容而非核心规则，需要单独的内容审计。
+
+---
+
+## 6. 如何复核
+
+```bash
+pnpm test          # 含 §4 的 5 条规则断言
+pnpm test:matrix   # 随机对局 + 回放哈希一致性
+```
+
+新增规则时请同时：在本文档登记、在 `suite.ts` 补断言、并确认断言在旧实现下会失败（非空转）。

@@ -334,7 +334,7 @@
 }
 
 .dock-fan .act .act-ico {
-  font-size: 23px;
+  font-size: var(--type-xl);
 }
 
 .dock-fan .act:hover,
