@@ -1,5 +1,6 @@
 import confetti from 'canvas-confetti';
 import { cardArtSvg } from './cardArt';
+import { reconcileKeyedPreservingScroll } from './dom/keyed';
 import {
   CameraView,
   GAME_TABS,
@@ -1043,25 +1044,44 @@ export class BoardGameHUD {
     if (feed.dataset.signature === signature) return;
     feed.dataset.signature = signature;
 
-    const rows = entries
-      .slice(0, this.historyCollapsed ? 3 : 18)
-      .map(entry => this.historyRow(entry))
-      .join('');
+    // The header is created once and then only its text changes, so the toggle
+    // keeps its focus and listeners across snapshots.
+    let head = feed.querySelector('#af-toggle') as HTMLButtonElement | null;
+    let body = feed.querySelector('.af-body') as HTMLElement | null;
+    if (!head || !body) {
+      feed.innerHTML = `
+        <button class="af-head" id="af-toggle" type="button" title="展开 / 收起近期记录">
+          <span class="af-title">近期动态</span>
+          <span class="af-count"></span>
+          <span class="af-caret"></span>
+        </button>
+        <div class="af-body"></div>
+      `;
+      head = feed.querySelector('#af-toggle') as HTMLButtonElement;
+      body = feed.querySelector('.af-body') as HTMLElement;
+      head.addEventListener('click', () => {
+        this.historyCollapsed = !this.historyCollapsed;
+        if (this.latest) this.renderHistory(this.latest);
+      });
+    }
 
-    feed.innerHTML = `
-      <button class="af-head" id="af-toggle" type="button" title="展开 / 收起近期记录">
-        <span class="af-title">近期动态</span>
-        <span class="af-count">${entries.length}</span>
-        <span class="af-caret">${this.historyCollapsed ? '▸' : '▾'}</span>
-      </button>
-      <div class="af-body">${rows || '<div class="af-empty">尚无记录，行动后会在这里留下痕迹</div>'}</div>
-    `;
+    const count = head.querySelector('.af-count');
+    if (count) count.textContent = String(entries.length);
+    const caret = head.querySelector('.af-caret');
+    if (caret) caret.textContent = this.historyCollapsed ? '▸' : '▾';
 
-    feed.querySelector('#af-toggle')?.addEventListener('click', () => {
-      this.historyCollapsed = !this.historyCollapsed;
-      feed.dataset.signature = '';
-      if (this.latest) this.renderHistory(this.latest);
-    });
+    // Rows are reconciled by entry id: appending one entry creates one node and
+    // leaves the rest — and therefore the reader's scroll position — alone.
+    const visible = entries.slice(0, this.historyCollapsed ? 3 : 18);
+    if (visible.length === 0) {
+      body.innerHTML = '<div class="af-empty">尚无记录，行动后会在这里留下痕迹</div>';
+    } else {
+      body.querySelector('.af-empty')?.remove();
+      reconcileKeyedPreservingScroll(
+        body,
+        visible.map(entry => ({ key: entry.id, html: this.historyRow(entry) }))
+      );
+    }
   }
 
   private historyRow(entry: UiHistoryEntry): string {
