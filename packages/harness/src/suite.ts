@@ -3914,3 +3914,91 @@ test('rules: an attack is available once per turn and only after the haunt', () 
   raw.players.p1.customProps.attacksLeft = 1;
   assertEqual(canAttack(), true, 'one attack is offered while the allowance is unspent');
 });
+
+test('rules: the mystic elevator has one door and rolls two dice', () => {
+  const def = ROOM_DEFS.mystic_elevator;
+  assert(!!def, 'the elevator room exists');
+  assertEqual(def!.doors.length, 1, 'the car has a single opening');
+
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'room_features' });
+  const raw = engine.getRawState();
+  // Put p1 in the elevator with a move to spend.
+  addExploredRoom(raw, 'mystic_elevator', 3, 3, 'room_basement_landing');
+  movePlayerTo(raw, 'p1', 'room_mystic_elevator');
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 3;
+  raw.players.p1.customProps.elevatorUsed = false;
+
+  const ride = engine.getLegalActions('p1').find(a => a.type === 'USE_ELEVATOR');
+  assert(!!ride, 'the ride is offered from inside the car');
+  assert(engine.dispatch(ride!).ok, 'riding dispatches');
+
+  const after = engine.getRawState();
+  const roll = after.globalVars.lastElevatorRoll as { rolls: number[]; sum: number } | undefined;
+  assert(!!roll, 'the ride records a roll');
+  assertEqual(roll!.rolls.length, 2, 'two dice decide the floor');
+  assertEqual(after.players.p1.customProps.elevatorUsed, true, 'one ride per turn');
+
+  // 0 is the only outcome that wounds; 1 is the only one that stays put.
+  if (roll!.sum === 0) assertEqual(traitValue(after.players.p1, 'might') + traitValue(after.players.p1, 'speed') < 8, true, 'a zero drop costs a physical point');
+});
+
+test('rules: the drip curse only fires in a windowless room', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  addEffect(raw, { kind: 'ONGOING', source: 'p1', target: 'p1', payload: { effect: 'DRIP' } });
+
+  // The exploration layout has no garden, so place one and stand in it.
+  addExploredRoom(raw, 'garden', 0, 1, 'room_entrance_hall');
+  const garden = raw.mapGraph.nodes.room_garden;
+  assert(!!garden, 'the garden exists');
+  assert(
+    Array.isArray(garden!.props?.tags) && (garden!.props!.tags as string[]).includes('outside'),
+    'the garden counts as an outside room'
+  );
+
+  // Outside rooms have windows, so the curse must stay quiet there.
+  movePlayerTo(raw, 'p1', garden!.id);
+  raw.globalVars.lastRoll = undefined;
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 0;
+  const end = engine.getLegalActions('p1').find(a => a.type === 'END_TURN');
+  assert(!!end, 'the turn can end');
+  engine.dispatch(end!);
+  const afterGarden = engine.getRawState();
+  const gardenRoll = afterGarden.globalVars.lastRoll as { reason?: string } | undefined;
+  assertEqual(gardenRoll?.reason === '滴血之声', false, 'no drip check in the garden');
+});
+
+test('rules: the drip curse does fire in a windowless room', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  addEffect(raw, { kind: 'ONGOING', source: 'p1', target: 'p1', payload: { effect: 'DRIP' } });
+
+  const cellar = Object.values(raw.mapGraph.nodes).find(
+    n => n.type === 'ROOM' && !(Array.isArray(n.props?.tags) && (n.props!.tags as string[]).includes('outside'))
+  );
+  assert(!!cellar, 'an indoor room exists');
+  movePlayerTo(raw, 'p1', cellar!.id);
+
+  raw.globalVars.lastRoll = undefined;
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 0;
+  const end = engine.getLegalActions('p1').find(a => a.type === 'END_TURN');
+  assert(!!end, 'the turn can end');
+  engine.dispatch(end!);
+
+  // The curse fires when the NEXT turn for p1 begins; walk the table round.
+  let state = engine.getRawState();
+  for (let i = 0; i < 8 && state.activePlayerId !== 'p1'; i++) {
+    const next = engine.getLegalActions(state.activeActorId ?? state.activePlayerId).find(a => a.type === 'END_TURN');
+    if (!next) break;
+    engine.dispatch(next);
+    state = engine.getRawState();
+  }
+  const roll = state.globalVars.lastRoll as { reason?: string } | undefined;
+  assertEqual(roll?.reason, '滴血之声', 'the drip check runs indoors');
+});

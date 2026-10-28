@@ -485,7 +485,8 @@ const ROOM_LIST: RoomDef[] = [
     name: '神秘电梯',
     en: 'Mystic Elevator',
     floor: 'BASEMENT',
-    doors: ['E', 'W'],
+    // One door only: the elevator is a dead end you ride out of.
+    doors: ['E'],
     special: 'ELEVATOR',
     tags: ['elevator'],
     text: '一个没有缆绳的电梯，按钮上刻着不存在的楼层。'

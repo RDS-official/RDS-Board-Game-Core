@@ -761,8 +761,40 @@ export class BetrayalRules {
       case 'USE_ELEVATOR': {
         const player = s.players[pid];
         if (player.customProps.elevatorUsed) break;
-        movePlayerTo(s, pid, action.targetNodeId ?? '');
+        const fromFloor = String(s.mapGraph.nodes[activeRoom(s, pid)]?.props?.floor ?? '');
+        const targetId = action.targetNodeId ?? '';
+        const targetFloor = String(s.mapGraph.nodes[targetId]?.props?.floor ?? '');
+
+        // Two-dice car:
+        //   >= 3  any chosen room with an open door, any floor
+        //   == 2  same floor only
+        //   == 1  nothing happens
+        //   == 0  the car drops: 1 physical damage
+        const roll = rollZeroDice(s.prngState, 2);
+        s.prngState = roll.nextSeed;
+        s.globalVars.lastElevatorRoll = { rolls: roll.rolls, sum: roll.sum };
+        trace(ctx, 'DICE_ROLL', `🛗 神秘电梯 [${roll.rolls.join('+')}] = ${roll.sum}`, 700);
         player.customProps.elevatorUsed = true;
+
+        if (roll.sum === 0) {
+          damagePlayer(s, pid, 'PHYSICAL', 1);
+          trace(ctx, 'DAMAGE_EFFECT', `电梯骤然下坠，${player.name} 受到 1 点物理伤害`, 600);
+          break;
+        }
+        if (roll.sum === 1) {
+          trace(ctx, 'ANNOUNCEMENT', '电梯纹丝不动，门又关上了', 500);
+          break;
+        }
+        if (roll.sum === 2 && targetFloor !== fromFloor) {
+          trace(ctx, 'ANNOUNCEMENT', '电梯只在同一层滑动', 500);
+          break;
+        }
+        if (!targetId || !s.mapGraph.nodes[targetId]) {
+          trace(ctx, 'ANNOUNCEMENT', '电梯停在一片虚空前，无处可去', 500);
+          break;
+        }
+
+        movePlayerTo(s, pid, targetId);
         player.customProps.movesLeft = Math.max(0, Number(player.customProps.movesLeft ?? 1) - 1);
         trace(ctx, 'MOVE_OBJECT', `🛗 ${player.name} 乘神秘电梯抵达 ${roomName(s, activeRoom(s, pid))}`, 500);
         this.enterRoom(s, pid, activeRoom(s, pid), ctx, false);
@@ -2788,8 +2820,15 @@ export class BetrayalRules {
     // folds in the legacy `customProps.effects` array so old logs still replay.
     for (const effect of ongoingEffectKinds(state, pid)) {
       if (effect === 'DRIP') {
-        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: '滴血之声' });
-        if (!check.success) damagePlayer(state, pid, 'MENTAL', 1);
+        // Card text: the check happens at the start of your turn while you are in
+        // a *windowless* room. Outside rooms (garden, balcony, patio) have windows,
+        // so they are exempt - previously this fired every turn anywhere.
+        const dripRoom = activeRoom(state, pid);
+        const hasWindows = roomTags(state, dripRoom).includes('outside');
+        if (!hasWindows) {
+          const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: '滴血之声' });
+          if (!check.success) damagePlayer(state, pid, 'MENTAL', 1);
+        }
       } else if (effect === 'POSSESSION') {
         const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: '恶灵附体' });
         if (!check.success) {
