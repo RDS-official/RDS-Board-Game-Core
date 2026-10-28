@@ -508,3 +508,12 @@
 .side-panel-extras {
   display: none;
 }
+
+/* ---- [hidden] must actually hide --------------------------------------
+   `.icon-btn { display: flex }` is more specific than the UA's
+   `[hidden] { display: none }`, so #btn-exit-net rendered on every screen even
+   though the markup marks it hidden. That extra 44px is what pushed the phone
+   topbar past the viewport edge once another icon button was added. */
+[hidden] {
+  display: none !important;
+}

@@ -743,6 +743,18 @@ export function addRoomNode(
   nodeId: string
 ): MapGraphNode {
   ensureRoomSlots(state, nodeId);
+
+  // Two rooms on one floor may not share a grid cell: the renderer would draw
+  // both tiles in the same place. Re-placing the SAME node (moving it) is fine.
+  const layerIndex = FLOOR_META[def.floor].index;
+  for (const other of Object.values(state.mapGraph.nodes)) {
+    if (other.type !== 'ROOM' || other.id === nodeId) continue;
+    if (other.position[2] === layerIndex && other.position[0] === col && other.position[1] === row) {
+      throw new Error(
+        `room grid collision: ${nodeId} wants (${col},${row}) on ${def.floor}, \`but ${other.id} is already there`
+      );
+    }
+  }
   const node: MapGraphNode = {
     id: nodeId,
     type: 'ROOM',
