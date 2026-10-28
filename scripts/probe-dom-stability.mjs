@@ -206,13 +206,84 @@ if (!mounted) {
   }
 }
 
+/* ---- 5. the action fan is reused across an unchanged repaint -------- */
+{
+  await page.locator('.dock-fan .act').first().hover();
+  await page.waitForTimeout(200);
+
+  const fan = await page.evaluate(() => {
+    const app = window.__boardGameApp;
+    const card = document.querySelector('.dock-fan .act');
+    if (!card) return { skipped: true };
+
+    const hintBefore = document.querySelector('[data-fan-hint]')?.classList.contains('active') ?? false;
+    const idsBefore = [...document.querySelectorAll('.dock-fan .act')].map(el => el.dataset.actionId);
+
+    // Repaint with the SAME snapshot: no action changed, so every card must be
+    // reused. This is the path a snapshot takes on an opponent move or a tick.
+    app.hud.renderDock(app.session.getSnapshot());
+
+    const after = [...document.querySelectorAll('.dock-fan .act')];
+    return {
+      skipped: false,
+      reused: after[0] === card,
+      idsStable: JSON.stringify(after.map(el => el.dataset.actionId)) === JSON.stringify(idsBefore),
+      hintBefore,
+      hintAfter: document.querySelector('[data-fan-hint]')?.classList.contains('active') ?? false,
+      cards: after.length
+    };
+  });
+
+  if (fan.skipped) {
+    failures.push('the action fan has no cards to probe');
+  } else {
+    console.log('fan:', JSON.stringify(fan));
+    record('fan', fan.reused, 'an unchanged repaint replaced the fan cards');
+    record('fan', fan.idsStable, 'an unchanged repaint changed the card order');
+    record('fan', fan.hintBefore, 'hover did not activate the hint bar');
+    record('fan', fan.hintAfter, 'the hint bar lost its hover state across an unchanged repaint');
+  }
+}
+
+/* ---- 6. keyboard focus on a fan card survives a snapshot update ------ */
+{
+  const cardFocus = await page.evaluate(async () => {
+    const app = window.__boardGameApp;
+    const engine = app.session.engine;
+    const card = document.querySelector('.dock-fan .act');
+    if (!card) return { skipped: true };
+    card.focus();
+    const focusedBefore = document.activeElement === card;
+
+    // Unchanged repaint, for the same reason as the identity check.
+    app.hud.renderDock(app.session.getSnapshot());
+    await new Promise(r => setTimeout(r, 200));
+
+    const after = document.activeElement;
+    return {
+      skipped: false,
+      focusedBefore,
+      stillFocused: after === card,
+      afterTag: after === document.body ? 'body' : (after?.className || after?.tagName)
+    };
+  });
+
+  if (cardFocus.skipped) {
+    failures.push('no fan card could take focus');
+  } else {
+    console.log('card focus:', JSON.stringify(cardFocus));
+    record('fan', cardFocus.focusedBefore, 'a fan card could not take focus');
+    record('fan', cardFocus.stillFocused, `focus left the fan card and landed on ${cardFocus.afterTag}`);
+  }
+}
+
 console.log(`\nDOM stability probe: ${checks} checks`);
 if (failures.length) {
   console.log(`\nFAILURES (${failures.length}):`);
   for (const f of failures) console.log(`  x ${f}`);
   process.exitCode = 1;
 } else {
-  console.log('\nFeed survives snapshot updates: node identity, scroll and focus preserved.');
+  console.log('\nPanels survive snapshot updates: node identity, scroll, focus and fan hover preserved.');
 }
 
 await browser.close();
