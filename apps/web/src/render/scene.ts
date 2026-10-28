@@ -1631,7 +1631,8 @@ export class BoardGameScene {
             floor: node.props.floor,
             special: node.props.special,
             tags: node.props.tags,
-            symbol: node.props.symbol
+            symbol: node.props.symbol,
+            frontDoor: node.props.frontDoor
           }
         );
         roomMesh.position.set(node.position[0], node.position[1], node.position[2]);
