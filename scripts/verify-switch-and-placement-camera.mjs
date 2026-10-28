@@ -1,4 +1,5 @@
 import { launchChromium } from './lib/browser.mjs';
+import { clickDockAction } from './lib/actions.mjs';
 import { ensureSoloServer } from './lib/soloserver.mjs';
 
 /**
@@ -139,7 +140,7 @@ console.log('Pre-explore camera:', JSON.stringify(beforeExplore));
 
 // Click explore door
 console.log('Exploring door to trigger placement...');
-await page.locator('.dock-actions .act', { hasText: '探索' }).first().click();
+await clickDockAction(page, '探索');
 await page.waitForFunction(() => window.__boardGameApp.scene.controls.enabled, null, { timeout: 8000 });
 
 const duringPlacement = await sampleCam();

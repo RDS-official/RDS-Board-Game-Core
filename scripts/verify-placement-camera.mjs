@@ -1,4 +1,5 @@
 import { launchChromium } from './lib/browser.mjs';
+import { clickDockAction } from './lib/actions.mjs';
 import { ensureSoloServer } from './lib/soloserver.mjs';
 
 /**
@@ -50,7 +51,7 @@ const before = await sample();
 console.log('before explore:', JSON.stringify(before));
 
 // Explore a door and confirm the placement.
-await page.locator('.dock-actions .act', { hasText: '探索' }).first().click();
+await clickDockAction(page, '探索');
 await page.waitForTimeout(900);
 const raised = await sample();
 await page.locator('[data-place-confirm]').click();

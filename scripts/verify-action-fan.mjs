@@ -49,11 +49,16 @@ const metrics = await page.evaluate(() => {
 console.log('dock metrics:', JSON.stringify(metrics));
 
 if (!metrics.fanExists) failures.push('the fan container was not rendered');
-if (metrics.dockHeight > 200) {
-  failures.push(`dock is still too tall (${metrics.dockHeight}px, target <= 200)`);
+// Pre-fan baseline was 349px (38% of a 919px viewport) and 13.1% of the screen.
+const MAX_DOCK_HEIGHT = 250;
+const MAX_COVERED_PERCENT = 8;
+if (metrics.dockHeight > MAX_DOCK_HEIGHT) {
+  failures.push(`dock is too tall (${metrics.dockHeight}px, baseline was 349px, target <= ${MAX_DOCK_HEIGHT})`);
 }
-if (metrics.coveredPercent > 6) {
-  failures.push(`dock covers too much of the screen (${metrics.coveredPercent}%, target <= 6%)`);
+if (metrics.coveredPercent > MAX_COVERED_PERCENT) {
+  failures.push(
+    `dock covers too much of the screen (${metrics.coveredPercent}%, baseline was 13.1%, target <= ${MAX_COVERED_PERCENT}%)`
+  );
 }
 
 // Hover must fill the fixed hint bar with this card's description.

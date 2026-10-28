@@ -1,4 +1,5 @@
 import { launchChromium } from './lib/browser.mjs';
+import { clickDockAction } from './lib/actions.mjs';
 import { ensureSoloServer } from './lib/soloserver.mjs';
 
 /**
@@ -40,8 +41,27 @@ await page.waitForTimeout(900);
 const board = await sample();
 console.log('board      :', JSON.stringify(board));
 
-await page.locator('.dock-actions .act', { hasText: '探索' }).first().click();
-await page.waitForTimeout(1200);
+await clickDockAction(page, '探索');
+// Wait for the preview to arm and the camera tween to finish: a fixed sleep
+// sampled mid-animation once the dock gained its detail-panel step.
+await page
+  .waitForFunction(() => !!window.__boardGameApp?.scene?.placementPreview?.position, { timeout: 8000 })
+  .catch(() => {});
+await page
+  .waitForFunction(
+    () => {
+      const cam = window.__boardGameApp?.scene?.camera;
+      if (!cam) return false;
+      const key = 'probeCam';
+      const prev = window[key];
+      window[key] = cam.position.toArray();
+      if (!prev) return false;
+      return prev.every((v, i) => Math.abs(v - window[key][i]) < 0.01);
+    },
+    { timeout: 8000, polling: 120 }
+  )
+  .catch(() => {});
+await page.waitForTimeout(250);
 const placing = await sample();
 console.log('placing    :', JSON.stringify(placing));
 

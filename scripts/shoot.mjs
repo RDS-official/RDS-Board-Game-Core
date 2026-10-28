@@ -42,7 +42,7 @@ await page.click('.mip-tab[data-tab="G"]').catch(() => {});
 await page.waitForTimeout(300);
 
 // Roll dice
-const rollBtn = page.locator('.act', { hasText: '掷骰子' }).first();
+const rollBtn = page.locator('.act[data-fan-label*="掷骰子"], .act:has-text("掷骰子")').first();
 if (await rollBtn.count()) {
   await rollBtn.click();
   await page.waitForTimeout(1600);
@@ -54,7 +54,7 @@ await page.click('.game-pill[data-game="sanguosha"]');
 await page.waitForTimeout(2200);
 await page.screenshot({ path: 'shots/04-sanguosha.png' });
 
-const strikeBtn = page.locator('.act', { hasText: '出【杀】' }).first();
+const strikeBtn = page.locator('.act[data-fan-label*="出【杀】"], .act:has-text("出【杀】")').first();
 if (await strikeBtn.count()) {
   await strikeBtn.click();
   await page.waitForTimeout(1400);
@@ -62,7 +62,7 @@ if (await strikeBtn.count()) {
   await page.click('.mip-tab[data-tab="STACK"]').catch(() => {});
   await page.waitForTimeout(500);
   await page.screenshot({ path: 'shots/05b-sanguosha-stack-panel.png' });
-  const dodge = page.locator('.act', { hasText: '出【闪】' }).first();
+  const dodge = page.locator('.act[data-fan-label*="出【闪】"], .act:has-text("出【闪】")').first();
   if (await dodge.count()) {
     await dodge.click();
     await page.waitForTimeout(1400);
@@ -86,12 +86,12 @@ await page.screenshot({ path: 'shots/07-splendor.png' });
 await page.click('.game-pill[data-game="betrayal"]');
 await page.waitForTimeout(2200);
 await page.screenshot({ path: 'shots/08-betrayal.png' });
-const explore = page.locator('.act', { hasText: '探索房门' }).first();
+const explore = page.locator('.act[data-fan-label*="探索房门"], .act:has-text("探索房门")').first();
 if (await explore.count()) {
   await explore.click();
   await page.waitForTimeout(1600);
   await page.screenshot({ path: 'shots/09-betrayal-explore.png' });
-  const haunt = page.locator('.act', { hasText: '作祟检定' }).first();
+  const haunt = page.locator('.act[data-fan-label*="作祟检定"], .act:has-text("作祟检定")').first();
   if (await haunt.count()) {
     await haunt.click();
     await page.waitForTimeout(2400);
@@ -110,16 +110,16 @@ await page.click('.game-pill[data-game="dune_mahjong"]');
 await page.waitForTimeout(2200);
 await page.screenshot({ path: 'shots/11-dune.png' });
 
-const openBattle = page.locator('.act', { hasText: '开启秘密战斗窗口' }).first();
+const openBattle = page.locator('.act[data-fan-label*="开启秘密战斗窗口"], .act:has-text("开启秘密战斗窗口")').first();
 if (await openBattle.count()) {
   await openBattle.click();
   await page.waitForTimeout(900);
-  const commitP1 = page.locator('.act', { hasText: '锁定战斗转盘' }).first();
+  const commitP1 = page.locator('.act[data-fan-label*="锁定战斗转盘"], .act:has-text("锁定战斗转盘")').first();
   if (await commitP1.count()) {
     await commitP1.click();
     await page.waitForTimeout(900);
     await page.screenshot({ path: 'shots/11b-dune-secret.png' });
-    const commitP2 = page.locator('.act', { hasText: '锁定战斗转盘' }).first();
+    const commitP2 = page.locator('.act[data-fan-label*="锁定战斗转盘"], .act:has-text("锁定战斗转盘")').first();
     if (await commitP2.count()) {
       await commitP2.click();
       await page.waitForTimeout(1600);
