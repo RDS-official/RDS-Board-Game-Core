@@ -387,9 +387,9 @@ export function setupBetrayal(seed: number = 42, roster: string[] = DEFAULT_ROST
     room: roomShuffle.result.length
   };
 
-  // The first turn gets its movement the same way every later turn does: a Speed
-  // roll. Without this the opening turn moved the raw Speed value while every
-  // following turn rolled, which is both inconsistent and off-rules.
+  // Official rule: the front door stays locked until a haunt opens it.
+  state.globalVars.frontDoorLocked = true;
+
   resetTurnResources(state, state.activePlayerId);
 
   return state;

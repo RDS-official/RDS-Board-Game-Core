@@ -334,9 +334,18 @@ export class BetrayalRules {
           const other = nodeGrid(node);
           return other && other.floor === grid.floor && other.col === col && other.row === row;
         });
-        if (!occupied) {
-          actions.push({ type: 'EXPLORE_DOOR', playerId, payload: { direction: dir } });
+        if (occupied) continue;
+
+        // Official rule: the front door is always locked unless a haunt says
+        // otherwise. It is the only doorway that leads out of the house.
+        const isFrontDoor =
+          room.props.special === 'FRONT_DOOR' && room.props.frontDoor === dir;
+        if (isFrontDoor && state.globalVars.frontDoorLocked !== false) {
+          actions.push({ type: 'TRY_FRONT_DOOR', playerId });
+          continue;
         }
+
+        actions.push({ type: 'EXPLORE_DOOR', playerId, payload: { direction: dir } });
       }
 
       if (room.props.special === 'ELEVATOR' && !player.customProps.elevatorUsed) {
@@ -800,6 +809,9 @@ export class BetrayalRules {
         this.enterRoom(s, pid, activeRoom(s, pid), ctx, false);
         break;
       }
+      case 'TRY_FRONT_DOOR':
+        trace(ctx, 'ANNOUNCEMENT', '前门纹丝不动 —— 作祟结束前，谁也离不开这座宅子', 700);
+        break;
       case 'JUMP_DOWN': {
         const ballroom = Object.values(s.mapGraph.nodes).find(node => node.props?.name === '舞厅');
         const player = s.players[pid];
@@ -2797,6 +2809,24 @@ export class BetrayalRules {
     if (special === 'FURNACE') {
       damagePlayer(state, pid, 'PHYSICAL', 1);
       trace(ctx, 'DAMAGE_EFFECT', `🔥 ${player.name} 在熔炉房结束回合，被高温灼伤（1 点物理伤害）`, 500);
+    }
+
+    // House rule: some rooms reward ending your turn in them with a permanent +1,
+    // once per explorer per game. Recorded per room so re-entering never re-pays.
+    const buff = room.props?.endTurnBuff as 'speed' | 'might' | 'sanity' | 'knowledge' | undefined;
+    if (buff) {
+      const claimed = new Set<string>((player.customProps.roomBuffs as string[]) ?? []);
+      if (!claimed.has(roomId)) {
+        claimed.add(roomId);
+        player.customProps.roomBuffs = [...claimed];
+        applyTraitSteps(state, pid, buff, 1, { force: true });
+        trace(
+          ctx,
+          'ANNOUNCEMENT',
+          `💪 ${player.name} 在${String(room.props.name)}练有所成：永久 +1 ${TRAIT_META[buff].zh}`,
+          700
+        );
+      }
     }
 
     // 2. 邪恶/不洁房间：回合结束停留在此进行神智检定

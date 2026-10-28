@@ -4002,3 +4002,68 @@ test('rules: the drip curse does fire in a windowless room', () => {
   const roll = state.globalVars.lastRoll as { reason?: string } | undefined;
   assertEqual(roll?.reason, '滴血之声', 'the drip check runs indoors');
 });
+
+test('rules: the front door is locked until a haunt opens it', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  const hall = raw.mapGraph.nodes.room_entrance_hall;
+  assert(!!hall, 'the entrance hall exists');
+  assertEqual(String(hall!.props?.frontDoor), 'N', 'the front door faces out of the house');
+  assertEqual(raw.globalVars.frontDoorLocked, true, 'it starts locked');
+
+  movePlayerTo(raw, 'p1', 'room_entrance_hall');
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 4;
+
+  const exploresNorth = () =>
+    engine.getLegalActions('p1').some(a => a.type === 'EXPLORE_DOOR' && a.payload?.direction === 'N');
+  const canTryDoor = () => engine.getLegalActions('p1').some(a => a.type === 'TRY_FRONT_DOOR');
+
+  assertEqual(exploresNorth(), false, 'the locked door is not explorable');
+  assertEqual(canTryDoor(), true, 'trying the front door is offered instead');
+
+  // A haunt that opens it makes the doorway explorable again.
+  raw.globalVars.frontDoorLocked = false;
+  assertEqual(exploresNorth(), true, 'an opened front door can be explored');
+});
+
+test('rules: ending a turn in a buff room grants one permanent point, once', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  addExploredRoom(raw, 'gymnasium', 0, 2, 'room_grand_staircase');
+  movePlayerTo(raw, 'p1', 'room_gymnasium');
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+
+  // The buff raises the trait by one STEP on the printed ladder. The ladder has
+  // repeated values (speed: [0,1,2,3,3,4,4,5]), so a step does not always change
+  // the printed number - assert on the index, not the value.
+  const speedIndexBefore = traitIndex(raw.players.p1, 'speed');
+  raw.players.p1.customProps.movesLeft = 0;
+  const end = engine.getLegalActions('p1').find(a => a.type === 'END_TURN');
+  assert(!!end, 'the turn can end');
+  const dispatched = engine.dispatch(end!);
+  assert(dispatched.ok, `the turn ended (${dispatched.error ?? 'ok'})`);
+
+  const after = engine.getRawState();
+  assertEqual(
+    traitIndex(after.players.p1, 'speed'),
+    speedIndexBefore + 1,
+    'the gymnasium advances Speed by one step'
+  );
+  assert(
+    Array.isArray(after.players.p1.customProps.roomBuffs) &&
+      (after.players.p1.customProps.roomBuffs as string[]).includes('room_gymnasium'),
+    'the claim is recorded on the explorer'
+  );
+
+  // Coming back later must not pay twice.
+  const claimedIndex = traitIndex(after.players.p1, 'speed');
+  after.players.p1.customProps.movesLeft = 0;
+  after.activePlayerId = 'p1';
+  after.activeActorId = 'p1';
+  const again = engine.getLegalActions('p1').find(a => a.type === 'END_TURN');
+  if (again) engine.dispatch(again);
+  assertEqual(traitIndex(engine.getRawState().players.p1, 'speed'), claimedIndex, 'the buff pays only once');
+});

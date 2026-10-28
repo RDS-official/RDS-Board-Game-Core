@@ -800,6 +800,8 @@ export function addRoomNode(
       symbol: def.symbol ?? null,
       special: def.special ?? null,
       tags: def.tags ?? [],
+      frontDoor: def.frontDoor ?? null,
+      endTurnBuff: def.endTurnBuff ?? null,
       explored: true,
       color: FLOOR_META[def.floor].color,
       text: def.text
