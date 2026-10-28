@@ -13,6 +13,8 @@ export interface RoomRecord {
   maxPlayers: number; players: string[]; createdAt: number;
   /** Phase B（旧数据可能缺省） */
   readyPlayers?: string[]; isPrivate?: boolean; code?: string; scenarioId?: string;
+  /** 阶段三：房间回收（旧数据可能缺省，清扫按 createdAt 兜底） */
+  lastActivity?: number; firstEmptyAt?: number;
 }
 
 interface DbShape { users: UserRecord[]; rooms: RoomRecord[]; }

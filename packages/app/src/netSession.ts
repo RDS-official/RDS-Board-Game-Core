@@ -116,6 +116,9 @@ export class NetSession implements GamePresenter {
   public onPresence?: (onlinePlayerIds: string[]) => void;
   /** Room was closed by the host (e.g. in-game exit): guests should leave. */
   public onRoomClosed?: () => void;
+  /** 阶段三：房客频道断开 → 自动重拨。每次尝试前回调（遮罩文案用），成功后回调 onGuestReconnected。 */
+  public onGuestReconnecting?: (attempt: number) => void;
+  public onGuestReconnected?: () => void;
 
   private readonly module: GameModule;
   private readonly options: NetSessionOptions;
@@ -277,6 +280,11 @@ export class NetSession implements GamePresenter {
       } catch (err) { lastError = err; }
     }
     if (!channel || !pc) throw lastError;
+    this.wireGuestChannel(channel, pc);
+  }
+
+  /** Wire a freshly dialed guest data channel（首次拨号与重连共用；重挂后 host 侧会重发全量快照）。 */
+  private wireGuestChannel(channel: RTCDataChannel, pc: RTCPeerConnection): void {
     this.pc = pc;
     this.channel = channel as unknown as GuestChannel;
     const transport = new WebRtcGuestTransport(text => this.sendToHost(text));
@@ -304,15 +312,40 @@ export class NetSession implements GamePresenter {
     }
   }
 
+  private guestReconnecting = false;
+  private hostSeenOffline = false;
+
+  /**
+   * 阶段三：房客侧频道断开 → 自动重拨（host 侧 startHostMesh 本就接受新拨号，
+   * 阶段二 E2E 已验证 guest 重进可同步）。每 2.5s 一次、最多 40 次（约 100s）；
+   * 成功即重挂 transport 并由 transport.join 触发 host 全量快照；全部失败才提示错误。
+   */
   private onGuestDisconnected(): void {
-    if (this.disposed || this.role !== 'guest') return;
-    this.emitNotice({
-      kind: 'error',
-      icon: '📡',
-      title: '与房主的连接已断开',
-      detail: '本页面仍显示最后收到的局面；刷新或等待房主重新开局。',
-      durationMs: 0
-    });
+    if (this.disposed || this.role !== 'guest' || this.guestReconnecting) return;
+    this.guestReconnecting = true;
+    void (async () => {
+      for (let attempt = 1; attempt <= 40; attempt++) {
+        await new Promise(r => setTimeout(r, 2500));
+        if (this.disposed) break;
+        this.onGuestReconnecting?.(attempt);
+        try {
+          const dialed = await openGuestChannel(this.signaling!, this.options.hostId!);
+          if (this.disposed) break;
+          this.wireGuestChannel(dialed.channel, dialed.pc);
+          this.guestReconnecting = false;
+          this.onGuestReconnected?.();
+          return;
+        } catch { /* 继续下一次重试 */ }
+      }
+      this.guestReconnecting = false;
+      this.emitNotice({
+        kind: 'error',
+        icon: '📡',
+        title: '与房主的连接已断开',
+        detail: '自动重连失败；本页面仍显示最后收到的局面，可刷新页面重试。',
+        durationMs: 0
+      });
+    })();
   }
 
   /* ------------------------------------------------------------------ */
@@ -537,6 +570,22 @@ export class NetSession implements GamePresenter {
   private wireSideChannel(signaling: HubSignaling): void {
     signaling.onSide({
       onPresence: online => {
+        // 阶段三：房主掉线后回来时，旧频道大概率已死且 ICE 可能停在半死状态
+        // （connectionState 迟迟不转 failed，onclose 不触发）。用 presence 做兜底：
+        // 看到 host 上线→下线→再上线且频道未恢复，主动拆掉旧频道走重拨。
+        if (this.role === 'guest' && this.options.hostId) {
+          const hostOnline = online.includes(this.options.hostId);
+          if (!hostOnline) {
+            this.hostSeenOffline = true;
+          } else if (this.hostSeenOffline) {
+            this.hostSeenOffline = false;
+            try { this.channel?.close?.(); } catch { /* already gone */ }
+            try { this.pc?.close(); } catch { /* already gone */ }
+            this.channel = undefined;
+            this.pc = undefined;
+            this.onGuestDisconnected();
+          }
+        }
         const owners = this.options.seatOwners;
         if (!owners || !this.onPresence) return;
         const seats = Object.entries(owners)

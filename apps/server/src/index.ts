@@ -11,7 +11,7 @@ import path from 'node:path';
 import { PORT, DATA_DIR } from './config.ts';
 import { users } from './storage.ts';
 import { register, login, userFromAuthHeader, profileOf, updateDisplayName } from './auth.ts';
-import { listRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoomInfo, setReady, kickPlayer, transferHost, setRoomChangedHook } from './rooms.ts';
+import { listRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoomInfo, setReady, kickPlayer, transferHost, setRoomChangedHook, sweepRooms } from './rooms.ts';
 import { GAMES } from './games.ts';
 import { SignalHub } from './signal.ts';
 
@@ -165,6 +165,11 @@ const wss = new WebSocketServer({ noServer: true });
 const hub = new SignalHub();
 hub.startHeartbeat();
 setRoomChangedHook(room => hub.broadcastRoomUpdate(room));
+// 阶段三：房间回收——60s 清扫一次（全员离线 >10min 或 6h 无动作 → 关房）。
+setInterval(() => {
+  const closedIds = sweepRooms(id => hub.onlineUsers(id));
+  if (closedIds.length) console.log('[hub] room-sweep closed:', closedIds.join(','));
+}, 60_000);
 server.on('upgrade', (req: http.IncomingMessage, socket, head) => {
   const url = new URL(req.url ?? '/', 'http://x');
   if (url.pathname !== '/ws') { socket.destroy(); return; }

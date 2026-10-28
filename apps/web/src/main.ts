@@ -283,13 +283,88 @@ class BoardGameSimulatorApp {
     }
   }
 
+  // 阶段三：联机状态遮罩（房客单独重连 / 房主暂离等待）。
+  private netWaitEl: HTMLElement | null = null;
+  private hostWaitTimer: number | null = null;
+
+  private showNetWait(title: string, sub: string): void {
+    if (!this.netWaitEl) {
+      const el = document.createElement('div');
+      el.id = 'net-wait';
+      const s = el.style;
+      s.position = 'fixed'; s.inset = '0'; s.zIndex = '9998';
+      s.display = 'flex'; s.flexDirection = 'column'; s.alignItems = 'center'; s.justifyContent = 'center';
+      s.gap = '12px'; s.background = 'rgba(13,17,23,.94)'; s.color = '#d9b45b';
+      s.fontFamily = '"Alibaba PuHuiTi", system-ui, sans-serif';
+      el.innerHTML = [
+        '<div class="nw-title" style="font-size:20px;letter-spacing:2px"></div>',
+        '<div class="nw-sub" style="font-size:13px;color:#8b949e"></div>'
+      ].join('');
+      document.body.appendChild(el);
+      this.netWaitEl = el;
+    }
+    (this.netWaitEl.querySelector('.nw-title') as HTMLElement).textContent = title;
+    (this.netWaitEl.querySelector('.nw-sub') as HTMLElement).textContent = sub;
+  }
+
+  private hideNetWait(): void {
+    this.netWaitEl?.remove();
+    this.netWaitEl = null;
+  }
+
+  /** 房主暂离：guest 侧 5 分钟倒计时遮罩，超时直接结束对局回大厅（m02676 定案）。 */
+  private startHostWait(): void {
+    if (this.hostWaitTimer !== null) return;
+    const deadline = Date.now() + 5 * 60 * 1000;
+    const tick = (): void => {
+      const left = deadline - Date.now();
+      if (left <= 0) {
+        this.stopHostWait();
+        this.showNetWait('对局已结束', '房主超时未归，正在返回大厅…');
+        setTimeout(() => { location.href = location.pathname; }, 1500);
+        return;
+      }
+      const mm = String(Math.floor(left / 60000)).padStart(2, '0');
+      const ss = String(Math.floor((left % 60000) / 1000)).padStart(2, '0');
+      this.showNetWait('房主暂离', '等待房主返回… 剩余 ' + mm + ':' + ss);
+    };
+    tick();
+    this.hostWaitTimer = window.setInterval(tick, 1000);
+  }
+
+  private stopHostWait(): void {
+    if (this.hostWaitTimer !== null) {
+      clearInterval(this.hostWaitTimer);
+      this.hostWaitTimer = null;
+    }
+    this.hideNetWait();
+  }
+
   private createSession(gameId: string, scenario?: string): UniversalSession | NetSession {
     const module = GAME_REGISTRY[gameId];
     if (!module) throw new Error(`Unknown game module: ${gameId}`);
     if (this.netOptions) {
       const net = new NetSession(module, this.netOptions);
       // 阶段二：presence → HUD 在线点；房主关闭房间 → 提示后回大厅。
-      net.onPresence = ids => this.hud?.setOnlinePlayers(ids);
+      // 阶段三：房主座位离线时 guest 侧启动 5 分钟等待遮罩（超时结束对局）。
+      const opts = this.netOptions;
+      const hostPid = opts.role === 'guest'
+        ? (Object.entries(opts.seatOwners ?? {}) as [string, string][])
+            .find(([, uid]) => uid === opts.hostId)?.[0]
+        : undefined;
+      net.onPresence = ids => {
+        this.hud?.setOnlinePlayers(ids);
+        if (hostPid && !ids.includes(hostPid)) this.startHostWait();
+        else this.stopHostWait();
+      };
+      // 阶段三：房客单独重连遮罩（频道断开后 NetSession 自动重拨）。
+      net.onGuestReconnecting = attempt => {
+        this.showNetWait('连接已断开', '正在重新连接房主…（第 ' + attempt + ' 次尝试）');
+      };
+      net.onGuestReconnected = () => {
+        if (this.hostWaitTimer === null) this.hideNetWait();
+        this.hud?.showAnnouncement('已重新连接');
+      };
       net.onRoomClosed = () => {
         this.hud?.showAnnouncement('房主已结束对局');
         setTimeout(() => { location.href = location.pathname; }, 1200);

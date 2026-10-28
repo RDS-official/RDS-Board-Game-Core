@@ -13,6 +13,9 @@ interface RoomRec {
   isPrivate: boolean;
   code: string;                // 私密房加入码（6 位大写）
   scenarioId?: string;         // 开局变体
+  /** 阶段三：房间回收 */
+  lastActivity: number;        // 最近一次状态变更（changed() 触碰）
+  firstEmptyAt?: number;       // 全员离线起点（有人上线即清零）
 }
 
 /** 房间字段变化 → 推送钩子（index.ts 注入 SignalHub 广播；rooms.ts 不反向依赖 ws）。 */
@@ -46,6 +49,9 @@ function toInfo(r: RoomRec, opts: { includeCode?: boolean } = {}): HubRoomInfo {
 }
 
 function changed(r: RoomRec, opts: { includeCode?: boolean } = {}): HubRoomInfo {
+  // 阶段三：任何房间变更都算「有动作」，供回收清扫的 6h 兜底计时。
+  r.lastActivity = Date.now();
+  rooms.update(r.id, { lastActivity: r.lastActivity });
   const info = toInfo(r, opts);
   onRoomChanged(info);
   return info;
@@ -75,7 +81,7 @@ export function createRoom(userId: string, name: string, gameId: string, opts: C
   const rec: RoomRec = {
     id, name: (name || '未命名房间').slice(0, 40), gameId, hostId: userId,
     status: 'open', maxPlayers,
-    players: [userId], createdAt: Date.now(),
+    players: [userId], createdAt: Date.now(), lastActivity: Date.now(),
     readyPlayers: [userId],          // 房主默认就绪
     isPrivate: !!opts.isPrivate,
     code: genCode(),
@@ -156,4 +162,34 @@ export function transferHost(hostId: string, roomId: string, targetId: string) {
   if (!r.players.includes(targetId)) return { error: '该玩家不在房间内' };
   rooms.update(roomId, { hostId: targetId });
   return changed(rooms.byId(roomId)! as RoomRec);
+}
+
+/**
+ * 阶段三：房间回收清扫（index.ts 每 60s 调一次）。
+ * 规则：全员离线超过 10 分钟，或 6 小时无任何动作 → 关房（closed 会经 changed()
+ * 广播给房间组成员与大厅订阅者）。返回本次被关闭的房间 id 列表。
+ */
+export function sweepRooms(onlineOf: (roomId: string) => string[]): string[] {
+  const closedIds: string[] = [];
+  const now = Date.now();
+  for (const rec of rooms.all()) {
+    const r = rec as RoomRec;
+    if (r.status === 'closed') continue;
+    if (onlineOf(r.id).length > 0) {
+      if (r.firstEmptyAt) rooms.update(r.id, { firstEmptyAt: undefined });
+      continue;
+    }
+    if (!r.firstEmptyAt) {
+      rooms.update(r.id, { firstEmptyAt: now });
+      continue;
+    }
+    const emptyMs = now - r.firstEmptyAt;
+    const idleMs = now - (r.lastActivity ?? r.createdAt);
+    if (emptyMs > 10 * 60 * 1000 || idleMs > 6 * 3600 * 1000) {
+      rooms.update(r.id, { status: 'closed', firstEmptyAt: undefined });
+      closedIds.push(r.id);
+      changed(rooms.byId(r.id)! as RoomRec);
+    }
+  }
+  return closedIds;
 }

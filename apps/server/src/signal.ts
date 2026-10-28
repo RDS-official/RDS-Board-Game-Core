@@ -98,6 +98,11 @@ export class SignalHub {
     this.broadcastPresence(roomId);
   }
 
+  /** 阶段三：某房间当前在线（去重 userId）。供 rooms.ts 回收清扫查询。 */
+  onlineUsers(roomId: string): string[] {
+    return [...new Set([...this.clients].filter(c => c.roomId === roomId).map(c => c.userId))];
+  }
+
   /** Phase 2: deduped online userIds of a room group, pushed to every member. */
   private broadcastPresence(roomId: string): void {
     const online = [...new Set([...this.clients].filter(c => c.roomId === roomId).map(c => c.userId))];

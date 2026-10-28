@@ -257,6 +257,14 @@ export function startHostMesh(
     },
     onSdp: async (from, sdp) => {
       let pc = peers.get(from);
+      // 阶段三：guest 掉线重拨时，旧 pc 可能停在 failed/disconnected 半死状态
+      // （对它 setRemoteDescription 会静默失败，answer 永远发不回去）。先拆旧的再重建。
+      if (pc && pc.connectionState !== 'connected' && pc.connectionState !== 'connecting' && pc.connectionState !== 'new') {
+        try { pc.close(); } catch { /* already closed */ }
+        peers.delete(from);
+        transport.channelClosed(from);
+        pc = undefined;
+      }
       if (!pc) {
         pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
         peers.set(from, pc);
