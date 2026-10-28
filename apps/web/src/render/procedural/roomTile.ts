@@ -898,9 +898,10 @@ export class RoomTileBuilder {
     const H = 0.66;
     const base = 0.12;
 
-    // Stone surround + carved lintel
-    this.addBox(target, W + 0.16, H + 0.12, 0.05, MAT.paleStone, 0, base + (H + 0.12) / 2, z - 0.01, false);
-    this.addBox(target, W + 0.26, 0.07, 0.09, MAT.marble, 0, base + H + 0.12, z + 0.01);
+    // Brick surround + carved lintel. The pale stone panel read as a blank white
+    // wall behind the doors; brick ties the entrance to the house's masonry.
+    this.addBox(target, W + 0.16, H + 0.12, 0.05, MAT.brick, 0, base + (H + 0.12) / 2, z - 0.01, false);
+    this.addBox(target, W + 0.26, 0.07, 0.09, MAT.brick, 0, base + H + 0.12, z + 0.01);
     this.addBox(target, W + 0.3, 0.03, 0.11, MAT.brass, 0, base + H + 0.17, z + 0.01, false);
 
     // Two leaves

@@ -50,6 +50,8 @@ export const MAT = {
   marble: std(0xa9a49a, 0.34, 0.05),
   granite: std(0x3b3a38, 0.95, 0.02),
   plaster: std(0x8d8275, 0.95, 0.0),
+  /** Red brick for the mansion's outer front door surround. */
+  brick: std(0x8c3a28, 0.94, 0.02),
 
   /* ------------------------------- textiles ------------------------------ */
   crimsonVelvet: std(0x6d1519, 0.94, 0.02),
