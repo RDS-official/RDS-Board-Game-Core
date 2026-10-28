@@ -1005,7 +1005,7 @@ export class BoardGameHUD {
       `;
     }).join('');
 
-    el.innerHTML = `
+    const minimapHtml = `
       <div class="mm-head">
         <div class="mm-title">
           <span class="mm-ico">🧭</span>
@@ -1020,6 +1020,12 @@ export class BoardGameHUD {
         ${floorItems}
       </div>
     `;
+
+    const minimapSig = hash(minimapHtml);
+    if (el.dataset.sig !== minimapSig) {
+      el.innerHTML = minimapHtml;
+      el.dataset.sig = minimapSig;
+    }
 
     el.querySelector('#mm-toggle')?.addEventListener('click', e => {
       e.stopPropagation();
@@ -1237,7 +1243,7 @@ export class BoardGameHUD {
     const items = loot.length ? `<span class="rc-chip loot"><i></i>遗物 ×${loot.length}</span>` : '';
 
     card.style.display = '';
-    card.innerHTML = `
+    const dossierHtml = `
       <div class="rc-head">
         <span class="rc-floor">${floorLabel}</span>
         <button class="rc-focus" id="rc-focus" title="镜头聚焦该房间">◎</button>
@@ -1253,6 +1259,15 @@ export class BoardGameHUD {
         ppl || mobs || items ? `${ppl}${mobs}${items}` : '<span class="rc-empty">空无一人</span>'
       }</div>
     `;
+
+    // Guarded paint: the dossier is small and changes rarely, so skipping the
+    // rebuild when nothing moved removes a per-snapshot cost without keying
+    // every row inside it.
+    const dossierSig = hash(dossierHtml);
+    if (card.dataset.dossierSig !== dossierSig) {
+      card.innerHTML = dossierHtml;
+      card.dataset.dossierSig = dossierSig;
+    }
 
     card.querySelector('#rc-focus')?.addEventListener('click', () => {
       if (this.ports.focusRoom) this.ports.focusRoom(roomId);
@@ -1303,7 +1318,7 @@ export class BoardGameHUD {
   }
 
   private renderPlayers(snapshot: GameSnapshot): void {
-    const rail = this.container.querySelector('#player-rail');
+    const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
     if (!rail) return;
 
     const playerCards = snapshot.players
@@ -1357,7 +1372,7 @@ export class BoardGameHUD {
           .map(stat => `<div class="pc-row"><span class="k">${stat.label}</span><span class="v">${stat.value}</span></div>`)
           .join('');
 
-        return `
+        const card = `
           <article class="pc ${player.isFocus ? 'active' : ''} ${player.alive ? '' : 'dead'}" data-player-id="${player.id}" style="--pc-color:${player.color}">
             <div class="pc-head">
               <div class="pc-avatar"><span class="pc-online${this.onlinePlayerIds.has(player.id) ? ' on' : ''}" title="在线状态"></span>${player.avatarUrl ? `<img src="${player.avatarUrl}" alt="" loading="lazy" />` : player.avatar}</div>
@@ -1379,15 +1394,15 @@ export class BoardGameHUD {
             </div>
           </article>
         `;
-      })
-      .join('');
+        return { key: player.id, html: card };
+      });
 
     const npcCards = (snapshot.npcs ?? [])
       .map(npc => {
         const stats = npc.stats
           .map(stat => `<div class="pc-row"><span class="k">${stat.label}</span><span class="v">${stat.value}</span></div>`)
           .join('');
-        return `
+        const card = `
           <article class="pc npc ${npc.isFocus ? 'active' : ''}" style="--pc-color:${npc.color}">
             <div class="pc-head">
               <div class="pc-avatar">${npc.avatar}</div>
@@ -1402,10 +1417,12 @@ export class BoardGameHUD {
             <div class="pc-body">${stats}</div>
           </article>
         `;
-      })
-      .join('');
+        return { key: npc.id, html: card };
+      });
 
-    rail.innerHTML = playerCards + npcCards;
+    // Reconcile instead of rebuilding: a player card holds focus and hover, and
+    // the rail holds the scroll position.
+    reconcileKeyed(rail, [...playerCards, ...npcCards]);
   }
 
   private renderDock(snapshot: GameSnapshot): void {
