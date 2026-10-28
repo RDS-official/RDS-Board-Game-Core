@@ -1,6 +1,6 @@
 import confetti from 'canvas-confetti';
 import { cardArtSvg } from './cardArt';
-import { reconcileKeyedPreservingScroll } from './dom/keyed';
+import { hash, reconcileKeyed, reconcileKeyedPreservingScroll } from './dom/keyed';
 import {
   CameraView,
   GAME_TABS,
@@ -1409,7 +1409,7 @@ export class BoardGameHUD {
   }
 
   private renderDock(snapshot: GameSnapshot): void {
-    const dock = this.container.querySelector('#action-dock');
+    const dock = this.container.querySelector('#action-dock') as HTMLElement | null;
     if (!dock) return;
 
     const alert = snapshot.decision
@@ -1560,103 +1560,232 @@ export class BoardGameHUD {
         })()
       : '';
 
-    dock.innerHTML = `
-      <button class="dock-handle" data-dock-toggle aria-expanded="${this.dockOpen ? 'true' : 'false'}">
-        <span class="dh-grip"></span>
-        <span class="dh-label">${this.dockOpen ? '收起动作' : '展开动作'}</span>
-        <span class="dh-count">${snapshot.actions.length} 个可选</span>
-      </button>
-      ${alert}
-      ${
-        snapshot.mission
-          ? `<div class="alert-strip mission">
-              <div class="al-ico">🎯</div>
-              <div class="al-body">
-                <div class="al-title">当前目标</div>
-                <div class="al-desc">${snapshot.mission}</div>
-              </div>
-            </div>`
-          : ''
-      }
-      ${floorTabs}
-      <div class="dock-shell">
-        <div class="dock-bar">
-          <span class="dock-phase"><span class="ph-dot"></span>${snapshot.phaseLabel}</span>
-          <span class="dock-who">行动者 <b>${snapshot.actorName}</b></span>
-          <span class="dock-meta">
-            <span class="m">R${snapshot.round}·T${snapshot.turn}</span>
-            <span class="m">Σ ${snapshot.stackDepth}</span>
-            <span class="m">Δ ${snapshot.openDecisions}</span>
-            <span class="m">|ℒ| ${snapshot.legalCount}</span>
-          </span>
+    // ---- skeleton, created once ---------------------------------------
+    // The dock used to be rebuilt wholesale on every snapshot, which replaced
+    // the fan cards mid-gesture and dropped their hover state. The skeleton and
+    // its delegated listeners now survive; each render only patches what moved.
+    if (!dock.querySelector('.dock-shell')) {
+      dock.innerHTML = `
+        <button class="dock-handle" data-dock-toggle aria-expanded="false">
+          <span class="dh-grip"></span>
+          <span class="dh-label"></span>
+          <span class="dh-count"></span>
+        </button>
+        <div data-slot="alert"></div>
+        <div data-slot="mission"></div>
+        <div data-slot="floors"></div>
+        <div class="dock-shell">
+          <div class="dock-bar">
+            <span class="dock-phase"><span class="ph-dot"></span><span data-bar="phase"></span></span>
+            <span class="dock-who">行动者 <b data-bar="actor"></b></span>
+            <span class="dock-meta">
+              <span class="m" data-bar="round"></span>
+              <span class="m" data-bar="stack"></span>
+              <span class="m" data-bar="decisions"></span>
+              <span class="m" data-bar="legal"></span>
+            </span>
+          </div>
+          <div class="dock-actions" data-slot="actions"></div>
         </div>
-        <div class="dock-actions">
-          ${
-            placement
-              ? placementPanel
-              : snapshot.actions.length > 0
-              ? `<div class="fan-hint" data-fan-hint>
-                   <span class="fh-label">悬停查看动作</span>
-                   <span class="fh-detail">点击任意牌面展开详情 · 数字键直接执行</span>
-                 </div>
-                 <div class="dock-fan" data-fan>${buttons}</div>`
-              : snapshot.gameOver
-              ? `<div class="empty-hint"><span class="e-ico">🏁</span><span>对局已结束${
-                  snapshot.winnerLabel ? ` — 胜者：${snapshot.winnerLabel}` : ''
-                }${snapshot.winnerReason ? ` · ${snapshot.winnerReason}` : ''}</span></div>`
-              : `<div class="empty-hint"><span class="e-ico">◌</span><span>暂无可执行的合法动作 — 等待其他玩家，或正在结算响应栈。</span></div>`
-          }
-        </div>
-      </div>
-    `;
+      `;
+      this.bindDockEvents(dock);
+    }
 
-    dock.querySelector('[data-place-rotate]')?.addEventListener('click', () => {
-      this.presenter.rotatePlacement(1);
-    });
-    dock.querySelector('[data-place-confirm]')?.addEventListener('click', () => {
-      const result = this.presenter.confirmPlacement();
-      if (!result.ok) this.pushToast('⚠️', result.error ?? '放置被拒绝');
-    });
+    const slot = (name: string) => dock.querySelector(`[data-slot="${name}"]`) as HTMLElement | null;
+    const setText = (selector: string, text: string) => {
+      const el = dock.querySelector(selector) as HTMLElement | null;
+      if (el && el.textContent !== text) el.textContent = text;
+    };
+    // Signature-guarded paint: these slots have no persistent state, so a full
+    // innerHTML is fine as long as it only happens when the content changed.
+    const setHtml = (el: HTMLElement | null, html: string) => {
+      if (!el) return;
+      const sig = hash(html);
+      if (el.dataset.sig === sig) return;
+      el.innerHTML = html;
+      el.dataset.sig = sig;
+    };
 
     dock.setAttribute('data-dock', this.dockOpen ? 'open' : 'closed');
-    dock.querySelector('[data-dock-toggle]')?.addEventListener('click', () => {
-      this.dockOpen = !this.dockOpen;
-      dock.setAttribute('data-dock', this.dockOpen ? 'open' : 'closed');
+    const handle = dock.querySelector('.dock-handle') as HTMLElement | null;
+    if (handle) {
+      handle.setAttribute('aria-expanded', this.dockOpen ? 'true' : 'false');
+      const label = handle.querySelector('.dh-label');
+      const labelText = this.dockOpen ? '收起动作' : '展开动作';
+      if (label && label.textContent !== labelText) label.textContent = labelText;
+      const count = handle.querySelector('.dh-count');
+      const countText = `${snapshot.actions.length} 个可选`;
+      if (count && count.textContent !== countText) count.textContent = countText;
+    }
+
+    setHtml(slot('alert'), alert);
+    setHtml(
+      slot('mission'),
+      snapshot.mission
+        ? `<div class="alert-strip mission">
+             <div class="al-ico">🎯</div>
+             <div class="al-body">
+               <div class="al-title">当前目标</div>
+               <div class="al-desc">${snapshot.mission}</div>
+             </div>
+           </div>`
+        : ''
+    );
+    setHtml(slot('floors'), floorTabs);
+
+    setText('[data-bar="phase"]', snapshot.phaseLabel);
+    setText('[data-bar="actor"]', snapshot.actorName);
+    setText('[data-bar="round"]', `R${snapshot.round}·T${snapshot.turn}`);
+    setText('[data-bar="stack"]', `Σ ${snapshot.stackDepth}`);
+    setText('[data-bar="decisions"]', `Δ ${snapshot.openDecisions}`);
+    setText('[data-bar="legal"]', `|ℒ| ${snapshot.legalCount}`);
+
+    // ---- actions slot -------------------------------------------------
+    const actionsSlot = slot('actions');
+    if (actionsSlot) {
+      const mode = placement
+        ? 'placement'
+        : snapshot.actions.length > 0
+        ? 'fan'
+        : snapshot.gameOver
+        ? 'over'
+        : 'idle';
+
+      // Rebuilding is only correct when the dock changes shape.
+      if (actionsSlot.dataset.mode !== mode) {
+        actionsSlot.dataset.mode = mode;
+        actionsSlot.removeAttribute('data-sig');
+        actionsSlot.innerHTML =
+          mode === 'fan'
+            ? `<div class="fan-hint" data-fan-hint><span class="fh-label">悬停查看动作</span><span class="fh-detail">点击任意牌面展开详情 · 数字键直接执行</span></div><div class="dock-fan" data-fan></div>`
+            : '';
+      }
+
+      if (mode === 'placement') {
+        setHtml(actionsSlot, placementPanel);
+      } else if (mode === 'over') {
+        setHtml(
+          actionsSlot,
+          `<div class="empty-hint"><span class="e-ico">🏁</span><span>对局已结束${
+            snapshot.winnerLabel ? ` — 胜者：${snapshot.winnerLabel}` : ''
+          }${snapshot.winnerReason ? ` · ${snapshot.winnerReason}` : ''}</span></div>`
+        );
+      } else if (mode === 'idle') {
+        setHtml(
+          actionsSlot,
+          '<div class="empty-hint"><span class="e-ico">◌</span><span>暂无可执行的合法动作 — 等待其他玩家，或正在结算响应栈。</span></div>'
+        );
+      } else {
+        // Fan mode: reconcile the cards by action id so hover survives a repaint.
+        const fan = actionsSlot.querySelector('[data-fan]') as HTMLElement | null;
+        if (fan) {
+          const total = snapshot.actions.length;
+          const mid = (total - 1) / 2;
+          reconcileKeyed(
+            fan,
+            snapshot.actions.map((action, index) => {
+              const offset = index - mid;
+              const tone =
+                action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : '';
+              return {
+                key: action.id,
+                html: `<button class="act ${tone}"
+                  data-action-id="${action.id}"
+                  data-fan-label="${action.label}"
+                  data-fan-hint="${action.hint}"
+                  style="--i:${index};--off:${offset.toFixed(2)};--abs:${Math.abs(offset).toFixed(2)}"
+                  title="${action.label}">
+                  <span class="act-ico">${action.icon}</span>
+                  <span class="act-key">${index + 1}</span>
+                </button>`
+              };
+            })
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * Dock listeners, bound once with the skeleton.
+   *
+   * Delegation rather than per-element binding: the fan cards are reconciled,
+   * so re-binding on every render would leak listeners onto removed nodes and
+   * make hover state impossible to keep.
+   */
+  private bindDockEvents(dock: HTMLElement): void {
+    const REST_HINT =
+      '<span class="fh-label">悬停查看动作</span><span class="fh-detail">点击任意牌面展开详情 · 数字键直接执行</span>';
+
+    dock.addEventListener('click', event => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+
+      if (target.closest('[data-dock-toggle]')) {
+        this.dockOpen = !this.dockOpen;
+        dock.setAttribute('data-dock', this.dockOpen ? 'open' : 'closed');
+        const handle = dock.querySelector('.dock-handle');
+        if (handle) {
+          handle.setAttribute('aria-expanded', this.dockOpen ? 'true' : 'false');
+          const label = handle.querySelector('.dh-label');
+          if (label) label.textContent = this.dockOpen ? '收起动作' : '展开动作';
+        }
+        return;
+      }
+
+      if (target.closest('[data-place-rotate]')) {
+        this.presenter.rotatePlacement(1);
+        return;
+      }
+
+      if (target.closest('[data-place-confirm]')) {
+        const result = this.presenter.confirmPlacement();
+        if (!result.ok) this.pushToast('⚠️', result.error ?? '放置被拒绝');
+        return;
+      }
+
+      const card = target.closest('[data-action-id]') as HTMLElement | null;
+      const id = card?.dataset.actionId;
+      if (id) {
+        const action = this.latest?.actions.find(candidate => candidate.id === id);
+        if (action) this.openActionDetail(action);
+      }
     });
 
-    // Hovering a card surfaces its description in the fixed bar above the fan,
-    // so the cards themselves only need an icon.
-    const hintBar = dock.querySelector('[data-fan-hint]') as HTMLElement | null;
-    const restHint = hintBar ? hintBar.innerHTML : '';
-    dock.querySelectorAll<HTMLElement>('.dock-fan .act').forEach(button => {
-      const show = () => {
-        if (!hintBar) return;
-        hintBar.innerHTML =
-          `<span class="fh-label">${button.dataset.fanLabel ?? ''}</span>` +
-          `<span class="fh-detail">${button.dataset.fanHint ?? ''}</span>`;
-        hintBar.classList.add('active');
-      };
-      const hide = () => {
-        if (!hintBar) return;
-        hintBar.innerHTML = restHint;
-        hintBar.classList.remove('active');
-      };
-      button.addEventListener('mouseenter', show);
-      button.addEventListener('focus', show);
-      button.addEventListener('mouseleave', hide);
-      button.addEventListener('blur', hide);
+    const bar = () => dock.querySelector('[data-fan-hint]') as HTMLElement | null;
+    const showHint = (card: HTMLElement) => {
+      const el = bar();
+      if (!el) return;
+      el.innerHTML =
+        `<span class="fh-label">${card.dataset.fanLabel ?? ''}</span>` +
+        `<span class="fh-detail">${card.dataset.fanHint ?? ''}</span>`;
+      el.classList.add('active');
+    };
+    const hideHint = () => {
+      const el = bar();
+      if (!el) return;
+      el.innerHTML = REST_HINT;
+      el.classList.remove('active');
+    };
+    // relatedTarget checks keep the hint from flickering as the pointer crosses
+    // the card's inner spans.
+    dock.addEventListener('mouseover', event => {
+      const card = (event.target as HTMLElement | null)?.closest('.dock-fan .act') as HTMLElement | null;
+      if (!card) return;
+      if ((event.relatedTarget as HTMLElement | null)?.closest?.('.dock-fan .act') === card) return;
+      showHint(card);
     });
-
-    dock.querySelectorAll<HTMLElement>('[data-action-id]').forEach(button => {
-      button.addEventListener('click', () => {
-        const id = button.dataset.actionId;
-        if (!id) return;
-        const action = snapshot.actions.find(candidate => candidate.id === id);
-        if (!action) return;
-        // Clicking a card expands its detail; the number key stays the fast path.
-        this.openActionDetail(action);
-      });
+    dock.addEventListener('mouseout', event => {
+      const card = (event.target as HTMLElement | null)?.closest('.dock-fan .act') as HTMLElement | null;
+      if (!card) return;
+      if ((event.relatedTarget as HTMLElement | null)?.closest?.('.dock-fan .act') === card) return;
+      hideHint();
     });
+    dock.addEventListener('focusin', event => {
+      const card = (event.target as HTMLElement | null)?.closest('.dock-fan .act') as HTMLElement | null;
+      if (card) showHint(card);
+    });
+    dock.addEventListener('focusout', () => hideHint());
   }
 
   /**

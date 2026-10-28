@@ -11,22 +11,25 @@
  * deliberately small (no framework, no virtual DOM) because the panels are
  * plain lists and a full diffing library would be more machinery than the
  * problem needs.
+ *
+ * A row whose markup changed is replaced in place. Rows carry no internal state
+ * of their own (no focusable descendant, no scroll), so replacing just that one
+ * node is safe; the surrounding nodes — and therefore the panel's scroll and
+ * focus — are untouched.
  */
 
 export interface KeyedItem {
   /** Stable identity across renders. Rows with the same key are reused. */
   key: string;
-  /** Serialised content; a change here means the node's innerHTML is replaced. */
+  /** Serialised content; a change here means the node is replaced. */
   html: string;
-  /** Optional class list applied to the reused node. */
-  className?: string;
 }
 
 const KEY_ATTR = 'data-key';
 const SIG_ATTR = 'data-sig';
 
-/** Cheap, stable string hash so we can compare content without storing it twice. */
-function hash(text: string): string {
+/** Cheap, stable string hash (kept for callers that need a content signature). */
+export function hash(text: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) {
     h ^= text.charCodeAt(i);
@@ -35,11 +38,21 @@ function hash(text: string): string {
   return (h >>> 0).toString(36);
 }
 
+function build(item: KeyedItem): HTMLElement | null {
+  const template = document.createElement('template');
+  template.innerHTML = item.html.trim();
+  const el = template.content.firstElementChild as HTMLElement | null;
+  if (!el) return null;
+  el.setAttribute(KEY_ATTR, item.key);
+  el.setAttribute(SIG_ATTR, hash(item.html));
+  return el;
+}
+
 /**
  * Reconcile `container`'s element children against `items`.
  *
- * Returns the number of nodes that were created, updated or removed, so callers
- * can tell whether a repaint actually did anything.
+ * Returns the number of nodes that were created, replaced, moved or removed, so
+ * callers can tell whether a repaint actually did anything.
  */
 export function reconcileKeyed(container: HTMLElement, items: KeyedItem[]): number {
   const existing = new Map<string, HTMLElement>();
@@ -53,18 +66,12 @@ export function reconcileKeyed(container: HTMLElement, items: KeyedItem[]): numb
   let cursor: Element | null = container.firstElementChild;
 
   for (const item of items) {
-    const sig = hash(item.html);
     let node = existing.get(item.key);
 
     if (!node) {
       // New key: build it and drop it into position.
-      const template = document.createElement('template');
-      template.innerHTML = item.html.trim();
-      const built = template.content.firstElementChild as HTMLElement | null;
+      const built = build(item);
       if (!built) continue;
-      built.setAttribute(KEY_ATTR, item.key);
-      built.setAttribute(SIG_ATTR, sig);
-      if (item.className) built.className = item.className;
       container.insertBefore(built, cursor);
       changes++;
       continue;
@@ -72,22 +79,28 @@ export function reconcileKeyed(container: HTMLElement, items: KeyedItem[]): numb
 
     existing.delete(item.key);
 
-    // Content changed: refresh the node in place, keeping the element itself.
-    if (node.getAttribute(SIG_ATTR) !== sig) {
-      const template = document.createElement('template');
-      template.innerHTML = item.html.trim();
-      const built = template.content.firstElementChild as HTMLElement | null;
-      if (built) {
-        node.innerHTML = built.innerHTML;
-        node.className = built.className;
-        if (item.className) node.className = item.className;
-        node.setAttribute(SIG_ATTR, sig);
-        changes++;
-      }
+    // Content changed: swap the node in place.
+    //
+    // The comparison uses a stored hash of the markup we rendered, not
+    // outerHTML: anything else that touches the node (a hover class, a test
+    // marker attribute) would otherwise read as a content change and defeat the
+    // reuse this whole helper exists for.
+    const fresh = build(item);
+    const sig = hash(item.html);
+    if (fresh && node.getAttribute(SIG_ATTR) !== sig) {
+      container.insertBefore(fresh, node);
+      // Keep the cursor on a live node: if it pointed at the node being
+      // removed, the next insertBefore would target a detached element.
+      if (cursor === node) cursor = fresh;
+      node.remove();
+      node = fresh;
+      changes++;
     }
 
     // Reorder only when the node is out of place.
     if (node !== cursor) {
+      // A stale cursor (already detached) would make insertBefore throw.
+      if (cursor && cursor.parentNode !== container) cursor = null;
       container.insertBefore(node, cursor);
       changes++;
     } else {
