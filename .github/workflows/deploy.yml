@@ -1,0 +1,54 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install and build
+        run: |
+          npm_config_manage_package_manager_versions=false pnpm install --frozen-lockfile
+          npm_config_manage_package_manager_versions=false pnpm build
+
+      - name: Pack deployment bundle
+        run: |
+          tar -czf app.tar.gz --exclude=.git --exclude=node_modules --exclude=.github .
+          ls -la app.tar.gz
+
+      - name: Load SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Ship and deploy
+        run: |
+          scp -i ~/.ssh/id_rsa -P ${{ secrets.SSH_PORT }} app.tar.gz ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/tmp/rds-deploy.tar.gz
+          ssh -i ~/.ssh/id_rsa -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} '
+            set -e
+            cd /opt/rds-board/app
+            tar -xzf /tmp/rds-deploy.tar.gz
+            rm -f /tmp/rds-deploy.tar.gz
+            rm -rf apps/server/data
+            ln -sfn /opt/rds-board/data apps/server/data
+            export npm_config_manage_package_manager_versions=false COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
+            pnpm install --frozen-lockfile --prefer-offline
+            HUB_SECRET=$(grep HUB_SECRET /opt/rds-board/.env | cut -d= -f2) pm2 startOrReload ecosystem.config.cjs --update-env
+            sleep 3
+            curl -sf http://127.0.0.1:8787/healthz >/dev/null && echo "[deploy] OK"
+          '
