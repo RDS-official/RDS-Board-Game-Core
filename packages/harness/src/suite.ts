@@ -45,6 +45,7 @@ import {
   movementCost,
   ongoingEffectKinds,
   ownsDef,
+  nodeGrid,
   removeEffects,
   resetTurnResources,
   rollZeroDice,
@@ -3932,13 +3933,31 @@ test('rules: the mystic elevator has one door and rolls two dice', () => {
 
   const ride = engine.getLegalActions('p1').find(a => a.type === 'USE_ELEVATOR');
   assert(!!ride, 'the ride is offered from inside the car');
-  assert(engine.dispatch(ride!).ok, 'riding dispatches');
+  const rideRes = engine.dispatch(ride!);
+  assert(rideRes.ok, `riding dispatches (${rideRes.error ?? ''})`);
 
   const after = engine.getRawState();
   const roll = after.globalVars.lastElevatorRoll as { rolls: number[]; sum: number } | undefined;
   assert(!!roll, 'the ride records a roll');
   assertEqual(roll!.rolls.length, 2, 'two dice decide the floor');
   assertEqual(after.players.p1.customProps.elevatorUsed, true, 'one ride per turn');
+
+  // The car rides with you: the tile must leave its old cell and end up adjacent
+  // to the chosen room, with the rider inside it.
+  if (roll!.sum >= 2) {
+    const moved = after.mapGraph.nodes.room_mystic_elevator;
+    const grid = nodeGrid(moved);
+    assert(!!grid, 'the elevator tile still exists');
+    assert(
+      !(grid!.col === 3 && grid!.row === 3),
+      'the elevator left its original cell'
+    );
+    assert(
+      moved!.neighbors.includes(ride!.targetNodeId ?? ''),
+      'the elevator is now attached to the destination room'
+    );
+    assertEqual(String(after.players.p1.customProps.currentRoomId), 'room_mystic_elevator', 'the rider is inside the car');
+  }
 
   // 0 is the only outcome that wounds; 1 is the only one that stays put.
   if (roll!.sum === 0) assertEqual(traitValue(after.players.p1, 'might') + traitValue(after.players.p1, 'speed') < 8, true, 'a zero drop costs a physical point');

@@ -83,7 +83,9 @@ import {
   traitIndex,
   traitValue,
   usedThisTurn,
-  weaponOptions
+  weaponOptions,
+  addRoomNode,
+  connectRooms
 } from './helpers';
 
 const TRAIT_OPTIONS: Record<'PHYSICAL' | 'MENTAL', { value: TraitKey; label: string }[]> = {
@@ -803,10 +805,55 @@ export class BetrayalRules {
           break;
         }
 
-        movePlayerTo(s, pid, targetId);
+        // The car travels with you: the elevator tile is re-placed at an empty
+        // doorway of the destination room, and its old cell is vacated.
+        const elevatorId = activeRoom(s, pid);
+        const targetRoom = s.mapGraph.nodes[targetId];
+        const tGrid = nodeGrid(targetRoom);
+        if (!tGrid) break;
+
+        const OFFSETS: Record<string, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
+        let spot: { col: number; row: number } | null = null;
+        for (const doorDir of (targetRoom.props.doors ?? []) as string[]) {
+          const offset = OFFSETS[doorDir];
+          if (!offset) continue;
+          const col = tGrid.col + offset[0];
+          const row = tGrid.row + offset[1];
+          const taken = Object.values(s.mapGraph.nodes).some(node => {
+            if (node.type !== 'ROOM' || node.id === elevatorId) return false;
+            const g = nodeGrid(node);
+            return !!g && g.floor === tGrid.floor && g.col === col && g.row === row;
+          });
+          if (!taken) {
+            spot = { col, row };
+            break;
+          }
+        }
+        if (!spot) {
+          trace(ctx, 'ANNOUNCEMENT', '目标房间没有空着的门口，电梯无法停靠', 500);
+          break;
+        }
+
+        // Drop the old connections, move the tile, then hook it to the target.
+        // The neighbour's adjacency list has to be cleaned too, or the topology
+        // invariant reports a neighbour without an edge.
+        for (const edge of Object.values(s.mapGraph.edges)) {
+          if (edge.from !== elevatorId && edge.to !== elevatorId) continue;
+          const otherId = edge.from === elevatorId ? edge.to : edge.from;
+          const other = s.mapGraph.nodes[otherId];
+          if (other) other.neighbors = other.neighbors.filter(id => id !== elevatorId);
+          delete s.mapGraph.edges[edge.id];
+        }
+        const elevatorNode = s.mapGraph.nodes[elevatorId];
+        if (elevatorNode) elevatorNode.neighbors = [];
+        addRoomNode(s, ROOM_DEFS.mystic_elevator, spot.col, spot.row, 0, elevatorId);
+        connectRooms(s, elevatorId, targetId, 'DOOR');
+        s.globalVars.elevatorRoomId = elevatorId;
+
+        movePlayerTo(s, pid, elevatorId);
         player.customProps.movesLeft = Math.max(0, Number(player.customProps.movesLeft ?? 1) - 1);
-        trace(ctx, 'MOVE_OBJECT', `🛗 ${player.name} 乘神秘电梯抵达 ${roomName(s, activeRoom(s, pid))}`, 500);
-        this.enterRoom(s, pid, activeRoom(s, pid), ctx, false);
+        trace(ctx, 'MOVE_OBJECT', `🛗 ${player.name} 乘神秘电梯抵达 ${roomName(s, targetId)}，电梯砖随之移动`, 500);
+        this.enterRoom(s, pid, elevatorId, ctx, false);
         break;
       }
       case 'TRY_FRONT_DOOR':

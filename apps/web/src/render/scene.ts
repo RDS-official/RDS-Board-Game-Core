@@ -1497,13 +1497,16 @@ export class BoardGameScene {
 
   private createFloorNavArrow(
     dir: 'N' | 'S' | 'E' | 'W',
-    kind: 'NAV' | 'EXPLORE',
+    kind: 'NAV' | 'EXPLORE' | 'CHECK' | 'LOCKED',
     targetName: string
   ): { group: THREE.Group; material: THREE.MeshStandardMaterial } {
     const group = new THREE.Group();
     const isNav = kind === 'NAV';
-    const mainColor = isNav ? 0x22dd77 : 0xe5a93c;
-    const emissiveColor = isNav ? 0x11bb66 : 0x9e6c1a;
+    const isDanger = kind === 'CHECK' || kind === 'LOCKED';
+    // Green = a plain move, amber = an unexplored doorway, red = passing this way
+    // costs something (a trait check) or is impossible (the locked front door).
+    const mainColor = isDanger ? 0xe23b2a : isNav ? 0x22dd77 : 0xe5a93c;
+    const emissiveColor = isDanger ? 0xa11f12 : isNav ? 0x11bb66 : 0x9e6c1a;
 
     const arrowMat = new THREE.MeshStandardMaterial({
       color: mainColor,
@@ -1703,10 +1706,15 @@ export class BoardGameScene {
           doorMesh.userData.floor = nodeFloor;
           this.boardObjectsGroup.add(doorMesh);
 
+          const CHECK_ON_ENTRY = new Set(['COLLAPSED', 'COAL_CHUTE', 'FURNACE']);
           if (isConnected && neighborRoom) {
             const targetName = String(neighborRoom.props?.name ?? '相邻房间');
             if (isCurrentActorRoom && movesLeft > 0) {
-              const { group: navArrow, material } = this.createFloorNavArrow(dir, 'NAV', targetName);
+              // Red when stepping through costs a check or health.
+              const navKind = CHECK_ON_ENTRY.has(String(neighborRoom.props?.special ?? ''))
+                ? 'CHECK'
+                : 'NAV';
+              const { group: navArrow, material } = this.createFloorNavArrow(dir, navKind, targetName);
               const ax = dir === 'W' ? -1.02 : dir === 'E' ? 1.02 : 0;
               const az = dir === 'N' ? -1.02 : dir === 'S' ? 1.02 : 0;
               const arrowY = node.position[1] + 0.125;
@@ -1749,7 +1757,15 @@ export class BoardGameScene {
             });
           } else if (!neighborRoom) {
             if (isCurrentActorRoom && movesLeft > 0) {
-              const { group: exploreArrow, material } = this.createFloorNavArrow(dir, 'EXPLORE', '探索');
+              const isLockedFrontDoor =
+                node.props.special === 'FRONT_DOOR' &&
+                node.props.frontDoor === dir &&
+                state.globalVars.frontDoorLocked !== false;
+              const { group: exploreArrow, material } = this.createFloorNavArrow(
+                dir,
+                isLockedFrontDoor ? 'LOCKED' : 'EXPLORE',
+                isLockedFrontDoor ? '前门锁死' : '探索'
+              );
               const ax = dir === 'W' ? -1.02 : dir === 'E' ? 1.02 : 0;
               const az = dir === 'N' ? -1.02 : dir === 'S' ? 1.02 : 0;
               const arrowY = node.position[1] + 0.125;
