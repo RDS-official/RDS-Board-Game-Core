@@ -584,6 +584,7 @@ class BoardGameSimulatorApp {
 
       if (event.key === 'Escape') {
         this.hud.closePayload();
+        this.hud.closeAbout();
         this.session.cancelPlacement();
         this.scene.setHighlight(null);
         return;

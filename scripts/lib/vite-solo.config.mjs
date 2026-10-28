@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 
 /**
  * Solo-mode Vite config for layout/probe scripts.
@@ -17,8 +18,37 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const pkg = name => `${root}packages/${name}/src`;
 
+// 与根 vite.config.ts 保持一致：注入 git 元信息（About 弹窗读取这些常量）。
+const run = (cmd) => {
+  try {
+    return execSync(cmd, { encoding: 'utf-8' }).trim();
+  } catch {
+    return '';
+  }
+};
+const gitInfo = (() => {
+  const hash = run('git rev-parse --short HEAD') || 'dev';
+  const fullHash = run('git rev-parse HEAD') || hash;
+  const author = run('git log -1 --format="%an <%ae>"') || 'unknown';
+  const commitDate = run('git log -1 --format=%cI') || '';
+  const rawUrl = run('git remote get-url origin');
+  let repo = rawUrl;
+  const scpLike = rawUrl.match(/^(?:git@|ssh:\/\/git@)([^/:]+)[/:](.+?)(?:\.git)?$/);
+  if (scpLike) repo = `https://${scpLike[1]}/${scpLike[2]}`;
+  else if (rawUrl) repo = rawUrl.replace(/\.git$/, '');
+  return { hash, fullHash, author, commitDate, repo };
+})();
+
 export default defineConfig({
   root,
+  define: {
+    __COMMIT_HASH__: JSON.stringify(gitInfo.hash),
+    __COMMIT_FULL_HASH__: JSON.stringify(gitInfo.fullHash),
+    __COMMIT_AUTHOR__: JSON.stringify(gitInfo.author),
+    __COMMIT_DATE__: JSON.stringify(gitInfo.commitDate),
+    __REPO_URL__: JSON.stringify(gitInfo.repo),
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString())
+  },
   resolve: {
     alias: [
       { find: '@rds/kernel', replacement: pkg('kernel') },

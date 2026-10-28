@@ -5,17 +5,38 @@ import { execSync } from 'node:child_process';
 const pkg = (name: string) =>
   fileURLToPath(new URL(`./packages/${name}/src`, import.meta.url));
 
-const commitHash = (() => {
-  try {
-    return execSync('git rev-parse --short HEAD', { encoding: 'utf-8' }).trim();
-  } catch {
-    return 'dev';
-  }
+/** 构建期注入的仓库元信息：哈希、作者、仓库地址（About 弹窗使用）。 */
+const gitInfo = (() => {
+  const run = (cmd: string): string => {
+    try {
+      return execSync(cmd, { encoding: 'utf-8' }).trim();
+    } catch {
+      return '';
+    }
+  };
+
+  const hash = run('git rev-parse --short HEAD') || 'dev';
+  const fullHash = run('git rev-parse HEAD') || hash;
+  const author = run('git log -1 --format="%an <%ae>"') || 'unknown';
+  const commitDate = run('git log -1 --format=%cI') || '';
+  // 归一化 remote URL：git@host:path / ssh:// → https://，便于弹窗内直接点击跳转。
+  const rawUrl = run('git remote get-url origin');
+  let repo = rawUrl;
+  const scpLike = rawUrl.match(/^(?:git@|ssh:\/\/git@)([^/:]+)[/:](.+?)(?:\.git)?$/);
+  if (scpLike) repo = `https://${scpLike[1]}/${scpLike[2]}`;
+  else if (rawUrl) repo = rawUrl.replace(/\.git$/, '');
+
+  return { hash, fullHash, author, commitDate, repo };
 })();
 
 export default defineConfig({
   define: {
-    __COMMIT_HASH__: JSON.stringify(commitHash)
+    __COMMIT_HASH__: JSON.stringify(gitInfo.hash),
+    __COMMIT_FULL_HASH__: JSON.stringify(gitInfo.fullHash),
+    __COMMIT_AUTHOR__: JSON.stringify(gitInfo.author),
+    __COMMIT_DATE__: JSON.stringify(gitInfo.commitDate),
+    __REPO_URL__: JSON.stringify(gitInfo.repo),
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString())
   },
   resolve: {
     alias: [

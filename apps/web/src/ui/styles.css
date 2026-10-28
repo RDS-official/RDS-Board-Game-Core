@@ -3022,6 +3022,95 @@ select.pf-control {
   color: #f6dc9c;
 }
 
+/* -------------------------------------------------------------------------- */
+/* About dialog（关于 · 版本信息）                                              */
+/* -------------------------------------------------------------------------- */
+
+.about-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.about-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 7, 11, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.about-card {
+  position: relative;
+  width: min(440px, calc(100vw - 48px));
+  max-height: calc(100% - 48px);
+  overflow: auto;
+  background: linear-gradient(165deg, rgba(20, 27, 36, 0.98), rgba(11, 15, 21, 0.99));
+  border: 1px solid var(--line-strong, rgba(201, 181, 122, 0.35));
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  padding: 16px;
+  color: var(--text-primary, #e8edf5);
+}
+
+.about-rows {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.about-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 9px 2px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.07);
+  font-size: var(--type-sm, var(--type-xs));
+}
+
+.about-row:last-child {
+  border-bottom: none;
+}
+
+.about-row dt {
+  flex: none;
+  width: 96px;
+  color: var(--text-secondary, #8b98ab);
+  letter-spacing: 0.02em;
+}
+
+.about-row dd {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  word-break: break-all;
+  color: var(--text-primary, #e8edf5);
+}
+
+.about-row dd code {
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(201, 181, 122, 0.3);
+  background: rgba(201, 181, 122, 0.1);
+  color: #f6dc9c;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--type-xs);
+}
+
+.about-row .about-repo a {
+  color: var(--accent-bright, #d9b45b);
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(217, 180, 91, 0.5);
+}
+
+.about-row .about-repo a:hover,
+.about-row .about-repo a:focus-visible {
+  color: #f6dc9c;
+  border-bottom-color: #f6dc9c;
+}
+
 /* Screen-space labels; anchors come from renderer, layout is collision-free. */
 .label-overlay {
   position: absolute;
