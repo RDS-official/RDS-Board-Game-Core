@@ -99,6 +99,7 @@ export class BoardGameHUD {
     this.unsubSnapshot?.();
     this.unsubNotice?.();
     this.closePayload();
+    this.closeAbout();
     this.container.querySelector('#card-sheet-layer')?.remove();
     // Switching fixtures must not treat the new board as "rooms discovered".
     this.knownRooms = undefined;
@@ -138,6 +139,83 @@ export class BoardGameHUD {
     if (!layer) return;
     layer.style.display = 'none';
     layer.innerHTML = '';
+  }
+
+  /** 「关于」弹窗：展示当前构建的版本信息（git hash、作者、仓库地址等）。 */
+  public openAbout(): void {
+    if (this.container.querySelector('#about-layer')) return;
+
+    const commitHash = typeof __COMMIT_HASH__ !== 'undefined' ? __COMMIT_HASH__ : 'unknown';
+    const fullHash = typeof __COMMIT_FULL_HASH__ !== 'undefined' ? __COMMIT_FULL_HASH__ : commitHash;
+    const author = typeof __COMMIT_AUTHOR__ !== 'undefined' ? __COMMIT_AUTHOR__ : 'unknown';
+    const commitDate = typeof __COMMIT_DATE__ !== 'undefined' ? __COMMIT_DATE__ : '';
+    const repoUrl = typeof __REPO_URL__ !== 'undefined' ? __REPO_URL__ : '';
+    const buildTime = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '';
+    const repoHref = /^https?:\/\//.test(repoUrl) ? repoUrl : '';
+
+    const layer = document.createElement('div');
+    layer.className = 'about-layer';
+    layer.id = 'about-layer';
+    // 所有来自构建期注入的值都按纯文本转义（Author 里含 `<email>`，
+    // 不转义会被解析成 HTML 标签而静默消失）。
+    const esc = (value: string): string =>
+      value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    layer.innerHTML = `
+      <div class="about-backdrop" data-about-close></div>
+      <div class="about-card" role="dialog" aria-modal="true" aria-label="关于 · 版本信息">
+        <div class="pf-head">
+          <div class="pf-ico">𝒢</div>
+          <div>
+            <div class="pf-title">关于 · 通用桌游模拟器</div>
+            <div class="pf-hint">UNIVERSAL BOARD GAME KERNEL · 构建版本信息</div>
+          </div>
+        </div>
+        <dl class="about-rows">
+          <div class="about-row">
+            <dt>Git Hash</dt>
+            <dd><code title="${esc(fullHash)}">${esc(commitHash)}</code></dd>
+          </div>
+          <div class="about-row">
+            <dt>Author</dt>
+            <dd>${esc(author)}</dd>
+          </div>
+          <div class="about-row">
+            <dt>Repository</dt>
+            <dd class="about-repo">${
+              repoHref
+                ? `<a href="${esc(repoHref)}" target="_blank" rel="noopener noreferrer">${esc(repoUrl)}</a>`
+                : esc(repoUrl) || 'unknown'
+            }</dd>
+          </div>
+          ${commitDate ? `<div class="about-row"><dt>Commit Date</dt><dd>${esc(commitDate)}</dd></div>` : ''}
+          ${buildTime ? `<div class="about-row"><dt>Build Time</dt><dd>${esc(buildTime)}</dd></div>` : ''}
+        </dl>
+        <div class="pf-foot">
+          <button class="pf-btn primary about-close" data-about-close>关闭</button>
+        </div>
+      </div>
+    `;
+    this.container.appendChild(layer);
+
+    const close = () => this.closeAbout();
+    layer.addEventListener('click', event => {
+      if ((event.target as HTMLElement).closest('[data-about-close]')) close();
+    });
+    layer.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        close();
+      }
+    });
+    (layer.querySelector('.about-close') as HTMLElement | null)?.focus();
+  }
+
+  public closeAbout(): void {
+    const layer = this.container.querySelector('#about-layer') as HTMLElement | null;
+    if (!layer) return;
+    const opener = this.container.querySelector('#btn-about') as HTMLElement | null;
+    layer.remove();
+    opener?.focus();
   }
 
   /** Reflect the renderer's camera state without owning the camera. */
@@ -762,6 +840,7 @@ export class BoardGameHUD {
           <button class="icon-btn danger" id="btn-exit-net" aria-label="退出对局" hidden>⎋<span class="tip">退出对局</span></button>
           <button class="icon-btn" id="btn-audio" aria-label="音效">♪<span class="tip">音效开关</span></button>
           <button class="icon-btn" id="btn-inspector" aria-label="数学模型">𝒢<span class="tip">内核检查器 · I</span></button>
+          <button class="icon-btn" id="btn-about" aria-label="关于">ⓘ<span class="tip">关于 · 版本信息</span></button>
           <button class="shell-toggle" data-toggle="side" aria-label="显示信息栏">▤ 信息</button>
         </div>
       </header>
@@ -852,6 +931,10 @@ export class BoardGameHUD {
 
     this.container.querySelector('#btn-inspector')?.addEventListener('click', () => {
       this.ports.toggleInspector();
+    });
+
+    this.container.querySelector('#btn-about')?.addEventListener('click', () => {
+      this.openAbout();
     });
 
     this.container.querySelector('#btn-undo')?.addEventListener('click', () => {
