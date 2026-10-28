@@ -350,9 +350,26 @@ export class BetrayalRules {
         actions.push({ type: 'EXPLORE_DOOR', playerId, payload: { direction: dir } });
       }
 
+      // Riding the elevator is two steps: roll first, then choose where it stops.
       if (room.props.special === 'ELEVATOR' && !player.customProps.elevatorUsed) {
-        for (const other of exploredRooms(state)) {
-          if (other !== roomId) actions.push({ type: 'USE_ELEVATOR', playerId, targetNodeId: other });
+        actions.push({ type: 'USE_ELEVATOR', playerId });
+      }
+
+      // A finished roll opens the destination picker, limited by the dice.
+      const ride = state.globalVars.elevatorRide as
+        | { sum: number; fromFloor: string; allowSameFloorOnly: boolean }
+        | null
+        | undefined;
+      if (room.props.special === 'ELEVATOR' && ride && ride.sum >= 2) {
+        const targets = exploredRooms(state).filter(other => {
+          if (other === roomId) return false;
+          if (!ride.allowSameFloorOnly) return true;
+          return String(state.mapGraph.nodes[other]?.props?.floor ?? '') === ride.fromFloor;
+        });
+        // One action per destination, like MOVE_NPC: the UI groups them by
+        // targetNodeId, highlights the rooms and sends the chosen one back.
+        for (const target of targets) {
+          actions.push({ type: 'ELEVATOR_MOVE', playerId, targetNodeId: target });
         }
       }
 
@@ -773,34 +790,65 @@ export class BetrayalRules {
         const player = s.players[pid];
         if (player.customProps.elevatorUsed) break;
         const fromFloor = String(s.mapGraph.nodes[activeRoom(s, pid)]?.props?.floor ?? '');
-        const targetId = action.targetNodeId ?? '';
-        const targetFloor = String(s.mapGraph.nodes[targetId]?.props?.floor ?? '');
 
-        // Two-dice car:
-        //   >= 3  any chosen room with an open door, any floor
+        // Step 1 of the ride: the dice decide what is possible, so they are rolled
+        // before any destination is offered. The result stays in state and the
+        // picker opens on the next legal-action pass.
+        //   >= 3  any room with an open door, any floor
         //   == 2  same floor only
         //   == 1  nothing happens
         //   == 0  the car drops: 1 physical damage
         const roll = rollZeroDice(s.prngState, 2);
         s.prngState = roll.nextSeed;
         s.globalVars.lastElevatorRoll = { rolls: roll.rolls, sum: roll.sum };
-        trace(ctx, 'DICE_ROLL', `🛗 神秘电梯 [${roll.rolls.join('+')}] = ${roll.sum}`, 700);
         player.customProps.elevatorUsed = true;
 
+        // Also publish it as the last roll so the dice overlay animates the ride.
+        s.globalVars.rollSeq = Number(s.globalVars.rollSeq ?? 0) + 1;
+        s.globalVars.lastRoll = {
+          playerId: pid,
+          dice: roll.rolls,
+          total: roll.sum,
+          seq: Number(s.globalVars.rollSeq ?? 0),
+          reason: 'elevator',
+          effect: '3+ 任意楼层 · 2 仅同层 · 1 不动 · 0 受伤'
+        };
+        trace(ctx, 'DICE_ROLL', `🛗 神秘电梯 [${roll.rolls.join('+')}] = ${roll.sum}`, 700);
+
         if (roll.sum === 0) {
+          s.globalVars.elevatorRide = null;
           damagePlayer(s, pid, 'PHYSICAL', 1);
           trace(ctx, 'DAMAGE_EFFECT', `电梯骤然下坠，${player.name} 受到 1 点物理伤害`, 600);
           break;
         }
         if (roll.sum === 1) {
+          s.globalVars.elevatorRide = null;
           trace(ctx, 'ANNOUNCEMENT', '电梯纹丝不动，门又关上了', 500);
           break;
         }
-        if (roll.sum === 2 && targetFloor !== fromFloor) {
-          trace(ctx, 'ANNOUNCEMENT', '电梯只在同一层滑动', 500);
-          break;
-        }
-        if (!targetId || !s.mapGraph.nodes[targetId]) {
+
+        s.globalVars.elevatorRide = {
+          sum: roll.sum,
+          fromFloor,
+          allowSameFloorOnly: roll.sum === 2
+        };
+        trace(
+          ctx,
+          'ANNOUNCEMENT',
+          roll.sum === 2 ? '电梯只在同一层滑动 —— 选择本层目的地' : '电梯随你心意移动 —— 选择目的地',
+          600
+        );
+        break;
+      }
+      case 'ELEVATOR_MOVE': {
+        const player = s.players[pid];
+        const ride = s.globalVars.elevatorRide as
+          | { sum: number; fromFloor: string; allowSameFloorOnly: boolean }
+          | null
+          | undefined;
+        const targetId = action.targetNodeId ?? action.targets?.[0] ?? '';
+        s.globalVars.elevatorRide = null;
+        if (!ride || !targetId || !s.mapGraph.nodes[targetId]) {
           trace(ctx, 'ANNOUNCEMENT', '电梯停在一片虚空前，无处可去', 500);
           break;
         }

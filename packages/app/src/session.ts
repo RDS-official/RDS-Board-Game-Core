@@ -311,28 +311,21 @@ export class UniversalSession implements GamePresenter {
       const targetName = (pick.metadata as any)?.targetName ?? '目标房间';
 
       if (action === 'USE_ELEVATOR') {
-        // The lift reaches every explored room, so arm the board-targeting
-        // group instead of guessing a destination.
+        // The ride rolls first. Arming a board group here used to highlight every
+        // explored room before any dice were thrown; now the roll happens, and the
+        // destination picker opens as its own ELEVATOR_MOVE action afterwards.
         const elevator = legal.find(a => a.type === 'USE_ELEVATOR');
         if (!elevator) return { handled: false, message: '电梯本回合已使用' };
-        const bound = this.bound.find(entry => entry.action?.type === 'USE_ELEVATOR');
-        if (bound) {
-          this.activeBoardGroup = {
-            type: 'USE_ELEVATOR',
-            idKey: 'targetNodeId',
-            targets: (bound.highlight ?? []) as string[]
-          };
-          this.emit({
-            kind: 'event',
-            icon: '🛗',
-            title: '电梯已就绪 · 点击任意已探索房间前往',
-            durationMs: 3200
-          });
-          return { handled: true };
-        }
-        return { handled: false, message: '无法启动电梯' };
+        const ride = this.dispatch({ ...elevator });
+        if (!ride.ok) return { handled: false, message: ride.error ?? '无法启动电梯' };
+        this.emit({
+          kind: 'event',
+          icon: '🛗',
+          title: '神秘电梯启动 · 先掷骰再决定去向',
+          durationMs: 2600
+        });
+        return { handled: true };
       }
-
       const special = legal.find(a => a.type === action);
       if (!special) {
         return { handled: false, message: `当前无法执行该特殊移动` };
@@ -1380,7 +1373,7 @@ export function buildActionsView(
 
     const boardGroups: Record<
       string,
-      { idKey: 'targetEdgeId' | 'targetNodeId' | 'entityId'; icon: string; label: string; hint: string; tone: UiAction['tone'] }
+      { idKey?: 'targetEdgeId' | 'targetNodeId' | 'entityId'; icon: string; label: string; hint: string; tone: UiAction['tone'] }
     > = {
       BUILD_ROAD: { idKey: 'targetEdgeId', icon: '🛣️', label: '修建道路', hint: '点击桌面高亮边位 · 1木 1砖', tone: 'normal' },
       SETUP_ROAD: { idKey: 'targetEdgeId', icon: '🛣️', label: '铺设起始道路', hint: '点击与定居点相连的边位', tone: 'primary' },
@@ -1388,7 +1381,8 @@ export function buildActionsView(
       SETUP_SETTLEMENT: { idKey: 'targetNodeId', icon: '🏠', label: '选择起始定居点', hint: '点击高亮顶点 · 免费', tone: 'primary' },
       UPGRADE_CITY: { idKey: 'targetNodeId', icon: '🏰', label: '升级为城市', hint: '点击高亮定居点 · +1VP', tone: 'primary' },
       MOVE_ROBBER: { idKey: 'targetNodeId', icon: '🦹', label: '移动强盗', hint: '点击一块非当前地块', tone: 'danger' },
-      USE_ELEVATOR: { idKey: 'targetNodeId', icon: '🛗', label: '神秘电梯', hint: '点击任意已探索房间', tone: 'primary' },
+      USE_ELEVATOR: { icon: '🛗', label: '乘坐神秘电梯', hint: '先掷 2 骰决定去向', tone: 'primary' },
+      ELEVATOR_MOVE: { idKey: 'targetNodeId', icon: '🛗', label: '选择电梯目的地', hint: '点击高亮房间', tone: 'primary' },
       CLIMB_UP: { idKey: 'targetNodeId', icon: '🪜', label: '沿麻绳攀上', hint: '点击上方楼座/露台的房间', tone: 'normal' },
       PICK_UP_ITEM: { idKey: 'entityId', icon: '🫳', label: '拾取物品堆', hint: '点击房间中的卡牌', tone: 'normal' },
       MOVE_NPC: { idKey: 'targetNodeId', icon: '👹', label: '怪物移动', hint: '点击高亮房间 · 消耗怪物移动力', tone: 'danger' },
@@ -1397,7 +1391,7 @@ export function buildActionsView(
 
     for (const action of actions) {
       const group = boardGroups[action.type];
-      if (!group) continue;
+      if (!group?.idKey) continue;
       const id = action[group.idKey];
       if (!id) continue;
       const bucket = groups.get(action.type) ?? { action, ids: [] };

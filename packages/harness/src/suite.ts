@@ -3916,14 +3916,13 @@ test('rules: an attack is available once per turn and only after the haunt', () 
   assertEqual(canAttack(), true, 'one attack is offered while the allowance is unspent');
 });
 
-test('rules: the mystic elevator has one door and rolls two dice', () => {
+test('rules: the elevator rolls before offering a destination', () => {
   const def = ROOM_DEFS.mystic_elevator;
   assert(!!def, 'the elevator room exists');
   assertEqual(def!.doors.length, 1, 'the car has a single opening');
 
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'room_features' });
   const raw = engine.getRawState();
-  // Put p1 in the elevator with a move to spend.
   addExploredRoom(raw, 'mystic_elevator', 3, 3, 'room_basement_landing');
   movePlayerTo(raw, 'p1', 'room_mystic_elevator');
   raw.activePlayerId = 'p1';
@@ -3931,8 +3930,11 @@ test('rules: the mystic elevator has one door and rolls two dice', () => {
   raw.players.p1.customProps.movesLeft = 3;
   raw.players.p1.customProps.elevatorUsed = false;
 
+  // Step 1: riding takes no target, so the UI cannot show a room picker first.
   const ride = engine.getLegalActions('p1').find(a => a.type === 'USE_ELEVATOR');
   assert(!!ride, 'the ride is offered from inside the car');
+  assertEqual(ride!.selection, undefined, 'riding asks for no destination yet');
+
   const rideRes = engine.dispatch(ride!);
   assert(rideRes.ok, `riding dispatches (${rideRes.error ?? ''})`);
 
@@ -3941,26 +3943,40 @@ test('rules: the mystic elevator has one door and rolls two dice', () => {
   assert(!!roll, 'the ride records a roll');
   assertEqual(roll!.rolls.length, 2, 'two dice decide the floor');
   assertEqual(after.players.p1.customProps.elevatorUsed, true, 'one ride per turn');
+  // The roll is published so the dice overlay can animate it.
+  const shown = after.globalVars.lastRoll as { total?: number; dice?: number[] } | undefined;
+  assertEqual(shown?.total, roll!.sum, 'the ride is the last roll shown to the UI');
 
-  // The car rides with you: the tile must leave its old cell and end up adjacent
-  // to the chosen room, with the rider inside it.
-  if (roll!.sum >= 2) {
-    const moved = after.mapGraph.nodes.room_mystic_elevator;
-    const grid = nodeGrid(moved);
-    assert(!!grid, 'the elevator tile still exists');
-    assert(
-      !(grid!.col === 3 && grid!.row === 3),
-      'the elevator left its original cell'
+  if (roll!.sum < 2) {
+    // Nothing to choose: the car did not move and no picker is offered.
+    assertEqual(
+      engine.getLegalActions('p1').some(a => a.type === 'ELEVATOR_MOVE'),
+      false,
+      'no destination picker below 2'
     );
-    assert(
-      moved!.neighbors.includes(ride!.targetNodeId ?? ''),
-      'the elevator is now attached to the destination room'
-    );
-    assertEqual(String(after.players.p1.customProps.currentRoomId), 'room_mystic_elevator', 'the rider is inside the car');
+    return;
   }
 
-  // 0 is the only outcome that wounds; 1 is the only one that stays put.
-  if (roll!.sum === 0) assertEqual(traitValue(after.players.p1, 'might') + traitValue(after.players.p1, 'speed') < 8, true, 'a zero drop costs a physical point');
+  // Step 2: the dice opened the picker, and moving relocates the tile itself.
+  const choices = engine.getLegalActions('p1').filter(a => a.type === 'ELEVATOR_MOVE');
+  assert(choices.length > 0, 'the destination picker opens after the roll');
+
+  const destination = String(choices[0].targetNodeId ?? '');
+  assert(destination.length > 0, 'each choice carries its room');
+  const moveRes = engine.dispatch(choices[0] as never);
+  assert(moveRes.ok, `the ride completes (${moveRes.error ?? ''})`);
+
+  const moved = engine.getRawState();
+  const elevator = moved.mapGraph.nodes.room_mystic_elevator;
+  const grid = nodeGrid(elevator);
+  assert(!!grid, 'the elevator tile still exists');
+  assert(!(grid!.col === 3 && grid!.row === 3), 'the elevator left its original cell');
+  assert(elevator!.neighbors.includes(destination), 'the elevator is attached to the destination');
+  assertEqual(
+    String(moved.players.p1.customProps.currentRoomId),
+    'room_mystic_elevator',
+    'the rider is inside the car'
+  );
 });
 
 test('rules: the drip curse only fires in a windowless room', () => {
