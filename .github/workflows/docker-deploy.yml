@@ -49,7 +49,7 @@ jobs:
       packages: read
     steps:
       - name: Compute lowercase image name
-        run: echo "IMAGE=ghcr.io/${{ github.repository_owner }}/rds-board-game-core:main" | tr '[:upper:]' '[:lower:]' >> "$GITHUB_ENV"
+        run: echo "IMAGE=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/rds-board-game-core:main" >> "$GITHUB_ENV"
 
       - name: Load private key
         run: |
