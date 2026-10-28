@@ -153,8 +153,12 @@ const json = JSON.stringify(doc, null, 2) + '\n';
 if (args.has('--stdout')) {
   process.stdout.write(json);
 } else if (args.has('--check')) {
-  const current = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8') : '';
-  if (current !== json) {
+  // Compare with normalised line endings. git's autocrlf rewrites the checked-in
+  // file to CRLF on Windows while the generator emits LF, so a raw string
+  // compare reports "stale" for a byte-identical document.
+  const normalise = text => text.replace(/\r\n/g, '\n');
+  const current = fs.existsSync(OUT) ? normalise(fs.readFileSync(OUT, 'utf8')) : '';
+  if (current !== normalise(json)) {
     console.log(`design tokens are stale: run "node scripts/export-design-tokens.mjs"`);
     process.exitCode = 1;
   } else {
