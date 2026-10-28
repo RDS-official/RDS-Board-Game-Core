@@ -1388,7 +1388,71 @@ export class BoardGameHUD {
 
     card.querySelector('#rc-focus')?.addEventListener('click', () => {
       if (this.ports.focusRoom) this.ports.focusRoom(roomId);
+      this.openRoomCardWindow(roomId, snapshot);
     });
+  }
+
+  /**
+   * The room dossier as a floating window, matching what the placement preview
+   * shows. Triggered from the room card's focus button.
+   */
+  private openRoomCardWindow(roomId: string, snapshot: GameSnapshot): void {
+    const layer = this.container.querySelector('#payload-layer') as HTMLElement | null;
+    if (!layer) return;
+
+    const node = snapshot.board.mapGraph.nodes[roomId];
+    if (!node || node.type !== 'ROOM') return;
+    const props = (node.props ?? {}) as Record<string, unknown>;
+    const doors = Array.isArray(props.doors) ? (props.doors as string[]) : [];
+
+    const floorLabel = String(props.floor ?? '') === 'BASEMENT' ? '地下室' : String(props.floor ?? '') === 'UPPER' ? '二楼' : '一楼';
+    const compass = ['N', 'E', 'S', 'W']
+      .map(dir => `<span class="rc-door ${doors.includes(dir) ? 'on' : ''}">${dir}</span>`)
+      .join('');
+
+    const occupants = Object.values(snapshot.board.players).filter(
+      p => p.alive && !p.customProps?.banished && p.customProps?.currentRoomId === roomId
+    );
+    const monsters = Object.values(snapshot.board.entities ?? {}).filter(entity => {
+      const custom = entity?.components?.custom as Record<string, unknown> | undefined;
+      return entity.type === 'MEEPLE' && !!custom?.monster && custom?.roomId === roomId && !custom?.destroyed;
+    });
+    const loot = Object.values(snapshot.board.entities ?? {}).filter(entity => {
+      return entity.zoneId === `zone_room_${roomId}` && entity.components?.custom?.cardType === 'ITEM';
+    });
+
+    const chips =
+      occupants.map(p => `<span class="rc-chip" style="--chip:${p.color}"><i></i>${p.name}</span>`).join('') +
+      monsters
+        .map(m => `<span class="rc-chip monster"><i></i>${String((m.components?.custom as Record<string, unknown>)?.name ?? '怪物')}</span>`)
+        .join('') +
+      (loot.length ? `<span class="rc-chip loot"><i></i>遗物 ×${loot.length}</span>` : '');
+
+    layer.innerHTML = `
+      <div class="payload-backdrop"></div>
+      <div class="payload-card room-card-window">
+        <header class="rc-head">
+          <span class="rc-floor">${floorLabel}</span>
+          <button type="button" class="pf-btn" id="rcw-close">关闭</button>
+        </header>
+        <div class="rc-title">${String(props.name ?? '房间')}</div>
+        <div class="rc-en">${String(props.en ?? '')}</div>
+        <div class="rc-meta">
+          <div class="rc-compass">${compass}</div>
+          <div class="rc-symbol">${props.symbol === 'OMEN' ? '👁 预兆' : props.symbol === 'ITEM' ? '◆ 遗物' : props.symbol === 'EVENT' ? '✦ 事件' : '· 无符号'}</div>
+        </div>
+        <p class="rc-text">${String(props.text ?? '')}</p>
+        <div class="rc-occupants">${chips || '<span class="rc-empty">空无一人</span>'}</div>
+      </div>
+    `;
+    layer.style.display = 'flex';
+
+    const close = () => {
+      layer.style.display = 'none';
+      layer.innerHTML = '';
+    };
+    layer.querySelector('.payload-backdrop')?.addEventListener('click', close);
+    layer.querySelector('#rcw-close')?.addEventListener('click', close);
   }
 
   private renderViewerSelect(snapshot: GameSnapshot): void {
