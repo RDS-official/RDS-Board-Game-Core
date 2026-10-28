@@ -1,4 +1,5 @@
 import { launchChromium } from './lib/browser.mjs';
+import { clickDockAction } from './lib/actions.mjs';
 import { ensureSoloServer } from './lib/soloserver.mjs';
 
 const dev = await ensureSoloServer();
@@ -28,9 +29,7 @@ const before = await page.evaluate(() => {
 console.log('Before explore:', before);
 
 // Explore a door (p1 in ballroom exploring South door)
-const explore = page.locator('.dock-actions .act', { hasText: '探索' }).first();
-if (!(await explore.count())) throw new Error('Explore action missing');
-await explore.click();
+await clickDockAction(page, '探索').catch(() => { throw new Error('Explore action missing'); });
 await page.waitForTimeout(800);
 
 // Verify placement preview state

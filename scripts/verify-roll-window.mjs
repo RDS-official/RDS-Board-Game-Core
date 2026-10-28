@@ -1,4 +1,5 @@
 import { launchChromium } from './lib/browser.mjs';
+import { clickDockAction } from './lib/actions.mjs';
 import { ensureSoloServer } from './lib/soloserver.mjs';
 
 /**
@@ -35,7 +36,7 @@ await page.waitForTimeout(1000);
 
 const dockLabels = () =>
   page.evaluate(() =>
-    [...document.querySelectorAll('.dock-actions .act .act-label')].map(el => el.textContent.trim())
+    [...document.querySelectorAll('.dock-actions .act')].map(el => el.dataset.fanLabel || el.querySelector('.act-label')?.textContent?.trim() || '')
   );
 
 // Give the vault explorer a post-roll luck item so the check has a real choice.
@@ -63,13 +64,13 @@ const before = await dockLabels();
 console.log('dock before:', JSON.stringify(before));
 
 // Click 撬开金库
-await page.locator('.dock-actions .act', { hasText: '撬开金库' }).first().click();
+await clickDockAction(page, '撬开金库');
 await page.waitForTimeout(900);
 
 const declarePhase = await page.evaluate(() => {
   const app = window.__boardGameApp;
   const snap = app.session.getSnapshot();
-  const labels = [...document.querySelectorAll('.dock-actions .act .act-label')].map(el => el.textContent.trim());
+  const labels = [...document.querySelectorAll('.dock-actions .act')].map(el => el.dataset.fanLabel || el.querySelector('.act-label')?.textContent?.trim() || '');
   return { labels, types: snap.actions.map(a => a.actionType ?? a.id) };
 });
 console.log('declare phase dock:', JSON.stringify(declarePhase.labels));
@@ -84,11 +85,11 @@ if (declarePhase.labels.some(l => /^[A-Z_]{4,}$/.test(l))) {
 }
 
 // Roll.
-await page.locator('.dock-actions .act', { hasText: '掷骰检定' }).first().click();
+await clickDockAction(page, '掷骰检定');
 await page.waitForTimeout(900);
 
 const reactPhase = await page.evaluate(() => {
-  const labels = [...document.querySelectorAll('.dock-actions .act .act-label')].map(el => el.textContent.trim());
+  const labels = [...document.querySelectorAll('.dock-actions .act')].map(el => el.dataset.fanLabel || el.querySelector('.act-label')?.textContent?.trim() || '');
   return labels;
 });
 console.log('react phase dock:', JSON.stringify(reactPhase));
@@ -97,16 +98,16 @@ if (!reactPhase.some(l => l.includes('检定响应'))) {
 }
 
 // React with the lucky stone, then resolve.
-await page.locator('.dock-actions .act', { hasText: '检定响应' }).first().click();
+await clickDockAction(page, '检定响应');
 await page.waitForTimeout(800);
-await page.locator('.dock-actions .act', { hasText: '结算检定' }).first().click();
+await clickDockAction(page, '结算检定');
 await page.waitForTimeout(900);
 
 const after = await page.evaluate(() => {
   const app = window.__boardGameApp;
   const snap = app.session.getSnapshot();
   return {
-    labels: [...document.querySelectorAll('.dock-actions .act .act-label')].map(el => el.textContent.trim()),
+    labels: [...document.querySelectorAll('.dock-actions .act')].map(el => el.dataset.fanLabel || el.querySelector('.act-label')?.textContent?.trim() || ''),
     feed: snap.history.slice(0, 4).map(h => h.title),
     pending: !!snap.board.rollWindows?.length
   };

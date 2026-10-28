@@ -13,9 +13,12 @@ page.on('console', msg => {
 });
 page.on('pageerror', err => errors.push(`[pageerror] ${err.message}`));
 
-const actionTexts = async () => page.locator('.act .act-label').allTextContents();
+const actionTexts = async () =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('.act')].map(el => el.dataset.fanLabel || el.querySelector('.act-label')?.textContent || '')
+  );
 const clickAction = async text => {
-  const button = page.locator('.act', { hasText: text }).first();
+  const button = page.locator(`.act[data-fan-label*="${text}"], .act:has-text("${text}")`).first();
   if (!(await button.count())) return false;
   await button.click();
   await page.waitForTimeout(900);
