@@ -288,20 +288,78 @@ apps/web/src/ui/
 
 **探针升级**：`pnpm probe:ui` 现在测 **12 个状态**（7 档视口的默认态 + 窄屏的抽屉展开态），因为关闭的抽屉对探针不可见——只测默认态等于没测里面那些面板。
 
-### Phase 3 · 组件化（3–5 天，可分多次）⏸ 待评审
+### Phase 3 · 组件化 ⏸ 待评审（方案已就绪）
 
-> 需要引入 Lit 依赖（~5KB），属用户评审项。Phase 4 已完成并先行合并；Phase 3 在评审通过后开始。
+> 需要引入 Lit 依赖（~5KB），属用户评审项。**方案已写入下方，评审通过后才动代码。**
 
-按「收益/风险」排序逐个迁移到 Lit：
+#### 3.1 先看清楚：23 处 `innerHTML` 不是同一种东西
 
-1. `action-fan`（交互最复杂，先啃硬骨头）
-2. `player-card`
-3. `activity-feed`（顺带解决全量重建导致的滚动/焦点丢失）
-4. `minimap` / `room-dossier`
+盘点 `apps/web/src/ui/hud.ts` 的 23 处赋值，它们分成两类，价值完全不同：
 
-每迁一个，`hud.ts` 少一段 `innerHTML`。全部迁完后 `hud.ts` 只保留订阅与分发。
+| 类别 | 处数 | 位置 | 每次快照重建？ | 有持久状态吗 |
+| --- | --- | --- | --- | --- |
+| **常驻面板** | 7 | `renderMinimap` `renderHistory` `renderRoomCard`×2 `renderPlayers` `renderDock`×3 | **是** | **有**：滚动位置、悬停、焦点、展开态 |
+| 临时浮层 | 10 | `openPayloadForm`×2 `showCardSheet`×2 `maybeShowHaunt`×2 `openActionDetail`×2 `closePayload` | 否（按需重建） | 无 |
+| 小型注入 | 6 | `pushToast` `showAnnouncement` `showHoverHint` `renderViewerSelect` `renderScenarioSelect` `renderSkeleton` | 部分 | 基本无 |
 
-验收：`hud.ts` 中 `innerHTML =` 数量为 0；快照更新时不再重建未变化的 DOM。
+**结论**：真正的问题是「常驻面板每次快照整段重建」——它把滚动位置、悬停态、键盘焦点一起冲掉。临时浮层重建没有代价，不需要组件化。
+
+**实测证据**（在 `exploration` 剧本、1680×1050 下触发一次快照更新）：
+
+| 观测项 | 结果 |
+| --- | --- |
+| 活动流首个 `.af-row` 的 DOM 节点身份 | **变了**（`sameNode: false`） |
+| 给节点打的 `data-probe-tag` 标记 | **丢失**（`tagSurvived: false`） |
+| 焦点在 `.af-head` 上时触发更新 | 焦点落到 `body`（`focusLost: true`） |
+
+也就是说：整段重建 → 标记丢失 → 滚动与焦点随之归零。这不是推测，是测出来的。
+
+#### 3.2 三个选项
+
+| 选项 | 做法 | 收益 | 代价 |
+| --- | --- | --- | --- |
+| **A. 引入 Lit** | Web Components + 响应式属性，逐组件替换 | 组件边界清晰、按字段更新、生态成熟 | 新增 ~5KB 运行时；团队需熟悉 Lit |
+| **B. 无依赖：键控更新** | 保留手写模板，把「整段重建」改为「按 key 复用节点、只改变化的文本」 | **零依赖**，直接解决滚动/焦点丢失这个真实痛点 | 需要自己写一份约 120 行的复用逻辑；组件边界仍靠约定 |
+| **C. 维持现状** | 不改 | 无风险 | 滚动/焦点丢失长期存在；`hud.ts` 继续变胖 |
+
+**推荐顺序：先做 B 的第一步（收益确定、零依赖），再决定是否需要 A。** 理由：B 解决的是**用户能感知的问题**（列表滚动跳回顶部、悬停丢失、按钮失焦）；A 解决的是**代码组织问题**。前者优先级更高，且做完 B 之后 A 的必要性会明显下降。
+
+#### 3.3 若选 B：分三步，每步可独立合并
+
+**B1 · 活动流键控更新**（收益最高，改动最小）
+- `renderHistory` 由「整段 `innerHTML`」改为：按条目 id 复用 `<li>`，只更新变化条目的文本与类名；
+- 验收：新增动态时**滚动位置不跳**、悬停高亮不丢；`pnpm probe:ui` 全绿。
+
+**B2 · 行动扇形键控更新**
+- `renderDock` 的扇形卡片按 `action.id` 复用，避免每帧重建导致悬停抬起状态被打断；
+- 验收：悬停时快照更新（如倒计时）不再打断抬起与说明条。
+
+**B3 · 角色栏与信息栏**
+- `renderPlayers` / `renderMinimap` / `renderRoomCard` 同样按 id 复用；
+- 验收：`hud.ts` 中「每次快照必执行的重建型 `innerHTML`」归零（临时浮层不计）。
+
+**B 的验收判据**：新增 `scripts/probe-dom-stability.mjs` —— 触发一次快照更新，断言活动流/角色栏/扇形的**节点身份不变**（同一个 `Element` 引用）、滚动位置不变、`document.activeElement` 不变。这条断言能直接锁住本类回归。
+
+#### 3.4 若选 A：迁移顺序与拆分
+
+1. **`action-fan`**（交互最复杂，先啃硬骨头）：吸收 `renderDock` 的 3 处赋值与悬停/抽屉逻辑；
+2. **`player-card` + `player-rail`**：吸收 `renderPlayers`；
+3. **`activity-feed`**：吸收 `renderHistory`（顺带天然解决滚动/焦点问题）；
+4. **`minimap` / `room-dossier`**：吸收 `renderMinimap` / `renderRoomCard`；
+5. `hud.ts` 收敛为「订阅快照 → 分发属性」，10 处临时浮层保持原样（无持久状态，不值得组件化）。
+
+#### 3.5 回退方案
+
+- A 与 B 都是**逐面板替换**，任一时刻未迁移的面板继续用旧代码，**不存在半成品状态**；
+- 每个面板独立分支、独立 PR，出问题只回滚那一个；
+- 引入 Lit 前先跑一遍基线（`pnpm test:ui` + `probe:ui` 的 12 个状态），迁移后逐面板比对。
+
+#### 3.6 需要你决定
+
+1. **走 B（零依赖，先解决滚动/焦点）还是走 A（引入 Lit，重构组件边界）？**
+2. 若走 A，是否接受新增 ~5KB 运行时依赖？
+
+在你回复前不会改动 `hud.ts` 的渲染方式，也不会安装任何依赖。
 
 ### Phase 4 · 可访问性与多端收口 ✅ 已完成（2026-10-28）
 
