@@ -27,11 +27,10 @@
 - **偏差**：①官方无检定；②官方是「查看未抽的牌」，不是「抽出并重新放置」；③牌堆顶牌离开牌堆会改变后续抽牌顺序。
 - **修法**：改为纯查看（不消耗牌），去掉检定与放置决策。
 
-### A-3 玩具猴的每回合一次攻击未实现 ★ 已核实
+### A-3 玩具猴的每回合一次攻击 —— ⚪ **卡牌不在本仓库牌堆中**
 
 - **官方原文**：「The **Toy Monkey** can only attack once per turn.」
-- **实现**：全仓库无 `toy_monkey` 逻辑（0 处命中）。
-- **修法**：攻击合法性加门控。
+- **核实结论**：`toy_monkey` 在 `cards.ts` 中**不存在**（全仓库 0 处定义）。规则本身成立，但本仓库没有这张牌，无需实现；将来加入该卡时再补门控。
 
 ### A-4 狗的行为完全不符 ★ 已核实
 
@@ -40,17 +39,15 @@
 - **偏差**：能力本身是自创的，且缺失全部限制。
 - **修法**：改为官方语义（同伴，跟随主人，禁止单行道/需检定通道/电梯，不被怪物减速）。
 
-### A-5 镜中影像（Image in the Mirror）未实现 ★ 已核实
+### A-5 镜中影像（Image in the Mirror）—— ⚪ **卡牌不在本仓库牌堆中**
 
 - **官方原文**：「The **Image in the Mirror** Omen card **does not affect omens that are also items**, such as the Book.」
-- **实现**：无对应逻辑。
-- **修法**：复制/镜像类效果需排除「同时是物品的预兆」。
+- **核实结论**：`image_in_mirror` 在 `cards.ts` 中不存在，无需实现。
 
-### A-6 「It is Meant to Be」未实现 ★ 已核实
+### A-6 「It is Meant to Be」—— ⚪ **卡牌不在本仓库牌堆中**
 
 - **官方原文**：「The **It is Meant to Be** only allows you to save a result for a die roll **you** make.」
-- **实现**：无对应逻辑。
-- **修法**：结果暂存仅限自己掷的骰。
+- **核实结论**：`meant_to_be` 在 `cards.ts` 中不存在，无需实现。
 
 ### A-7 物品「获得当回合即可使用」待核实 ⚠️
 
@@ -86,11 +83,12 @@
 - **修法（已实施）**：`startHaunt` 设定角色后立即 `removeEffects` 掉叛徒的 ONGOING 效果，并清空 legacy `customProps.effects`。
 - **测试**：`rules: becoming the traitor clears lingering event effects`
 
-### C-2 神秘电梯对叛徒/怪物应免掷 ★ 已核实
+### C-2 神秘电梯对叛徒/怪物应免掷 ✅ **已修复**
 
 - **官方原文**：「**Traitors and Monsters can use the Elevator without rolling**, but only once per Traitor/Monster set of turns.」
 - **实现**：`USE_ELEVATOR` 对所有角色一律掷 2 骰。
-- **修法**：叛徒与怪物走免掷分支（仍需每回合一次）。
+- **修法（已实施）**：叛徒走免掷分支，直接打开「任意楼层」目的地选择；`elevatorUsed` 仍保证每回合一次。
+- **测试**：`rules: the traitor rides the elevator without rolling`（同时断言 PRNG 未被消耗）
 
 ### C-3 房间有害文本对叛徒/怪物的豁免不全 ⚠️ 待核实
 
