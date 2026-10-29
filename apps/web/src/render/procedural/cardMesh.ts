@@ -691,15 +691,24 @@ export class CardMeshBuilder {
     face: CardFace,
     width = 1.4,
     height = 2.1,
-    isMasked = false
+    isMasked = false,
+    faceTextureOverride?: THREE.Texture | null,
+    backTextureOverride?: THREE.Texture | null
   ): THREE.Mesh {
     const geom = new THREE.BoxGeometry(width, 0.02, height);
 
-    const faceTexture = this.createCardFaceTexture(face, isMasked);
-    const backTexture = this.getCardBackTexture();
+    const faceTextureFinal =
+      faceTextureOverride ??
+      (face.imageUrl ? this.loadImageTexture(face.imageUrl) : null);
+    const faceTexture = faceTextureFinal || this.createCardFaceTexture(face, isMasked);
+    const backTexture = backTextureOverride || this.getCardBackTexture();
 
     const edgeMat = new THREE.MeshStandardMaterial({ color: 0xd9c8ab, roughness: 0.85 });
-    const faceMat = new THREE.MeshStandardMaterial({ map: faceTexture, roughness: 0.55, metalness: 0.02 });
+    const faceMat = new THREE.MeshStandardMaterial({
+      map: faceTexture,
+      roughness: faceTextureFinal ? 0.4 : 0.55,
+      metalness: 0.02
+    });
     const backMat = new THREE.MeshStandardMaterial({ map: backTexture, roughness: 0.6, metalness: 0.05 });
 
     // Box material order: +X, -X, +Y, -Y, +Z, -Z
@@ -709,5 +718,18 @@ export class CardMeshBuilder {
     mesh.receiveShadow = true;
 
     return mesh;
+  }
+
+  private static imageTextureCache = new Map<string, THREE.Texture>();
+
+  /** Load an external image (e.g. imported Pokémon card art) as a texture. */
+  public static loadImageTexture(url: string): THREE.Texture {
+    const cached = this.imageTextureCache.get(url);
+    if (cached) return cached;
+    const tex = new THREE.TextureLoader().load(url);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    this.imageTextureCache.set(url, tex);
+    return tex;
   }
 }
