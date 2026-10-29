@@ -402,7 +402,11 @@ export class BetrayalRules {
       }
 
       // Riding the elevator is two steps: roll first, then choose where it stops.
-      if (room.props.special === 'ELEVATOR' && !player.customProps.elevatorUsed) {
+      if (
+        room.props.special === 'ELEVATOR' &&
+        !player.customProps.elevatorUsed &&
+        !ownsDef(state, playerId, 'dog')
+      ) {
         actions.push({ type: 'USE_ELEVATOR', playerId });
       }
 
@@ -486,11 +490,7 @@ export class BetrayalRules {
 
       const companion = !!entity.components.custom?.companion;
       const usable = 'usable' in def ? !!def.usable : false;
-      const isDog = defId === 'dog';
-
-      if (isDog && !usedThisTurn(state, playerId, defId)) {
-        actions.push({ type: 'USE_ITEM', playerId, entityId: entity.id });
-      } else if (usable && !usedThisTurn(state, playerId, defId)) {
+      if (usable && !usedThisTurn(state, playerId, defId)) {
         const fields = this.itemFields(state, playerId, defId);
         actions.push(fields && fields.length > 0
           ? { type: 'USE_ITEM', playerId, entityId: entity.id, fields }

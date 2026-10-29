@@ -4916,3 +4916,31 @@ test('rules: the crystal ball only looks, it does not take the card', () => {
   assertEqual(after.zones.zone_event_deck.orderedEntities[0], topBefore, 'the deck order is untouched');
   assert(!!after.globalVars.peek, 'the top card is revealed');
 });
+
+test('rules: the dog is a companion, not a fetch skill, and it cannot ride the elevator', () => {
+  // Rulebook, Using Items and Omens: "The Dog can't go through one-way passages,
+  // any passage like the Revolving Wall that requires a roll, or use the Mystic
+  // Elevator. His movement is not slowed by monsters."
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'room_features' });
+  const raw = engine.getRawState();
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 3;
+
+  const elevator = Object.values(raw.mapGraph.nodes).find(n => n.props?.special === 'ELEVATOR');
+  assert(!!elevator, 'the fixture has an elevator');
+  movePlayerTo(raw, 'p1', elevator!.id);
+  raw.players.p1.customProps.elevatorUsed = false;
+
+  const rides = () => engine.getLegalActions('p1').some(a => a.type === 'USE_ELEVATOR');
+  assertEqual(rides(), true, 'without the dog the ride is offered');
+
+  grantOmen(raw, 'p1', 'dog');
+  assertEqual(rides(), false, 'the dog bars the elevator');
+
+  // The dog is not a usable item any more: no USE_ITEM for it.
+  const usesDog = engine
+    .getLegalActions('p1')
+    .some(a => a.type === 'USE_ITEM' && String(a.entityId ?? '').includes('dog'));
+  assertEqual(usesDog, false, 'the dog has no activated ability');
+});

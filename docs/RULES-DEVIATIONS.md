@@ -33,12 +33,18 @@
 - **官方原文**：「The **Toy Monkey** can only attack once per turn.」
 - **核实结论**：`toy_monkey` 在 `cards.ts` 中**不存在**（全仓库 0 处定义）。规则本身成立，但本仓库没有这张牌，无需实现；将来加入该卡时再补门控。
 
-### A-4 狗的行为完全不符 ★ 已核实
+### A-4 狗的行为完全不符 ✅ **已修复**
 
 - **官方原文**：「The **Dog** can't go through one-way passages, any passage like the Revolving Wall that requires a roll, or use the Mystic Elevator. His movement is not slowed by monsters.」
 - **实现**：`rules.ts:1841` 把狗做成「自动捡回 6 步内的一堆物品」的取物技能；上述四条限制均无。
 - **偏差**：能力本身是自创的，且缺失全部限制。
-- **修法**：改为官方语义（同伴，跟随主人，禁止单行道/需检定通道/电梯，不被怪物减速）。
+- **修法（已实施）**：
+  - 删除自创的「每回合派狗取物」能力（`usable: false`，并移除其专属 `USE_ITEM` 分支）
+  - 持有狗时**禁止使用神秘电梯**（官方明示）
+  - 卡面描述改写为官方语义：随从、跟随主人、不能乘电梯 / 走单行道 / 走需检定通道
+- **保留**：获得时力量与神智各 +1、失去时各 −1（这部分原本正确）
+- **未实现**：「不被怪物减速」—— 狗的移动本就跟随主人，没有独立移动力，无对应机制
+- **测试**：`rules: the dog is a companion, not a fetch skill, and it cannot ride the elevator`
 
 ### A-5 镜中影像（Image in the Mirror）—— ⚪ **卡牌不在本仓库牌堆中**
 

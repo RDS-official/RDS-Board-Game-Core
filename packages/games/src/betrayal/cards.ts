@@ -650,7 +650,7 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'dog',
         name: '脏狗',
         en: 'Dog',
-        desc: '随从。获得时力量与神智各 +1；失去时各 -1。每回合可派狗去已探索房间拾取/丢弃 1 件物品。不可交易、丢弃或被盗。',
+        desc: '随从。获得时力量与神智各 +1；失去时各 -1。狗跟随主人，不能乘神秘电梯、不能走单行道或需要检定的通道。不可交易、丢弃或被盗。',
         companion: true,
         tradeable: false,
         onGain: [
@@ -661,8 +661,7 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
           { trait: 'might', amount: -1 },
           { trait: 'sanity', amount: -1 }
         ],
-        usable: true,
-        useKind: 'DIVINING'
+        usable: false,
       },
       {
         id: 'girl',
