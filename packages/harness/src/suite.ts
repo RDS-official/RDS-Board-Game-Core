@@ -52,7 +52,8 @@ import {
   resetTurnResources,
   rollZeroDice,
   traitIndex,
-  traitValue
+  traitValue,
+  hasRolledThisTurn
 } from '@rds/games/betrayal/helpers';
 import { addExploredRoom, grantItem, grantOmen } from '@rds/games/betrayal/scenarios';
 import { projectNodePosition } from '@rds/web/render/spatialProjection';
@@ -3961,11 +3962,14 @@ test('rules: the elevator rolls before offering a destination', () => {
 
   // Step 2: the dice opened the picker, and moving relocates the tile itself.
   const choices = engine.getLegalActions('p1').filter(a => a.type === 'ELEVATOR_MOVE');
-  assert(choices.length > 0, 'the destination picker opens after the roll');
+  assert(choices.length > 0, 'the doorway picker opens after the roll');
 
-  const destination = String(choices[0].targetNodeId ?? '');
+  const choice = choices[0];
+  const destination = String(choice.targetNodeId ?? '');
+  const doorDir = String(choice.payload?.direction ?? '');
   assert(destination.length > 0, 'each choice carries its room');
-  const moveRes = engine.dispatch(choices[0] as never);
+  assert(doorDir.length > 0, 'each choice names the doorway it lands on');
+  const moveRes = engine.dispatch(choice as never);
   assert(moveRes.ok, `the ride completes (${moveRes.error ?? ''})`);
 
   const moved = engine.getRawState();
@@ -3974,6 +3978,19 @@ test('rules: the elevator rolls before offering a destination', () => {
   assert(!!grid, 'the elevator tile still exists');
   assert(!(grid!.col === 3 && grid!.row === 3), 'the elevator left its original cell');
   assert(elevator!.neighbors.includes(destination), 'the elevator is attached to the destination');
+
+  // It must sit in the cell just outside the chosen doorway, and its single door
+  // must face back into that room - that is what the doorway choice encodes.
+  const roomGrid = nodeGrid(moved.mapGraph.nodes[destination]);
+  const OFFSETS: Record<string, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
+  const OPPOSITE: Record<string, string> = { N: 'S', S: 'N', E: 'W', W: 'E' };
+  const offset = OFFSETS[doorDir]!;
+  assertEqual(grid!.col, roomGrid!.col + offset[0], 'the car parks outside the chosen doorway (col)');
+  assertEqual(grid!.row, roomGrid!.row + offset[1], 'the car parks outside the chosen doorway (row)');
+  assert(
+    (elevator!.props?.doors as string[]).includes(OPPOSITE[doorDir]!),
+    'the car door faces the room it docked against'
+  );
   assertEqual(
     String(moved.players.p1.customProps.currentRoomId),
     'room_mystic_elevator',
@@ -4468,4 +4485,159 @@ test('fixture splendor: full games stay legal and replay bit-exactly at every se
       assert(replay.ok, `${seats}p seed ${seed}: replay is bit-exact (${replay.errors.slice(0, 2).join(' | ')})`);
     }
   }
+});
+
+test('rules: riding to another floor moves the elevator tile to that floor', () => {
+  // The car is the one tile that belongs on every floor, so the data must say so:
+  // drawing a tile is filtered by `floors ?? [floor]`.
+  assertEqual(
+    (ROOM_DEFS.mystic_elevator.floors ?? []).slice().sort().join(','),
+    'BASEMENT,GROUND,UPPER',
+    'the elevator declares every floor'
+  );
+
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'room_features' });
+  const raw = engine.getRawState();
+
+  // The car starts in the basement; the destination is upstairs.
+  addExploredRoom(raw, 'mystic_elevator', 0, 3, 'room_basement_landing');
+  movePlayerTo(raw, 'p1', 'room_mystic_elevator');
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 3;
+  raw.players.p1.customProps.elevatorUsed = true;
+  raw.globalVars.elevatorRoomId = 'room_mystic_elevator';
+  raw.globalVars.elevatorRide = { sum: 3, fromFloor: 'BASEMENT', allowSameFloorOnly: false };
+
+  const upstairs = Object.values(raw.mapGraph.nodes).find(
+    node => node.type === 'ROOM' && String(node.props?.floor) === 'UPPER'
+  );
+  assert(!!upstairs, 'the fixture has an upstairs room');
+
+  const ride = engine
+    .getLegalActions('p1')
+    .find(a => a.type === 'ELEVATOR_MOVE' && a.targetNodeId === upstairs!.id);
+  assert(!!ride, 'the upstairs room offers a doorway to dock at');
+  const rideRes = engine.dispatch(ride! as never);
+  assert(rideRes.ok, `the ride dispatches (${rideRes.error ?? ''})`);
+
+  const after = engine.getRawState();
+  const elevator = after.mapGraph.nodes.room_mystic_elevator;
+  assert(!!elevator, 'the elevator tile still exists');
+
+  // The tile must sit on the destination floor, not back down in the basement.
+  assertEqual(String(elevator!.props?.floor), 'UPPER', 'the tile moved to the upstairs floor');
+  assertEqual(String(elevator!.layer), 'UPPER', 'the tile layer follows the floor');
+  assertEqual(
+    String(after.players.p1.customProps.floor),
+    'UPPER',
+    'the rider ends up on the upstairs floor'
+  );
+  assertEqual(
+    String(after.players.p1.customProps.currentRoomId),
+    'room_mystic_elevator',
+    'the rider is inside the car'
+  );
+});
+
+test('rules: room floor lists are well formed', () => {
+  // A tile may name several floors (drawing filters on `floors ?? [floor]`), but
+  // the list must always contain the tile's own base floor and never be empty.
+  for (const def of Object.values(ROOM_DEFS)) {
+    if (!def.floors) continue;
+    assert(def.floors.length > 0, `${def.id} declares an empty floor list`);
+    assert(
+      def.floors.includes(def.floor),
+      `${def.id} floor list omits its base floor ${def.floor}`
+    );
+  }
+
+  // The once-per-game trait rooms are Gymnasium/Library/Chapel/Larder; the
+  // kitchen has no such bonus.
+  assertEqual(String(ROOM_DEFS.gymnasium.endTurnBuff), 'speed', 'gymnasium buffs Speed');
+  assertEqual(String(ROOM_DEFS.library.endTurnBuff), 'knowledge', 'library buffs Knowledge');
+  assertEqual(String(ROOM_DEFS.chapel.endTurnBuff), 'sanity', 'chapel buffs Sanity');
+  assertEqual(String(ROOM_DEFS.larder.endTurnBuff), 'might', 'larder buffs Might');
+  assertEqual(ROOM_DEFS.kitchen.endTurnBuff, undefined, 'kitchen grants no trait');
+});
+
+test('rules: the same check cannot be attempted twice in one turn', () => {
+  // Rulebook, Die Rolls: "You cannot try to make the same roll more than once per
+  // turn." The vault is the one re-enterable optional check, so it is the honest
+  // place to prove the gate.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  addExploredRoom(raw, 'vault', 0, 2, 'room_entrance_hall');
+  movePlayerTo(raw, 'p1', 'room_vault');
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 2;
+  raw.players.p1.customProps.rolledThisTurn = [];
+
+  const vaultOffered = () => engine.getLegalActions('p1').some(a => a.type === 'ROOM_FEATURE');
+  assertEqual(vaultOffered(), true, 'the vault can be tried once');
+
+  const attempt = engine.getLegalActions('p1').find(a => a.type === 'ROOM_FEATURE');
+  assert(engine.dispatch(attempt!).ok, 'the attempt dispatches');
+
+  assertEqual(hasRolledThisTurn(engine.getRawState(), 'p1', 'vault'), true, 'the attempt is recorded');
+  assertEqual(vaultOffered(), false, 'a second attempt is refused in the same turn');
+
+  // A new turn clears the record.
+  const after = engine.getRawState();
+  after.players.p1.customProps.rolledThisTurn = [];
+  assertEqual(vaultOffered(), true, 'a new turn may try again');
+});
+
+test('rules: leaving a room with an opponent costs an extra space for everyone', () => {
+  // Rulebook, Moving Past Opponents: "for each opponent in a room with you, a
+  // Hero, monster or Traitor must use one extra space of movement to leave".
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'haunt_zombie' });
+  const raw = engine.getRawState();
+
+  const traitorId = Object.entries(raw.players).find(([, p]) => p.role === 'TRAITOR')?.[0];
+  assert(!!traitorId, 'the fixture has a traitor');
+  const heroId = Object.entries(raw.players).find(([id, p]) => id !== traitorId && p.alive)?.[0];
+  assert(!!heroId, 'the fixture has a living hero');
+
+  const room = String(raw.players[heroId!].customProps.currentRoomId);
+  movePlayerTo(raw, traitorId!, room);
+
+  assertEqual(hostilesInRoom(raw, heroId!, room), 1, 'the hero counts the traitor as an opponent');
+  assertEqual(movementCost(raw, heroId!, room), 2, 'the hero pays two spaces to leave');
+
+  assertEqual(hostilesInRoom(raw, traitorId!, room), 1, 'the traitor counts the hero as an opponent');
+  assertEqual(movementCost(raw, traitorId!, room), 2, 'the traitor also pays two spaces to leave');
+
+  // Standing with its own monsters is not an opponent for the traitor.
+  const elsewhere = Object.values(raw.mapGraph.nodes).find(
+    n => n.type === 'ROOM' && n.id !== room && String(n.props?.floor) === String(raw.mapGraph.nodes[room]?.props?.floor)
+  );
+  assert(!!elsewhere, 'another room on the same floor exists');
+  movePlayerTo(raw, traitorId!, elsewhere!.id);
+  assertEqual(hostilesInRoom(raw, traitorId!, elsewhere!.id), 0, 'no hero there, no penalty');
+  assertEqual(movementCost(raw, traitorId!, elsewhere!.id), 1, 'the traitor moves freely alone');
+});
+
+test('rules: a non-tradable item can still be dropped, a companion cannot', () => {
+  // Rulebook, Using Items and Omens: "Some items can't be traded, but MAY BE
+  // DROPPED OR PICKED UP." Companions are the only things barred from that.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 3;
+
+  // Bite is an omen that cannot be traded and is not a companion.
+  grantOmen(raw, 'p1', 'bite');
+  const biteDrop = () => engine.getLegalActions('p1').find(a => a.type === 'DROP_ITEM');
+  assert(!!biteDrop(), 'a non-tradable omen can be dropped');
+  assert(engine.dispatch(biteDrop()!).ok, 'dropping it dispatches');
+
+  // The dog is a companion: it follows its custodian and cannot be dropped.
+  grantOmen(raw, 'p1', 'dog');
+  const dogDrop = engine
+    .getLegalActions('p1')
+    .find(a => a.type === 'DROP_ITEM' && String(a.entityId ?? '').includes('dog'));
+  assertEqual(dogDrop, undefined, 'a companion cannot be dropped');
 });

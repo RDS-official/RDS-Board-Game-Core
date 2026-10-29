@@ -396,6 +396,19 @@ export class UniversalSession implements GamePresenter {
     // In-world door exploration hotspot
     if ((pick.metadata as any)?.type === 'DOOR') {
       const dir = (pick.metadata as any)?.direction;
+      const meta = pick.metadata as any;
+      if (meta?.elevator) {
+        // The elevator pick names a doorway, so match on room + direction.
+        const rideAction = legal.find(
+          a =>
+            a.type === 'ELEVATOR_MOVE' &&
+            a.targetNodeId === meta.roomId &&
+            a.payload?.direction === meta.direction
+        );
+        if (!rideAction) return { handled: false, message: '这里停不了电梯' };
+        const res = this.dispatch(rideAction);
+        return { handled: res.ok, message: res.error };
+      }
       const exploreAction = legal.find(a => a.type === 'EXPLORE_DOOR' && a.payload?.direction === dir);
       if (exploreAction) {
         const res = this.dispatch(exploreAction);
@@ -1412,7 +1425,7 @@ export function buildActionsView(
       UPGRADE_CITY: { idKey: 'targetNodeId', icon: '🏰', label: '升级为城市', hint: '点击高亮定居点 · +1VP', tone: 'primary' },
       MOVE_ROBBER: { idKey: 'targetNodeId', icon: '🦹', label: '移动强盗', hint: '点击一块非当前地块', tone: 'danger' },
       USE_ELEVATOR: { icon: '🛗', label: '乘坐神秘电梯', hint: '先掷 2 骰决定去向', tone: 'primary' },
-      ELEVATOR_MOVE: { idKey: 'targetNodeId', icon: '🛗', label: '选择电梯目的地', hint: '点击高亮房间', tone: 'primary' },
+      ELEVATOR_MOVE: { icon: '🛗', label: '电梯停靠', hint: '点击任意空门口的黄色箭头', tone: 'primary' },
       CLIMB_UP: { idKey: 'targetNodeId', icon: '🪜', label: '沿麻绳攀上', hint: '点击上方楼座/露台的房间', tone: 'normal' },
       PICK_UP_ITEM: { idKey: 'entityId', icon: '🫳', label: '拾取物品堆', hint: '点击房间中的卡牌', tone: 'normal' },
       MOVE_NPC: { idKey: 'targetNodeId', icon: '👹', label: '怪物移动', hint: '点击高亮房间 · 消耗怪物移动力', tone: 'danger' },

@@ -437,6 +437,11 @@ export function rollTraitCheck(
 
   const baseValue = traitValue(player, trait);
   state.globalVars.rollSeq = Number(state.globalVars.rollSeq ?? 0) + 1;
+  if (options.reason) {
+    const attempted = new Set<string>((player.customProps.rolledThisTurn as string[]) ?? []);
+    attempted.add(options.reason);
+    player.customProps.rolledThisTurn = [...attempted];
+  }
   let count = baseValue;
   count += Number(player.customProps.checkBonus ?? 0);
   count += Number(options.extraDice ?? 0);
@@ -1092,29 +1097,45 @@ export function movePlayerTo(state: GameState, playerId: PlayerId, roomId: strin
   player.customProps.floor = room.props.floor;
 }
 
+/**
+ * Opponents sharing the room, used for the movement penalty.
+ *
+ * Rulebook, Moving Past Opponents: "for each opponent in a room with you, a Hero,
+ * monster or Traitor must use one extra space of movement to leave that room.
+ * Stunned monsters don't slow an explorer's move in this way."
+ *
+ * A hero's opponents are the traitor plus unstunned monsters. The traitor's
+ * opponents are the heroes - the monsters are its allies, and counting them (as
+ * this used to) made the traitor pay for standing next to its own minions.
+ */
 export function hostilesInRoom(state: GameState, playerId: PlayerId, roomId: string): number {
   const player = state.players[playerId];
   if (!player) return 0;
   const haunt = !!state.globalVars.hauntTriggered;
   if (!haunt) return 0;
 
-  const isHero = player.role !== 'TRAITOR';
   let count = 0;
+  const others = Object.entries(state.players).filter(([id]) => id !== playerId);
+
+  if (player.role === 'TRAITOR') {
+    for (const [, other] of others) {
+      if (!other.alive || other.role === 'TRAITOR' || other.customProps.banished) continue;
+      if (other.customProps.currentRoomId === roomId) count += 1;
+    }
+    return count;
+  }
 
   for (const monster of monstersInRoom(state, roomId)) {
     if (!monster.components.custom?.stunned) count += 1;
   }
-
-  if (isHero) {
-    const traitor = Object.values(state.players).find(other => other.role === 'TRAITOR' && other.alive);
-    if (traitor && !traitor.customProps.banished && traitor.customProps.currentRoomId === roomId) count += 1;
-  }
+  const traitor = others.find(([, other]) => other.role === 'TRAITOR' && other.alive)?.[1];
+  if (traitor && !traitor.customProps.banished && traitor.customProps.currentRoomId === roomId) count += 1;
   return count;
 }
 
 export function movementCost(state: GameState, playerId: PlayerId, fromRoomId: string): number {
   const player = state.players[playerId];
-  if (!player || player.role === 'TRAITOR') return 1;
+  if (!player) return 1;
   return 1 + hostilesInRoom(state, playerId, fromRoomId);
 }
 
@@ -1253,6 +1274,17 @@ export function addFrost(state: GameState, roomId: string): void {
   state.globalVars.frostRooms = [...rooms];
 }
 
+/**
+ * Rulebook, Die Rolls: "You cannot try to make the same roll more than once per
+ * turn." Optional checks are gated on this; automatic room effects are not, since
+ * the player is not choosing to re-roll there.
+ */
+export function hasRolledThisTurn(state: GameState, playerId: PlayerId, reason: string): boolean {
+  const player = state.players[playerId];
+  if (!player) return false;
+  return ((player.customProps.rolledThisTurn as string[]) ?? []).includes(reason);
+}
+
 export function resetTurnResources(state: GameState, playerId: PlayerId): void {
   const player = state.players[playerId];
   if (!player) return;
@@ -1269,6 +1301,9 @@ export function resetTurnResources(state: GameState, playerId: PlayerId): void {
   player.customProps.forcedRoll = undefined;
   player.customProps.movesUsed = 0;
   player.customProps.skipActions = false;
+  // Rulebook, Die Rolls: "You cannot try to make the same roll more than once per
+  // turn." This holds the check reasons already attempted this turn.
+  player.customProps.rolledThisTurn = [];
 }
 
 export function nextEligiblePlayer(state: GameState, fromId: PlayerId): PlayerId {

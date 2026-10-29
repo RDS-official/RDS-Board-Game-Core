@@ -85,7 +85,9 @@ import {
   usedThisTurn,
   weaponOptions,
   addRoomNode,
-  connectRooms
+  connectRooms,
+  validRotations,
+  hasRolledThisTurn
 } from './helpers';
 
 const TRAIT_OPTIONS: Record<'PHYSICAL' | 'MENTAL', { value: TraitKey; label: string }[]> = {
@@ -366,10 +368,38 @@ export class BetrayalRules {
           if (!ride.allowSameFloorOnly) return true;
           return String(state.mapGraph.nodes[other]?.props?.floor ?? '') === ride.fromFloor;
         });
-        // One action per destination, like MOVE_NPC: the UI groups them by
-        // targetNodeId, highlights the rooms and sends the chosen one back.
+
+        // One action per EMPTY DOORWAY, not per room: the doorway decides both
+        // where the car lands and which way its single door faces, exactly like
+        // placing a drawn room tile.
+        const DOOR_OFFSET: Record<string, [number, number]> = {
+          N: [0, -1],
+          S: [0, 1],
+          E: [1, 0],
+          W: [-1, 0]
+        };
         for (const target of targets) {
-          actions.push({ type: 'ELEVATOR_MOVE', playerId, targetNodeId: target });
+          const targetNode = state.mapGraph.nodes[target];
+          const grid = nodeGrid(targetNode);
+          if (!grid) continue;
+          for (const dir of (targetNode.props?.doors ?? []) as string[]) {
+            const offset = DOOR_OFFSET[dir];
+            if (!offset) continue;
+            const col = grid.col + offset[0];
+            const row = grid.row + offset[1];
+            const taken = Object.values(state.mapGraph.nodes).some(node => {
+              if (node.type !== 'ROOM' || node.id === roomId) return false;
+              const other = nodeGrid(node);
+              return !!other && other.floor === grid.floor && other.col === col && other.row === row;
+            });
+            if (taken) continue;
+            actions.push({
+              type: 'ELEVATOR_MOVE',
+              playerId,
+              targetNodeId: target,
+              payload: { direction: dir }
+            });
+          }
         }
       }
 
@@ -389,7 +419,11 @@ export class BetrayalRules {
 
       // Optional room features the player can poke at instead of them firing
       // silently on entry. Only the vault is genuinely re-enterable.
-      if (room.props.special === 'VAULT' && !room.props?.opened) {
+      if (
+        room.props.special === 'VAULT' &&
+        !room.props?.opened &&
+        !hasRolledThisTurn(state, playerId, 'vault')
+      ) {
         actions.push({ type: 'ROOM_FEATURE', playerId, payload: { feature: 'VAULT' } });
       }
     }
@@ -414,7 +448,8 @@ export class BetrayalRules {
           : { type: 'USE_ITEM', playerId, entityId: entity.id });
       }
 
-      if (!companion && tradeable(entity)) {
+      // Dropping only excludes companions; non-tradable items may still be dropped.
+      if (!companion) {
         actions.push({ type: 'DROP_ITEM', playerId, entityId: entity.id });
         // Generic slot command, kept alongside the legacy drop action for old logs.
         actions.push({
@@ -853,34 +888,37 @@ export class BetrayalRules {
           break;
         }
 
-        // The car travels with you: the elevator tile is re-placed at an empty
-        // doorway of the destination room, and its old cell is vacated.
+        // The car travels with you: the elevator tile is placed at the chosen
+        // EMPTY DOORWAY and rotated so its single door faces the room, exactly
+        // like a drawn room tile. The old cell is vacated by the re-place.
         const elevatorId = activeRoom(s, pid);
         const targetRoom = s.mapGraph.nodes[targetId];
         const tGrid = nodeGrid(targetRoom);
         if (!tGrid) break;
 
         const OFFSETS: Record<string, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
-        let spot: { col: number; row: number } | null = null;
-        for (const doorDir of (targetRoom.props.doors ?? []) as string[]) {
-          const offset = OFFSETS[doorDir];
-          if (!offset) continue;
-          const col = tGrid.col + offset[0];
-          const row = tGrid.row + offset[1];
-          const taken = Object.values(s.mapGraph.nodes).some(node => {
-            if (node.type !== 'ROOM' || node.id === elevatorId) return false;
-            const g = nodeGrid(node);
-            return !!g && g.floor === tGrid.floor && g.col === col && g.row === row;
-          });
-          if (!taken) {
-            spot = { col, row };
-            break;
-          }
-        }
-        if (!spot) {
-          trace(ctx, 'ANNOUNCEMENT', '目标房间没有空着的门口，电梯无法停靠', 500);
+        const OPPOSITE: Record<string, string> = { N: 'S', S: 'N', E: 'W', W: 'E' };
+        const dir = String(action.payload?.direction ?? '');
+        const offset = OFFSETS[dir];
+        if (!offset) {
+          trace(ctx, 'ANNOUNCEMENT', '没有指定门口，电梯无法停靠', 500);
           break;
         }
+        const col = tGrid.col + offset[0];
+        const row = tGrid.row + offset[1];
+        const taken = Object.values(s.mapGraph.nodes).some(node => {
+          if (node.type !== 'ROOM' || node.id === elevatorId) return false;
+          const g = nodeGrid(node);
+          return !!g && g.floor === tGrid.floor && g.col === col && g.row === row;
+        });
+        if (taken) {
+          trace(ctx, 'ANNOUNCEMENT', '那个门口已经站了房间，电梯无法停靠', 500);
+          break;
+        }
+
+        // The car's door must face back toward the room it docked against.
+        const entryDoor = OPPOSITE[dir] as 'N' | 'S' | 'E' | 'W';
+        const rotation = validRotations(ROOM_DEFS.mystic_elevator.doors, entryDoor)[0] ?? 0;
 
         // Drop the old connections, move the tile, then hook it to the target.
         // The neighbour's adjacency list has to be cleaned too, or the topology
@@ -894,7 +932,27 @@ export class BetrayalRules {
         }
         const elevatorNode = s.mapGraph.nodes[elevatorId];
         if (elevatorNode) elevatorNode.neighbors = [];
-        addRoomNode(s, ROOM_DEFS.mystic_elevator, spot.col, spot.row, 0, elevatorId);
+
+        // The car adopts the DESTINATION's floor. addRoomNode derives the layer
+        // from the definition, and the elevator's definition says basement, so
+        // riding up to the second floor used to drop the tile into the basement
+        // at the same column/row - colliding with a basement room or stranding
+        // the rider on the wrong floor.
+        const targetFloor = String(targetRoom.props?.floor ?? 'BASEMENT') as Floor;
+        // Respect the tile's own floor list instead of assuming it may go anywhere.
+        const elevatorFloors = ROOM_DEFS.mystic_elevator.floors ?? [ROOM_DEFS.mystic_elevator.floor];
+        if (!elevatorFloors.includes(targetFloor)) {
+          trace(ctx, 'ANNOUNCEMENT', '电梯到不了那一层', 500);
+          break;
+        }
+        addRoomNode(
+          s,
+          { ...ROOM_DEFS.mystic_elevator, floor: targetFloor },
+          col,
+          row,
+          rotation,
+          elevatorId
+        );
         connectRooms(s, elevatorId, targetId, 'DOOR');
         s.globalVars.elevatorRoomId = elevatorId;
 
@@ -1453,20 +1511,23 @@ export class BetrayalRules {
     const special = room.props?.special as string | null;
     const tags = roomTags(state, roomId);
 
-    if (!traitor) {
-      if (special === 'COAL_CHUTE') {
-        const hasRope = ownsDef(state, pid, 'rope');
-        if (!hasRope) {
-          damagePlayer(state, pid, 'PHYSICAL', 1);
-          trace(ctx, 'DAMAGE_EFFECT', `${player.name} 从煤槽滑下擦伤（1 点物理伤害）`, 500);
-        } else {
-          trace(ctx, 'ANNOUNCEMENT', `${player.name} 借助绳索安全滑落煤槽`, 500);
-        }
-        if (state.mapGraph.nodes.room_basement_landing) {
-          movePlayerTo(state, pid, 'room_basement_landing');
-          trace(ctx, 'MOVE_OBJECT', `${player.name} 滑落至地下平台`, 500);
-        }
+    // Rulebook, Special Rooms: "The Chute affects Traitors and monsters." This
+    // used to sit behind `if (!traitor)`, so a traitor slid through untouched.
+    if (special === 'COAL_CHUTE') {
+      const hasRope = ownsDef(state, pid, 'rope');
+      if (!hasRope) {
+        damagePlayer(state, pid, 'PHYSICAL', 1);
+        trace(ctx, 'DAMAGE_EFFECT', `${player.name} 从煤槽滑下擦伤（1 点物理伤害）`, 500);
+      } else {
+        trace(ctx, 'ANNOUNCEMENT', `${player.name} 借助绳索安全滑落煤槽`, 500);
       }
+      if (state.mapGraph.nodes.room_basement_landing) {
+        movePlayerTo(state, pid, 'room_basement_landing');
+        trace(ctx, 'MOVE_OBJECT', `${player.name} 滑落至地下平台`, 500);
+      }
+    }
+
+    if (!traitor) {
       if (special === 'COLLAPSED') {
         const check = rollTraitCheck(state, pid, 'speed', {
           threshold: 5,
@@ -1717,7 +1778,7 @@ export class BetrayalRules {
     const player = state.players[pid];
     if (!entity || !player) return;
     if (!handEntities(state, pid).some(item => item.id === entityId)) return;
-    if (!tradeable(entity) || entity.components.custom?.companion) return;
+    if (entity.components.custom?.companion) return;
 
     // The destination is owned by the game module: the discard must land in
     // the actor's current room, never in a client/renderer-selected room.

@@ -161,10 +161,14 @@ const server = serve({ fetch: app.fetch, port: PORT }, info => {
 });
 
 // ---- /ws 信令 ----
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 const hub = new SignalHub();
 hub.startHeartbeat();
-setRoomChangedHook(room => hub.broadcastRoomUpdate(room));
+setRoomChangedHook(room => {
+  // 审查报告 S8：房间广播面向全部大厅订阅者，必须剥掉私密房加入码（房主经 REST 拿全量）
+  const { code: _code, ...safe } = room;
+  hub.broadcastRoomUpdate(safe as typeof room);
+});
 // 阶段三：房间回收——60s 清扫一次（全员离线 >10min 或 6h 无动作 → 关房）。
 setInterval(() => {
   const closedIds = sweepRooms(id => hub.onlineUsers(id));
@@ -173,5 +177,17 @@ setInterval(() => {
 server.on('upgrade', (req: http.IncomingMessage, socket, head) => {
   const url = new URL(req.url ?? '/', 'http://x');
   if (url.pathname !== '/ws') { socket.destroy(); return; }
-  wss.handleUpgrade(req, socket, head, ws => hub.accept(ws, url.searchParams.get('token')));
+  wss.handleUpgrade(req, socket, head, ws => {
+    // 审查报告 S1：信令层任何异常都不允许打崩 HTTP 进程
+    try {
+      hub.accept(ws, url.searchParams.get('token'));
+    } catch (err) {
+      console.error('[hub] ws accept error:', err);
+      try { ws.close(4000, 'error'); } catch { /* already closed */ }
+    }
+  });
 });
+
+// 兜底：未捕获异常记日志而不裸崩（pm2 内存阈值/显式重启仍可控）
+process.on('uncaughtException', err => console.error('[hub] uncaught exception:', err));
+process.on('unhandledRejection', err => console.error('[hub] unhandled rejection:', err));

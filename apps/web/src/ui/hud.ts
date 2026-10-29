@@ -15,6 +15,14 @@ import {
   UiTraitChange
 } from '@rds/app/contracts';
 
+/**
+ * HTML 转义：玩家可控文本（昵称/头像 URL/参与者名）进入 innerHTML 前必须经过这里。
+ * 来源：审查报告 S4——昵称可携带 `<svg/onload=...>` 这类载荷（存储型 XSS）。
+ */
+const escHtml = (v: unknown) =>
+  String(v ?? '').replace(/[&<>"']/g, ch =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
+
 /** Short trait key → character-sheet abbreviation used by the pip ladder. */
 const HUD_TRAIT_SHORT: Record<string, string> = {
   speed: '速',
@@ -1397,7 +1405,7 @@ export class BoardGameHUD {
     const ppl = occupants
       .map(p => {
         const role = p.role === 'TRAITOR' ? '叛徒' : p.role === 'HERO' ? '英雄' : '探索者';
-        return `<span class="rc-chip" style="--chip:${p.color}"><i></i>${p.name} · ${role}</span>`;
+        return `<span class="rc-chip" style="--chip:${escHtml(p.color)}"><i></i>${escHtml(p.name)} · ${role}</span>`;
       })
       .join('');
     const mobs = monsters
@@ -1602,9 +1610,9 @@ export class BoardGameHUD {
         const card = `
           <article class="pc ${player.isFocus ? 'active' : ''} ${player.alive ? '' : 'dead'}" data-player-id="${player.id}" style="--pc-color:${player.color}">
             <div class="pc-head">
-              <div class="pc-avatar"><span class="pc-online${this.onlinePlayerIds.has(player.id) ? ' on' : ''}" title="在线状态"></span>${player.avatarUrl ? `<img src="${player.avatarUrl}" alt="" loading="lazy" />` : player.avatar}</div>
+              <div class="pc-avatar"><span class="pc-online${this.onlinePlayerIds.has(player.id) ? ' on' : ''}" title="在线状态"></span>${player.avatarUrl ? `<img src="${escHtml(player.avatarUrl)}" alt="" loading="lazy" />` : player.avatar}</div>
               <div class="pc-id">
-                <div class="pc-name">${player.name}</div>
+                <div class="pc-name">${escHtml(player.name)}</div>
                 <div class="pc-tags">
                   ${player.roleLabel ? `<span class="pc-role ${player.roleClass ?? ''}">${player.roleLabel}</span>` : ''}
                   ${player.alive ? '' : '<span class="pc-role dead-chip" title="角色已退场，不再参与行动">☠ 已阵亡</span>'}
@@ -1674,7 +1682,7 @@ export class BoardGameHUD {
               .map(
                 participant =>
                   `<span class="chip ${participant.committed ? 'done' : 'wait'}"><span class="c-dot"></span>${
-                    participant.name
+                    escHtml(participant.name)
                   }${participant.committed ? ' · 已锁定' : ' · 待提交'}</span>`
               )
               .join('')}
@@ -1698,7 +1706,7 @@ export class BoardGameHUD {
             ${snapshot.stack[0].window.eligible
               .map(
                 player =>
-                  `<span class="chip ${player.pending ? 'wait' : 'done'}"><span class="c-dot"></span>${player.name}</span>`
+                  `<span class="chip ${player.pending ? 'wait' : 'done'}"><span class="c-dot"></span>${escHtml(player.name)}</span>`
               )
               .join('')}
           </div>
