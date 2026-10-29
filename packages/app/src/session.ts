@@ -1,7 +1,9 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { describeActionView } from './actionText';
 import { GameModule } from '@rds/kernel/module';
-import { Action, ActorId, GameState, PlayerId, ProjectedGameState, SelectionCandidate, SelectionSpec, VisualTraceEvent } from '@rds/kernel/types';
+import { Action, ActorId, GameState, PlayerId, ProjectedGameState, SelectionCandidate, SelectionSpec, VisualTraceEvent,
+  type EffectInstance
+} from '@rds/kernel/types';
 import { topDecision } from '@rds/kernel/decisions';
 import { InterruptStackManager } from '@rds/kernel/stack';
 import {
@@ -23,7 +25,8 @@ import {
   UiStackFrame,
   UiTraitChange,
   ViewerId,
-  UiRoll
+  UiRoll,
+  type UiEffect
 } from './contracts';
 
 /** Visual event type → activity-feed bucket. */
@@ -971,7 +974,7 @@ export class UniversalSession implements GamePresenter {
         ...state.playerOrder.map(pid => ({ id: pid, name: state.players[pid]?.name ?? pid }))
       ],
 
-      players: buildPlayersView(state, focus),
+      players: buildPlayersView(state, focus, raw.effects),
       npcs: buildNpcsView(state, focusActors, id => this.engine.getActorName(id)),
       actions: this.bound.map(entry => entry.ui),
       legalCount: legal.length,
@@ -1218,13 +1221,44 @@ export function missionLineOf(state: ProjectedGameState): string | undefined {
     return role === 'TRAITOR' ? `叛徒目标：${objectives.traitor ?? '—'}` : `英雄目标：${objectives.hero ?? '—'}`;
   }
 
-export function buildPlayersView(state: ProjectedGameState, focus: string[]): UiPlayer[] {
+export function buildPlayersView(
+  state: ProjectedGameState,
+  focus: string[],
+  effectsOverride?: EffectInstance[]
+): UiPlayer[] {
     const focusSet = new Set(focus);
 
     return state.playerOrder.map(pid => {
       const player = state.players[pid];
       const handCount = state.zones[`zone_hand_${pid}`]?.orderedEntities.length ?? 0;
       const equipCount = state.zones[`zone_equip_${pid}`]?.orderedEntities.length ?? 0;
+
+      const effects: UiEffect[] = [];
+      const source =
+        state.effects && state.effects.length > 0 ? state.effects : effectsOverride ?? [];
+      for (const effect of source) {
+        if (effect.target !== pid) continue;
+        const visibility = effect.visibility?.type ?? 'PUBLIC';
+        if (visibility !== 'PUBLIC') continue;
+        const payload = (effect.payload ?? {}) as { effect?: string; label?: string; detail?: string };
+        const id = payload.effect ?? effect.kind;
+        effects.push({
+          id,
+          label: payload.label ?? id,
+          detail: payload.detail,
+          tone: effect.kind === 'ONGOING' ? 'bad' : 'neutral'
+        });
+      }
+      const flags: { key: string; label: string; detail: string }[] = [
+        { key: 'banished', label: '被放逐', detail: '无法行动，等待剧本推进' },
+        { key: 'abducted', label: '已被掳走', detail: '被拖入飞船，已出局' },
+        { key: 'controlled', label: '被控制', detail: '被迫走向飞船' },
+        { key: 'skipActions', label: '本回合无法行动', detail: '跳过本回合的动作' }
+      ];
+      for (const flag of flags) {
+        if (!player?.customProps?.[flag.key]) continue;
+        effects.push({ id: flag.key, label: flag.label, detail: flag.detail, tone: 'bad' });
+      }
 
       const base: UiPlayer = {
         id: pid,
@@ -1239,7 +1273,8 @@ export function buildPlayersView(state: ProjectedGameState, focus: string[]): Ui
         roleClass: player?.role?.toLowerCase(),
         isFocus: focusSet.has(pid) && (player?.alive ?? true),
         stats: [],
-        pips: []
+        pips: [],
+        effects
       };
 
       if (!player) return base;

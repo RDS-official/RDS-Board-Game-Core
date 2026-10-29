@@ -26,7 +26,8 @@ import {
   TraitKey,
   TRAIT_KEYS,
   TRAIT_META,
-  WEAPON_SPECS
+  WEAPON_SPECS,
+  ONGOING_META
 } from './cards';
 import { HAUNT_DEFS, resolveHauntId } from './haunts';
 import { BETRAYAL_SPATIAL } from './spatial';
@@ -1854,7 +1855,11 @@ export class BetrayalRules {
             kind: 'ONGOING',
             source: pid,
             target: pid,
-            payload: { effect: effect.effect },
+            payload: {
+              effect: effect.effect,
+              label: ONGOING_META[effect.effect]?.zh ?? effect.effect,
+              detail: ONGOING_META[effect.effect]?.detail ?? ''
+            },
             tags: ['ongoing', effect.effect]
           });
           break;

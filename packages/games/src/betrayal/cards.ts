@@ -1022,6 +1022,15 @@ export type EventEffect =
 
 export type OngoingEffect = 'DRIP' | 'POSSESSION' | 'CHILL' | 'HAUNTING_MELODY' | 'MARK_OF_FEAR';
 
+/** Player-facing name and one-line effect for each lingering curse. */
+export const ONGOING_META: Record<OngoingEffect, { zh: string; detail: string }> = {
+  DRIP: { zh: '滴血之声', detail: '回合开始时若在无窗房间，神智 5+ 否则失去 1 点神智' },
+  POSSESSION: { zh: '恶灵附体', detail: '回合开始时神智 4+，否则本回合无法行动' },
+  CHILL: { zh: '刺骨寒意', detail: '回合开始时神智 5+，否则失去 1 点神智' },
+  HAUNTING_MELODY: { zh: '萦绕旋律', detail: '回合开始时知识 5+，否则失去 1 点知识' },
+  MARK_OF_FEAR: { zh: '恐惧印记', detail: '回合开始时神智 4+，否则失去 1 点神智' }
+};
+
 export interface EventBand {
   min: number;
   max: number;
