@@ -2065,7 +2065,7 @@ test('fixture betrayal: werewolf haunt forges silver bullets and suppresses luna
   assertEqual(engine.getRawState().globalVars.haunt?.progress, 1, 'moon suppression progress advanced');
 });
 
-test('fixture betrayal: event checks auto-resolve and the safe pays out two items', () => {
+test('fixture betrayal: event checks auto-resolve and the locked safe pays in traits', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 11);
   const raw = engine.getRawState();
   stackRoomTiles(raw, ['dining_room']);
@@ -2076,7 +2076,14 @@ test('fixture betrayal: event checks auto-resolve and the safe pays out two item
   deck.orderedEntities = deck.orderedEntities.filter(id => id !== safeId);
   deck.orderedEntities.push(safeId);
 
-  const before = raw.zones.zone_hand_p1.orderedEntities.length;
+  // Official Locked Safe: "4+ You crack the tumblers (Gain 1 Knowledge, Gain 1
+  // Might)." It grants traits, not items - the old assertion encoded an invented
+  // payout of two item cards.
+  const before = {
+    hand: raw.zones.zone_hand_p1.orderedEntities.length,
+    knowledge: traitIndex(raw.players.p1, 'knowledge'),
+    might: traitIndex(raw.players.p1, 'might')
+  };
   const explore = engine.getLegalActions('p1').find(
     action => action.type === 'EXPLORE_DOOR' && action.payload?.direction === 'E'
   );
@@ -2086,7 +2093,9 @@ test('fixture betrayal: event checks auto-resolve and the safe pays out two item
 
   const state = engine.getRawState();
   assert(!!state.mapGraph.nodes.room_dining_room, 'event room placed');
-  assertEqual(state.zones.zone_hand_p1.orderedEntities.length, before + 2, 'locked safe granted two items');
+  assertEqual(state.zones.zone_hand_p1.orderedEntities.length, before.hand, 'no items are granted');
+  assert(traitIndex(state.players.p1, 'knowledge') > before.knowledge, 'the safe grants Knowledge');
+  assert(traitIndex(state.players.p1, 'might') > before.might, 'the safe grants Might');
 });
 
 test('fixture betrayal: an ONGOING event card registers a kernel effect instance', () => {
