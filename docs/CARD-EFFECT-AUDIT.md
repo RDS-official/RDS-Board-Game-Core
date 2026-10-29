@@ -505,3 +505,41 @@
 | --- | --- |
 | **A-7** 物品「获得当回合即可使用」 | ✅ **本来就正确**。`usedThisTurn` 按 `defId` 记录、`resetTurnResources` 每回合清空，即「每回合一次」，与官方「use it once immediately and once on each subsequent turn」一致。 |
 | **G-9** 剧本「次数 = 探索者数」应含已死者 | ⚪ **不适用**。本仓库所有剧本进度阈值都是**固定数字**（2 / 3 / 2），从不按探索者人数推导，因此该规则没有作用点。胜负判定 `heroesOf` 只统计存活英雄，符合「至少一名英雄存活」的官方要求。 |
+
+---
+
+## E-1 房间表对齐官方 2E（2026-10-30）
+
+用官方 47 张房间砖数据（`tiles.json`：门位 / 楼层 / 符号）逐张比对。
+
+### 已完成：id 对齐（5 处重命名，内容不变）
+
+| 我们 | 官方 |
+| --- | --- |
+| garden | **gardens** |
+| pentagram_chamber | **the_pentagram_chamber** |
+| vault | **the_vault** |
+| operating_lab | **operating_laboratory** |
+| laboratory | **research_laboratory** |
+
+引用点同步更新（渲染道具映射、剧本触发表、场景放置、测试），全部通过。
+
+### 已完成：补齐 10 间缺失的官方房间
+
+按官方门位/楼层/符号新增：`stairs_from_basement`、`patio`、`abandoned_room`、`charred_room`、`organ_room`、`statuary_corridor`、`creaky_hallway`、`dusty_hallway`、`game_room`、`chasm`。
+
+房间总数 44 → **54**；其中 5 间起始砖，房间牌堆 49 张。
+
+### 仍多出 7 间（待确认）
+
+| 房间 | 性质 | 备注 |
+| --- | --- | --- |
+| widow_walk 寡妇步道 | **Widow's Walk 扩展** | 非 2E 基础 |
+| observatory 观星室 | 自制 | **承载「观星室升降梯」机制**，删除会移除该玩法 |
+| drawing_room 会客厅 | 自制 | 无特殊机制 |
+| study 书房 | 自制 | 无特殊机制 |
+| nursery 育婴室 | 自制 | 无特殊机制 |
+| linen_closet 亚麻储藏室 | 自制 | 无特殊机制 |
+| workshop 工坊 | 自制 | 无特殊机制 |
+
+删除前 5 项（除 observatory 外）是纯内容清理；**observatory 需要先决定是否保留升降梯机制**。

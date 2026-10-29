@@ -143,11 +143,13 @@
 
 ## E. 内容完整性（非规则偏差，但会影响剧本）
 
-### E-1 房间名单与官方 2E 不一致
+### E-1 房间名单与官方 2E 不一致 ✅ **已对齐（部分待定）**
 
 - **我们有、官方无**：会客厅、书房、育婴室、观星室、亚麻储藏室、寡妇步道（扩展开）、工坊、实验室。
 - **官方有、我们缺**：Abandoned Room、Charred Room、Organ Room、Statuary Corridor、Creaky Hallway、Dusty Hallway、Game Room、Chasm、Patio、Stairs from Basement、Research Laboratory。
 - **影响**：剧本（`haunts.ts`）按房名触发，缺房会导致对应剧本无法触发。
+- **已实施**：5 处 id 重命名对齐官方；按官方门位/楼层/符号补齐 10 间缺失房间（房间 44 → 54）。
+- **仍多出 7 间**：widow_walk（扩展开）、observatory（承载升降梯机制）、drawing_room、study、nursery、linen_closet、workshop —— 删除属内容/功能变更，待确认。
 
 ---
 
