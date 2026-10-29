@@ -1,5 +1,17 @@
 import { ECSManager } from '@rds/kernel/ecs';
 import { Entity, GameState, Player } from '@rds/kernel/types';
+import pkmnData from './pokemonData.json';
+
+/** Imported Pokémon Splendor card database (Ethan9123/pokemon-splendor). */
+export const PKMN_DECK = {
+  stage1: pkmnData.cards.filter(c => c.id.startsWith('s1_')),
+  stage2: pkmnData.cards.filter(c => c.id.startsWith('s2_')),
+  stage3: pkmnData.cards.filter(c => c.id.startsWith('s3_')),
+  rare: pkmnData.cards.filter(c => c.id.startsWith('rr_')),
+  legend: pkmnData.cards.filter(c => c.id.startsWith('lg_')),
+  mega: pkmnData.megas,
+  pokemart: pkmnData.pokemart
+};
 
 export type GemType = 'diamond' | 'sapphire' | 'emerald' | 'ruby' | 'onyx';
 
@@ -10,6 +22,48 @@ export const GEM_COLORS: Record<GemType | 'gold', string> = {
   ruby: '#e53935',     // Ruby Red
   onyx: '#212121',     // Black Onyx
   gold: '#ffb300'      // Gold wild
+};
+
+/**
+ * Pokémon Splendor color mapping.
+ *
+ * The Pokémon Splendor deck (Ethan9123/pokemon-splendor) uses six gem
+ * colors. They map onto the classic Splendor five tokens plus gold:
+ *   red    -> ruby     (red Poké Ball)
+ *   blue   -> sapphire (great ball blue)
+ *   black  -> onyx     (black ball / ultra)
+ *   pink   -> diamond  (pink ball)
+ *   yellow -> gold     (yellow ball)
+ *   purple -> emerald  (purple / master ball)
+ */
+export const PKMN_COLOR_TO_GEM: Record<string, GemType | 'gold'> = {
+  red: 'ruby',
+  blue: 'sapphire',
+  black: 'onyx',
+  pink: 'diamond',
+  yellow: 'gold',
+  purple: 'emerald'
+};
+
+export const PKMN_BALL_IMAGE: Record<string, string> = {
+  red: '/pokemon/balls/red.png',
+  blue: '/pokemon/balls/blue.png',
+  black: '/pokemon/balls/black.png',
+  pink: '/pokemon/balls/pink.png',
+  yellow: '/pokemon/balls/yellow.png',
+  purple: '/pokemon/balls/purple.png'
+};
+
+export const PKMN_CARD_BACK: Record<string, string> = {
+  stage1: '/pokemon/backs/stage1.webp',
+  stage2: '/pokemon/backs/stage2.webp',
+  stage3: '/pokemon/backs/stage3.webp',
+  rare: '/pokemon/backs/rare.webp',
+  legend: '/pokemon/backs/legend.webp',
+  mega: '/pokemon/backs/stage3.webp',
+  pmL1: '/pokemon/backs/pokemart-1.png',
+  pmL2: '/pokemon/backs/pokemart-2.png',
+  pmL3: '/pokemon/backs/pokemart-3.png'
 };
 
 export function setupSplendor(seed: number = 42): GameState {
@@ -142,7 +196,7 @@ export function setupSplendor(seed: number = 42): GameState {
           desc: `+1 ${c.gem} permanent bonus, ${c.vp} VP`,
           color: GEM_COLORS[c.gem]
         },
-        custom: { gem: c.gem, vp: c.vp, tier: 1 }
+        custom: { gem: c.gem, vp: c.vp, tier: 1, pkmnId: `t1_${idx}` }
       }
     };
     state = ECSManager.addEntity(state, entity);
@@ -163,7 +217,7 @@ export function setupSplendor(seed: number = 42): GameState {
           desc: `+1 ${c.gem} permanent bonus, ${c.vp} VP`,
           color: GEM_COLORS[c.gem]
         },
-        custom: { gem: c.gem, vp: c.vp, tier: 2 }
+        custom: { gem: c.gem, vp: c.vp, tier: 2, pkmnId: `t2_${idx}` }
       }
     };
     state = ECSManager.addEntity(state, entity);
@@ -184,7 +238,7 @@ export function setupSplendor(seed: number = 42): GameState {
           desc: `+1 ${c.gem} permanent bonus, ${c.vp} VP`,
           color: GEM_COLORS[c.gem]
         },
-        custom: { gem: c.gem, vp: c.vp, tier: 3 }
+        custom: { gem: c.gem, vp: c.vp, tier: 3, pkmnId: `t3_${idx}` }
       }
     };
     state = ECSManager.addEntity(state, entity);
@@ -203,7 +257,7 @@ export function setupSplendor(seed: number = 42): GameState {
           score: n.vp,
           desc: `Requires bonuses: ${Object.entries(n.requirements).map(([g, v]) => `${v} ${g}`).join(', ')}`
         },
-        custom: { requirements: n.requirements, vp: n.vp }
+        custom: { requirements: n.requirements, vp: n.vp, pkmnId: `noble_${idx}` }
       }
     };
     state = ECSManager.addEntity(state, entity);

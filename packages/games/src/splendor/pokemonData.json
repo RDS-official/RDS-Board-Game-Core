@@ -1,0 +1,2583 @@
+{
+ "cards": [
+  {
+   "id": "s1_01",
+   "name": "小火龙",
+   "vp": 1,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 3,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_01.webp"
+  },
+  {
+   "id": "s1_02",
+   "name": "妙蛙种子",
+   "vp": 1,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 4,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_02.webp"
+  },
+  {
+   "id": "s1_03",
+   "name": "小火龙",
+   "vp": 1,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 4,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_03.webp"
+  },
+  {
+   "id": "s1_04",
+   "name": "喇叭芽",
+   "vp": 0,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 0,
+    "black": 0,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_04.webp"
+  },
+  {
+   "id": "s1_05",
+   "name": "绿毛虫",
+   "vp": 0,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 1,
+    "black": 2,
+    "pink": 0,
+    "yellow": 1,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_05.webp"
+  },
+  {
+   "id": "s1_06",
+   "name": "迷你龙",
+   "vp": 1,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_06.webp"
+  },
+  {
+   "id": "s1_07",
+   "name": "杰尼龟",
+   "vp": 1,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 4,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_07.webp"
+  },
+  {
+   "id": "s1_08",
+   "name": "尼多兰",
+   "vp": 0,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 0,
+    "black": 0,
+    "pink": 1,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_08.webp"
+  },
+  {
+   "id": "s1_09",
+   "name": "迷你龙",
+   "vp": 1,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 4,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_09.webp"
+  },
+  {
+   "id": "s1_10",
+   "name": "喇叭芽",
+   "vp": 0,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_10.webp"
+  },
+  {
+   "id": "s1_11",
+   "name": "鬼斯",
+   "vp": 0,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 1,
+    "blue": 0,
+    "black": 1,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_11.webp"
+  },
+  {
+   "id": "s1_12",
+   "name": "波波",
+   "vp": 0,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 1,
+    "pink": 0,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_12.webp"
+  },
+  {
+   "id": "s1_13",
+   "name": "妙蛙种子",
+   "vp": 1,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 2,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_13.webp"
+  },
+  {
+   "id": "s1_14",
+   "name": "凯西",
+   "vp": 1,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 0,
+    "pink": 0,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_14.webp"
+  },
+  {
+   "id": "s1_15",
+   "name": "走路草",
+   "vp": 0,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 1,
+    "blue": 0,
+    "black": 0,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_15.webp"
+  },
+  {
+   "id": "s1_16",
+   "name": "腕力",
+   "vp": 0,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 1,
+    "black": 1,
+    "pink": 1,
+    "yellow": 1,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_16.webp"
+  },
+  {
+   "id": "s1_17",
+   "name": "鬼斯",
+   "vp": 0,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 1,
+    "blue": 1,
+    "black": 1,
+    "pink": 1,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_17.webp"
+  },
+  {
+   "id": "s1_18",
+   "name": "走路草",
+   "vp": 0,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 2,
+    "pink": 0,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_18.webp"
+  },
+  {
+   "id": "s1_19",
+   "name": "尼多兰",
+   "vp": 0,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 3,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_19.webp"
+  },
+  {
+   "id": "s1_20",
+   "name": "凯西",
+   "vp": 1,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 4,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_20.webp"
+  },
+  {
+   "id": "s1_21",
+   "name": "蚊香蝌蚪",
+   "vp": 0,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_21.webp"
+  },
+  {
+   "id": "s1_22",
+   "name": "喇叭芽",
+   "vp": 0,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 1,
+    "black": 2,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_22.webp"
+  },
+  {
+   "id": "s1_23",
+   "name": "蚊香蝌蚪",
+   "vp": 0,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 2,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_23.webp"
+  },
+  {
+   "id": "s1_24",
+   "name": "独角虫",
+   "vp": 0,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 1,
+    "blue": 1,
+    "black": 0,
+    "pink": 1,
+    "yellow": 1,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_24.webp"
+  },
+  {
+   "id": "s1_25",
+   "name": "腕力",
+   "vp": 0,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 1,
+    "pink": 1,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_25.webp"
+  },
+  {
+   "id": "s1_26",
+   "name": "绿毛虫",
+   "vp": 0,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 1,
+    "blue": 1,
+    "black": 1,
+    "pink": 0,
+    "yellow": 1,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_26.webp"
+  },
+  {
+   "id": "s1_27",
+   "name": "小拳石",
+   "vp": 0,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 1,
+    "black": 0,
+    "pink": 0,
+    "yellow": 1,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_27.webp"
+  },
+  {
+   "id": "s1_28",
+   "name": "小拳石",
+   "vp": 0,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 1,
+    "blue": 0,
+    "black": 1,
+    "pink": 1,
+    "yellow": 1,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_28.webp"
+  },
+  {
+   "id": "s1_29",
+   "name": "尼多兰",
+   "vp": 0,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 2,
+    "black": 0,
+    "pink": 0,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_29.webp"
+  },
+  {
+   "id": "s1_30",
+   "name": "蚊香蝌蚪",
+   "vp": 0,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 2,
+    "black": 0,
+    "pink": 0,
+    "yellow": 1,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_30.webp"
+  },
+  {
+   "id": "s1_31",
+   "name": "独角虫",
+   "vp": 0,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 1,
+    "blue": 2,
+    "black": 0,
+    "pink": 1,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_31.webp"
+  },
+  {
+   "id": "s1_32",
+   "name": "杰尼龟",
+   "vp": 1,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 2,
+    "black": 0,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s1_32.webp"
+  },
+  {
+   "id": "s1_33",
+   "name": "波波",
+   "vp": 0,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_33.webp"
+  },
+  {
+   "id": "s1_34",
+   "name": "波波",
+   "vp": 0,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 2,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_34.webp"
+  },
+  {
+   "id": "s1_35",
+   "name": "走路草",
+   "vp": 0,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 2
+   },
+   "img": "/pokemon/cards/s1_35.webp"
+  },
+  {
+   "id": "s2_01",
+   "name": "隆隆石",
+   "vp": 2,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 1,
+    "pink": 4,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s2_01.webp"
+  },
+  {
+   "id": "s2_02",
+   "name": "豪力",
+   "vp": 2,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 1,
+    "black": 2,
+    "pink": 0,
+    "yellow": 4,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s2_02.webp"
+  },
+  {
+   "id": "s2_03",
+   "name": "口呆花",
+   "vp": 1,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 2,
+    "pink": 3,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_03.webp"
+  },
+  {
+   "id": "s2_04",
+   "name": "妙蛙草",
+   "vp": 3,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 6,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_04.webp"
+  },
+  {
+   "id": "s2_05",
+   "name": "比比鸟",
+   "vp": 1,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 0,
+    "pink": 2,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_05.webp"
+  },
+  {
+   "id": "s2_06",
+   "name": "豪力",
+   "vp": 2,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 5,
+    "blue": 0,
+    "black": 0,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s2_06.webp"
+  },
+  {
+   "id": "s2_07",
+   "name": "尼多娜",
+   "vp": 1,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 2,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_07.webp"
+  },
+  {
+   "id": "s2_08",
+   "name": "蚊香君",
+   "vp": 1,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 2,
+    "black": 0,
+    "pink": 3,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_08.webp"
+  },
+  {
+   "id": "s2_09",
+   "name": "铁甲蛹",
+   "vp": 2,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 4,
+    "black": 0,
+    "pink": 0,
+    "yellow": 1,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s2_09.webp"
+  },
+  {
+   "id": "s2_10",
+   "name": "尼多娜",
+   "vp": 1,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 0,
+    "black": 0,
+    "pink": 2,
+    "yellow": 3,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_10.webp"
+  },
+  {
+   "id": "s2_11",
+   "name": "勇基拉",
+   "vp": 3,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 4,
+    "blue": 0,
+    "black": 1,
+    "pink": 0,
+    "yellow": 4,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_11.webp"
+  },
+  {
+   "id": "s2_12",
+   "name": "火恐龙",
+   "vp": 3,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 1,
+    "blue": 0,
+    "black": 4,
+    "pink": 0,
+    "yellow": 4,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_12.webp"
+  },
+  {
+   "id": "s2_13",
+   "name": "铁壳蛹",
+   "vp": 2,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 5,
+    "pink": 0,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s2_13.webp"
+  },
+  {
+   "id": "s2_14",
+   "name": "比比鸟",
+   "vp": 1,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 2,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_14.webp"
+  },
+  {
+   "id": "s2_15",
+   "name": "鬼斯通",
+   "vp": 2,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 2,
+    "black": 0,
+    "pink": 0,
+    "yellow": 5,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s2_15.webp"
+  },
+  {
+   "id": "s2_16",
+   "name": "妙蛙草",
+   "vp": 3,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 4,
+    "blue": 1,
+    "black": 0,
+    "pink": 4,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "blue",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_16.webp"
+  },
+  {
+   "id": "s2_17",
+   "name": "铁甲蛹",
+   "vp": 2,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 2,
+    "pink": 5,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s2_17.webp"
+  },
+  {
+   "id": "s2_18",
+   "name": "臭臭花",
+   "vp": 1,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 2,
+    "black": 3,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_18.webp"
+  },
+  {
+   "id": "s2_19",
+   "name": "勇基拉",
+   "vp": 3,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 6,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_19.webp"
+  },
+  {
+   "id": "s2_20",
+   "name": "蚊香君",
+   "vp": 1,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 2,
+    "black": 3,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_20.webp"
+  },
+  {
+   "id": "s2_21",
+   "name": "隆隆石",
+   "vp": 2,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 5,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "black",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s2_21.webp"
+  },
+  {
+   "id": "s2_22",
+   "name": "鬼斯通",
+   "vp": 2,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 1,
+    "blue": 0,
+    "black": 4,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s2_22.webp"
+  },
+  {
+   "id": "s2_23",
+   "name": "火恐龙",
+   "vp": 3,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 6,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "red",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_23.webp"
+  },
+  {
+   "id": "s2_24",
+   "name": "铁壳蛹",
+   "vp": 2,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 4,
+    "blue": 2,
+    "black": 0,
+    "pink": 1,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 3
+   },
+   "img": "/pokemon/cards/s2_24.webp"
+  },
+  {
+   "id": "s2_25",
+   "name": "哈克龙",
+   "vp": 3,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 6,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_25.webp"
+  },
+  {
+   "id": "s2_26",
+   "name": "卡咪龟",
+   "vp": 3,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 4,
+    "black": 4,
+    "pink": 1,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_26.webp"
+  },
+  {
+   "id": "s2_27",
+   "name": "口呆花",
+   "vp": 1,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 2,
+    "pink": 0,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_27.webp"
+  },
+  {
+   "id": "s2_28",
+   "name": "卡咪龟",
+   "vp": 3,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 6,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "pink",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_28.webp"
+  },
+  {
+   "id": "s2_29",
+   "name": "臭臭花",
+   "vp": 1,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 2,
+    "black": 0,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_29.webp"
+  },
+  {
+   "id": "s2_30",
+   "name": "哈克龙",
+   "vp": 3,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 4,
+    "black": 0,
+    "pink": 4,
+    "yellow": 1,
+    "purple": 0
+   },
+   "evoCost": {
+    "color": "yellow",
+    "count": 4
+   },
+   "img": "/pokemon/cards/s2_30.webp"
+  },
+  {
+   "id": "s3_01",
+   "name": "耿鬼",
+   "vp": 4,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 4,
+    "black": 6,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_01.webp"
+  },
+  {
+   "id": "s3_02",
+   "name": "水箭龟",
+   "vp": 5,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 7,
+    "black": 3,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_02.webp"
+  },
+  {
+   "id": "s3_03",
+   "name": "妙蛙花",
+   "vp": 5,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 7,
+    "blue": 0,
+    "black": 0,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_03.webp"
+  },
+  {
+   "id": "s3_04",
+   "name": "蚊香泳士",
+   "vp": 3,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 0,
+    "black": 0,
+    "pink": 5,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_04.webp"
+  },
+  {
+   "id": "s3_05",
+   "name": "尼多后",
+   "vp": 3,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 0,
+    "black": 0,
+    "pink": 2,
+    "yellow": 5,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_05.webp"
+  },
+  {
+   "id": "s3_06",
+   "name": "霸王花",
+   "vp": 3,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 2,
+    "black": 5,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_06.webp"
+  },
+  {
+   "id": "s3_07",
+   "name": "大比鸟",
+   "vp": 3,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 5,
+    "black": 2,
+    "pink": 0,
+    "yellow": 2,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_07.webp"
+  },
+  {
+   "id": "s3_08",
+   "name": "胡地",
+   "vp": 5,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 7,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_08.webp"
+  },
+  {
+   "id": "s3_09",
+   "name": "怪力",
+   "vp": 4,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 4,
+    "yellow": 6,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_09.webp"
+  },
+  {
+   "id": "s3_10",
+   "name": "隆隆岩",
+   "vp": 4,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 4,
+    "blue": 0,
+    "black": 0,
+    "pink": 6,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_10.webp"
+  },
+  {
+   "id": "s3_11",
+   "name": "喷火龙",
+   "vp": 5,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 7,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_11.webp"
+  },
+  {
+   "id": "s3_12",
+   "name": "大食花",
+   "vp": 3,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 5,
+    "blue": 2,
+    "black": 2,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_12.webp"
+  },
+  {
+   "id": "s3_13",
+   "name": "快龙",
+   "vp": 5,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 0,
+    "pink": 7,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_13.webp"
+  },
+  {
+   "id": "s3_14",
+   "name": "大针蜂",
+   "vp": 4,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 6,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 4,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_14.webp"
+  },
+  {
+   "id": "s3_15",
+   "name": "巴大蝶",
+   "vp": 4,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 6,
+    "black": 4,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/s3_15.webp"
+  },
+  {
+   "id": "rr_01",
+   "name": "火箭队的果然翁",
+   "vp": 0,
+   "bonus": "blue",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 3,
+    "yellow": 2,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/rr_01.webp"
+  },
+  {
+   "id": "rr_02",
+   "name": "火箭队的喵喵",
+   "vp": 0,
+   "bonus": "red",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 2,
+    "black": 3,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/rr_02.webp"
+  },
+  {
+   "id": "rr_03",
+   "name": "小刚的大岩蛇",
+   "vp": 0,
+   "bonus": "black",
+   "bonusCount": 2,
+   "cost": {
+    "red": 2,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/rr_03.webp"
+  },
+  {
+   "id": "rr_04",
+   "name": "小霞的可达鸭",
+   "vp": 0,
+   "bonus": "pink",
+   "bonusCount": 2,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 2,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/rr_04.webp"
+  },
+  {
+   "id": "rr_05",
+   "name": "小智的皮卡丘",
+   "vp": 0,
+   "bonus": "yellow",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 0,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/rr_05.webp"
+  },
+  {
+   "id": "rr_06",
+   "name": "拉普拉斯",
+   "vp": 0,
+   "bonus": "red",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 2,
+    "black": 3,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/rr_06.webp"
+  },
+  {
+   "id": "rr_07",
+   "name": "伊布",
+   "vp": 0,
+   "bonus": "black",
+   "bonusCount": 2,
+   "cost": {
+    "red": 2,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/rr_07.webp"
+  },
+  {
+   "id": "rr_08",
+   "name": "卡比兽",
+   "vp": 0,
+   "bonus": "pink",
+   "bonusCount": 2,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 2,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/rr_08.webp"
+  },
+  {
+   "id": "rr_09",
+   "name": "百变怪",
+   "vp": 0,
+   "bonus": "blue",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 3,
+    "yellow": 2,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/rr_09.webp"
+  },
+  {
+   "id": "rr_10",
+   "name": "化石翼龙",
+   "vp": 0,
+   "bonus": "yellow",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 0,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/rr_10.webp"
+  },
+  {
+   "id": "lg_01",
+   "name": "捷拉奥拉",
+   "vp": 2,
+   "bonus": "yellow",
+   "bonusCount": 2,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 3,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/lg_01.webp"
+  },
+  {
+   "id": "lg_02",
+   "name": "美洛耶塔",
+   "vp": 2,
+   "bonus": "black",
+   "bonusCount": 2,
+   "cost": {
+    "red": 3,
+    "blue": 3,
+    "black": 0,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/lg_02.webp"
+  },
+  {
+   "id": "lg_03",
+   "name": "凯路迪欧",
+   "vp": 2,
+   "bonus": "blue",
+   "bonusCount": 2,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 3,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/lg_03.webp"
+  },
+  {
+   "id": "lg_04",
+   "name": "蒂安希",
+   "vp": 2,
+   "bonus": "pink",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 3,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/lg_04.webp"
+  },
+  {
+   "id": "lg_05",
+   "name": "比克提尼",
+   "vp": 2,
+   "bonus": "red",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 0,
+    "pink": 3,
+    "yellow": 3,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/lg_05.webp"
+  },
+  {
+   "id": "lg_06",
+   "name": "火焰鸟",
+   "vp": 2,
+   "bonus": "pink",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 3,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/lg_06.webp"
+  },
+  {
+   "id": "lg_07",
+   "name": "超梦",
+   "vp": 2,
+   "bonus": "black",
+   "bonusCount": 2,
+   "cost": {
+    "red": 3,
+    "blue": 3,
+    "black": 0,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/lg_07.webp"
+  },
+  {
+   "id": "lg_08",
+   "name": "梦幻",
+   "vp": 2,
+   "bonus": "blue",
+   "bonusCount": 2,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 3,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/lg_08.webp"
+  },
+  {
+   "id": "lg_09",
+   "name": "急冻鸟",
+   "vp": 2,
+   "bonus": "yellow",
+   "bonusCount": 2,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 3,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/lg_09.webp"
+  },
+  {
+   "id": "lg_10",
+   "name": "闪电鸟",
+   "vp": 2,
+   "bonus": "red",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 0,
+    "pink": 3,
+    "yellow": 3,
+    "purple": 1
+   },
+   "evoCost": null,
+   "img": "/pokemon/cards/lg_10.webp"
+  }
+ ],
+ "megas": [
+  {
+   "id": "mg_01",
+   "name": "超级耿鬼",
+   "vp": 4,
+   "bonus": "yellow",
+   "bonusCount": 2,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "megaFrom": "耿鬼",
+   "img": "/pokemon/cards/mg_01.webp"
+  },
+  {
+   "id": "mg_02",
+   "name": "超级妙蛙花",
+   "vp": 5,
+   "bonus": "yellow",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 4,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "megaFrom": "妙蛙花",
+   "img": "/pokemon/cards/mg_02.webp"
+  },
+  {
+   "id": "mg_03",
+   "name": "超级大针蜂",
+   "vp": 4,
+   "bonus": "black",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 0
+   },
+   "megaFrom": "大针蜂",
+   "img": "/pokemon/cards/mg_03.webp"
+  },
+  {
+   "id": "mg_04",
+   "name": "超级喷火龙X",
+   "vp": 5,
+   "bonus": "black",
+   "bonusCount": 2,
+   "cost": {
+    "red": 4,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "megaFrom": "喷火龙",
+   "img": "/pokemon/cards/mg_04.webp"
+  },
+  {
+   "id": "mg_05",
+   "name": "超级大比鸟",
+   "vp": 3,
+   "bonus": "blue",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 2,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "megaFrom": "大比鸟",
+   "img": "/pokemon/cards/mg_05.webp"
+  },
+  {
+   "id": "mg_06",
+   "name": "超级喷火龙Y",
+   "vp": 5,
+   "bonus": "blue",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 4,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "megaFrom": "喷火龙",
+   "img": "/pokemon/cards/mg_06.webp"
+  },
+  {
+   "id": "mg_07",
+   "name": "超级水箭龟",
+   "vp": 5,
+   "bonus": "red",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 4,
+    "yellow": 0,
+    "purple": 0
+   },
+   "megaFrom": "水箭龟",
+   "img": "/pokemon/cards/mg_07.webp"
+  },
+  {
+   "id": "mg_08",
+   "name": "超级超梦X",
+   "vp": 2,
+   "bonus": "red",
+   "bonusCount": 3,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 4,
+    "purple": 1
+   },
+   "megaFrom": "超梦",
+   "img": "/pokemon/cards/mg_08.webp"
+  },
+  {
+   "id": "mg_09",
+   "name": "超级胡地",
+   "vp": 5,
+   "bonus": "pink",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 4,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "megaFrom": "胡地",
+   "img": "/pokemon/cards/mg_09.webp"
+  },
+  {
+   "id": "mg_10",
+   "name": "超级超梦Y",
+   "vp": 2,
+   "bonus": "pink",
+   "bonusCount": 3,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 4,
+    "purple": 1
+   },
+   "megaFrom": "超梦",
+   "img": "/pokemon/cards/mg_10.webp"
+  }
+ ],
+ "pokemart": [
+  {
+   "id": "pm_01",
+   "name": "进化石",
+   "tier": "pmL3",
+   "vp": 1,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 0,
+    "pink": 6,
+    "yellow": 1,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_01.webp"
+  },
+  {
+   "id": "pm_02",
+   "name": "进化石",
+   "tier": "pmL3",
+   "vp": 1,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 1,
+    "black": 6,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_02.webp"
+  },
+  {
+   "id": "pm_03",
+   "name": "进化石",
+   "tier": "pmL3",
+   "vp": 1,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 6,
+    "blue": 0,
+    "black": 3,
+    "pink": 1,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_03.webp"
+  },
+  {
+   "id": "pm_04",
+   "name": "进化石",
+   "tier": "pmL3",
+   "vp": 1,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 1,
+    "blue": 6,
+    "black": 0,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_04.webp"
+  },
+  {
+   "id": "pm_05",
+   "name": "进化石",
+   "tier": "pmL3",
+   "vp": 1,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 1,
+    "pink": 0,
+    "yellow": 6,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_05.webp"
+  },
+  {
+   "id": "pm_06",
+   "name": "图鉴",
+   "tier": "pmL1",
+   "vp": 0,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_06.webp"
+  },
+  {
+   "id": "pm_07",
+   "name": "图鉴",
+   "tier": "pmL1",
+   "vp": 0,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_07.webp"
+  },
+  {
+   "id": "pm_08",
+   "name": "图鉴",
+   "tier": "pmL1",
+   "vp": 0,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_08.webp"
+  },
+  {
+   "id": "pm_09",
+   "name": "图鉴",
+   "tier": "pmL1",
+   "vp": 0,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_09.webp"
+  },
+  {
+   "id": "pm_10",
+   "name": "图鉴",
+   "tier": "pmL1",
+   "vp": 0,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 3,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_10.webp"
+  },
+  {
+   "id": "pm_11",
+   "name": "药水",
+   "tier": "pmL2",
+   "vp": 1,
+   "bonus": "black",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 0,
+    "pink": 0,
+    "yellow": 4,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_11.webp"
+  },
+  {
+   "id": "pm_12",
+   "name": "药水",
+   "tier": "pmL2",
+   "vp": 1,
+   "bonus": "red",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 4,
+    "black": 0,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_12.webp"
+  },
+  {
+   "id": "pm_13",
+   "name": "药水",
+   "tier": "pmL2",
+   "vp": 1,
+   "bonus": "yellow",
+   "bonusCount": 2,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 3,
+    "pink": 4,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_13.webp"
+  },
+  {
+   "id": "pm_14",
+   "name": "药水",
+   "tier": "pmL2",
+   "vp": 1,
+   "bonus": "blue",
+   "bonusCount": 2,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 4,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_14.webp"
+  },
+  {
+   "id": "pm_15",
+   "name": "药水",
+   "tier": "pmL2",
+   "vp": 1,
+   "bonus": "pink",
+   "bonusCount": 2,
+   "cost": {
+    "red": 4,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_15.webp"
+  },
+  {
+   "id": "pm_16",
+   "name": "神奇糖果",
+   "tier": "pmL2",
+   "vp": 1,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 1,
+    "pink": 4,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_16.webp"
+  },
+  {
+   "id": "pm_17",
+   "name": "神奇糖果",
+   "tier": "pmL2",
+   "vp": 1,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 1,
+    "black": 0,
+    "pink": 3,
+    "yellow": 4,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_17.webp"
+  },
+  {
+   "id": "pm_18",
+   "name": "神奇糖果",
+   "tier": "pmL2",
+   "vp": 1,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 1,
+    "blue": 4,
+    "black": 3,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_18.webp"
+  },
+  {
+   "id": "pm_19",
+   "name": "神奇糖果",
+   "tier": "pmL2",
+   "vp": 1,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 4,
+    "blue": 0,
+    "black": 0,
+    "pink": 1,
+    "yellow": 3,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_19.webp"
+  },
+  {
+   "id": "pm_20",
+   "name": "神奇糖果",
+   "tier": "pmL2",
+   "vp": 1,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 3,
+    "blue": 0,
+    "black": 4,
+    "pink": 0,
+    "yellow": 1,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_20.webp"
+  },
+  {
+   "id": "pm_21",
+   "name": "技能机",
+   "tier": "pmL1",
+   "vp": 0,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 2,
+    "pink": 0,
+    "yellow": 3,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_21.webp"
+  },
+  {
+   "id": "pm_22",
+   "name": "技能机",
+   "tier": "pmL1",
+   "vp": 0,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 3,
+    "black": 0,
+    "pink": 0,
+    "yellow": 2,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_22.webp"
+  },
+  {
+   "id": "pm_23",
+   "name": "技能机",
+   "tier": "pmL1",
+   "vp": 0,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 3,
+    "blue": 2,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_23.webp"
+  },
+  {
+   "id": "pm_24",
+   "name": "技能机",
+   "tier": "pmL1",
+   "vp": 0,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 2,
+    "blue": 0,
+    "black": 0,
+    "pink": 3,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_24.webp"
+  },
+  {
+   "id": "pm_25",
+   "name": "技能机",
+   "tier": "pmL1",
+   "vp": 0,
+   "bonus": "none",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 3,
+    "pink": 2,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_25.webp"
+  },
+  {
+   "id": "pm_26",
+   "name": "驱虫喷雾",
+   "tier": "pmL3",
+   "vp": 3,
+   "bonus": "blue",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_26.webp"
+  },
+  {
+   "id": "pm_27",
+   "name": "驱虫喷雾",
+   "tier": "pmL3",
+   "vp": 3,
+   "bonus": "pink",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_27.webp"
+  },
+  {
+   "id": "pm_28",
+   "name": "驱虫喷雾",
+   "tier": "pmL3",
+   "vp": 3,
+   "bonus": "red",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_28.webp"
+  },
+  {
+   "id": "pm_29",
+   "name": "驱虫喷雾",
+   "tier": "pmL3",
+   "vp": 3,
+   "bonus": "yellow",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_29.webp"
+  },
+  {
+   "id": "pm_30",
+   "name": "驱虫喷雾",
+   "tier": "pmL3",
+   "vp": 3,
+   "bonus": "black",
+   "bonusCount": 1,
+   "cost": {
+    "red": 0,
+    "blue": 0,
+    "black": 0,
+    "pink": 0,
+    "yellow": 0,
+    "purple": 0
+   },
+   "img": "/pokemon/cards/pm_30.webp"
+  }
+ ]
+}

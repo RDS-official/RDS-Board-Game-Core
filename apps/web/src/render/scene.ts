@@ -4,6 +4,8 @@ import { Entity, MapGraphNode, ProjectedGameState } from '@rds/kernel/types';
 import { TransactionalAnimationQueue } from './animationQueue';
 import { BoardRaycaster, InteractiveObjectData } from './raycaster';
 import { CardMeshBuilder } from './procedural/cardMesh';
+import { pokemonCardBackTexture, pokemonCardTexture } from './procedural/pokemonAssets';
+import { PKMN_COLOR_TO_GEM } from '@rds/games/splendor/setup';
 import { DiceMeshBuilder } from './procedural/diceMesh';
 import { HexTileBuilder } from './procedural/hexTile';
 import { RoomTileBuilder } from './procedural/roomTile';
@@ -2011,7 +2013,14 @@ export class BoardGameScene {
         const zPos = (idx - 2.5) * 1.05;
 
         for (let h = 0; h < Math.min(count, 5); h++) {
-          const chip = TokenMeshBuilder.createGemTokenMesh(gem, 0.36);
+          // Pokémon Splendor: render tokens as imported Poké Balls
+          const pkmnColor = Object.keys(PKMN_COLOR_TO_GEM).find(c => PKMN_COLOR_TO_GEM[c] === gem);
+          const chip = TokenMeshBuilder.createGemTokenMesh(
+            gem,
+            0.36,
+            !!pkmnColor,
+            pkmnColor
+          );
           chip.position.set(xPos - h * 0.16, 0.05 + h * 0.07, zPos);
           this.boardObjectsGroup.add(chip);
           this.raycaster.registerInteractive(chip, {
@@ -3127,7 +3136,16 @@ export class BoardGameScene {
   ): void {
     const face = entity.components?.cardFace || { title: 'Card' };
     const isMasked = !!entity.isMasked;
-    const mesh = CardMeshBuilder.createCardMesh(face, 1.35, 2.0, isMasked);
+    const custom = entity.components?.custom as Record<string, unknown> | undefined;
+    const isPkmn = this.lastState?.gameId === 'splendor';
+    const mesh = CardMeshBuilder.createCardMesh(
+      face,
+      1.35,
+      2.0,
+      isMasked,
+      isPkmn ? pokemonCardTexture(custom) : null,
+      isPkmn ? pokemonCardBackTexture(custom) : null
+    );
 
     if (zone.id === 'zone_market_t1') {
       mesh.position.set(-3.9 + index * 1.52, 0.1, 2.5);

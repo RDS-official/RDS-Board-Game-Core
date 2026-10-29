@@ -1,13 +1,51 @@
 import * as THREE from 'three';
-import { GEM_COLORS, GemType } from '@rds/games/splendor/setup';
+import { GEM_COLORS, GemType, PKMN_BALL_IMAGE } from '@rds/games/splendor/setup';
+
+const ballTextureCache = new Map<string, THREE.Texture>();
+
+function ballTexture(color: string): THREE.Texture | null {
+  const url = PKMN_BALL_IMAGE[color];
+  if (!url) return null;
+  const cached = ballTextureCache.get(url);
+  if (cached) return cached;
+  const tex = new THREE.TextureLoader().load(url);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  ballTextureCache.set(url, tex);
+  return tex;
+}
 
 export class TokenMeshBuilder {
   /**
-   * Create a Splendor Gem Token (Poker chip style with faceted gem emblem)
+   * Create a Splendor Gem Token (Poker chip style with faceted gem emblem).
+   * When `usePokeBall` is set the token is rendered as an imported Poké Ball
+   * (Ethan9123/pokemon-splendor assets): a sphere wrapped in the ball artwork.
    */
-  public static createGemTokenMesh(gem: GemType | 'gold', radius: number = 0.4): THREE.Group {
+  public static createGemTokenMesh(
+    gem: GemType | 'gold',
+    radius: number = 0.4,
+    usePokeBall = false,
+    pkmnColor?: string
+  ): THREE.Group {
     const group = new THREE.Group();
     const hexColor = GEM_COLORS[gem] || '#ffb300';
+
+    if (usePokeBall && pkmnColor) {
+      const tex = ballTexture(pkmnColor);
+      if (tex) {
+        const ballGeom = new THREE.SphereGeometry(radius, 32, 24);
+        const ballMat = new THREE.MeshStandardMaterial({
+          map: tex,
+          roughness: 0.25,
+          metalness: 0.15
+        });
+        const ballMesh = new THREE.Mesh(ballGeom, ballMat);
+        ballMesh.castShadow = true;
+        ballMesh.position.y = radius * 0.75;
+        group.add(ballMesh);
+        return group;
+      }
+    }
 
     // Base chip cylinder
     const chipGeom = new THREE.CylinderGeometry(radius, radius, 0.08, 32);
