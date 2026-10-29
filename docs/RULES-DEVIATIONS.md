@@ -56,11 +56,11 @@
 - **官方原文**：「The **It is Meant to Be** only allows you to save a result for a die roll **you** make.」
 - **核实结论**：`meant_to_be` 在 `cards.ts` 中不存在，无需实现。
 
-### A-7 物品「获得当回合即可使用」待核实 ⚠️
+### A-7 物品「获得当回合即可使用」✅ **本来就正确**
 
 - **官方原文**：「he may use it **once immediately and once on each subsequent turn**」。
 - **实现**：`usedItems` 每回合重置，语义上应已覆盖；但「抽到当回合的立即使用」是否与「当回合的正常使用」区分，尚未逐行确认。
-- **修法**：若未区分则无需改动；确认后登记结论。
+- **核实结论**：`usedThisTurn` 按 `defId` 记录、`resetTurnResources` 每回合清空 —— 即「每回合一次」，与官方「use it once immediately and once on each subsequent turn」一致，无需改动。
 
 ---
 
@@ -231,10 +231,10 @@
 - **实现**：固定 `playerOrder[0]`。
 - **修法**：按角色卡生日排序（属体验项，非平衡项）。
 
-### G-9 剧本「次数 = 探索者数」应含已死亡者 ⚠️ 待核实
+### G-9 剧本「次数 = 探索者数」应含已死亡者 ⚪ **不适用**
 
 - **官方原文**：「If a scenario states that something must be done a number of times equal to the number of explorers, this **includes those who get killed**.」
-- **修法**：核对各剧本计数是否用了「存活人数」。
+- **核实结论**：本仓库所有剧本进度阈值都是**固定数字**（2 / 3 / 2），从不按探索者人数推导，该规则无作用点。胜负判定只统计存活英雄，符合「至少一名英雄存活」。
 
 ---
 
