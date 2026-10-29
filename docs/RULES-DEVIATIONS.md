@@ -187,17 +187,18 @@
 - **实现**：无叛徒对事件/预兆的豁免开关。
 - **修法**：叛徒遇事件效果时提供「忽略」选项。
 
-### G-5 昏迷怪物被完全禁止行动 ★ 已核实
+### G-5 昏迷怪物被完全禁止行动 ✅ **已修复**
 
 - **官方原文**：「a stunned monster **can't slow an explorer's movement**, but **a Traitor may still move the monster**. At the end of the monster's turn flip it back.」
 - **实现**：`rules.ts:605` `if (custom.stunned) return [{ type: 'END_NPC_TURN', ... }]` —— 昏迷即只能结束回合，无法移动。
-- **修法**：昏迷仍允许移动，只禁用攻击与减速效果。
+- **修法（已实施）**：昏迷只禁用 `ATTACK_HERO`，`MOVE_NPC` 照常提供；`endNpcTurn` 已有 `stunTurns` 翻回逻辑。
+- **测试**：`rules: a stunned monster still moves but cannot attack`
 
-### G-6 怪物攀爬煤槽/坍塌之室/楼座应免检定 ★ 已核实
+### G-6 怪物攀爬煤槽/坍塌之室/楼座应免检定 ✅ **本来就正确**
 
 - **官方原文**：「**Monsters, but not traitors**, are able to climb up the Coal Chute, Collapsed Room, and Gallery **without making a roll**.」
 - **实现**：无怪物专用豁免。
-- **修法**：怪物经过这三处跳过检定。
+- **核实结论**：`moveNpc` 只调用 `moveMonster`，**从不经过 `enterRoom`**，因此怪物本来就不会触发煤槽/坍塌之室/楼座的检定 —— 已符合规则，无需改动。
 
 ### G-7 怪物不能携带物品 ⚠️ 待核实
 
