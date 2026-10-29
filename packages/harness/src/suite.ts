@@ -5029,3 +5029,15 @@ test('rules: the music box rolls Sanity and shifts it, it does not freeze anyone
   assertEqual(Boolean(after.players.p1.customProps.skipActions), false, 'nobody is frozen');
   assertEqual(Number(after.players.p1.customProps.movesLeft), Number(raw.players.p1.customProps.movesLeft), 'movement is untouched');
 });
+
+test('rules: the underground lake is a basement-only tile', () => {
+  // The rulebook mentions the Lake collapsing "if found on the upper floor", which
+  // reads like it could be drawn upstairs. The 2E printing restricts it to the
+  // basement, and the audit found no evidence of the multi-floor version, so the
+  // tile stays single-floor. This test locks that decision so a future edit has to
+  // make it deliberately.
+  const lake = ROOM_DEFS.underground_lake;
+  assert(!!lake, 'the lake exists');
+  assertEqual(String(lake!.floor), 'BASEMENT', 'the lake sits on the basement floor');
+  assertEqual(lake!.floors, undefined, 'the lake declares no extra floors');
+});
