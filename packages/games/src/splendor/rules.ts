@@ -697,6 +697,12 @@ export class SplendorRules {
    */
   private static advanceTurn(state: GameState, currentPId: PlayerId, ctx: ReduceContext): GameState {
     let next = SplendorRules.settleEndOfTurnEvolution(state, currentPId, ctx);
+    // The end-of-turn evolution can push a player past the goal on its own (it
+    // strictly raises VP), so the trigger has to be re-checked here: `buyCard`
+    // and `evolve` both run before the seat passes, but this settlement runs
+    // *inside* the hand-over. Missing it left a reach-goal-by-evolution table
+    // without a final round — the game then simply played on.
+    next = SplendorRules.markLastRound(next, ctx);
 
     const order = next.playerOrder;
     const currentIdx = order.indexOf(currentPId);
