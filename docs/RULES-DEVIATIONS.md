@@ -158,12 +158,14 @@
 
 逐节读完整本规则书后新发现的问题。
 
-### G-1 同一检定每回合只能尝试一次 —— 未实现 ★ 已核实
+### G-1 同一检定每回合只能尝试一次 ✅ **已修复**
 
 - **官方原文**：「**You cannot try to make the same roll more than once per turn.** Also, you cannot make more than one roll of a particular category specified in a scenario per turn.」
 - **实现**：无任何「本回合已掷过同类检定」的门控（全仓库无 `rolledThisTurn` 类状态）。
 - **影响**：玩家可以反复重掷同一个检定直到通过，直接破坏概率设计。
-- **修法**：`rollTraitCheck` 记录本回合的 `(playerId, reason)`，重复即拒绝。
+- **修法（已实施）**：`rollTraitCheck` 把 `reason` 写入 `customProps.rolledThisTurn`；新增 `hasRolledThisTurn()` 门控；`resetTurnResources` 每回合清空。宝库（唯一可重复进入的可选检定）已接门控。
+- **测试**：`rules: the same check cannot be attempted twice in one turn`
+- **遗留**：其它可选检定（如谜盒）若有独立入口，后续接入同一门控。
 
 ### G-2 叛徒离开有对手的房间不付额外移动力 ★ 已核实
 

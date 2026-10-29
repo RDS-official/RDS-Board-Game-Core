@@ -50,7 +50,8 @@ import {
   resetTurnResources,
   rollZeroDice,
   traitIndex,
-  traitValue
+  traitValue,
+  hasRolledThisTurn
 } from '@rds/games/betrayal/helpers';
 import { addExploredRoom, grantItem, grantOmen } from '@rds/games/betrayal/scenarios';
 import { projectNodePosition } from '@rds/web/render/spatialProjection';
@@ -4191,4 +4192,32 @@ test('rules: room floor lists are well formed', () => {
   assertEqual(String(ROOM_DEFS.chapel.endTurnBuff), 'sanity', 'chapel buffs Sanity');
   assertEqual(String(ROOM_DEFS.larder.endTurnBuff), 'might', 'larder buffs Might');
   assertEqual(ROOM_DEFS.kitchen.endTurnBuff, undefined, 'kitchen grants no trait');
+});
+
+test('rules: the same check cannot be attempted twice in one turn', () => {
+  // Rulebook, Die Rolls: "You cannot try to make the same roll more than once per
+  // turn." The vault is the one re-enterable optional check, so it is the honest
+  // place to prove the gate.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  addExploredRoom(raw, 'vault', 0, 2, 'room_entrance_hall');
+  movePlayerTo(raw, 'p1', 'room_vault');
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 2;
+  raw.players.p1.customProps.rolledThisTurn = [];
+
+  const vaultOffered = () => engine.getLegalActions('p1').some(a => a.type === 'ROOM_FEATURE');
+  assertEqual(vaultOffered(), true, 'the vault can be tried once');
+
+  const attempt = engine.getLegalActions('p1').find(a => a.type === 'ROOM_FEATURE');
+  assert(engine.dispatch(attempt!).ok, 'the attempt dispatches');
+
+  assertEqual(hasRolledThisTurn(engine.getRawState(), 'p1', 'vault'), true, 'the attempt is recorded');
+  assertEqual(vaultOffered(), false, 'a second attempt is refused in the same turn');
+
+  // A new turn clears the record.
+  const after = engine.getRawState();
+  after.players.p1.customProps.rolledThisTurn = [];
+  assertEqual(vaultOffered(), true, 'a new turn may try again');
 });

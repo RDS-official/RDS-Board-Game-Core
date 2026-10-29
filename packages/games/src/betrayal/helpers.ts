@@ -437,6 +437,11 @@ export function rollTraitCheck(
 
   const baseValue = traitValue(player, trait);
   state.globalVars.rollSeq = Number(state.globalVars.rollSeq ?? 0) + 1;
+  if (options.reason) {
+    const attempted = new Set<string>((player.customProps.rolledThisTurn as string[]) ?? []);
+    attempted.add(options.reason);
+    player.customProps.rolledThisTurn = [...attempted];
+  }
   let count = baseValue;
   count += Number(player.customProps.checkBonus ?? 0);
   count += Number(options.extraDice ?? 0);
@@ -1253,6 +1258,17 @@ export function addFrost(state: GameState, roomId: string): void {
   state.globalVars.frostRooms = [...rooms];
 }
 
+/**
+ * Rulebook, Die Rolls: "You cannot try to make the same roll more than once per
+ * turn." Optional checks are gated on this; automatic room effects are not, since
+ * the player is not choosing to re-roll there.
+ */
+export function hasRolledThisTurn(state: GameState, playerId: PlayerId, reason: string): boolean {
+  const player = state.players[playerId];
+  if (!player) return false;
+  return ((player.customProps.rolledThisTurn as string[]) ?? []).includes(reason);
+}
+
 export function resetTurnResources(state: GameState, playerId: PlayerId): void {
   const player = state.players[playerId];
   if (!player) return;
@@ -1269,6 +1285,9 @@ export function resetTurnResources(state: GameState, playerId: PlayerId): void {
   player.customProps.forcedRoll = undefined;
   player.customProps.movesUsed = 0;
   player.customProps.skipActions = false;
+  // Rulebook, Die Rolls: "You cannot try to make the same roll more than once per
+  // turn." This holds the check reasons already attempted this turn.
+  player.customProps.rolledThisTurn = [];
 }
 
 export function nextEligiblePlayer(state: GameState, fromId: PlayerId): PlayerId {
