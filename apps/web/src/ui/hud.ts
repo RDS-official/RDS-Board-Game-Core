@@ -1,5 +1,6 @@
 import confetti from 'canvas-confetti';
 import { cardArtSvg } from './cardArt';
+import { handLayout } from './handLayout';
 import { hash, reconcileKeyed, reconcileKeyedPreservingScroll } from './dom/keyed';
 import { DiceRollOverlay } from './dice-overlay';
 import {
@@ -56,6 +57,10 @@ export class BoardGameHUD {
   private onlinePlayerIds = new Set<string>();
   /** Room the player last clicked; the dossier follows it until the turn moves. */
   private pinnedRoomId?: string;
+  /** Pointer position across the action row: 0 = left edge, 1 = right edge. */
+  private fanFocusX = 0.5;
+  /** 0 = flat row, 1 = full fisheye. Drops to 0 when the pointer leaves. */
+  private fanFocusStrength = 0;
   private lastActorRoomId?: string;
   /** Set of room ids already seen, for the "new room discovered" reveal. */
   private knownRooms?: Set<string>;
@@ -1954,9 +1959,63 @@ export class BoardGameHUD {
               };
             })
           );
+          this.layoutActionFan(fan);
         }
       }
     }
+  }
+
+  /**
+   * Re-position the action cards as a fisheye row.
+   *
+   * The cards keep their size and the gaps carry the fisheye: `lockCardWidth`
+   * plus a low context ratio stacks the far end almost on top of itself, which is
+   * what lets an unbounded number of actions stay inside one row.
+   */
+  private layoutActionFan(fan: HTMLElement): void {
+    const cards = [...fan.querySelectorAll<HTMLElement>('.act')];
+    if (cards.length === 0) return;
+
+    const cardWidth = cards[0].offsetWidth || 76;
+    if (cardWidth <= 0) return;
+
+    // Absolutely positioned children are laid out against the padding box, while
+    // clientWidth includes the padding, so the row is inset by it. The extra
+    // hover inset keeps a scaled edge card from poking out of the container.
+    const style = getComputedStyle(fan);
+    const padLeft = parseFloat(style.paddingLeft) || 0;
+    const padRight = parseFloat(style.paddingRight) || 0;
+    const hoverInset = Math.ceil(cardWidth * 0.07) + 1;
+    const containerWidth = fan.clientWidth - padLeft - padRight - hoverInset * 2;
+    if (containerWidth <= 0) return;
+
+    const hoverIndex = cards.findIndex(card => card.matches(':hover'));
+    const layout = handLayout({
+      count: cards.length,
+      containerWidth,
+      cardWidth,
+      focusX: this.fanFocusX,
+      focusStrength: this.fanFocusStrength,
+      hoverIndex: hoverIndex >= 0 ? hoverIndex : null,
+      lockCardWidth: true,
+      focusPitchRatio: 1.15,
+      contextPitchRatio: 0.1
+    });
+
+    // Gaps are capped at one card width, so a short row can be narrower than the
+    // container; centre it rather than leaving a lopsided tail of empty space.
+    const span = layout.span || containerWidth;
+    const centreOffset = padLeft + hoverInset + Math.max(0, (containerWidth - span) / 2);
+
+    layout.cards.forEach((card, index) => {
+      const el = cards[index];
+      if (!el) return;
+      // The card is left-anchored at 0, so shift by centre minus half a card.
+      el.style.setProperty('--fan-x', `${(card.x - card.width / 2 + centreOffset).toFixed(1)}px`);
+      el.style.setProperty('--fan-scale', card.scale.toFixed(3));
+      el.style.setProperty('--fan-lift', card.lift.toFixed(2));
+      el.style.zIndex = String(card.z);
+    });
   }
 
   /**
@@ -1970,6 +2029,28 @@ export class BoardGameHUD {
     const REST_HINT =
       '<span class="fh-label">悬停查看动作</span><span class="fh-detail">点击任意牌面展开详情 · 数字键直接执行</span>';
 
+    // The action row is a fisheye: the pointer position decides which gaps open
+    // up. Delegated on the dock so it survives every reconcile.
+    const fanPointerBound = (event: PointerEvent) => {
+      const fan = dock.querySelector('[data-fan]') as HTMLElement | null;
+      if (!fan) return;
+      const rect = fan.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      this.fanFocusX = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+      this.fanFocusStrength = 1;
+      this.layoutActionFan(fan);
+    };
+    dock.addEventListener('pointermove', fanPointerBound);
+    dock.addEventListener('pointerleave', () => {
+      const fan = dock.querySelector('[data-fan]') as HTMLElement | null;
+      if (!fan) return;
+      this.fanFocusStrength = 0;
+      this.layoutActionFan(fan);
+    });
+    window.addEventListener('resize', () => {
+      const fan = dock.querySelector('[data-fan]') as HTMLElement | null;
+      if (fan) this.layoutActionFan(fan);
+    });
     dock.addEventListener('click', event => {
       const target = event.target as HTMLElement | null;
       if (!target) return;
