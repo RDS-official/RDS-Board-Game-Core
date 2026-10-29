@@ -1641,9 +1641,9 @@ test('fixture betrayal: content tables and starting position', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 2024);
   const state = engine.getRawState();
 
-  assertEqual(Object.keys(ROOM_DEFS).length, 54, '54 room tiles are defined');
+  assertEqual(Object.keys(ROOM_DEFS).length, 48, '48 room tiles are defined');
   assertEqual(STARTING_ROOM_IDS.length, 5, 'five starting tiles');
-  assertEqual(ROOM_DECK_IDS.length, 49, '49 tiles remain in the room deck');
+  assertEqual(ROOM_DECK_IDS.length, 43, '43 tiles remain in the room deck');
   assertEqual(Object.keys(OMEN_DEFS).length, 13, '13 omens');
   assertEqual(Object.keys(ITEM_DEFS).length, 22, '22 items, matching the official 2E deck');
   assertEqual(Object.keys(EVENT_DEFS).length, 30, '30 events: 25 official plus 5 curse carriers');
@@ -1657,8 +1657,8 @@ test('fixture betrayal: content tables and starting position', () => {
   assertEqual(state.zones.zone_event_deck.orderedEntities.length, 30, 'event deck built');
   assertEqual(state.zones.zone_item_deck.orderedEntities.length, 22, 'item deck built');
   assertEqual(state.zones.zone_omen_deck.orderedEntities.length, 13, 'omen deck built');
-  assertEqual(state.zones.zone_room_deck.orderedEntities.length, 49, 'room tile deck built');
-  assertEqual(state.globalVars.roomDeckTotal, 49, 'room deck total recorded');
+  assertEqual(state.zones.zone_room_deck.orderedEntities.length, 43, 'room tile deck built');
+  assertEqual(state.globalVars.roomDeckTotal, 43, 'room deck total recorded');
 
   const ox = state.players.p1;
   assertEqual(ox.customProps.traits.speed, 4, 'Ox speed');

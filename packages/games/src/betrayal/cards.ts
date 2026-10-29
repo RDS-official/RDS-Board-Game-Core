@@ -120,15 +120,6 @@ const ROOM_LIST: RoomDef[] = [
     text: '长桌上摆着永远不会腐败的晚宴。'
   },
   {
-    id: 'drawing_room',
-    name: '会客厅',
-    en: 'Drawing Room',
-    floor: 'GROUND',
-    doors: ['N', 'E', 'W'],
-    symbol: 'EVENT',
-    text: '褪色的沙发围着一架积灰的钢琴。'
-  },
-  {
     id: 'library',
     name: '图书馆',
     en: 'Library',
@@ -139,16 +130,6 @@ const ROOM_LIST: RoomDef[] = [
     tags: ['books'],
     text: '直抵天花板的书架，藏着家族的秘密。',
     endTurnBuff: 'knowledge',
-  },
-  {
-    id: 'study',
-    name: '书房',
-    en: 'Study',
-    floor: 'GROUND',
-    doors: ['N', 'W'],
-    symbol: 'EVENT',
-    tags: ['books'],
-    text: '写字台上摊着一封写到一半的信。'
   },
   {
     id: 'conservatory',
@@ -224,16 +205,6 @@ const ROOM_LIST: RoomDef[] = [
     doors: ['N', 'S', 'W'],
     symbol: 'ITEM',
     text: '四柱床上铺着从未整理的被褥。'
-  },
-  {
-    id: 'nursery',
-    name: '育婴室',
-    en: 'Nursery',
-    floor: 'UPPER',
-    doors: ['N', 'E'],
-    symbol: 'ITEM',
-    tags: ['child'],
-    text: '摇椅还在前后晃动，摇篮里空无一物。'
   },
   {
     id: 'attic',
@@ -324,25 +295,6 @@ const ROOM_LIST: RoomDef[] = [
     floors: ['BASEMENT', 'GROUND', 'UPPER'],
     doors: ['N', 'W'],
     text: '破家具与旧箱子堆得几乎无法通行。'
-  },
-  {
-    id: 'linen_closet',
-    name: '亚麻储藏室',
-    en: 'Linen Closet',
-    floor: 'UPPER',
-    doors: ['E', 'S'],
-    symbol: 'ITEM',
-    text: '叠得整整齐齐的床单上落着灰。'
-  },
-  {
-    id: 'widow_walk',
-    name: '寡妇步道',
-    en: "Widow's Walk",
-    floor: 'UPPER',
-    doors: ['N', 'W'],
-    symbol: 'OMEN',
-    tags: ['high'],
-    text: '屋顶边缘的窄道，只能容一人侧身通过。'
   },
   {
     id: 'ballroom',
@@ -444,15 +396,6 @@ const ROOM_LIST: RoomDef[] = [
     doors: ['N', 'W'],
     symbol: 'ITEM',
     text: '罐头、工具与不知用途的箱子堆到天花板。'
-  },
-  {
-    id: 'workshop',
-    name: '工坊',
-    en: 'Workshop',
-    floor: 'BASEMENT',
-    doors: ['S', 'E'],
-    symbol: 'ITEM',
-    text: '工作台上散落着半成品与沾血的工具。'
   },
   {
     id: 'research_laboratory',
