@@ -196,7 +196,7 @@ export function setupSplendor(seed: number = 42): GameState {
           desc: `+1 ${c.gem} permanent bonus, ${c.vp} VP`,
           color: GEM_COLORS[c.gem]
         },
-        custom: { gem: c.gem, vp: c.vp, tier: 1, pkmnId: `t1_${idx}` }
+        custom: { gem: c.gem, vp: c.vp, tier: 1, pkmnId: PKMN_DECK.stage1[idx % PKMN_DECK.stage1.length].id }
       }
     };
     state = ECSManager.addEntity(state, entity);
@@ -217,7 +217,7 @@ export function setupSplendor(seed: number = 42): GameState {
           desc: `+1 ${c.gem} permanent bonus, ${c.vp} VP`,
           color: GEM_COLORS[c.gem]
         },
-        custom: { gem: c.gem, vp: c.vp, tier: 2, pkmnId: `t2_${idx}` }
+        custom: { gem: c.gem, vp: c.vp, tier: 2, pkmnId: PKMN_DECK.stage2[idx % PKMN_DECK.stage2.length].id }
       }
     };
     state = ECSManager.addEntity(state, entity);
@@ -238,7 +238,7 @@ export function setupSplendor(seed: number = 42): GameState {
           desc: `+1 ${c.gem} permanent bonus, ${c.vp} VP`,
           color: GEM_COLORS[c.gem]
         },
-        custom: { gem: c.gem, vp: c.vp, tier: 3, pkmnId: `t3_${idx}` }
+        custom: { gem: c.gem, vp: c.vp, tier: 3, pkmnId: PKMN_DECK.stage3[idx % PKMN_DECK.stage3.length].id }
       }
     };
     state = ECSManager.addEntity(state, entity);
@@ -257,7 +257,7 @@ export function setupSplendor(seed: number = 42): GameState {
           score: n.vp,
           desc: `Requires bonuses: ${Object.entries(n.requirements).map(([g, v]) => `${v} ${g}`).join(', ')}`
         },
-        custom: { requirements: n.requirements, vp: n.vp, pkmnId: `noble_${idx}` }
+        custom: { requirements: n.requirements, vp: n.vp, pkmnId: PKMN_DECK.legend[idx % PKMN_DECK.legend.length].id, pkmnTier: 'legend' }
       }
     };
     state = ECSManager.addEntity(state, entity);
