@@ -4274,3 +4274,31 @@ test('rules: a non-tradable item can still be dropped, a companion cannot', () =
     .find(a => a.type === 'DROP_ITEM' && String(a.entityId ?? '').includes('dog'));
   assertEqual(dogDrop, undefined, 'a companion cannot be dropped');
 });
+
+test('rules: becoming the traitor clears lingering event effects', () => {
+  // Rulebook, Traitor and Monster Powers: "When you become a traitor, prior
+  // lingering bad effects from Event cards disappear."
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 7, { scenario: 'omen_ready' });
+  const raw = engine.getRawState();
+  addEffect(raw, { kind: 'ONGOING', source: 'p1', target: 'p1', payload: { effect: 'DRIP' } });
+  raw.players.p1.customProps.effects = ['DRIP'];
+  assertEqual(ongoingEffectKinds(raw, 'p1').length > 0, true, 'the curse is active before the haunt');
+
+  // Trigger the haunt through the pending roll so startHaunt runs for real.
+  raw.globalVars.omensRevealed = 13;
+  raw.globalVars.pendingHauntRoll = { playerId: 'p1', omens: 13 };
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 0;
+  const end = engine.getLegalActions('p1').find(a => a.type === 'END_TURN');
+  assert(!!end, 'the turn can end');
+  engine.dispatch(end!);
+  const roll = engine.getLegalActions('p1').find(a => a.type === 'ROLL_HAUNT_CHECK');
+  assert(!!roll, 'the haunt roll is offered');
+  engine.dispatch(roll!);
+
+  const after = engine.getRawState();
+  assertEqual(after.globalVars.hauntTriggered, true, 'the haunt started');
+  assertEqual(String(after.players.p1.role), 'TRAITOR', 'the revealer is the traitor');
+  assertEqual(ongoingEffectKinds(after, 'p1').length, 0, 'no lingering curse remains on the traitor');
+});
