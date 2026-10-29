@@ -78,12 +78,13 @@
 
 ## C. 叛徒 / 怪物特权
 
-### C-1 成为叛徒时未清除自身残留事件效果 ★ 已核实
+### C-1 成为叛徒时未清除自身残留事件效果 ✅ **已修复**
 
 - **官方原文**：「**When you become a traitor, prior lingering bad effects from Event cards disappear.**」
 - **实现**：`startHaunt`（`rules.ts:2497`）未调用任何清除；全文件无 `removeEffects` 调用。
 - **影响**：叛徒仍受「滴血之声」等持续事件折磨。
-- **修法**：作祟开始时清掉叛徒身上的 ONGOING 效果。
+- **修法（已实施）**：`startHaunt` 设定角色后立即 `removeEffects` 掉叛徒的 ONGOING 效果，并清空 legacy `customProps.effects`。
+- **测试**：`rules: becoming the traitor clears lingering event effects`
 
 ### C-2 神秘电梯对叛徒/怪物应免掷 ★ 已核实
 

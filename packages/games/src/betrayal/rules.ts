@@ -87,7 +87,8 @@ import {
   addRoomNode,
   connectRooms,
   validRotations,
-  hasRolledThisTurn
+  hasRolledThisTurn,
+  removeEffects
 } from './helpers';
 
 const TRAIT_OPTIONS: Record<'PHYSICAL' | 'MENTAL', { value: TraitKey; label: string }[]> = {
@@ -2513,6 +2514,12 @@ export class BetrayalRules {
       if (!player) continue;
       player.role = pid === revealerId ? 'TRAITOR' : player.role === 'TRAITOR' ? 'HERO' : 'HERO';
     }
+
+    // Rulebook, Traitor and Monster Powers: "When you become a traitor, prior
+    // lingering bad effects from Event cards disappear." Curses like the drip used
+    // to keep gnawing at the traitor for the rest of the game.
+    removeEffects(state, effect => effect.target === revealerId && effect.kind === 'ONGOING');
+    if (state.players[revealerId]) state.players[revealerId].customProps.effects = [];
 
     const haunt = {
       id: hauntId,
