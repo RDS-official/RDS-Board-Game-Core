@@ -4,8 +4,11 @@ import { fileURLToPath } from 'node:url';
 
 const env = process.env;
 function secret(): string {
-  // 首次启动生成并落盘，运维可用 HUB_SECRET 覆盖
+  // 运维用 HUB_SECRET 覆盖；生产缺失时拒绝启动（审查报告 S2）
   if (env.HUB_SECRET) return env.HUB_SECRET;
+  if (env.NODE_ENV === 'production') {
+    throw new Error('[hub] 生产环境必须通过 HUB_SECRET 提供签名密钥，拒绝用默认密钥启动');
+  }
   return 'dev-secret-do-not-use-in-prod';
 }
 export const PORT = Number(env.PORT || 8787);

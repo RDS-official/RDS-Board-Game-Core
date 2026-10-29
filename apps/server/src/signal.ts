@@ -1,6 +1,7 @@
 /** WebSocket 信令：房间组 + SDP/ICE 盲转发 + 大厅实时频道。不接触游戏数据。 */
 import type { WebSocket } from 'ws';
 import { verifyJwt, profileOf } from './auth.ts';
+import { rooms } from './storage.ts';
 import type { HubRoomInfo, SignalMessage } from '@rds/room-protocol';
 
 interface Client { userId: string; name: string; ws: WebSocket; roomId?: string; alive: boolean; lobby: boolean; }
@@ -44,6 +45,13 @@ export class SignalHub {
     try { msg = JSON.parse(text); } catch { return; }
     switch (msg.t) {
       case 'join-room': {
+        // 审查报告 S8：入组前校验成员资格——非房间成员不允许进入房间组
+        // （否则可旁听 presence/sdp 转发、以任意 roomId 收发 lobby-chat）
+        const rec = rooms.byId(msg.roomId ?? '');
+        if (!rec || rec.status === 'closed' || !rec.players.includes(client.userId)) {
+          client.ws.close(4003, 'forbidden');
+          return;
+        }
         if (client.roomId) this.dropFromRoom(client);
         client.roomId = msg.roomId;
         const peers = [...this.clients]
@@ -67,9 +75,9 @@ export class SignalHub {
       case 'lobby-sub': client.lobby = true; break;
       case 'lobby-unsub': client.lobby = false; break;
       case 'lobby-chat': {
-        // 只做群内转发（房间组成员 + 发送者），不落盘、不鉴权成员资格（房间页只把
-        // 自己 join-room 进组；游戏对局的 ws 连接不受影响——它不处理 lobby-chat）。
-        if (!msg.roomId || typeof msg.text !== 'string' || !msg.text.trim()) return;
+        // 只做群内转发（房间组成员 + 发送者）。成员资格已由 join-room 把关，
+        // 这里再校验发送者确实在该房间组内（防止加入 A 房却往 B 房喊话）。
+        if (!msg.roomId || client.roomId !== msg.roomId || typeof msg.text !== 'string' || !msg.text.trim()) return;
         const trimmed = msg.text.trim().slice(0, 200);
         const chatName = profileOf(client.userId)?.displayName ?? client.name;
         const payload: SignalMessage = { t: 'lobby-chat', roomId: msg.roomId, from: client.userId, name: chatName, text: trimmed, at: Date.now() };

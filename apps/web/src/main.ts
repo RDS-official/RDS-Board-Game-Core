@@ -1,4 +1,9 @@
 import { GAME_REGISTRY } from '@rds/games/registry';
+
+/** 玩家可控文本进入 innerHTML 前的转义（审查报告 S4）。 */
+const escText = (v: unknown) =>
+  String(v ?? '').replace(/[&<>"']/g, ch =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
 import { BoardGameScene, CameraPreset } from './render/scene';
 import { BoardGameAudio } from './render/audio';
 import { ensureCanvasFontsReady } from './render/fonts';
@@ -483,9 +488,9 @@ class BoardGameSimulatorApp {
     const roster = document.createElement('div');
     roster.style.cssText = 'margin:0 0 18px;text-align:left;font-size:12px;line-height:1.7';
     roster.innerHTML =
-      `<div style="color:#57ffa8">存活：${alive.length ? alive.map(p => `${p.avatar} ${p.name}`).join('、') : '无'}</div>` +
+      `<div style="color:#57ffa8">存活：${alive.length ? alive.map(p => `${p.avatar} ${escText(p.name)}`).join('、') : '无'}</div>` +
       `<div style="color:#8b94a3">已退场：${
-        snapshot.players.filter(p => !p.alive).map(p => `${p.avatar} ${p.name}`).join('、') || '无'
+        snapshot.players.filter(p => !p.alive).map(p => `${p.avatar} ${escText(p.name)}`).join('、') || '无'
       }</div>`;
 
     const row = document.createElement('div');
