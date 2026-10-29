@@ -1212,6 +1212,9 @@ export class BoardGameHUD {
       knowledge: '知识'
     };
     const trait = roll.trait ? traitZh[roll.trait] ?? roll.trait : '';
+    const source = roll.label?.trim();
+    if (source && trait) return `${source} · ${trait}检定`;
+    if (source) return source;
     return trait ? `${trait}检定` : '检定';
   }
 

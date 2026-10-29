@@ -299,13 +299,10 @@
 
 .dice-verdict-slot {
   opacity: 0;
-  transform: translateY(4px);
-  transition: opacity 380ms ease, transform 380ms ease;
 }
 
 .dice-overlay.is-settled .dice-verdict-slot {
   opacity: 1;
-  transform: translateY(0);
 }
 
 .dice-verdict {
@@ -557,3 +554,17 @@
   width: 21px;
   height: 21px;
 }
+
+/* The consequence line lives inside the verdict slot, so it inherits the slot
+   visibility instead of needing its own reveal rule. */
+.dice-consequence {
+  display: block;
+  max-width: min(520px, 78vw);
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-ui);
+  font-size: var(--type-base);
+  line-height: 1.5;
+  text-align: center;
+  color: rgba(206, 217, 233, 0.9);
+}
+

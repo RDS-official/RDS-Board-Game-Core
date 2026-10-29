@@ -349,6 +349,8 @@ export interface UiRoll {
   effect?: string;
   /** Module tag for what the check was for (e.g. 'vault'). */
   reason?: string;
+  /** Player-facing name of the thing being checked. */
+  label?: string;
   /** Monotonic per-check counter; only moves when a check is actually rolled. */
   seq?: number;
   /** Stable stamp so the UI can tell one roll from the next. */
