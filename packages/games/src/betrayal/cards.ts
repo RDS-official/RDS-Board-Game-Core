@@ -641,7 +641,7 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'crystal_ball',
         name: '水晶球',
         en: 'Crystal Ball',
-        desc: '每回合一次：知识检定。4+ 窥视事件或物品牌堆顶牌并决定置于顶或底；1–3 失去 1 神智；0 失去 2 神智。',
+        desc: '每回合一次：查看物品或事件牌堆顶牌。无需检定，也不会把牌抽走。',
         tradeable: true,
         usable: true,
         useKind: 'CRYSTAL_BALL'

@@ -1628,6 +1628,35 @@ export class BetrayalRules {
     const special = room.props?.special as string | null;
     const tags = roomTags(state, roomId);
 
+    // Rulebook, Death and Stuns: when an explorer dies their companion token is
+    // left in the room, and "any other explorer that enters the room gains
+    // custody of the companion". Unowned companions lying here are claimed now.
+    const roomZone = state.zones[`zone_room_${roomId}`];
+    for (const entityId of [...(roomZone?.orderedEntities ?? [])]) {
+      const entity = state.entities[entityId];
+      if (!entity?.components.custom?.companion) continue;
+      if (entity.ownerId) continue;
+      // A zone can list an entity whose zoneId points elsewhere (a stale listing
+      // left by an earlier move). Moving it would create a duplicate zone entry,
+      // which the kernel rejects, so only claim entities that really are here.
+      if (entity.zoneId && entity.zoneId !== roomZone?.id) continue;
+      const hand = state.zones[`zone_hand_${pid}`];
+      if (!hand) continue;
+      entity.ownerId = pid;
+      // Strip any stale listing first: a card can be left registered in the deck
+      // zone it was drawn from, and moving it without cleaning that up produces a
+      // duplicate zone entry the kernel rejects.
+      for (const zone of Object.values(state.zones)) {
+        if (zone.id === hand.id) continue;
+        const at = zone.orderedEntities.indexOf(entityId);
+        if (at >= 0) zone.orderedEntities.splice(at, 1);
+      }
+      const next = ECSManager.moveEntity(state, entityId, hand.id);
+      state.entities = next.entities;
+      state.zones = next.zones;
+      trace(ctx, 'ANNOUNCEMENT', `${player.name} 收留了${itemLabel(entity)}`, 450);
+    }
+
     // Rulebook, Special Rooms: "The Chute affects Traitors and monsters." This
     // used to sit behind `if (!traitor)`, so a traitor slid through untouched.
     if (special === 'COAL_CHUTE') {
@@ -2059,32 +2088,26 @@ export class BetrayalRules {
         break;
       }
       case 'crystal_ball': {
-        const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 4, reason: 'crystal ball' });
-        if (check.total >= 4) {
-          const requested = String(action.payload?.deck ?? 'zone_event_deck');
-          const peekDeck = requested === 'zone_item_deck' ? 'zone_item_deck' : 'zone_event_deck';
-          const top = takeTopCard(state, peekDeck);
-          state.globalVars.peek = { deck: peekDeck, title: top ? itemLabel(top) : '空', ownerId: pid };
-          const opened = openDecision(
-            state,
-            {
-              kind: 'SIMULTANEOUS',
-              title: '水晶球的窥视',
-              description: '将牌堆顶牌留在原处，或移至牌堆底。',
-              participants: [pid],
-              secret: false,
-              policy: { type: 'ALL_COMMITTED' },
-              payload: { kind: 'peek', deck: peekDeck }
-            },
-            ctx.id('peek')
-          );
-          state.pendingDecisions = opened.state.pendingDecisions;
-          trace(ctx, 'ANNOUNCEMENT', `🔮 水晶球映出：「${state.globalVars.peek.title}」`, 600);
-        } else if (check.total === 0) {
-          damagePlayer(state, pid, 'MENTAL', 2);
-        } else {
-          damagePlayer(state, pid, 'MENTAL', 1);
-        }
+        // Rulebook, Using Items and Omens: "The Crystal Ball can only be used to
+        // look through undrawn Item and Event cards." It is a pure look: no trait
+        // roll, and the card is NOT taken off the deck (taking it would silently
+        // reorder every later draw, which the previous version did).
+        const requested = String(action.payload?.deck ?? 'zone_event_deck');
+        const peekDeck = requested === 'zone_item_deck' ? 'zone_item_deck' : 'zone_event_deck';
+        const zone = state.zones[peekDeck];
+        const topId = zone?.orderedEntities?.[0];
+        const top = topId ? state.entities[topId] : undefined;
+        state.globalVars.peek = {
+          deck: peekDeck,
+          title: top ? itemLabel(top) : '空',
+          ownerId: pid
+        };
+        trace(
+          ctx,
+          'ANNOUNCEMENT',
+          `🔮 水晶球映出${peekDeck === 'zone_item_deck' ? '物品' : '事件'}牌堆顶：${state.globalVars.peek.title}`,
+          600
+        );
         markUsed(state, pid, defId);
         break;
       }
