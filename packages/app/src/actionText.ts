@@ -2,6 +2,39 @@ import { Action, ProjectedGameState } from '@rds/kernel/types';
 import { UiAction } from './contracts';
 import { translateText } from './i18n';
 
+/**
+ * 宝可梦璀璨宝石 (Pokémon Splendor) 词汇表。
+ *
+ * `TAKE_3_DIFF_GEMS` / `TAKE_2_SAME_GEMS` / `BUY_CARD` / `RESERVE_CARD` /
+ * `EVOLVE` 这五个动作类型由 splendor 夹具独占产出，所以这里可以放心地按
+ * 宝可梦语义描述：币种是六色精灵球，`purple` 即大师球（万能替代色）。
+ */
+const BALL_ZH: Record<string, string> = {
+  red: '红',
+  blue: '蓝',
+  black: '黑',
+  pink: '粉',
+  yellow: '黄',
+  purple: '紫'
+};
+
+/** 单色精灵球图标；`purple` 用紫球表现大师球。 */
+const BALL_ICON: Record<string, string> = {
+  red: '🔴',
+  blue: '🔵',
+  black: '⚫',
+  pink: '💗',
+  yellow: '🟡',
+  purple: '🟣'
+};
+
+const ballZh = (gem: unknown): string => BALL_ZH[String(gem ?? '')] ?? '精灵';
+const ballIcon = (gem: unknown): string => BALL_ICON[String(gem ?? '')] ?? '⚪';
+
+/** `payload.gems` 是任意输入，收窄成颜色字符串数组后再渲染。 */
+const ballList = (raw: unknown): string[] =>
+  Array.isArray(raw) ? raw.filter((gem): gem is string => typeof gem === 'string') : [];
+
 function describeActionZh(
   state: ProjectedGameState,
   action: Action
@@ -16,6 +49,35 @@ function describeActionZh(
         entity?.components?.cardFace?.title ??
         '未知卡牌'
       );
+    };
+    /**
+     * Splendor card detail. Evolution hints live in `custom` (`evolvesTo` /
+     * `evoCost`), so the label can explain the requirement without re-deriving
+     * the rules here.
+     */
+    const cardInfo = (
+      id?: string
+    ): { name: string; reward: string; evo: { color: string; count: number } | null } => {
+      const entity = id ? state.entities[id] : undefined;
+      const custom = (entity?.components?.custom ?? {}) as Record<string, unknown>;
+      const bonus = typeof custom.bonus === 'string' && custom.bonus !== 'none' ? custom.bonus : null;
+      const bonusCount = Number(custom.bonusCount ?? 1);
+      const vp = Number(custom.vp ?? entity?.components?.cardFace?.score ?? 0);
+      const rawEvo = custom.evoCost as { color?: unknown; count?: unknown } | null | undefined;
+      const reward = [
+        vp > 0 ? `+${vp} 分` : null,
+        bonus ? `+${bonusCount} ${ballZh(bonus)}色加成` : null
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      return {
+        name: card(id),
+        reward,
+        evo:
+          rawEvo && typeof rawEvo.color === 'string' && typeof rawEvo.count === 'number'
+            ? { color: rawEvo.color, count: rawEvo.count }
+            : null
+      };
     };
 
     switch (action.type) {
@@ -45,12 +107,65 @@ function describeActionZh(
         return { icon: '⊘', label: '放弃响应', hint: 'Pass · 让栈顶结算', tone: 'danger' };
       case 'DRAW_CARDS':
         return { icon: '🎴', label: '摸 2 张牌', hint: '从牌堆抽取', tone: 'normal' };
-      case 'TAKE_3_DIFF_GEMS':
-        return { icon: '💎', label: '取 3 种不同宝石', hint: '三色筹码各 1', tone: 'primary' };
-      case 'TAKE_2_SAME_GEMS':
-        return { icon: '◈', label: `取 2 枚 ${action.payload?.gem ?? '宝石'}`, hint: '同色双取', tone: 'normal' };
-      case 'RESERVE_CARD':
-        return { icon: '🔖', label: '保留一张发展卡', hint: '附赠 1 黄金', tone: 'normal' };
+      /* ---- 宝可梦璀璨宝石 (Pokémon Splendor) ---------------------------- */
+      case 'TAKE_3_DIFF_GEMS': {
+        // 1–3 colours: the bank may not cover three, and the 10-ball cap bites.
+        // Each legal combination is its own action, so the colours go into the
+        // label — otherwise ten identical buttons are indistinguishable.
+        const gems = ballList(action.payload?.gems);
+        const count = gems.length > 0 ? gems.length : 3;
+        return {
+          icon: '🥎',
+          label: `拿走 ${count} 个不同颜色的精灵球${
+            gems.length > 0 ? ` · ${gems.map(ballZh).join('/')}` : ''
+          }`,
+          hint: `共 ${count} 颗，每色各 1 颗 · 大师球不可直取`,
+          tone: 'primary'
+        };
+      }
+      case 'TAKE_2_SAME_GEMS': {
+        const gem = action.payload?.gem;
+        const color = typeof gem === 'string' && BALL_ZH[gem] ? `${ballZh(gem)}色` : '同色';
+        return {
+          icon: ballIcon(gem),
+          label: `拿走 2 个${color}精灵球`,
+          hint: '同色双取 · 该色银行需 ≥ 4 颗',
+          tone: 'normal'
+        };
+      }
+      case 'BUY_CARD': {
+        const info = cardInfo(action.entityId);
+        return {
+          icon: '⚡',
+          label: `捕捉宝可梦 [${info.name}]`,
+          hint: `支付精灵球${info.reward ? ` · ${info.reward}` : ''}`,
+          tone: 'primary',
+          fields: action.fields
+        };
+      }
+      case 'RESERVE_CARD': {
+        const tier = action.payload?.fromTier;
+        const info = cardInfo(action.entityId);
+        return {
+          icon: '🎒',
+          // Blind draw from the level deck: no card id, only a tier.
+          label: tier !== undefined && tier !== null ? `从第 ${String(tier)} 阶牌堆盲抽保留` : `保留卡牌 [${info.name}]`,
+          hint: '并获得 1 个大师球 · 上限 3 张',
+          tone: 'normal'
+        };
+      }
+      case 'EVOLVE': {
+        const from = cardInfo(action.payload?.fromId);
+        const to = cardInfo(action.payload?.toId);
+        return {
+          icon: '🧬',
+          label: `进化：${from.name} → ${to.name}`,
+          hint: `免费 · 不消耗行动 · 每回合 1 次${
+            from.evo ? ` · 需 ${from.evo.count} 个${ballZh(from.evo.color)}色加成` : ''
+          }`,
+          tone: 'primary'
+        };
+      }
       case 'EXPLORE_DOOR':
         return { icon: '🚪', label: `探索房门 · ${action.payload?.direction ?? ''}`, hint: '抽房间板块，再选择朝向', tone: 'primary' };
       case 'PLACE_ROOM':

@@ -1,25 +1,121 @@
 import * as THREE from 'three';
-import { GEM_COLORS, GemType, PKMN_BALL_IMAGE } from '@rds/games/splendor/setup';
+import { GEM_COLORS, GemType } from '@rds/games/splendor/setup';
+import { isMasterBall, pokeBallTexture, resolveBallColor } from './pokemonAssets';
 
-const ballTextureCache = new Map<string, THREE.Texture>();
-
-function ballTexture(color: string): THREE.Texture | null {
-  const url = PKMN_BALL_IMAGE[color];
-  if (!url) return null;
-  const cached = ballTextureCache.get(url);
-  if (cached) return cached;
-  const tex = new THREE.TextureLoader().load(url);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  ballTextureCache.set(url, tex);
-  return tex;
+/**
+ * Ball colour that will actually be rendered for this token, or null when the
+ * caller should fall back to the procedural gem chip.
+ *
+ * Accepts the six canonical colours, the master-ball spellings (`master`,
+ * `masterBall`, …) and the deprecated Splendor gem aliases (`ruby`, `sapphire`,
+ * `onyx`, …), so a caller that still speaks the old five-gem vocabulary still
+ * lands on a ball. Falls back to `gem` when the explicit colour is unknown.
+ */
+export function resolveTokenBallColor(
+  gem: GemType | 'gold',
+  pkmnColor?: string
+): string | null {
+  return resolveBallColor(pkmnColor) ?? resolveBallColor(gem);
 }
 
+/** Base tint per ball, used while the artwork is still in flight. */
+const BALL_TINTS: Record<string, number> = {
+  red: 0xd32f2f,
+  blue: 0x1e88e5,
+  black: 0x212121,
+  pink: 0xec407a,
+  yellow: 0xfdd835,
+  purple: 0x8e24aa
+};
+
+/** Gold used to set the purple master ball apart from the five regular balls. */
+const MASTER_BALL_GOLD = 0xffc94d;
+
 export class TokenMeshBuilder {
+  /**
+   * A single Poké Ball token: the ball artwork wrapped on a sphere, plus a gold
+   * halo for the purple master ball.
+   *
+   * The bitmap is attached asynchronously: until it decodes the sphere wears a
+   * solid tint of the same colour, so a token is never a black blob and a broken
+   * asset simply leaves the tint in place rather than aborting the render.
+   */
+  private static createPokeBallMesh(
+    radius: number,
+    ballColor: string,
+    texture: THREE.Texture
+  ): THREE.Group {
+    const group = new THREE.Group();
+    const master = isMasterBall(ballColor);
+    const tint = BALL_TINTS[ballColor] ?? 0xd32f2f;
+
+    const ballMat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(tint),
+      roughness: master ? 0.18 : 0.25,
+      metalness: master ? 0.38 : 0.15
+    });
+    const ballMesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 24), ballMat);
+    ballMesh.castShadow = true;
+    // Sphere UVs put the image centre (the ball button) on +X; turn it towards
+    // the camera side (+Z) while leaving the equator band horizontal.
+    ballMesh.rotation.y = -Math.PI / 2;
+    ballMesh.position.y = radius * 0.75;
+    group.add(ballMesh);
+
+    // Attach the bitmap only once it has decoded: a `map` with a null image
+    // makes three warn on every frame. `pokeBallTexture` invokes the hook
+    // synchronously when the texture is already cached, so warm tokens get the
+    // artwork on their very first frame.
+    const applyArtwork = (loaded: THREE.Texture): void => {
+      ballMat.map = loaded;
+      ballMat.color.set(0xffffff);
+      ballMat.needsUpdate = true;
+    };
+    if (texture.image) applyArtwork(texture);
+    else pokeBallTexture(ballColor, applyArtwork);
+
+    if (master) {
+      // Golden ring around the ball's waist.
+      const haloGeom = new THREE.TorusGeometry(radius * 1.06, radius * 0.055, 8, 40);
+      const haloMat = new THREE.MeshStandardMaterial({
+        color: MASTER_BALL_GOLD,
+        emissive: MASTER_BALL_GOLD,
+        emissiveIntensity: 0.85,
+        roughness: 0.25,
+        metalness: 0.9
+      });
+      const halo = new THREE.Mesh(haloGeom, haloMat);
+      halo.rotation.x = Math.PI / 2;
+      halo.position.y = radius * 0.75;
+      group.add(halo);
+
+      // Soft additive aura so the master ball still reads at board zoom.
+      const auraMat = new THREE.MeshBasicMaterial({
+        color: MASTER_BALL_GOLD,
+        transparent: true,
+        opacity: 0.16,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.BackSide
+      });
+      const aura = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.18, 16, 12), auraMat);
+      aura.position.y = radius * 0.75;
+      group.add(aura);
+    }
+
+    return group;
+  }
+
   /**
    * Create a Splendor Gem Token (Poker chip style with faceted gem emblem).
    * When `usePokeBall` is set the token is rendered as an imported Poké Ball
    * (Ethan9123/pokemon-splendor assets): a sphere wrapped in the ball artwork.
+   *
+   * All six ball colours resolve, plus master-ball spellings and the deprecated
+   * gem aliases. While the artwork is still in flight the sphere wears a tinted
+   * placeholder and switches to the bitmap as soon as it decodes, so a slow or
+   * broken asset never paints a black or invisible token. The purple master
+   * ball additionally gets a gold halo so it reads as the wild token.
    */
   public static createGemTokenMesh(
     gem: GemType | 'gold',
@@ -30,19 +126,13 @@ export class TokenMeshBuilder {
     const group = new THREE.Group();
     const hexColor = GEM_COLORS[gem] || '#ffb300';
 
-    if (usePokeBall && pkmnColor) {
-      const tex = ballTexture(pkmnColor);
-      if (tex) {
-        const ballGeom = new THREE.SphereGeometry(radius, 32, 24);
-        const ballMat = new THREE.MeshStandardMaterial({
-          map: tex,
-          roughness: 0.25,
-          metalness: 0.15
-        });
-        const ballMesh = new THREE.Mesh(ballGeom, ballMat);
-        ballMesh.castShadow = true;
-        ballMesh.position.y = radius * 0.75;
-        group.add(ballMesh);
+    if (usePokeBall) {
+      const ballColor = resolveTokenBallColor(gem, pkmnColor);
+      const texture = ballColor ? pokeBallTexture(ballColor) : null;
+      // `null` means every URL for this token is known to be broken: keep the
+      // procedural chip rather than wrapping a sphere in a missing bitmap.
+      if (ballColor && texture) {
+        group.add(this.createPokeBallMesh(radius, ballColor, texture));
         return group;
       }
     }

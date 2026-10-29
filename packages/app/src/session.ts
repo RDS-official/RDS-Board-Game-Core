@@ -119,14 +119,24 @@ const RESOURCES: Record<string, { icon: string; label: string; color: string }> 
   ore: { icon: '⛏️', label: '矿', color: '#8b93a1' }
 };
 
-const GEMS: Record<string, string> = {
-  diamond: '#dfe9ef',
-  sapphire: '#4f8ef7',
-  emerald: '#3fbf7f',
-  ruby: '#e0604e',
-  onyx: '#8b93a1',
-  gold: '#d9b45b'
-};
+/**
+ * 宝可梦璀璨宝石的六色精灵球。
+ *
+ * 与 `@rds/games/splendor/setup` 的 `POKEBALL_COLORS` 一一对应：红 / 蓝 / 黑 /
+ * 粉 / 黄，以及作为万能替代色的紫色大师球。DTO 层只持有颜色与标签，不 import
+ * 游戏模块（分层约束）。
+ */
+const POKEBALLS: { id: string; short: string; label: string; color: string }[] = [
+  { id: 'red', short: '红', label: '红色精灵球', color: '#e53935' },
+  { id: 'blue', short: '蓝', label: '蓝色精灵球', color: '#1e88e5' },
+  { id: 'black', short: '黑', label: '黑色精灵球', color: '#212121' },
+  { id: 'pink', short: '粉', label: '粉色精灵球', color: '#ec407a' },
+  { id: 'yellow', short: '黄', label: '黄色精灵球', color: '#fdd835' },
+  { id: 'purple', short: '紫', label: '大师球', color: '#8e24aa' }
+];
+
+/** 紫色大师球：万能替代色，保留宝可梦时获得。 */
+const MASTER_BALL = 'purple';
 
 const EVENT_ICONS: Record<string, string> = {
   CARD_DRAW: '🎴',
@@ -1148,8 +1158,19 @@ export function phaseLabelOf(state: ProjectedGameState): string {
       }
       case 'sanguosha':
         return 'PLAY PHASE · 出牌阶段';
-      case 'splendor':
-        return 'TAKE ACTION · 行动阶段';
+      case 'splendor': {
+        // 行动阶段：收服精灵球 / 捕捉宝可梦 / 保留 / 进化（进化免费且不结束回合）。
+        const evolved = state.globalVars.evolvedThisTurn === true;
+        const lastRound = state.globalVars.lastRound === true;
+        return [
+          'TRAINER TURN · 训练家行动',
+          `目标 ${Number(state.globalVars.scoreToWin ?? 18)} 分`,
+          evolved ? '本回合已进化' : '可进化 1 次',
+          lastRound ? '终局回合' : null
+        ]
+          .filter(Boolean)
+          .join(' · ');
+      }
       case 'betrayal': {
         const haunt = state.globalVars.haunt as
           | { number?: number; title?: string; progress?: number; eyesDestroyed?: number; bonesFound?: boolean }
@@ -1242,21 +1263,22 @@ export function buildPlayersView(state: ProjectedGameState, focus: string[]): Ui
           { label: '手牌 / 装备', value: `${handCount} / ${equipCount}` }
         ];
       } else if (state.gameId === 'splendor') {
+        // 宝可梦语义词条：彩虹徽章是该色加成数，紫色徽章是手上的大师球。
         const bonuses = player.customProps.bonuses ?? {};
         const tokens = player.customProps.tokens ?? {};
-        base.pips = [
-          ...['diamond', 'sapphire', 'emerald', 'ruby', 'onyx'].map(gem => ({
-            color: GEMS[gem],
-            label: gem,
-            value: String(bonuses[gem] ?? 0)
-          })),
-          { color: GEMS.gold, label: 'gold', value: String(tokens.gold ?? 0) }
+        base.pips = POKEBALLS.map(ball => ({
+          color: ball.color,
+          label: ball.id === MASTER_BALL ? `${ball.label}（持有）` : `${ball.label}（加成）`,
+          short: ball.short,
+          value: String((ball.id === MASTER_BALL ? tokens[ball.id] : bonuses[ball.id]) ?? 0)
+        }));
+        const tokenTotal = POKEBALLS.reduce((sum, ball) => sum + Number(tokens[ball.id] ?? 0), 0);
+        // 场上宝可梦 = 图鉴区（进化会替换掉基础形态），保留区 = 手牌区。
+        const fielded = state.zones[`zone_tableau_${pid}`]?.orderedEntities.length ?? 0;
+        base.stats = [
+          { label: '精灵球 / 大师球', value: `${tokenTotal - Number(tokens[MASTER_BALL] ?? 0)} / ${Number(tokens[MASTER_BALL] ?? 0)}` },
+          { label: '宝可梦 / 保留', value: `${fielded} / ${handCount}` }
         ];
-        const tokenTotal = Object.entries(tokens).reduce(
-          (sum, [gem, count]) => (gem === 'gold' ? sum : sum + Number(count)),
-          0
-        );
-        base.stats = [{ label: '筹码 / 保留', value: `${tokenTotal} / ${handCount}` }];
       } else if (state.gameId === 'betrayal') {
         const room = state.mapGraph.nodes[player.customProps.currentRoomId];
         const traits = player.customProps.traits ?? {};
@@ -1373,7 +1395,15 @@ export function buildActionsView(
 
     const boardGroups: Record<
       string,
-      { idKey?: 'targetEdgeId' | 'targetNodeId' | 'entityId'; icon: string; label: string; hint: string; tone: UiAction['tone'] }
+      {
+        idKey?: 'targetEdgeId' | 'targetNodeId' | 'entityId';
+        icon: string;
+        label: string;
+        hint: string;
+        tone: UiAction['tone'];
+        /** 覆盖默认的「N 处可选」后缀（宝可梦捕捉/保留只说张数）。 */
+        countLabel?: (count: number) => string;
+      }
     > = {
       BUILD_ROAD: { idKey: 'targetEdgeId', icon: '🛣️', label: '修建道路', hint: '点击桌面高亮边位 · 1木 1砖', tone: 'normal' },
       SETUP_ROAD: { idKey: 'targetEdgeId', icon: '🛣️', label: '铺设起始道路', hint: '点击与定居点相连的边位', tone: 'primary' },
@@ -1386,7 +1416,25 @@ export function buildActionsView(
       CLIMB_UP: { idKey: 'targetNodeId', icon: '🪜', label: '沿麻绳攀上', hint: '点击上方楼座/露台的房间', tone: 'normal' },
       PICK_UP_ITEM: { idKey: 'entityId', icon: '🫳', label: '拾取物品堆', hint: '点击房间中的卡牌', tone: 'normal' },
       MOVE_NPC: { idKey: 'targetNodeId', icon: '👹', label: '怪物移动', hint: '点击高亮房间 · 消耗怪物移动力', tone: 'danger' },
-      BUY_CARD: { idKey: 'entityId', icon: '🏷️', label: '购买发展卡', hint: '点击高亮卡牌', tone: 'primary' }
+      // 宝可梦璀璨宝石：捕捉市场 / 保留区的宝可梦。只有 splendor 产出 BUY_CARD。
+      BUY_CARD: {
+        idKey: 'entityId',
+        icon: '⚡',
+        label: '捕捉宝可梦',
+        hint: '点击高亮卡牌 · 支付精灵球',
+        tone: 'primary',
+        countLabel: count => `${count} 只可捕捉`
+      },
+      // 明牌保留：点高亮卡牌直接收进保留区。按阶盲抽没有 entityId，走下面
+      // 的独立动作按钮，不会吞进这个高亮组。
+      RESERVE_CARD: {
+        idKey: 'entityId',
+        icon: '🎒',
+        label: '保留卡牌',
+        hint: '点击高亮卡牌 · 并获得 1 个大师球',
+        tone: 'normal',
+        countLabel: count => `${count} 张可保留`
+      }
     };
 
     for (const action of actions) {
@@ -1406,7 +1454,9 @@ export function buildActionsView(
           id: `a${bound.length}`,
           actionType: type,
           icon: config.icon,
-          label: `${config.label} · ${bucket.ids.length} 处可选`,
+          label: `${config.label} · ${
+            config.countLabel ? config.countLabel(bucket.ids.length) : `${bucket.ids.length} 处可选`
+          }`,
           hint: config.hint,
           tone: config.tone,
           highlightIds: bucket.ids
@@ -1418,13 +1468,22 @@ export function buildActionsView(
     }
     const seen = new Set<string>();
     for (const action of actions) {
-      if (boardGroups[action.type]) continue;
-
+      // 被高亮组吸收的动作不再单独出按钮。唯一的例外是「有 idKey 但这条动作
+      // 恰好没带该字段」——目前仅 splendor 的按阶盲抽 RESERVE_CARD（没有
+      // entityId），它必须继续落到这里的独立按钮分支。
+      const group = boardGroups[action.type];
+      const groupKey = group?.idKey;
+      const absorbed = !!group && (!groupKey || !!action[groupKey]);
+      if (absorbed) continue;
+      // 宝可梦璀璨宝石的 RESERVE_CARD 有两种形态：指定明牌（entityId）或按阶
+      // 盲抽（payload.fromTier）。旧实现把所有保留动作塌缩成一个按钮，导致只能
+      // 保留第一张/第一阶；这里按「阶段 + 具体卡牌」区分，未知形态再退回按阶。
+      const reserveKey = `${action.entityId ?? ''}|${String(action.payload?.fromTier ?? '')}`;
       const dedupeKey = `${action.actorId ?? action.playerId}:${
         action.type === 'PLAY_STRIKE'
           ? `${action.type}:${action.targetPlayerId}`
           : action.type === 'RESERVE_CARD'
-          ? action.type
+          ? `${action.type}:${reserveKey}`
           : `${action.type}:${action.entityId ?? ''}:${action.targetPlayerId ?? ''}:${action.targetNodeId ?? ''}:${action.targetEdgeId ?? ''}:${JSON.stringify(action.payload ?? {})}`
       }`;
       if (seen.has(dedupeKey)) continue;

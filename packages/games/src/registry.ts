@@ -161,32 +161,64 @@ export const sanguoshaModule: GameModule = defineGame({
   outcome: state => toOutcome(SanguoshaRules.checkWinCondition(state))
 });
 
+/**
+ * 宝可梦璀璨宝石 (Pokémon Splendor).
+ *
+ * Six Poké Ball colours, a bank dealt by seat count, three shuffled stage decks
+ * with a four-card market row, master-ball-only rare / legendary Pokémon, and
+ * free evolution that buries the base Pokémon.
+ */
 export const splendorModule: GameModule = defineGame({
   meta: {
     id: 'splendor',
-    name: '璀璨宝石 (Splendor)',
-    description: '近似完全信息、永久费用修饰器、贵族自动结算',
-    version: '1.0.0',
+    name: '宝可梦璀璨宝石 (Pokémon Splendor)',
+    description: '六色精灵球 · 三阶宝可梦市场 · 大师球稀有捕捉 · 免费进化 · 18 分终局',
+    version: '2.0.0',
+    schemaVersion: 2,
     capabilities: {
       simultaneousMoves: false,
-      hiddenInformation: false,
+      // The stage decks are face-down piles: card order is hidden information.
+      hiddenInformation: true,
       interruptStack: false,
       dynamicRules: false,
       topology: 'none',
-      topologySpec: { kind: 'none', adjacency: 'none', geometry: 'none' },
+      topologySpec: { kind: 'none', adjacency: 'none', geometry: 'none' }
     }
   },
   hooks: [],
   actionSchemas: {
-    TAKE_3_DIFF_GEMS: { type: 'TAKE_3_DIFF_GEMS' },
+    TAKE_3_DIFF_GEMS: {
+      type: 'TAKE_3_DIFF_GEMS',
+      // 1–3 distinct non-master colours; cross-field checks live in the reducer.
+      payload: { gems: { kind: 'array', required: true } }
+    },
     TAKE_2_SAME_GEMS: {
       type: 'TAKE_2_SAME_GEMS',
       payload: {
-        gem: { kind: 'string', required: true, enum: ['diamond', 'sapphire', 'emerald', 'ruby', 'onyx'] }
+        // Master balls are never taken from the bank — reserving awards them.
+        gem: { kind: 'string', required: true, enum: ['red', 'blue', 'black', 'pink', 'yellow'] }
       }
     },
-    BUY_CARD: { type: 'BUY_CARD', fields: { entityId: { kind: 'string', required: true } } },
-    RESERVE_CARD: { type: 'RESERVE_CARD', fields: { entityId: { kind: 'string', required: true } } }
+    BUY_CARD: {
+      type: 'BUY_CARD',
+      fields: { entityId: { kind: 'string', required: true } }
+    },
+    RESERVE_CARD: {
+      type: 'RESERVE_CARD',
+      // Either a face-up card (`entityId`) or a blind draw from the level deck
+      // (`payload.fromTier`), so neither may be mandatory on its own.
+      fields: { entityId: { kind: 'string' } },
+      payload: { fromTier: { kind: 'integer', min: 1, max: 3 } }
+    },
+    EVOLVE: {
+      type: 'EVOLVE',
+      payload: {
+        fromId: { kind: 'string', required: true },
+        toId: { kind: 'string', required: true }
+      }
+    },
+    // Only offered when a player has no other legal move (see getLegalActions).
+    END_TURN: { type: 'END_TURN', allowPayload: false }
   },
   setup: seed => setupSplendor(seed),
   legalActions: (state, playerId) => SplendorRules.getLegalActions(state, playerId),

@@ -5,7 +5,6 @@ import { TransactionalAnimationQueue } from './animationQueue';
 import { BoardRaycaster, InteractiveObjectData } from './raycaster';
 import { CardMeshBuilder } from './procedural/cardMesh';
 import { pokemonCardBackTexture, pokemonCardTexture } from './procedural/pokemonAssets';
-import { PKMN_COLOR_TO_GEM } from '@rds/games/splendor/setup';
 import { DiceMeshBuilder } from './procedural/diceMesh';
 import { HexTileBuilder } from './procedural/hexTile';
 import { RoomTileBuilder } from './procedural/roomTile';
@@ -63,6 +62,140 @@ export interface RenderStats {
   textures: number;
   lastSyncMs: number;
 }
+
+/* -------------------------------------------------------------------------- */
+/* Pokémon Splendor presentation tables                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Face-down art per deck zone, as plain URLs from `/public/pokemon/backs`.
+ *
+ * Declared here (instead of going through the fixture's `PKMN_CARD_BACK`) so
+ * the renderer keeps drawing card backs even while the rules package is being
+ * reworked. `CardMeshBuilder.loadImageTexture` caches by URL, so switching
+ * between decks re-uses one texture per art file.
+ */
+const PKMN_BACK_URL_BY_ZONE: Record<string, string> = {
+  zone_deck_s1: '/pokemon/backs/stage1.webp',
+  zone_deck_s2: '/pokemon/backs/stage2.webp',
+  zone_deck_s3: '/pokemon/backs/stage3.webp',
+  zone_deck_rare: '/pokemon/backs/rare.webp',
+  zone_deck_legend: '/pokemon/backs/legend.webp',
+  zone_deck_mega: '/pokemon/backs/stage3.webp',
+  zone_deck_pokemart: '/pokemon/backs/pokemart-1.png'
+};
+
+/** Same art keyed by the entity's `components.custom.pkmnTier` token. */
+const PKMN_BACK_URL_BY_TIER: Record<string, string> = {
+  stage1: '/pokemon/backs/stage1.webp',
+  stage2: '/pokemon/backs/stage2.webp',
+  stage3: '/pokemon/backs/stage3.webp',
+  rare: '/pokemon/backs/rare.webp',
+  legend: '/pokemon/backs/legend.webp',
+  mega: '/pokemon/backs/stage3.webp',
+  pmL1: '/pokemon/backs/pokemart-1.png',
+  pmL2: '/pokemon/backs/pokemart-2.png',
+  pmL3: '/pokemon/backs/pokemart-3.png'
+};
+
+/** Short deck captions for the count labels under each pile. */
+const PKMN_DECK_LABEL: Record<string, string> = {
+  zone_deck_s1: '一阶',
+  zone_deck_s2: '二阶',
+  zone_deck_s3: '三阶',
+  zone_deck_rare: '稀有',
+  zone_deck_legend: '传说',
+  zone_deck_mega: 'MEGA',
+  zone_deck_pokemart: '商店'
+};
+
+/** Ball colours in bank/tray order — the canonical fixture order. */
+const PKMN_BALL_ORDER = ['red', 'blue', 'black', 'pink', 'yellow', 'purple'] as const;
+
+const PKMN_BALL_TINT: Record<string, string> = {
+  red: '#e53935',
+  blue: '#1e88e5',
+  black: '#4a4a4a',
+  pink: '#ec407a',
+  yellow: '#fdd835',
+  purple: '#8e24aa'
+};
+
+const PKMN_BALL_LABEL: Record<string, string> = {
+  red: '红',
+  blue: '蓝',
+  black: '黑',
+  pink: '粉',
+  yellow: '黄',
+  purple: '紫'
+};
+
+/** The wild substitute colour: drawn with a golden halo so it reads distinct. */
+const PKMN_MASTER_BALL = 'purple';
+
+/** Cards whose bonus cannot be read are parked in this pseudo-column. */
+const PKMN_NO_BONUS_COLUMN = 'none';
+
+/**
+ * Fixed deck rail on the left side of the table.
+ *
+ * The renderer owns the table layout (the fixture's anchors are a rules-side
+ * detail and, with the new rare/legend decks, no longer hold a clean grid).
+ * Stage decks form one column; the special decks sit outboard of their reveal
+ * slot so no pile ever covers a face-up card.
+ */
+const PKMN_DECK_RAIL: Record<string, [number, number, number]> = {
+  zone_deck_s1: [-5.9, 0.06, 3.0],
+  zone_deck_s2: [-5.9, 0.06, 1.7],
+  zone_deck_s3: [-5.9, 0.06, 0.4],
+  zone_deck_rare: [-10.0, 0.06, 1.0],
+  zone_deck_legend: [-10.0, 0.06, -1.0],
+  zone_deck_mega: [-5.9, 0.06, -3.2],
+  zone_deck_pokemart: [-10.0, 0.06, -3.2]
+};
+
+/** Reveal slot anchors for the rare / legendary rows. */
+const PKMN_REVEAL_RAIL: Record<string, [number, number, number]> = {
+  zone_rare: [-8.0, 0.1, 1.0],
+  zone_legend: [-8.0, 0.1, -1.0]
+};
+
+/**
+ * Bonus colours in canonical ball order; a card whose bonus cannot be read is
+ * parked in the `none` column so it never invents a new column mid-game.
+ */
+const PKMN_BONUS_ORDER = [...PKMN_BALL_ORDER, PKMN_NO_BONUS_COLUMN] as string[];
+
+/** Deprecated classic Splendor gem names → ball colour. */
+const PKMN_BONUS_ALIAS: Record<string, string> = {
+  ruby: 'red',
+  sapphire: 'blue',
+  onyx: 'black',
+  diamond: 'pink',
+  gold: 'yellow',
+  emerald: 'purple'
+};
+
+/** Extra caption for the fallback column. */
+const PKMN_BONUS_LABEL_EXTRA: Record<string, string> = { [PKMN_NO_BONUS_COLUMN]: '其他' };
+
+/**
+ * Tableau bands sit along the near edge of the table, one slot per seat.
+ *
+ * The value is chosen so the bands land inside the default isometric framing:
+ * the splendor fixture has no map nodes, so `fitCameraToBoard` has nothing to
+ * fit to and the preset camera stays put — anything parked beyond z ≈ 8 falls
+ * off the bottom of the viewport.
+ */
+const PKMN_TABLEAU_Z = 6.1;
+const PKMN_TABLEAU_SLOT_WIDTH = 5.3;
+/** Column pitch inside a tableau: narrower than the card so columns layer. */
+const PKMN_TABLEAU_COLUMN_STEP = 0.66;
+/** Distance from a tableau's centre to its buried-Pokémon pile. */
+const PKMN_BURIED_OFFSET_X = 2.28;
+/** Small face-down card used for decks and buried Pokémon. */
+const PKMN_SMALL_CARD_W = 0.78;
+const PKMN_SMALL_CARD_H = 1.24;
 
 export class BoardGameScene {
   private static readonly _scratchNdc = new THREE.Vector2();
@@ -1907,7 +2040,12 @@ export class BoardGameScene {
 
   private renderEntities(state: ProjectedGameState): void {
     // ---------- Card zones ----------
+    const isPkmnSplendor = state.gameId === 'splendor';
     Object.values(state.zones).forEach(zone => {
+      // Pokémon Splendor owns deck / tableau / buried / rare / legend layout
+      // below; skipping them here keeps one renderer per zone.
+      if (isPkmnSplendor && this.isPokemonCustomZone(zone.id)) return;
+
       const items = zone.orderedEntities
         .map(id => state.entities[id])
         .filter((e): e is Partial<Entity> & { isMasked?: boolean; id: string } => !!e && !!e.id && e.type === 'CARD');
@@ -1939,6 +2077,26 @@ export class BoardGameScene {
         )
       );
     });
+
+    // ---------- Pokémon Splendor: deck piles + player tableaus ----------
+    if (state.gameId === 'splendor') {
+      // Decks are hidden zones, so the projection masks every card in them.
+      // Draw a pile per deck from the (masked) card count and its back art;
+      // iterate the zones rather than a fixed list so a new deck still shows.
+      for (const deckZone of Object.values(state.zones)) {
+        if (deckZone.type === 'DECK') this.renderPokemonDeckPile(state, deckZone.id);
+      }
+
+      // Rare / legendary reveal slots: one face-up card each, on dedicated mat.
+      this.renderPokemonRevealSlot(state, 'zone_rare', '稀有', '#c9a7e8');
+      this.renderPokemonRevealSlot(state, 'zone_legend', '传说', '#f0d089');
+
+      for (const playerId of state.playerOrder) {
+        this.renderPokemonTableau(state, playerId);
+        this.renderPokemonBuried(state, playerId);
+      }
+      this.renderPokemonBank(state);
+    }
 
     // ---------- Board buildings (Catan) ----------
     Object.values(state.entities).forEach(entity => {
@@ -2004,33 +2162,9 @@ export class BoardGameScene {
     }
 
     // ---------- Splendor gem bank ----------
-    if (state.globalVars.bank) {
-      const bank = state.globalVars.bank;
-      const gemList = ['diamond', 'sapphire', 'emerald', 'ruby', 'onyx', 'gold'] as const;
-      gemList.forEach((gem, idx) => {
-        const count = bank[gem] || 0;
-        const xPos = 7.4;
-        const zPos = (idx - 2.5) * 1.05;
-
-        for (let h = 0; h < Math.min(count, 5); h++) {
-          // Pokémon Splendor: render tokens as imported Poké Balls
-          const pkmnColor = Object.keys(PKMN_COLOR_TO_GEM).find(c => PKMN_COLOR_TO_GEM[c] === gem);
-          const chip = TokenMeshBuilder.createGemTokenMesh(
-            gem,
-            0.36,
-            !!pkmnColor,
-            pkmnColor
-          );
-          chip.position.set(xPos - h * 0.16, 0.05 + h * 0.07, zPos);
-          this.boardObjectsGroup.add(chip);
-          this.raycaster.registerInteractive(chip, {
-            type: 'ENTITY',
-            id: `chip_bank_${gem}`,
-            metadata: { gem, count }
-          });
-        }
-      });
-    }
+    // Pokémon Splendor draws its six Poké-Ball piles (with per-colour count
+    // labels) from `renderPokemonBank`; other fixtures' banks are resource
+    // counts with no chip mesh, so there is nothing to draw here any more.
 
     // ---------- Betrayal explorers ----------
     if (state.gameId === 'betrayal') {
@@ -2589,6 +2723,404 @@ export class BoardGameScene {
   }
 
   /* ------------------------------------------------------------------ */
+  /* Pokémon Splendor: decks, tableaus, Poké Ball bank                  */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Zone ids that the Pokémon renderer builds itself instead of the generic
+   * card-zone pass. Only applies while the fixture is `splendor`.
+   *
+   * Deck / rare / legend / tableau / buried zones each have a dedicated
+   * renderer below; letting the generic pass draw them too would double every
+   * mesh and (for unanchored zones) pile them at the world origin.
+   */
+  private isPokemonCustomZone(zoneId: string): boolean {
+    if (zoneId.startsWith('zone_deck_')) return true;
+    if (zoneId === 'zone_rare' || zoneId === 'zone_legend') return true;
+    if (zoneId.startsWith('zone_buried_')) return true;
+    if (zoneId.startsWith('zone_tableau_')) {
+      const seated = this.lastState?.playerOrder ?? [];
+      // Tableaus are per-seat; a zone for a seat outside the current roster is
+      // left to the generic pass rather than silently dropped.
+      return seated.some(playerId => zoneId === `zone_tableau_${playerId}`);
+    }
+    return false;
+  }
+
+  /** Card-back texture for a deck zone, falling back to the tier token. */
+  private pokemonBackTextureFor(zoneId: string, tier?: unknown): THREE.Texture | null {
+    const directUrl = PKMN_BACK_URL_BY_ZONE[zoneId];
+    if (directUrl) return CardMeshBuilder.loadImageTexture(directUrl);
+    const tierKey = typeof tier === 'string' ? tier : '';
+    const tierUrl = PKMN_BACK_URL_BY_TIER[tierKey];
+    if (tierUrl) return CardMeshBuilder.loadImageTexture(tierUrl);
+    // Unknown deck: let the asset module pick, then fall back to painted backs.
+    return pokemonCardBackTexture({ pkmnTier: tierKey });
+  }
+
+  /**
+   * A face-down card whose *top* surface is the back art.
+   *
+   * `createCardMesh` paints the face material on +Y and the back material on
+   * −Y (a card lies flat), so a face-down card must hand its back art to the
+   * face slot — passing it as `backTextureOverride` would hide it underneath.
+   */
+  private createPokemonFaceDownMesh(
+    art: THREE.Texture | null,
+    width: number,
+    height: number,
+    title = 'Card'
+  ): THREE.Mesh {
+    return CardMeshBuilder.createCardMesh({ title }, width, height, true, art, null);
+  }
+
+  /**
+   * Face-down deck pile.
+   *
+   * Height encodes how many cards remain: the top card of the stack is raised
+   * by a compressed per-card offset, so a full deck reads as a chunky block and
+   * a nearly drained one as a flat sheet. The stack is presentation only — the
+   * logical zone order is never touched.
+   */
+  private renderPokemonDeckPile(state: ProjectedGameState, zoneId: string): void {
+    const zone = state.zones[zoneId];
+    if (!zone) return;
+    const count = zone.orderedEntities.length;
+    if (count === 0) return;
+
+    // The renderer owns the deck rail: fixture anchors predate the rare /
+    // legend decks and would stack piles on top of the reveal slots.
+    const anchor = PKMN_DECK_RAIL[zoneId] ?? [-6.4, 0.06, -3.2];
+    // Deck zones are hidden, so the projected cards carry no custom data. The
+    // back art therefore comes from the zone id; the tier token is only a
+    // fallback for fixtures that expose one.
+    const tierToken = String(state.entities[zone.orderedEntities[0]]?.components?.custom?.pkmnTier ?? '');
+    const art = this.pokemonBackTextureFor(zoneId, tierToken);
+
+    // Cap the visible slab so a 35-card deck stays a tidy pile, not a tower.
+    const layers = Math.min(count, 18);
+    const layerStep = 0.014;
+    const slabHeight = Math.max(0.02, layers * layerStep);
+    const topY = anchor[1] + slabHeight;
+
+    // Block body sits entirely *below* the top card, so the back art is never
+    // occluded by its own edge band.
+    const slab = new THREE.Mesh(
+      new THREE.BoxGeometry(PKMN_SMALL_CARD_W - 0.03, slabHeight, PKMN_SMALL_CARD_H - 0.03),
+      new THREE.MeshStandardMaterial({ color: 0x1c2430, roughness: 0.85, metalness: 0.05 })
+    );
+    slab.position.set(anchor[0], anchor[1] + slabHeight / 2, anchor[2]);
+    slab.receiveShadow = true;
+    this.boardObjectsGroup.add(slab);
+
+    const mesh = this.createPokemonFaceDownMesh(
+      art,
+      PKMN_SMALL_CARD_W,
+      PKMN_SMALL_CARD_H,
+      PKMN_DECK_LABEL[zoneId] ?? zone.name
+    );
+    // +0.012 clears the slab's own top face.
+    mesh.position.set(anchor[0], topY + 0.012, anchor[2]);
+    // A hair of rotation per pile so stacks read as physical objects.
+    mesh.rotation.y = 0.04;
+    this.boardObjectsGroup.add(mesh);
+
+    // Count label sits in front of the pile, facing the camera.
+    const label = this.createLabelSprite(
+      `${PKMN_DECK_LABEL[zoneId] ?? zone.name} · ${count}`,
+      '#cbb57a',
+      34
+    );
+    label.position.set(anchor[0], topY + 0.42, anchor[2] + PKMN_SMALL_CARD_H * 0.5 + 0.26);
+    label.scale.set(1.7, 0.4, 1);
+    this.boardObjectsGroup.add(label);
+  }
+
+  /**
+   * One revealed rare / legendary Pokémon, standing on its own ritual mat.
+   *
+   * The card itself is a normal face-up market card (full artwork); the slot
+   * only adds the mat, a glow ring and the caption so those two single-card
+   * rows do not read as an accidental extra market row.
+   */
+  private renderPokemonRevealSlot(
+    state: ProjectedGameState,
+    zoneId: string,
+    caption: string,
+    accent: string
+  ): void {
+    const zone = state.zones[zoneId];
+    if (!zone) return;
+    const items = zone.orderedEntities
+      .map(id => state.entities[id])
+      .filter((e): e is Partial<Entity> & { isMasked?: boolean; id: string } => !!e && !!e.id);
+    if (items.length === 0) return;
+
+    const anchor = PKMN_REVEAL_RAIL[zoneId] ?? zone.anchorPosition ?? [-7.7, 0.1, 0];
+
+    // Mat + accent ring: presentation only, never a hit target.
+    const mat = new THREE.Mesh(
+      new THREE.BoxGeometry(1.32, 0.02, 1.98),
+      new THREE.MeshStandardMaterial({ color: 0x0a1712, roughness: 0.96, metalness: 0.02 })
+    );
+    mat.position.set(anchor[0], 0.02, anchor[2]);
+    this.boardObjectsGroup.add(mat);
+
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.78, 0.018, 8, 48),
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color(accent),
+        emissive: new THREE.Color(accent),
+        emissiveIntensity: 0.75,
+        metalness: 0.7,
+        roughness: 0.3
+      })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(anchor[0], 0.05, anchor[2]);
+    this.boardObjectsGroup.add(ring);
+    this.navArrowMeshes.push({ group: ring, material: ring.material as THREE.MeshStandardMaterial, baseIntensity: 0.75, baseY: 0.05 });
+
+    items.forEach((entity, index) => {
+      const face = entity.components?.cardFace || { title: 'Card' };
+      const custom = entity.components?.custom as Record<string, unknown> | undefined;
+      const isMasked = !!entity.isMasked;
+      const mesh = isMasked
+        ? this.createPokemonFaceDownMesh(
+            this.pokemonBackTextureFor(zoneId, custom?.pkmnTier),
+            1.28,
+            1.88,
+            String(face.title ?? 'Card')
+          )
+        : CardMeshBuilder.createCardMesh(face, 1.28, 1.88, false, pokemonCardTexture(custom), null);
+      // A single card per slot; extra cards (mid-deal) fan harmlessly.
+      mesh.position.set(anchor[0] + index * 0.16, anchor[1] + index * 0.02, anchor[2]);
+      mesh.rotation.y = index === 0 ? 0 : 0.06 * index;
+      this.boardObjectsGroup.add(mesh);
+      this.entityMeshes.set(entity.id, mesh);
+      this.raycaster.registerInteractive(mesh, {
+        type: 'ENTITY',
+        id: entity.id,
+        metadata: face
+      });
+    });
+
+    const plate = this.createLabelSprite(caption, accent, 30);
+    plate.position.set(anchor[0], 0.52, anchor[2] - 1.16);
+    plate.scale.set(1.5, 0.34, 1);
+    this.boardObjectsGroup.add(plate);
+  }
+
+  /** Normalise a card's `custom.bonus` into one of the six ball colours. */
+  private pokemonBonusColumn(custom?: Record<string, unknown>): string {
+    const raw = String(custom?.bonusColor ?? custom?.bonus ?? '');
+    if (!raw || raw === 'none') return PKMN_NO_BONUS_COLUMN;
+    if (PKMN_BONUS_ORDER.includes(raw)) return raw;
+    return PKMN_BONUS_ALIAS[raw] ?? PKMN_NO_BONUS_COLUMN;
+  }
+
+  /** Table slot for a seat's tableau band (four seats along the near edge). */
+  private pokemonTableauSlot(state: ProjectedGameState, playerId: string): [number, number] {
+    const index = Math.max(0, state.playerOrder.indexOf(playerId));
+    const seats = Math.max(1, state.playerOrder.length);
+    // Centre the row of bands on the table.
+    const x = (index - (seats - 1) / 2) * PKMN_TABLEAU_SLOT_WIDTH;
+    return [x, PKMN_TABLEAU_Z];
+  }
+
+  /**
+   * A player's caught Pokémon, grouped into one column per ball colour.
+   *
+   * Columns run left→right in canonical ball order; each is topped with a
+   * `红 ×N` badge. Cards inside a column are offset toward the viewer so the
+   * badges and the artwork both stay legible at board scale.
+   */
+  private renderPokemonTableau(state: ProjectedGameState, playerId: string): void {
+    const zone = state.zones[`zone_tableau_${playerId}`];
+    if (!zone) return;
+    const items = zone.orderedEntities
+      .map(id => state.entities[id])
+      .filter((e): e is Partial<Entity> & { isMasked?: boolean; id: string } => !!e && !!e.id);
+    if (items.length === 0) return;
+
+    const [slotX, slotZ] = this.pokemonTableauSlot(state, playerId);
+    const playerName = state.players[playerId]?.name ?? playerId;
+
+    // Bucket by bonus colour; entity order inside a column is the zone order,
+    // so a deterministic layout never depends on object key iteration.
+    const columns = new Map<string, (Partial<Entity> & { isMasked?: boolean; id: string })[]>();
+    for (const entity of items) {
+      const column = this.pokemonBonusColumn(entity.components?.custom as Record<string, unknown>);
+      const bucket = columns.get(column) ?? [];
+      bucket.push(entity);
+      columns.set(column, bucket);
+    }
+
+    const orderedColumns = PKMN_BONUS_ORDER.filter(column => (columns.get(column)?.length ?? 0) > 0);
+    const firstColumnX = slotX - ((orderedColumns.length - 1) * PKMN_TABLEAU_COLUMN_STEP) / 2;
+
+    orderedColumns.forEach((column, columnIndex) => {
+      const bucket = columns.get(column) ?? [];
+      const columnX = firstColumnX + columnIndex * PKMN_TABLEAU_COLUMN_STEP;
+
+      bucket.forEach((entity, rowIndex) => {
+        const face = entity.components?.cardFace || { title: 'Card' };
+        const custom = entity.components?.custom as Record<string, unknown> | undefined;
+        const isMasked = !!entity.isMasked;
+        // A masked card must show the back art on its *top* face; a revealed one
+        // shows the Pokémon artwork. Both are the +Y material slot.
+        const mesh = isMasked
+          ? this.createPokemonFaceDownMesh(
+              this.pokemonBackTextureFor('', custom?.pkmnTier),
+              PKMN_SMALL_CARD_W,
+              PKMN_SMALL_CARD_H,
+              String(face.title ?? 'Card')
+            )
+          : CardMeshBuilder.createCardMesh(
+              face,
+              PKMN_SMALL_CARD_W,
+              PKMN_SMALL_CARD_H,
+              false,
+              pokemonCardTexture(custom),
+              null
+            );
+        // Each successive card overlaps the one behind, like a fan on felt.
+        mesh.position.set(columnX, 0.1 + rowIndex * 0.014, slotZ + rowIndex * 0.1);
+        mesh.rotation.y = 0.02 * (rowIndex % 2 === 0 ? 1 : -1);
+        this.boardObjectsGroup.add(mesh);
+        this.entityMeshes.set(entity.id, mesh);
+        this.raycaster.registerInteractive(mesh, {
+          type: 'ENTITY',
+          id: entity.id,
+          metadata: face
+        });
+      });
+
+      // `红 ×N` badge above the column.
+      const caption = PKMN_BALL_LABEL[column] ?? PKMN_BONUS_LABEL_EXTRA[column] ?? column;
+      const badge = this.createLabelSprite(`${caption} ×${bucket.length}`, PKMN_BALL_TINT[column] ?? '#cbd5e1', 30);
+      badge.position.set(columnX, 0.62, slotZ - PKMN_SMALL_CARD_H * 0.5 - 0.18);
+      badge.scale.set(1.05, 0.26, 1);
+      this.boardObjectsGroup.add(badge);
+    });
+
+    const plate = this.createLabelSprite(`${playerName} · 图鉴 ${items.length}`, '#8fb7d9', 26);
+    plate.position.set(slotX, 0.4, slotZ + PKMN_SMALL_CARD_H * 0.5 + 0.86);
+    plate.scale.set(2.2, 0.34, 1);
+    this.boardObjectsGroup.add(plate);
+  }
+
+  /**
+   * Buried Pokémon (evolution fodder) as one small face-down stack beside the
+   * tableau band. `buriedIds` lives on the player, so the count is read from
+   * there; the zone itself supplies the card entities when they are visible.
+   */
+  private renderPokemonBuried(state: ProjectedGameState, playerId: string): void {
+    const buriedIds = (state.players[playerId]?.customProps?.buriedIds ?? []) as unknown[];
+    const zone = state.zones[`zone_buried_${playerId}`];
+    const count = Math.max(buriedIds.length, zone?.orderedEntities.length ?? 0);
+    if (count === 0) return;
+
+    const [slotX, slotZ] = this.pokemonTableauSlot(state, playerId);
+    // Park the pile just past the right-most bonus column, inside the band.
+    const pileX = slotX + PKMN_BURIED_OFFSET_X;
+    const pileZ = slotZ + 0.1;
+
+    const layers = Math.min(count, 12);
+    // Each buried card keeps its own art when the zone exposes the entity;
+    // otherwise the pile shares one generic back.
+    const buriedZone = state.zones[`zone_buried_${playerId}`];
+    const buriedIdsInZone = buriedZone?.orderedEntities ?? [];
+    const fallbackArt = this.pokemonBackTextureFor('zone_buried', 'stage1');
+    for (let i = 0; i < layers; i++) {
+      const buriedEntity = state.entities[buriedIdsInZone[i]];
+      const tier = String(buriedEntity?.components?.custom?.pkmnTier ?? '');
+      const art = tier ? this.pokemonBackTextureFor('zone_buried', tier) : fallbackArt;
+      const mesh = this.createPokemonFaceDownMesh(
+        art,
+        PKMN_SMALL_CARD_W - 0.06,
+        PKMN_SMALL_CARD_H - 0.08,
+        'Buried'
+      );
+      mesh.position.set(pileX + i * 0.008, 0.1 + i * 0.012, pileZ);
+      mesh.rotation.y = -0.04;
+      this.boardObjectsGroup.add(mesh);
+    }
+
+    const badge = this.createLabelSprite(`埋没 ×${count}`, '#9aa7b8', 28);
+    badge.position.set(pileX, 0.58, pileZ - PKMN_SMALL_CARD_H * 0.5 - 0.2);
+    badge.scale.set(1.25, 0.28, 1);
+    this.boardObjectsGroup.add(badge);
+  }
+
+  /**
+   * Six Poké Ball piles with a remaining-count badge each.
+   *
+   * The tray is widened to six slots; the master ball (purple) gets a golden
+   * halo so it never reads as just another colour.
+   */
+  private renderPokemonBank(state: ProjectedGameState): void {
+    const bank = (state.globalVars.bank ?? {}) as Record<string, number>;
+    const trayX = 7.4;
+    const slotStep = 1.0;
+    const firstZ = -((PKMN_BALL_ORDER.length - 1) * slotStep) / 2;
+
+    PKMN_BALL_ORDER.forEach((color, index) => {
+      const count = Math.max(0, Number(bank[color] ?? 0));
+      const zPos = firstZ + index * slotStep;
+      const isMaster = color === PKMN_MASTER_BALL;
+
+      // A shallow well per colour, so an emptied pile still shows a slot.
+      const well = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.34, 0.34, 0.02, 28),
+        new THREE.MeshStandardMaterial({ color: 0x131a22, roughness: 0.9, metalness: 0.05 })
+      );
+      well.position.set(trayX, 0.03, zPos);
+      this.boardObjectsGroup.add(well);
+
+      const stack = Math.min(count, 5);
+      for (let h = 0; h < stack; h++) {
+        const chip = TokenMeshBuilder.createGemTokenMesh(color, 0.28, true, color);
+        chip.position.set(trayX - h * 0.1, 0.05 + h * 0.1, zPos);
+        this.boardObjectsGroup.add(chip);
+        if (h === stack - 1) {
+          this.raycaster.registerInteractive(chip, {
+            type: 'ENTITY',
+            id: `chip_bank_${color}`,
+            metadata: { gem: color, count }
+          });
+        }
+      }
+
+      // Master ball halo: a brass ring that reads at any zoom level.
+      if (isMaster) {
+        const halo = new THREE.Mesh(
+          new THREE.TorusGeometry(0.34, 0.022, 8, 40),
+          new THREE.MeshStandardMaterial({
+            color: 0xd9b45b,
+            emissive: 0xd9b45b,
+            emissiveIntensity: 0.9,
+            metalness: 0.85,
+            roughness: 0.25
+          })
+        );
+        halo.rotation.x = -Math.PI / 2;
+        halo.position.set(trayX, 0.2, zPos);
+        this.boardObjectsGroup.add(halo);
+      }
+
+      const badge = this.createLabelSprite(
+        `${PKMN_BALL_LABEL[color] ?? color} ${count}`,
+        isMaster ? '#f0d089' : '#cfd8e6',
+        28
+      );
+      badge.position.set(trayX + 0.42, 0.3, zPos);
+      badge.scale.set(0.86, 0.24, 1);
+      this.boardObjectsGroup.add(badge);
+    });
+  }
+
+  /* ------------------------------------------------------------------ */
   /* Hands around the table                                              */
   /* ------------------------------------------------------------------ */
 
@@ -2713,15 +3245,39 @@ export class BoardGameScene {
     }
 
     if (state.gameId === 'splendor') {
+      // Market rows (three tiers of four cards).
       this.addTableMat(10.2, 7.6, 0.2, 0.1);
-      this.addTableMat(2.3, 6.2, -7.6, 0.1);
-      const title = this.createLabelSprite('DEVELOPMENT MARKET · 发展卡市场', '#c9b57a', 38);
+      // Deck rail: stage decks nearest the market, special decks outboard.
+      this.addTableMat(1.5, 9.2, -5.9, 0.1);
+      this.addTableMat(1.5, 9.2, -10.0, 0.1);
+      // Rare / legendary reveal column between the two rails.
+      this.addTableMat(2.4, 6.4, -8.0, 0.1);
+      const title = this.createLabelSprite('POKÉMON MARKET · 宝可梦市场', '#c9b57a', 38);
       title.position.set(0.2, 0.5, -3.9);
       title.scale.set(5.2, 0.68, 1);
       this.boardObjectsGroup.add(title);
 
-      // Gem bank tray
-      this.addTableMat(2.4, 7.0, 7.6, 0.1);
+      // Poké Ball bank tray — widened to hold all six colours side by side.
+      this.addTableMat(1.9, 7.2, 7.55, 0.1);
+      const bankTitle = this.createLabelSprite('POKÉ BALL BANK · 精灵球银行', '#cfd8e6', 26);
+      bankTitle.position.set(7.4, 0.42, -3.75);
+      bankTitle.scale.set(2.1, 0.32, 1);
+      this.boardObjectsGroup.add(bankTitle);
+
+      // One band per seat along the near edge for the caught-Pokémon tableaus.
+      const seats = Math.max(1, state.playerOrder.length);
+      state.playerOrder.forEach((playerId, index) => {
+        const x = (index - (seats - 1) / 2) * PKMN_TABLEAU_SLOT_WIDTH;
+        this.addTableMat(PKMN_TABLEAU_SLOT_WIDTH - 0.35, 2.5, x, PKMN_TABLEAU_Z + 0.2);
+        const caption = this.createLabelSprite(
+          `${state.players[playerId]?.name ?? playerId} · 宝可梦图鉴`,
+          state.players[playerId]?.color ?? '#cfd8e6',
+          24
+        );
+        caption.position.set(x, 0.42, PKMN_TABLEAU_Z + 1.42);
+        caption.scale.set(2.0, 0.3, 1);
+        this.boardObjectsGroup.add(caption);
+      });
     }
 
     if (state.gameId === 'catan') {
