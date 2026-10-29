@@ -1903,6 +1903,77 @@ export class BoardGameScene {
         }
       }
     });
+
+    // An elevator ride in progress marks every empty doorway it may dock at.
+    this.addElevatorDoorwayHints(state);
+  }
+
+  /**
+   * Yellow arrows on every empty doorway the elevator may dock at.
+   *
+   * The ride resolves in two steps (roll, then pick), and the pick is a DOORWAY
+   * rather than a room: the doorway fixes both where the car lands and which way
+   * its single door faces, so this reuses the explore arrow the placement flow
+   * already draws.
+   */
+  private addElevatorDoorwayHints(state: ProjectedGameState): void {
+    const globals = state.globalVars as Record<string, unknown> | undefined;
+    const ride = globals?.elevatorRide as
+      | { sum: number; fromFloor: string; allowSameFloorOnly: boolean }
+      | null
+      | undefined;
+    if (!ride || ride.sum < 2) return;
+
+    const OFFSETS: Record<string, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
+    const rooms = Object.values(state.mapGraph.nodes).filter(node => node.type === 'ROOM');
+    const elevatorId =
+      String(globals?.elevatorRoomId ?? '') ||
+      rooms.find(node => node.props?.special === 'ELEVATOR')?.id ||
+      '';
+
+    for (const room of rooms) {
+      if (room.id === elevatorId) continue;
+      const floor = String(room.props?.floor ?? '');
+      if (ride.allowSameFloorOnly && floor !== ride.fromFloor) continue;
+
+      for (const dir of (room.props?.doors ?? []) as ('N' | 'S' | 'E' | 'W')[]) {
+        const offset = OFFSETS[dir];
+        if (!offset) continue;
+        const col = Number(room.props?.col) + offset[0];
+        const row = Number(room.props?.row) + offset[1];
+        const taken = rooms.some(other => {
+          if (other.id === elevatorId) return false;
+          return (
+            Number(other.props?.col) === col &&
+            Number(other.props?.row) === row &&
+            String(other.props?.floor ?? '') === floor
+          );
+        });
+        if (taken) continue;
+
+        const { group: arrow, material } = this.createFloorNavArrow(dir, 'EXPLORE', '电梯停靠');
+        const ax = dir === 'W' ? -1.02 : dir === 'E' ? 1.02 : 0;
+        const az = dir === 'N' ? -1.02 : dir === 'S' ? 1.02 : 0;
+        const arrowY = room.position[1] + 0.125;
+        arrow.position.set(room.position[0] + ax, arrowY, room.position[2] + az);
+        arrow.userData.floor = floor;
+        this.boardObjectsGroup.add(arrow);
+        this.navArrowMeshes.push({ group: arrow, material, baseIntensity: 0.9, baseY: arrowY });
+
+        this.raycaster.registerInteractive(arrow, {
+          type: 'NODE',
+          id: `${room.id}:elevator:${dir}`,
+          metadata: {
+            type: 'DOOR',
+            elevator: true,
+            roomId: room.id,
+            direction: dir,
+            name: String(room.props?.name ?? ''),
+            intent: 'interact'
+          }
+        });
+      }
+    }
   }
 
   private renderEntities(state: ProjectedGameState): void {

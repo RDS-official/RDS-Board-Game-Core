@@ -3959,11 +3959,14 @@ test('rules: the elevator rolls before offering a destination', () => {
 
   // Step 2: the dice opened the picker, and moving relocates the tile itself.
   const choices = engine.getLegalActions('p1').filter(a => a.type === 'ELEVATOR_MOVE');
-  assert(choices.length > 0, 'the destination picker opens after the roll');
+  assert(choices.length > 0, 'the doorway picker opens after the roll');
 
-  const destination = String(choices[0].targetNodeId ?? '');
+  const choice = choices[0];
+  const destination = String(choice.targetNodeId ?? '');
+  const doorDir = String(choice.payload?.direction ?? '');
   assert(destination.length > 0, 'each choice carries its room');
-  const moveRes = engine.dispatch(choices[0] as never);
+  assert(doorDir.length > 0, 'each choice names the doorway it lands on');
+  const moveRes = engine.dispatch(choice as never);
   assert(moveRes.ok, `the ride completes (${moveRes.error ?? ''})`);
 
   const moved = engine.getRawState();
@@ -3972,6 +3975,19 @@ test('rules: the elevator rolls before offering a destination', () => {
   assert(!!grid, 'the elevator tile still exists');
   assert(!(grid!.col === 3 && grid!.row === 3), 'the elevator left its original cell');
   assert(elevator!.neighbors.includes(destination), 'the elevator is attached to the destination');
+
+  // It must sit in the cell just outside the chosen doorway, and its single door
+  // must face back into that room - that is what the doorway choice encodes.
+  const roomGrid = nodeGrid(moved.mapGraph.nodes[destination]);
+  const OFFSETS: Record<string, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
+  const OPPOSITE: Record<string, string> = { N: 'S', S: 'N', E: 'W', W: 'E' };
+  const offset = OFFSETS[doorDir]!;
+  assertEqual(grid!.col, roomGrid!.col + offset[0], 'the car parks outside the chosen doorway (col)');
+  assertEqual(grid!.row, roomGrid!.row + offset[1], 'the car parks outside the chosen doorway (row)');
+  assert(
+    (elevator!.props?.doors as string[]).includes(OPPOSITE[doorDir]!),
+    'the car door faces the room it docked against'
+  );
   assertEqual(
     String(moved.players.p1.customProps.currentRoomId),
     'room_mystic_elevator',
