@@ -90,11 +90,14 @@
 - **修法（已实施）**：叛徒走免掷分支，直接打开「任意楼层」目的地选择；`elevatorUsed` 仍保证每回合一次。
 - **测试**：`rules: the traitor rides the elevator without rolling`（同时断言 PRNG 未被消耗）
 
-### C-3 房间有害文本对叛徒/怪物的豁免不全 ⚠️ 待核实
+### C-3 房间有害文本对叛徒/怪物的豁免不全 ✅ **已修复**
 
 - **官方原文**：「Traitors and monsters can use any beneficial text on a room tile … while **ignoring any harmful text**（Collapsed Room、Gallery、Furnace Room、Crypt、Junk Room、回合结束类效果）。」
 - **实现**：坍塌之室、熔炉房、地窖等有 `!traitor` 分支；**杂物间**等未见豁免。
-- **修法**：统一一张「有害房间」表，叛徒/怪物跳过。
+- **核实结果**：坍塌之室、熔炉房、地窖、墓园、五芒星堂原本就在 `!traitor` 守卫内（已豁免）；**遗漏的是楼座** —— `JUMP_DOWN` 对叛徒照扣 1 点物理伤害。
+- **修法（已实施）**：楼座的坠落伤害对叛徒免除，移动仍然生效（正是「用其利、避其害」）。
+- **测试**：`rules: the traitor ignores harmful room text but keeps the movement`
+- **说明**：本仓库没有 Chasm / Tower / Junk Room 特殊房，无需额外豁免。
 
 ---
 
@@ -179,11 +182,12 @@
 - **正确语义**：叛徒的对手是英雄；英雄的对手是叛徒 + 怪物。
 - **修法（已实施）**：按角色分派 —— 叛徒统计房间内**英雄**，英雄统计叛徒 + 未昏迷怪物。测试同时覆盖「叛徒独处时无加价」。
 
-### G-4 叛徒不能选择不受事件卡影响 ★ 已核实
+### G-4 叛徒不能选择不受事件卡影响 ✅ **已修复**
 
 - **官方原文**：「**The Traitor can choose not to be affected by an Event card or Omens such as Bite.**」
 - **实现**：无叛徒对事件/预兆的豁免开关。
-- **修法**：叛徒遇事件效果时提供「忽略」选项。
+- **修法（已实施）**：`applyEventEffects` 是所有事件/预兆效果的**唯一汇聚点**，在入口处对叛徒直接返回并留痕。
+- **测试覆盖**：结构性保证（单点守卫）+ 代码路径；未写独立断言，因为事件卡由随机种子决定、难以稳定命中「有害且只影响该玩家」的样本。登记为**已知测试缺口**。
 
 ### G-5 昏迷怪物被完全禁止行动 ✅ **已修复**
 

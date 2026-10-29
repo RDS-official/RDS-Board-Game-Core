@@ -4730,3 +4730,40 @@ test('rules: the traitor rides the elevator without rolling', () => {
     'the traitor may pick any floor'
   );
 });
+
+test('rules: the traitor ignores harmful room text but keeps the movement', () => {
+  // Rulebook, Traitor and Monster Powers: "Traitors and monsters can use any
+  // beneficial text on a room tile ... while ignoring any harmful text".
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'haunt_zombie' });
+  const raw = engine.getRawState();
+  const traitorId = Object.entries(raw.players).find(([, p]) => p.role === 'TRAITOR')?.[0];
+  assert(!!traitorId, 'the fixture has a traitor');
+
+  // The Gallery drop moves you to the Ballroom and costs a point of physical
+  // damage without a rope. The traitor takes the move and skips the damage.
+  // The haunt fixture has neither room, so place them adjacent to each other.
+  addExploredRoom(raw, 'ballroom', 0, 1, 'room_basement_landing');
+  addExploredRoom(raw, 'gallery', 0, 0, 'room_ballroom');
+  const gallery = raw.mapGraph.nodes.room_gallery;
+  const ballroom = raw.mapGraph.nodes.room_ballroom;
+  assert(!!gallery, 'the gallery was placed');
+  assert(!!ballroom, 'the ballroom was placed');
+
+  const before_ = {
+    might: traitValue(raw.players[traitorId!], 'might'),
+    speed: traitValue(raw.players[traitorId!], 'speed')
+  };
+  movePlayerTo(raw, traitorId!, gallery!.id);
+  raw.activePlayerId = traitorId!;
+  raw.activeActorId = traitorId!;
+  raw.players[traitorId!].customProps.movesLeft = 2;
+
+  const jump = engine.getLegalActions(traitorId!).find(a => a.type === 'JUMP_DOWN');
+  assert(!!jump, 'the gallery offers the drop');
+  assert(engine.dispatch(jump!).ok, 'the drop dispatches');
+
+  const after = engine.getRawState();
+  assertEqual(String(after.players[traitorId!].customProps.currentRoomId), ballroom!.id, 'the traitor still falls');
+  assertEqual(traitValue(after.players[traitorId!], 'might'), before_.might, 'no Might is lost');
+  assertEqual(traitValue(after.players[traitorId!], 'speed'), before_.speed, 'no Speed is lost');
+});

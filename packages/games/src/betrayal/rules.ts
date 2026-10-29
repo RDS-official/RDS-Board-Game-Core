@@ -983,7 +983,10 @@ export class BetrayalRules {
         movePlayerTo(s, pid, ballroom.id);
         player.customProps.movesLeft = 0;
         const rope = ownsDef(s, pid, 'rope');
-        if (!rope) {
+        // Rulebook, Traitor and Monster Powers: a traitor uses the beneficial text
+        // of a room while ignoring its harmful text, so the Gallery drop is free
+        // for them and only the movement applies.
+        if (!rope && player.role !== 'TRAITOR') {
           damagePlayer(s, pid, 'PHYSICAL', 1);
           trace(ctx, 'DAMAGE_EFFECT', `${player.name} 从楼座坠落，受到 1 点伤害`, 500);
         } else {
@@ -1637,6 +1640,15 @@ export class BetrayalRules {
     effects: EventEffect[],
     ctx: ReduceContext
   ): void {
+    // Rulebook, Traitor and Monster Powers: "The Traitor can choose not to be
+    // affected by an Event card or Omens such as Bite." Every effect in this deck
+    // is a cost, so the traitor declines them all.
+    const acting = state.players[pid];
+    if (acting?.role === 'TRAITOR') {
+      trace(ctx, 'ANNOUNCEMENT', `${acting.name} 身为叛徒，选择不受事件卡影响`, 500);
+      return;
+    }
+
     for (const effect of effects) {
       switch (effect.kind) {
         case 'TRAIT':
