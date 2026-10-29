@@ -2441,6 +2441,12 @@ export class BetrayalRules {
         trace(ctx, 'ANNOUNCEMENT', '远程攻击失败，怪物无法反击', 300);
         return;
       }
+      // Rulebook, Death and Stuns: "If a stunned monster is attacked and wins, it
+      // deals no damage."
+      if (monster.components.custom.stunned) {
+        trace(ctx, 'ANNOUNCEMENT', '昏迷的怪物虽然挡住了攻击，却无力反击', 350);
+        return;
+      }
       damagePlayer(state, pid, monster.components.custom.attack === 'MENTAL' ? 'MENTAL' : 'PHYSICAL', -diff);
     } else {
       trace(ctx, 'ANNOUNCEMENT', '攻击被挡下', 300);
