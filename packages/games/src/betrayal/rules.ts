@@ -2067,33 +2067,21 @@ export class BetrayalRules {
         break;
       }
       case 'bottle': {
-        if (!state.globalVars.hauntTriggered) {
-          trace(ctx, 'ANNOUNCEMENT', '黑液药瓶只有在作祟开始后才能饮用', 300);
-          return;
-        }
+        // Official: "Drink it: roll 3 dice. 4+ Invigorating elixir (Gain 1 Might,
+        // Speed); 1-3 Bitter tonic (Gain 1 Sanity); 0 Poison (Lose 1 Might)."
         const roll = rollZeroDice(state.prngState, 3);
         state.prngState = roll.nextSeed;
-        trace(ctx, 'DICE_ROLL', `黑液药瓶 [${roll.rolls.join('+')}] = ${roll.sum}`, 600);
-        if (roll.sum >= 6) {
-          const target = randomRoom(state);
-          if (target) movePlayerTo(state, pid, target);
-          trace(ctx, 'MOVE_OBJECT', `${player.name} 被黑液传送到 ${roomName(state, activeRoom(state, pid))}`, 500);
-        } else if (roll.sum === 5) {
-          applyTraitSteps(state, pid, 'might', 2, { force: true });
-          applyTraitSteps(state, pid, 'speed', 2, { force: true });
-        } else if (roll.sum === 4) {
-          applyTraitSteps(state, pid, 'knowledge', 2, { force: true });
-          applyTraitSteps(state, pid, 'sanity', 2, { force: true });
+        trace(ctx, 'DICE_ROLL', `药瓶 [${roll.rolls.join('+')}] = ${roll.sum}`, 600);
+        if (roll.sum >= 4) {
+          applyTraitSteps(state, pid, 'might', 1, { force: true });
+          applyTraitSteps(state, pid, 'speed', 1, { force: true });
+          trace(ctx, 'ANNOUNCEMENT', '提神药液：力量与速度各 +1', 450);
         } else if (roll.sum >= 1) {
-          damagePlayer(state, pid, 'PHYSICAL', 1);
+          applyTraitSteps(state, pid, 'sanity', 1, { force: true });
+          trace(ctx, 'ANNOUNCEMENT', '苦涩补剂：神智 +1', 450);
         } else {
-          for (const trait of TRAIT_KEYS) {
-            const track = player.customProps.tracks[trait] as number[];
-            const min = state.globalVars.hauntTriggered ? 0 : 1;
-            player.customProps.traitIndex[trait] = min;
-            player.customProps.traits[trait] = track[min];
-          }
-          this.checkDeath(state, pid);
+          applyTraitSteps(state, pid, 'might', -1, { force: true });
+          trace(ctx, 'ANNOUNCEMENT', '毒液：力量 -1', 450);
         }
         this.consume(state, pid, entityId, ctx);
         break;
@@ -2122,24 +2110,61 @@ export class BetrayalRules {
         markUsed(state, pid, defId);
         break;
       }
+      case 'idol': {
+        // Official: "Make a Sanity roll: 4+ Divine blessing (+1 to all traits!);
+        // 0-3 Dark curse (Lose 1 Sanity)."
+        const check = rollTraitCheck(state, pid, 'sanity', {
+          threshold: 4,
+          reason: 'idol',
+          label: '神秘神像',
+          effect: '成功：全部属性 +1；失败：失去 1 点神智'
+        });
+        if (check.success) {
+          for (const trait of ['might', 'speed', 'knowledge', 'sanity'] as TraitKey[]) {
+            applyTraitSteps(state, pid, trait, 1, { force: true });
+          }
+          trace(ctx, 'DICE_ROLL', `神像：神智检定 ${check.total} vs 4，全部属性 +1`, 500);
+        } else {
+          applyTraitSteps(state, pid, 'sanity', -1, { force: true });
+          trace(ctx, 'DICE_ROLL', `神像：神智检定 ${check.total} vs 4，神智 -1`, 500);
+        }
+        markUsed(state, pid, defId);
+        break;
+      }
       case 'dark_dice': {
+        // Official: "Roll 3 dice: 4+ Dark boon grants +1 Might, Speed, Knowledge;
+        // 0-3 The dark dice demand payment (Lose 1 Might and 1 Speed)."
         const roll = rollZeroDice(state.prngState, 3);
         state.prngState = roll.nextSeed;
         if (roll.sum >= 4) {
-          applyTraitSteps(state, pid, 'might', 1, { force: true });
-          trace(ctx, 'DICE_ROLL', `黑暗骰子 [${roll.rolls.join('+')}] = ${roll.sum}：力量 +1`, 500);
+          for (const trait of ['might', 'speed', 'knowledge'] as TraitKey[]) {
+            applyTraitSteps(state, pid, trait, 1, { force: true });
+          }
+          trace(ctx, 'DICE_ROLL', `黑暗骰子 [${roll.rolls.join('+')}] = ${roll.sum}：力量、速度、知识各 +1`, 500);
         } else {
-          damagePlayer(state, pid, 'MENTAL', 1);
-          trace(ctx, 'DICE_ROLL', `黑暗骰子 [${roll.rolls.join('+')}] = ${roll.sum}：神智 -1`, 500);
+          applyTraitSteps(state, pid, 'might', -1, { force: true });
+          applyTraitSteps(state, pid, 'speed', -1, { force: true });
+          trace(ctx, 'DICE_ROLL', `黑暗骰子 [${roll.rolls.join('+')}] = ${roll.sum}：力量与速度各 -1`, 500);
         }
         markUsed(state, pid, defId);
         break;
       }
       case 'skull': {
-        const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 5, reason: 'skull', label: '头骨' });
+        // Official: "Use to commune with the dead: roll Sanity 4+ Gain 1 Knowledge;
+        // 0-3 Lose 1 Sanity." The old version rolled Knowledge 5+ and had no
+        // failure branch at all.
+        const check = rollTraitCheck(state, pid, 'sanity', {
+          threshold: 4,
+          reason: 'skull',
+          label: '头骨',
+          effect: '成功：获得 1 点知识；失败：失去 1 点神智'
+        });
         if (check.success) {
           applyTraitSteps(state, pid, 'knowledge', 1, { force: true });
-          trace(ctx, 'ANNOUNCEMENT', '💀 头骨中的亡魂低声说出知识', 400);
+          trace(ctx, 'DICE_ROLL', `头骨：神智检定 ${check.total} vs 4，知识 +1`, 450);
+        } else {
+          applyTraitSteps(state, pid, 'sanity', -1, { force: true });
+          trace(ctx, 'DICE_ROLL', `头骨：神智检定 ${check.total} vs 4，神智 -1`, 450);
         }
         markUsed(state, pid, defId);
         break;
@@ -2230,9 +2255,11 @@ export class BetrayalRules {
         break;
       }
       case 'smelling_salts': {
-        const trait = (action.payload?.trait as TraitKey) ?? 'sanity';
-        this.healToGreen(state, pid, trait);
-        trace(ctx, 'ANNOUNCEMENT', `${player.name} 使用嗅盐恢复 ${TRAIT_META[trait].zh}`, 350);
+        // Official: "Wake a stunned explorer or restore 1 Sanity." The old version
+        // healed a chosen trait all the way back to its green value, which is a
+        // different (and far stronger) card.
+        applyTraitSteps(state, pid, 'sanity', 1, { force: true });
+        trace(ctx, 'ANNOUNCEMENT', `${player.name} 嗅了嗅盐，神智 +1`, 350);
         this.consume(state, pid, entityId, ctx);
         break;
       }

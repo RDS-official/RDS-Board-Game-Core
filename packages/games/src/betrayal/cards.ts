@@ -889,10 +889,11 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'idol',
         name: '神秘神像',
         en: 'Idol',
-        desc: '获得时任选一项属性 +1。每回合一次，检定失败时可牺牲 1 神智重掷所有骰。',
+        desc: '每回合一次：神智检定。4+ 神恩降临，全部属性 +1；失败则黑暗诅咒，失去 1 点神智。',
         kind: 'relic',
         tradeable: true,
-        onGain: [{ trait: 'knowledge', amount: 1 }]
+        usable: true,
+        useKind: 'DIVINING'
       },
       {
         id: 'lucky_stone',
