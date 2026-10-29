@@ -145,15 +145,84 @@
 | 煤槽对叛徒与怪物同样生效 | ✅（已修） |
 | 事件卡默认弃置，持续效果进内核效果表 | ✅ |
 | 抽到预兆 → 当回合结束作祟检定 | ✅ |
+| 物理伤害：差值即为伤害，防御方自行分配速/力 | ✅ |
+| 精神伤害：分配知/智 | ✅ |
+| 攻击造成 2+ 物理伤害（非远程）可改为偷窃 | ✅ |
+| 远程攻击（左轮）沿门线直射；被防御方击败则无伤 | ✅ |
+| 昏迷怪物不增加离开房间的移动消耗 | ✅ `hostilesInRoom` 已排除 stunned |
+| 英雄胜利需至少一名英雄存活 | ✅ |
+
+---
+
+## G. 全量审查新增（Setup / Die Rolls / Attacks / Haunt）
+
+逐节读完整本规则书后新发现的问题。
+
+### G-1 同一检定每回合只能尝试一次 —— 未实现 ★ 已核实
+
+- **官方原文**：「**You cannot try to make the same roll more than once per turn.** Also, you cannot make more than one roll of a particular category specified in a scenario per turn.」
+- **实现**：无任何「本回合已掷过同类检定」的门控（全仓库无 `rolledThisTurn` 类状态）。
+- **影响**：玩家可以反复重掷同一个检定直到通过，直接破坏概率设计。
+- **修法**：`rollTraitCheck` 记录本回合的 `(playerId, reason)`，重复即拒绝。
+
+### G-2 叛徒离开有对手的房间不付额外移动力 ★ 已核实
+
+- **官方原文**：「After the Haunt starts, for each opponent in a room with you, a **Hero, monster or Traitor** must use one extra space of movement to leave that room.」
+- **实现**：`helpers.ts:1117` `if (!player || player.role === 'TRAITOR') return 1;` —— 叛徒恒定 1 步。
+- **修法**：移除叛徒豁免。
+
+### G-3 叛徒的「对手」统计错成自己人 ★ 已核实
+
+- **实现**：`hostilesInRoom`（`helpers.ts:1108`）只在 `isHero` 时统计叛徒；对叛徒本人**只统计怪物**，而怪物是叛徒的盟友。
+- **正确语义**：叛徒的对手是英雄；英雄的对手是叛徒 + 怪物。
+- **修法**：按角色分派统计对象。
+
+### G-4 叛徒不能选择不受事件卡影响 ★ 已核实
+
+- **官方原文**：「**The Traitor can choose not to be affected by an Event card or Omens such as Bite.**」
+- **实现**：无叛徒对事件/预兆的豁免开关。
+- **修法**：叛徒遇事件效果时提供「忽略」选项。
+
+### G-5 昏迷怪物被完全禁止行动 ★ 已核实
+
+- **官方原文**：「a stunned monster **can't slow an explorer's movement**, but **a Traitor may still move the monster**. At the end of the monster's turn flip it back.」
+- **实现**：`rules.ts:605` `if (custom.stunned) return [{ type: 'END_NPC_TURN', ... }]` —— 昏迷即只能结束回合，无法移动。
+- **修法**：昏迷仍允许移动，只禁用攻击与减速效果。
+
+### G-6 怪物攀爬煤槽/坍塌之室/楼座应免检定 ★ 已核实
+
+- **官方原文**：「**Monsters, but not traitors**, are able to climb up the Coal Chute, Collapsed Room, and Gallery **without making a roll**.」
+- **实现**：无怪物专用豁免。
+- **修法**：怪物经过这三处跳过检定。
+
+### G-7 怪物不能携带物品 ⚠️ 待核实
+
+- **官方原文**：「**Monsters can't explore new rooms or carry items** unless the Haunt says otherwise. If a monster allowed to carry items is stunned, he drops all items.」
+- **实现**：无通用限制；仅木乃伊「抱女孩」的特例字段。
+- **修法**：确认 NPC 是否本就没有手牌区；若有则需显式禁止。
+
+### G-8 首位玩家应由生日决定 ⚠️ 待核实
+
+- **官方原文**：「The explorer who has the **next birthday** starts first, with turns proceeding clockwise.」
+- **实现**：固定 `playerOrder[0]`。
+- **修法**：按角色卡生日排序（属体验项，非平衡项）。
+
+### G-9 剧本「次数 = 探索者数」应含已死亡者 ⚠️ 待核实
+
+- **官方原文**：「If a scenario states that something must be done a number of times equal to the number of explorers, this **includes those who get killed**.」
+- **修法**：核对各剧本计数是否用了「存活人数」。
 
 ---
 
 ## 修正优先级建议
 
-1. **A-1**（不可交易物品不能丢弃）—— 明确的可用性 bug，改动最小
-2. **C-1**（叛徒不清残留事件）—— 影响剧本平衡
-3. **D-1 / D-2**（失败可重试、屏障每回合一次）—— 官方明确，影响所有屏障房手感
-4. **C-2 / C-3**（叛徒与怪物特权）—— 统一豁免表
-5. **A-2 / A-3 / A-4 / A-5 / A-6**（特殊卡牌语义）—— 需要逐张卡对照设计
-6. **B-1 / B-2**（死亡同伴、昏迷免伤）—— 先核实再改
-7. **E-1**（房间名单）—— 独立内容任务，需与剧本一并规划
+1. **G-1**（同一检定每回合只能试一次）—— **最严重**：当前可反复重掷直到通过，直接破坏全部概率设计
+2. **G-2 / G-3**（叛徒的移动加价与对手统计）—— 战斗节奏核心，且 G-3 把盟友算成对手
+3. **A-1**（不可交易物品不能丢弃）—— 明确的可用性 bug，改动最小
+4. **C-1**（叛徒不清残留事件）—— 影响剧本平衡
+5. **D-1 / D-2**（失败可重试、屏障每回合一次）—— 官方明确，影响所有屏障房手感
+6. **G-5 / G-6**（昏迷怪物仍可移动、怪物攀爬免检定）—— 怪物操作手感
+7. **C-2 / C-3 / G-4**（叛徒与怪物特权：免掷电梯、房间有害文本、事件豁免）
+8. **A-2 ~ A-6**（特殊卡牌语义）—— 需要逐张卡对照设计
+9. **B-1 / B-2 / G-7 / G-8 / G-9**（死亡同伴、昏迷免伤、怪物携物、首位玩家、剧本计数）—— 先核实再改
+10. **E-1**（房间名单）—— 独立内容任务，需与剧本一并规划
