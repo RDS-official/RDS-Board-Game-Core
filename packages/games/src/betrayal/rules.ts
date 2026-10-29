@@ -91,6 +91,30 @@ import {
   removeEffects
 } from './helpers';
 
+/**
+ * Rooms that charge a roll to LEAVE.
+ *
+ * Rulebook, Special Rooms: Attic, Graveyard, Junk Room and Pentagram Chamber say
+ * "if an explorer fails his roll, he may choose to stay in the room and try again
+ * on his next turn instead of taking damage". The check therefore gates movement
+ * out of the room, not the end of the turn.
+ */
+const EXIT_CHECKS: Record<
+  string,
+  { trait: TraitKey; threshold: number; penalty: TraitKey; amount: number; reason: string }
+> = {
+  attic: { trait: 'speed', threshold: 3, penalty: 'might', amount: 1, reason: 'attic exit' },
+  graveyard: { trait: 'sanity', threshold: 4, penalty: 'knowledge', amount: 1, reason: 'graveyard exit' },
+  junk_room: { trait: 'might', threshold: 3, penalty: 'speed', amount: 1, reason: 'junk room exit' },
+  pentagram_chamber: {
+    trait: 'knowledge',
+    threshold: 4,
+    penalty: 'sanity',
+    amount: 1,
+    reason: 'pentagram chamber exit'
+  }
+};
+
 const TRAIT_OPTIONS: Record<'PHYSICAL' | 'MENTAL', { value: TraitKey; label: string }[]> = {
   PHYSICAL: [
     { value: 'might', label: '力量' },
@@ -317,8 +341,32 @@ export class BetrayalRules {
       return actions;
     }
 
+    // A failed exit roll leaves the explorer with the rulebook's choice: stay and
+    // retry next turn, or take the penalty and leave.
+    const pendingExit = state.globalVars.pendingExit as
+      | { playerId: PlayerId; roomId: string; penalty: TraitKey; amount: number }
+      | null
+      | undefined;
+    if (pendingExit && pendingExit.playerId === playerId) {
+      return [
+        { type: 'EXIT_STAY', playerId },
+        { type: 'EXIT_PAY', playerId }
+      ];
+    }
+
     /* 4. Movement --------------------------------------------------------- */
-    if (movesLeft > 0 && room) {
+    const exitCheck = EXIT_CHECKS[String(roomId.replace(/^room_/, ''))];
+    const exitBlocked =
+      !!exitCheck &&
+      player.role !== 'TRAITOR' &&
+      String(player.customProps.exitPassedRoom ?? '') !== roomId;
+    if (exitBlocked && movesLeft > 0) {
+      // You cannot simply walk out: try the roll first. Everything else the room
+      // offers (scenario actions, item use, …) stays available.
+      actions.push({ type: 'ROOM_EXIT_CHECK', playerId });
+    }
+
+    if (movesLeft > 0 && room && !exitBlocked) {
       const reachable = room.neighbors.filter(neighbor => movementCost(state, playerId, roomId) <= movesLeft);
       if (reachable.length > 0) {
         actions.push({
@@ -1071,6 +1119,61 @@ export class BetrayalRules {
       case 'SLAP':
         this.slap(s, pid, action.targetPlayerId ?? '', ctx);
         break;
+      case 'ROOM_EXIT_CHECK': {
+        const roomId = activeRoom(s, pid);
+        const check = EXIT_CHECKS[String(roomId.replace(/^room_/, ''))];
+        if (!check) break;
+        const result = rollTraitCheck(s, pid, check.trait, {
+          threshold: check.threshold,
+          reason: check.reason,
+          effect: `成功：可以离开；失败：留下重试，或失去 1 点${TRAIT_META[check.penalty].zh}后离开`
+        });
+        trace(
+          ctx,
+          'DICE_ROLL',
+          `${roomName(s, roomId)} 出口检定 ${result.total} vs ${check.threshold}`,
+          600
+        );
+        if (result.success) {
+          s.players[pid].customProps.exitPassedRoom = roomId;
+          trace(ctx, 'ANNOUNCEMENT', `${s.players[pid].name} 顺利离开${roomName(s, roomId)}`, 400);
+        } else {
+          s.globalVars.pendingExit = {
+            playerId: pid,
+            roomId,
+            penalty: check.penalty,
+            amount: check.amount
+          };
+          trace(ctx, 'ANNOUNCEMENT', '出口被阻 —— 留下重试，或承受伤害强行离开', 600);
+        }
+        break;
+      }
+      case 'EXIT_STAY': {
+        const pending = s.globalVars.pendingExit as { playerId: PlayerId } | null | undefined;
+        if (!pending || pending.playerId !== pid) break;
+        s.globalVars.pendingExit = null;
+        // Staying means this turn's movement is over; next turn the roll is free again.
+        s.players[pid].customProps.movesLeft = 0;
+        trace(ctx, 'ANNOUNCEMENT', `${s.players[pid].name} 决定留下，下回合再试`, 500);
+        break;
+      }
+      case 'EXIT_PAY': {
+        const pending = s.globalVars.pendingExit as
+          | { playerId: PlayerId; roomId: string; penalty: TraitKey; amount: number }
+          | null
+          | undefined;
+        if (!pending || pending.playerId !== pid) break;
+        s.globalVars.pendingExit = null;
+        applyTraitSteps(s, pid, pending.penalty, -pending.amount);
+        s.players[pid].customProps.exitPassedRoom = pending.roomId;
+        trace(
+          ctx,
+          'DAMAGE_EFFECT',
+          `${s.players[pid].name} 承受 1 点${TRAIT_META[pending.penalty].zh}损伤，强行离开`,
+          600
+        );
+        break;
+      }
       case 'ALLOCATE_DAMAGE':
         this.allocateDamage(s, pid, String(action.payload?.trait ?? ''), ctx);
         break;
@@ -3015,7 +3118,7 @@ export class BetrayalRules {
     }
 
     // 2. 邪恶/不洁房间：回合结束停留在此进行神智检定
-    if (tags.includes('pentagram') || tags.includes('crypt') || tags.includes('graveyard')) {
+    if (tags.includes('crypt')) {
       if (!ownsDef(state, pid, 'medallion')) {
         const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: 'unholy room' });
         trace(ctx, 'DICE_ROLL', `${room.props.name} · 神智检定 ${check.total} vs 4`, 600);

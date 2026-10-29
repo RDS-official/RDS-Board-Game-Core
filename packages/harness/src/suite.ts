@@ -2283,14 +2283,27 @@ test('fixture betrayal: the all-heroes-out verdict can never fire over a living 
 
   const hero = Object.values(raw.players).find(player => player.role !== 'TRAITOR')!;
   assert(!!hero, 'a hero exists');
-  // Stand the hero in a pentagram-tagged room and pin sanity one step above death.
-  const pentagram = Object.values(raw.mapGraph.nodes).find(node => {
-    const tags = node.props?.tags;
-    return Array.isArray(tags) && tags.includes('pentagram');
-  });
-  assert(!!pentagram, 'a pentagram room exists');
-  hero.customProps.currentRoomId = pentagram.id;
-  hero.customProps.floor = String(pentagram.props?.floor ?? 'BASEMENT');
+  // Stand the hero in the Crypt: it is the room that actually bites at turn end
+  // (the Pentagram Chamber uses an exit roll instead, per the rulebook).
+  // The fixture has no crypt, so place one on a free basement cell.
+  const basement = Object.values(raw.mapGraph.nodes).filter(
+    node => node.type === 'ROOM' && String(node.props?.floor) === 'BASEMENT'
+  );
+  const taken = new Set(basement.map(node => `${node.props?.col},${node.props?.row}`));
+  let free = { col: 0, row: 3 };
+  outer: for (let col = 0; col <= 6; col += 1) {
+    for (let row = 0; row <= 6; row += 1) {
+      if (!taken.has(`${col},${row}`)) {
+        free = { col, row };
+        break outer;
+      }
+    }
+  }
+  addExploredRoom(raw, 'crypt', free.col, free.row, 'room_basement_landing');
+  const crypt = raw.mapGraph.nodes.room_crypt;
+  assert(!!crypt, 'a crypt room exists');
+  hero.customProps.currentRoomId = crypt!.id;
+  hero.customProps.floor = String(crypt!.props?.floor ?? 'BASEMENT');
 
   // Force the sanity check to fail (value 0 → far below the threshold 4) but
   // keep the trait one step above death first.
@@ -4766,4 +4779,62 @@ test('rules: the traitor ignores harmful room text but keeps the movement', () =
   assertEqual(String(after.players[traitorId!].customProps.currentRoomId), ballroom!.id, 'the traitor still falls');
   assertEqual(traitValue(after.players[traitorId!], 'might'), before_.might, 'no Might is lost');
   assertEqual(traitValue(after.players[traitorId!], 'speed'), before_.speed, 'no Speed is lost');
+});
+
+test('rules: an exit room gates movement, and a failed roll offers stay or pay', () => {
+  // Rulebook, Special Rooms: "If an explorer fails his roll, he may choose to stay
+  // in the room and try again on his next turn instead of taking damage."
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  addExploredRoom(raw, 'graveyard', 0, 2, 'room_entrance_hall');
+  movePlayerTo(raw, 'p1', 'room_graveyard');
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 3;
+  raw.players.p1.customProps.exitPassedRoom = undefined;
+  raw.globalVars.pendingExit = null;
+
+  const types = () => engine.getLegalActions('p1').map(a => a.type);
+  assertEqual(types().includes('ROOM_EXIT_CHECK'), true, 'the exit roll is offered');
+  assertEqual(types().includes('MOVE_TO_ROOM'), false, 'you cannot just walk out');
+
+  // Success opens the way.
+  raw.players.p1.customProps.forcedRoll = { value: 8 };
+  const tryExit = engine.getLegalActions('p1').find(a => a.type === 'ROOM_EXIT_CHECK');
+  assert(engine.dispatch(tryExit!).ok, 'the exit roll dispatches');
+  assertEqual(
+    String(engine.getRawState().players.p1.customProps.exitPassedRoom),
+    'room_graveyard',
+    'a successful roll unlocks the door'
+  );
+  assertEqual(
+    engine.getLegalActions('p1').some(a => a.type === 'MOVE_TO_ROOM'),
+    true,
+    'movement is available after passing'
+  );
+
+  // Failure parks the choice.
+  const fail = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw2 = fail.getRawState();
+  addExploredRoom(raw2, 'graveyard', 0, 2, 'room_entrance_hall');
+  movePlayerTo(raw2, 'p1', 'room_graveyard');
+  raw2.activePlayerId = 'p1';
+  raw2.activeActorId = 'p1';
+  raw2.players.p1.customProps.movesLeft = 3;
+  raw2.players.p1.customProps.forcedRoll = { value: 0 };
+  const failRoll = fail.getLegalActions('p1').find(a => a.type === 'ROOM_EXIT_CHECK');
+  assert(failRoll, 'the exit roll is offered');
+  assert(fail.dispatch(failRoll!).ok, 'the failing roll dispatches');
+
+  const afterFail = fail.getLegalActions('p1').map(a => a.type);
+  assertEqual(afterFail.includes('EXIT_STAY'), true, 'staying is offered');
+  assertEqual(afterFail.includes('EXIT_PAY'), true, 'paying is offered');
+
+  // Staying costs nothing but ends this turn's movement.
+  const knowledgeBefore = traitValue(fail.getRawState().players.p1, 'knowledge');
+  const stay = fail.getLegalActions('p1').find(a => a.type === 'EXIT_STAY');
+  assert(fail.dispatch(stay!).ok, 'staying dispatches');
+  const stayed = fail.getRawState();
+  assertEqual(traitValue(stayed.players.p1, 'knowledge'), knowledgeBefore, 'staying costs no trait');
+  assertEqual(Number(stayed.players.p1.customProps.movesLeft), 0, 'staying ends movement');
 });

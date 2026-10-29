@@ -103,18 +103,25 @@
 
 ## D. 房间规则（已在 CROSSCHECK 登记，此处汇总）
 
-### D-1 失败后可留下重试，未实现 ★ 已核实
+### D-1 失败后可留下重试 ✅ **已修复**
 
 - **官方原文**：「**If an explorer fails his roll, he may choose to stay in the room and try again on his next turn instead of taking damage.**」（Attic / Graveyard / Junk Room / Pentagram Chamber，以及屏障房）
 - **实现**：失败即结算伤害，无「留下重试」选项。
 - **影响**：所有屏障类与四个「失败即伤害」房间的手感偏硬。
-- **修法**：失败后弹出「留下重试 / 承受伤害」二选一。
+- **修法（已实施）**：
+  - 新增出口检定表（阁楼 Speed3+/墓园 Sanity4+/杂物间 Might3+/五芒星堂 Knowledge4+）
+  - 处于这些房间时**移动被门控**：只能先掷 `ROOM_EXIT_CHECK`（其余动作如剧本仪式照常可用）
+  - 成功 → 记录 `exitPassedRoom`，本回合可自由离开
+  - 失败 → 提供两个动作：`EXIT_STAY`（不受伤、本回合不再移动）或 `EXIT_PAY`（扣 1 点对应属性后离开）
+  - **顺带修正**：墓园与五芒星堂原先被错误地做成「回合结束神智检定」，现已改为出口检定；地窖保留回合结束精神伤害
+- **测试**：`rules: an exit room gates movement, and a failed roll offers stay or pay`
 
-### D-2 屏障房的「每回合一次尝试」未实现 ★ 已核实
+### D-2 屏障房的「每回合一次尝试」✅ **已修复（本仓库模型下）**
 
 - **官方原文**：「You may attempt **once per turn** to make the trait roll to be able to cross the room.」「Crossing the barrier doesn't count as a move.」
 - **实现**：部分房间是进入即检定，没有「每回合一次」与「过屏障不计步」。
-- **修法**：按屏障房统一处理。
+- **已实施**：`exitPassedRoom` 每回合在 `resetTurnResources` 清空，因此每个房间每回合只能尝试一次，符合「once per turn」。
+- **不适用部分**：本仓库没有把 Vault/Tower/Chasm/Catacombs 建模成「两侧」的屏障房，因此「过屏障不计步」没有对应概念，未实现。
 
 ### D-3 地下湖楼层存疑 ⚠️ 待定
 
