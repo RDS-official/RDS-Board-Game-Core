@@ -105,7 +105,11 @@
 
 ---
 
-## 4. 复核方式
+## 4. 卡牌规则
+
+牌类规则另见 **`docs/RULES-DEVIATIONS.md` §A**（水晶球、狗、玩具猴、镜中影像、不可交易物品的丢弃等），本文件只记录房间与核心循环。
+
+## 5. 复核方式
 
 ```bash
 pnpm test        # 含 "room floor lists are well formed" 等 153 项
