@@ -152,17 +152,27 @@ export class BoardGameHUD {
 
     const commitHash = typeof __COMMIT_HASH__ !== 'undefined' ? __COMMIT_HASH__ : 'unknown';
     const fullHash = typeof __COMMIT_FULL_HASH__ !== 'undefined' ? __COMMIT_FULL_HASH__ : commitHash;
-    const author = typeof __COMMIT_AUTHOR__ !== 'undefined' ? __COMMIT_AUTHOR__ : 'unknown';
     const commitDate = typeof __COMMIT_DATE__ !== 'undefined' ? __COMMIT_DATE__ : '';
     const repoUrl = typeof __REPO_URL__ !== 'undefined' ? __REPO_URL__ : '';
     const buildTime = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '';
     const repoHref = /^https?:\/\//.test(repoUrl) ? repoUrl : '';
 
+    const rawContributors: string[] =
+      typeof __CONTRIBUTORS__ !== 'undefined' && Array.isArray(__CONTRIBUTORS__) && __CONTRIBUTORS__.length > 0
+        ? __CONTRIBUTORS__
+        : typeof __COMMIT_AUTHOR__ !== 'undefined' && __COMMIT_AUTHOR__
+        ? [__COMMIT_AUTHOR__]
+        : ['unknown'];
+
+    // 只展示 GitHub contributor ID，剥除可能附带的邮箱地址。
+    const contributors = rawContributors
+      .map(item => item.replace(/<[^>]+>/g, '').trim())
+      .filter(Boolean);
+
     const layer = document.createElement('div');
     layer.className = 'about-layer';
     layer.id = 'about-layer';
-    // 所有来自构建期注入的值都按纯文本转义（Author 里含 `<email>`，
-    // 不转义会被解析成 HTML 标签而静默消失）。
+    // 所有来自构建期注入的值都按纯文本转义
     const esc = (value: string): string =>
       value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     layer.innerHTML = `
@@ -181,8 +191,20 @@ export class BoardGameHUD {
             <dd><code title="${esc(fullHash)}">${esc(commitHash)}</code></dd>
           </div>
           <div class="about-row">
-            <dt>Author</dt>
-            <dd>${esc(author)}</dd>
+            <dt>Contributors</dt>
+            <dd class="about-contributors">${
+              contributors.length > 0
+                ? contributors
+                    .map(id => {
+                      const safeId = esc(id);
+                      const isGhUser = /^[\w-]+$/.test(id);
+                      return isGhUser
+                        ? `<a class="contributor-tag" href="https://github.com/${safeId}" target="_blank" rel="noopener noreferrer">${safeId}</a>`
+                        : `<span class="contributor-tag">${safeId}</span>`;
+                    })
+                    .join('')
+                : 'unknown'
+            }</dd>
           </div>
           <div class="about-row">
             <dt>Repository</dt>

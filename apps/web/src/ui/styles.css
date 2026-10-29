@@ -3099,6 +3099,34 @@ select.pf-control {
   font-size: var(--type-xs);
 }
 
+.about-row .about-contributors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.about-row .about-contributors .contributor-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary, #e8edf5);
+  font-size: var(--type-xs);
+  text-decoration: none;
+  line-height: 1.4;
+  transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.about-row .about-contributors a.contributor-tag:hover,
+.about-row .about-contributors a.contributor-tag:focus-visible {
+  color: var(--accent-bright, #d9b45b);
+  border-color: rgba(217, 180, 91, 0.45);
+  background: rgba(217, 180, 91, 0.12);
+}
+
 .about-row .about-repo a {
   color: var(--accent-bright, #d9b45b);
   text-decoration: none;
