@@ -4251,3 +4251,26 @@ test('rules: leaving a room with an opponent costs an extra space for everyone',
   assertEqual(hostilesInRoom(raw, traitorId!, elsewhere!.id), 0, 'no hero there, no penalty');
   assertEqual(movementCost(raw, traitorId!, elsewhere!.id), 1, 'the traitor moves freely alone');
 });
+
+test('rules: a non-tradable item can still be dropped, a companion cannot', () => {
+  // Rulebook, Using Items and Omens: "Some items can't be traded, but MAY BE
+  // DROPPED OR PICKED UP." Companions are the only things barred from that.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 3;
+
+  // Bite is an omen that cannot be traded and is not a companion.
+  grantOmen(raw, 'p1', 'bite');
+  const biteDrop = () => engine.getLegalActions('p1').find(a => a.type === 'DROP_ITEM');
+  assert(!!biteDrop(), 'a non-tradable omen can be dropped');
+  assert(engine.dispatch(biteDrop()!).ok, 'dropping it dispatches');
+
+  // The dog is a companion: it follows its custodian and cannot be dropped.
+  grantOmen(raw, 'p1', 'dog');
+  const dogDrop = engine
+    .getLegalActions('p1')
+    .find(a => a.type === 'DROP_ITEM' && String(a.entityId ?? '').includes('dog'));
+  assertEqual(dogDrop, undefined, 'a companion cannot be dropped');
+});
