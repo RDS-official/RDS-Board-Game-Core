@@ -1214,6 +1214,280 @@ export const EVENT_DEFS: Record<string, EventDef> = Object.fromEntries(
         bands: [{ min: 0, max: 0, effects: [{ kind: 'ONGOING', effect: 'MARK_OF_FEAR' }], text: '你感到无数目光落在背上。' }]
       },
 
+      {
+        id: 'something_slimy',
+        name: '黏滑之物',
+        en: 'Something Slimy',
+        category: 'PHYSICAL',
+        desc: 'Something cold and gelatinous brushes against your legs! Make a Might roll: 4+ You pull away safely. 1-3 It clings to you (Lose 1 Speed). 0 It drags you down (Lose 2 Speed).',
+        canonical: true,
+        check: 'might',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'speed', amount: -1 }], text: '1-3：失去 1 点速度' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'speed', amount: -2 }], text: '0：失去 2 点速度' }
+        ]
+      },
+      {
+        id: 'burning_man',
+        name: '燃烧的人',
+        en: 'Burning Man',
+        category: 'SANITY',
+        desc: 'A figure engulfed in raging flames rushes screaming past you! Make a Sanity roll: 4+ You stand firm. 2-3 You reel in terror (Lose 1 Sanity). 0-1 You scream in panic (Lose 2 Sanity).',
+        canonical: true,
+        check: 'sanity',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 2, max: 3, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }], text: '2-3：失去 1 点神智' },
+          { min: 0, max: 1, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -2 }], text: '0-1：失去 2 点神智' }
+        ]
+      },
+      {
+        id: 'whoops',
+        name: '踩空',
+        en: 'Whoops!',
+        category: 'PHYSICAL',
+        desc: 'You trip over a broken floorboard! Make a Speed roll: 3+ You regain balance. 0-2 You crash painfully (Lose 1 Speed).',
+        canonical: true,
+        check: 'speed',
+        bands: [
+          { min: 3, max: 8, effects: [{ kind: 'NOTHING' }], text: '3-8：无事发生' },
+          { min: 0, max: 2, effects: [{ kind: 'TRAIT', trait: 'speed', amount: -1 }], text: '0-2：失去 1 点速度' }
+        ]
+      },
+      {
+        id: 'smoke',
+        name: '浓烟',
+        en: 'Smoke',
+        category: 'PHYSICAL',
+        desc: 'Thick acrid smoke fills your lungs. Make a Might roll: 4+ You cough but push through. 1-3 You choke (Lose 1 Might). 0 You collapse coughing (Lose 2 Might).',
+        canonical: true,
+        check: 'might',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'might', amount: -1 }], text: '1-3：失去 1 点力量' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'might', amount: -2 }], text: '0：失去 2 点力量' }
+        ]
+      },
+      {
+        id: 'skeletons',
+        name: '骷髅',
+        en: 'Skeletons',
+        category: 'SANITY',
+        desc: 'Skeletal hands reach out from the walls trying to pull you into the dark! Make a Sanity roll: 4+ Nerves of steel. 1-3 Panic sets in (Lose 1 Sanity). 0 Terrified (Lose 2 Sanity).',
+        canonical: true,
+        check: 'sanity',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }], text: '1-3：失去 1 点神智' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -2 }], text: '0：失去 2 点神智' }
+        ]
+      },
+      {
+        id: 'spider',
+        name: '巨蛛',
+        en: 'Spider',
+        category: 'PHYSICAL',
+        desc: 'A hairy spider the size of a dinner plate drops onto your shoulder! Make a Speed roll: 4+ You dodge swiftly. 1-3 It bites your arm (Lose 1 Might). 0 Venom courses through you (Lose 2 Might).',
+        canonical: true,
+        check: 'speed',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'might', amount: -1 }], text: '1-3：失去 1 点力量' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'might', amount: -2 }], text: '0：失去 2 点力量' }
+        ]
+      },
+      {
+        id: 'angry_being',
+        name: '愤怒的灵体',
+        en: 'Angry Being',
+        category: 'SANITY',
+        desc: 'A furious specter bellows in rage, chilling you to the bone! Make a Sanity roll: 4+ You endure the roar. 1-3 Chilled to the soul (Lose 1 Sanity). 0 Paralyzing dread (Lose 2 Sanity).',
+        canonical: true,
+        check: 'sanity',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }], text: '1-3：失去 1 点神智' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -2 }], text: '0：失去 2 点神智' }
+        ]
+      },
+      {
+        id: 'hideous_shriek',
+        name: '骇人尖啸',
+        en: 'Hideous Shriek',
+        category: 'SANITY',
+        desc: 'An ear-splitting shriek pierces the dark corridors! Make a Sanity roll: 4+ You cover your ears in time. 1-3 Piercing ringing (Lose 1 Sanity). 0 Eardrums burst (Lose 2 Sanity).',
+        canonical: true,
+        check: 'sanity',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }], text: '1-3：失去 1 点神智' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -2 }], text: '0：失去 2 点神智' }
+        ]
+      },
+      {
+        id: 'something_hidden',
+        name: '暗藏之物',
+        en: 'Something Hidden',
+        category: 'KNOWLEDGE',
+        desc: 'You notice a secret hollow in the paneling containing ancient research! Make a Knowledge roll: 4+ Ancient occult treatise (Gain 2 Knowledge). 1-3 Useful blueprints (Gain 1 Knowledge). 0 The text has rotted away.',
+        canonical: true,
+        check: 'knowledge',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'TRAIT', trait: 'knowledge', amount: 2 }], text: '4-8：获得 2 点知识' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'knowledge', amount: 1 }], text: '1-3：获得 1 点知识' },
+          { min: 0, max: 0, effects: [{ kind: 'NOTHING' }], text: '0：无事发生' }
+        ]
+      },
+      {
+        id: 'disquieting_sounds',
+        name: '不安的声响',
+        en: 'Disquieting Sounds',
+        category: 'SANITY',
+        desc: 'Wet footsteps shuffle behind you! Make a Sanity roll: 4+ You master your fears (Gain 1 Sanity). 1-3 Creeping paranoia (Lose 1 Sanity). 0 Total panic (Lose 2 Sanity).',
+        canonical: true,
+        check: 'sanity',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: 1 }], text: '4-8：获得 1 点神智' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }], text: '1-3：失去 1 点神智' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -2 }], text: '0：失去 2 点神智' }
+        ]
+      },
+      {
+        id: 'image_in_mirror',
+        name: '镜中影像',
+        en: 'Image in the Mirror',
+        category: 'SANITY',
+        desc: 'Your reflection turns and laughs cruelly before decaying into dust! Make a Sanity roll: 4+ You recognize the trick. 1-3 Shaken (Lose 1 Sanity). 0 Broken psyche (Lose 2 Sanity).',
+        canonical: true,
+        check: 'sanity',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }], text: '1-3：失去 1 点神智' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -2 }], text: '0：失去 2 点神智' }
+        ]
+      },
+      {
+        id: 'groundskeeper',
+        name: '园丁',
+        en: 'Groundskeeper',
+        category: 'PHYSICAL',
+        desc: 'A hulking phantom in muddy overalls strikes with a rusty shovel! Make a Might roll: 4+ You deflect the shovel (Gain 1 Might). 1-3 A glancing blow (Lose 1 Might). 0 Heavy blow (Lose 2 Might).',
+        canonical: true,
+        check: 'might',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'TRAIT', trait: 'might', amount: 1 }], text: '4-8：获得 1 点力量' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'might', amount: -1 }], text: '1-3：失去 1 点力量' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'might', amount: -2 }], text: '0：失去 2 点力量' }
+        ]
+      },
+      {
+        id: 'mist_from_walls',
+        name: '墙中之雾',
+        en: 'Mist from the Walls',
+        category: 'SANITY',
+        desc: 'Freezing mist seeps through cracks, numbing your legs! Make a Sanity roll: 4+ You hold your breath. 1-3 Shivering cold (Lose 1 Speed). 0 Frostbite (Lose 2 Speed).',
+        canonical: true,
+        check: 'sanity',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'speed', amount: -1 }], text: '1-3：失去 1 点速度' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'speed', amount: -2 }], text: '0：失去 2 点速度' }
+        ]
+      },
+      {
+        id: 'phone_call',
+        name: '电话',
+        en: 'Phone Call',
+        category: 'SANITY',
+        desc: 'An antique rotary phone rings. A dead loved one whispers your name! Make a Sanity roll: 4+ A loving message calms you (Gain 1 Sanity). 1-3 Chilling sobs (Lose 1 Sanity). 0 A prophecy of doom (Lose 2 Sanity).',
+        canonical: true,
+        check: 'sanity',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: 1 }], text: '4-8：获得 1 点神智' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }], text: '1-3：失去 1 点神智' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -2 }], text: '0：失去 2 点神智' }
+        ]
+      },
+      {
+        id: 'rotten',
+        name: '腐坏',
+        en: 'Rotten',
+        category: 'PHYSICAL',
+        desc: 'Foul fungal stench fills the room! Make a Might roll: 4+ You fight off nausea. 1-3 You retch violently (Lose 1 Might). 0 Choking spores (Lose 2 Might).',
+        canonical: true,
+        check: 'might',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'might', amount: -1 }], text: '1-3：失去 1 点力量' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'might', amount: -2 }], text: '0：失去 2 点力量' }
+        ]
+      },
+      {
+        id: 'the_walls',
+        name: '墙壁',
+        en: 'The Walls',
+        category: 'SANITY',
+        desc: 'Blood begins weeping from the plaster seams! Make a Sanity roll: 4+ You ignore the gore. 1-3 Sickened (Lose 1 Sanity). 0 Hysterical horror (Lose 2 Sanity).',
+        canonical: true,
+        check: 'sanity',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }], text: '1-3：失去 1 点神智' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -2 }], text: '0：失去 2 点神智' }
+        ]
+      },
+      {
+        id: 'hanged_men',
+        name: '吊死者',
+        en: 'Hanged Men',
+        category: 'SANITY',
+        desc: 'Gallows ropes swing from the ceiling with shadowy figures! Make a Sanity roll: 4+ You remain steady. 1-3 Shudder in dread (Lose 1 Sanity). 0 Terrifying hallucination (Lose 2 Sanity).',
+        canonical: true,
+        check: 'sanity',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }], text: '1-3：失去 1 点神智' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'sanity', amount: -2 }], text: '0：失去 2 点神智' }
+        ]
+      },
+      {
+        id: 'closet_door',
+        name: '橱柜门',
+        en: 'Closet Door',
+        category: 'KNOWLEDGE',
+        desc: 'A cupboard door swings open, revealing a stash of old medical supplies! Make a Knowledge roll: 4+ Pristine apothecary restoratives (Gain 1 Might, Gain 1 Speed). 1-3 Clean bandages and salves (Gain 1 Might). 0 Empty jars.',
+        canonical: true,
+        check: 'knowledge',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'TRAIT', trait: 'might', amount: 1 }, { kind: 'TRAIT', trait: 'speed', amount: 1 }], text: '4-8：获得 1 点力量，获得 1 点速度' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'might', amount: 1 }], text: '1-3：获得 1 点力量' },
+          { min: 0, max: 0, effects: [{ kind: 'NOTHING' }], text: '0：无事发生' }
+        ]
+      },
+      {
+        id: 'night_view',
+        name: '夜景',
+        en: 'Night View',
+        category: 'SANITY',
+        desc: 'A window reveals the majestic moonlit estate, calming your racing heart. Gain 1 Sanity.',
+        canonical: true,
+        bands: [{ min: 0, max: 8, effects: [], text: '无事发生' }]
+      },
+      {
+        id: 'ground_tremors',
+        name: '地面震动',
+        en: 'Ground Tremors',
+        category: 'PHYSICAL',
+        desc: 'The foundations shake violently as if something massive is stirring beneath! Make a Speed roll: 4+ You keep your footing. 1-3 You stumble hard (Lose 1 Speed). 0 You crash violently to the floor (Lose 2 Speed).',
+        canonical: true,
+        check: 'speed',
+        bands: [
+          { min: 4, max: 8, effects: [{ kind: 'NOTHING' }], text: '4-8：无事发生' },
+          { min: 1, max: 3, effects: [{ kind: 'TRAIT', trait: 'speed', amount: -1 }], text: '1-3：失去 1 点速度' },
+          { min: 0, max: 0, effects: [{ kind: 'TRAIT', trait: 'speed', amount: -2 }], text: '0：失去 2 点速度' }
+        ]
+      },
     ] as EventDef[]
   ).map(def => [def.id, def])
 );

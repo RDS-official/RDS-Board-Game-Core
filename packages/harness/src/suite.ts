@@ -1646,7 +1646,7 @@ test('fixture betrayal: content tables and starting position', () => {
   assertEqual(ROOM_DECK_IDS.length, 39, '39 tiles remain in the room deck');
   assertEqual(Object.keys(OMEN_DEFS).length, 13, '13 omens');
   assertEqual(Object.keys(ITEM_DEFS).length, 22, '22 items, matching the official 2E deck');
-  assertEqual(Object.keys(EVENT_DEFS).length, 10, '10 events (the 5 official ones plus the 5 curse carriers)');
+  assertEqual(Object.keys(EVENT_DEFS).length, 30, '30 events: 25 official plus 5 curse carriers');
   assertEqual(
     Object.values(ROOM_DEFS).filter(room => !room.symbol).length,
     15,
@@ -1654,7 +1654,7 @@ test('fixture betrayal: content tables and starting position', () => {
   );
 
   assertEqual(Object.keys(state.mapGraph.nodes).length, 5, 'five starting rooms on the table');
-  assertEqual(state.zones.zone_event_deck.orderedEntities.length, 10, 'event deck built');
+  assertEqual(state.zones.zone_event_deck.orderedEntities.length, 30, 'event deck built');
   assertEqual(state.zones.zone_item_deck.orderedEntities.length, 22, 'item deck built');
   assertEqual(state.zones.zone_omen_deck.orderedEntities.length, 13, 'omen deck built');
   assertEqual(state.zones.zone_room_deck.orderedEntities.length, 39, 'room tile deck built');
