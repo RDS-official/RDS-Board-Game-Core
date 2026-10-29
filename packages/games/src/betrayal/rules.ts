@@ -1714,14 +1714,6 @@ export class BetrayalRules {
         trace(ctx, 'ANNOUNCEMENT', `${player.name} 是叛徒，不屑于抽事件牌`, 300);
         return;
       }
-      if (ownsDef(state, pid, 'candle')) {
-        const candle = rollZeroDice(state.prngState, 1);
-        state.prngState = candle.nextSeed;
-        if (candle.sum === 2) {
-          trace(ctx, 'CARD_DRAW', `🕯️ 蜡烛让事件退散（掷出 2）`, 500);
-          return;
-        }
-      }
       this.drawEvent(state, pid, roomId, ctx);
       return;
     }
@@ -2048,21 +2040,10 @@ export class BetrayalRules {
         break;
       }
       case 'bell': {
-        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: 'bell', label: '铃铛' });
-        if (check.success) {
-          const monsters = monstersInRoom(state, roomId);
-          for (const monster of monsters) {
-            const options = state.mapGraph.nodes[roomId]?.neighbors ?? [];
-            if (options.length > 0) {
-              const roll = DeterministicPRNG.nextInt(state.prngState, 0, options.length - 1);
-              state.prngState = roll.nextSeed;
-              moveMonster(state, monster.id, options[roll.value]);
-            }
-          }
-          trace(ctx, 'MOVE_OBJECT', `🔔 法铃驱使 ${monsters.length} 只怪物离开房间`, 500);
-        } else {
-          trace(ctx, 'ANNOUNCEMENT', '法铃没有回应', 300);
-        }
+        // Official: "Ring the brass bell once per turn to calm your nerves and gain
+        // 1 Sanity." The old version rolled Sanity 5+ to shove monsters around.
+        applyTraitSteps(state, pid, 'sanity', 1, { force: true });
+        trace(ctx, 'ANNOUNCEMENT', `${player.name} 摇响法铃，神智 +1`, 350);
         markUsed(state, pid, defId);
         break;
       }

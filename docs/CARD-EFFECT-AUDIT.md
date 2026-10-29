@@ -543,3 +543,19 @@
 | workshop 工坊 | 自制 | 无特殊机制 |
 
 删除前 5 项（除 observatory 外）是纯内容清理；**observatory 需要先决定是否保留升降梯机制**。
+
+## 修复记录（第五批：钟 / 蜡烛）
+
+| 卡 | 官方文本 | 原实现 | 现在 |
+| --- | --- | --- | --- |
+| **bell** 黄铜法铃 | 「Ring the brass bell once per turn to calm your nerves and **gain 1 Sanity**.」 | 神智 5+ 才成功，且成功后**驱使同房间怪物移动** | ✅ 每回合一次，直接 +1 神智 |
+| **candle** 蜡烛 | 「A beeswax candle whose flame reveals hidden secrets (**+1 Knowledge, +1 Sanity**).」 | 进入事件房间时掷 1 骰、掷出 2 则**忽略事件** | ✅ 改为获得时 +1 知识 +1 神智；虚构的事件忽略钩子已从 `enterRoom` 移除 |
+
+### 仍待决定：lucky_stone / rabbits_foot
+
+| 卡 | 官方文本 | 本仓库 |
+| --- | --- | --- |
+| **lucky_stone** | 「(+1 Speed, +1 Sanity)」—— 被动 | 「每回合一次，任何投骰结果 +1」 |
+| **rabbits_foot** | 「(+1 Speed on draw)」—— 被动 | 「检定不理想时可重掷任意 1 颗骰子」 |
+
+这两件的**重掷机制是本仓库自创的**，并非官方。但它是整套「幸运物品重掷」系统的核心，牵动 `rollTraitCheck`、两阶段检定窗口与多条测试。对齐官方意味着**移除重掷玩法**，属于设计层面的取舍，需确认后再动。
