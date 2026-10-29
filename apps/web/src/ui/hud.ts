@@ -680,11 +680,12 @@ export class BoardGameHUD {
       this.container.appendChild(layer);
     }
 
+    // Ink is the *light* text on the dark plate; ribbon is the dark category band.
     const palette: Record<string, { ink: string; ribbon: string; label: string; seal: string }> = {
-      OMEN: { ink: '#5c1424', ribbon: '#7d1b2c', label: '预兆 · OMEN', seal: '👁' },
-      ITEM: { ink: '#3f2a12', ribbon: '#7a5a22', label: '遗物 · ITEM', seal: '◆' },
-      EVENT: { ink: '#1e2730', ribbon: '#33414f', label: '事件 · EVENT', seal: '✦' },
-      ROOM: { ink: '#2d2118', ribbon: '#5a4326', label: '房间 · ROOM', seal: '⌂' }
+      OMEN: { ink: '#f2cfd8', ribbon: '#4a1020', label: '预兆 · OMEN', seal: '👁' },
+      ITEM: { ink: '#f0dfc2', ribbon: '#3f2c12', label: '遗物 · ITEM', seal: '◆' },
+      EVENT: { ink: '#dbe6f2', ribbon: '#1d2733', label: '事件 · EVENT', seal: '✦' },
+      ROOM: { ink: '#efdfc6', ribbon: '#33261a', label: '房间 · ROOM', seal: '⌂' }
     };
     const theme = palette[card.kind] ?? palette.ITEM;
 
