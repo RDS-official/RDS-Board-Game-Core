@@ -4171,3 +4171,24 @@ test('rules: riding to another floor moves the elevator tile to that floor', () 
     'the rider is inside the car'
   );
 });
+
+test('rules: room floor lists are well formed', () => {
+  // A tile may name several floors (drawing filters on `floors ?? [floor]`), but
+  // the list must always contain the tile's own base floor and never be empty.
+  for (const def of Object.values(ROOM_DEFS)) {
+    if (!def.floors) continue;
+    assert(def.floors.length > 0, `${def.id} declares an empty floor list`);
+    assert(
+      def.floors.includes(def.floor),
+      `${def.id} floor list omits its base floor ${def.floor}`
+    );
+  }
+
+  // The once-per-game trait rooms are Gymnasium/Library/Chapel/Larder; the
+  // kitchen has no such bonus.
+  assertEqual(String(ROOM_DEFS.gymnasium.endTurnBuff), 'speed', 'gymnasium buffs Speed');
+  assertEqual(String(ROOM_DEFS.library.endTurnBuff), 'knowledge', 'library buffs Knowledge');
+  assertEqual(String(ROOM_DEFS.chapel.endTurnBuff), 'sanity', 'chapel buffs Sanity');
+  assertEqual(String(ROOM_DEFS.larder.endTurnBuff), 'might', 'larder buffs Might');
+  assertEqual(ROOM_DEFS.kitchen.endTurnBuff, undefined, 'kitchen grants no trait');
+});

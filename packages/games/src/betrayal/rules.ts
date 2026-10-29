@@ -1505,20 +1505,23 @@ export class BetrayalRules {
     const special = room.props?.special as string | null;
     const tags = roomTags(state, roomId);
 
-    if (!traitor) {
-      if (special === 'COAL_CHUTE') {
-        const hasRope = ownsDef(state, pid, 'rope');
-        if (!hasRope) {
-          damagePlayer(state, pid, 'PHYSICAL', 1);
-          trace(ctx, 'DAMAGE_EFFECT', `${player.name} 从煤槽滑下擦伤（1 点物理伤害）`, 500);
-        } else {
-          trace(ctx, 'ANNOUNCEMENT', `${player.name} 借助绳索安全滑落煤槽`, 500);
-        }
-        if (state.mapGraph.nodes.room_basement_landing) {
-          movePlayerTo(state, pid, 'room_basement_landing');
-          trace(ctx, 'MOVE_OBJECT', `${player.name} 滑落至地下平台`, 500);
-        }
+    // Rulebook, Special Rooms: "The Chute affects Traitors and monsters." This
+    // used to sit behind `if (!traitor)`, so a traitor slid through untouched.
+    if (special === 'COAL_CHUTE') {
+      const hasRope = ownsDef(state, pid, 'rope');
+      if (!hasRope) {
+        damagePlayer(state, pid, 'PHYSICAL', 1);
+        trace(ctx, 'DAMAGE_EFFECT', `${player.name} 从煤槽滑下擦伤（1 点物理伤害）`, 500);
+      } else {
+        trace(ctx, 'ANNOUNCEMENT', `${player.name} 借助绳索安全滑落煤槽`, 500);
       }
+      if (state.mapGraph.nodes.room_basement_landing) {
+        movePlayerTo(state, pid, 'room_basement_landing');
+        trace(ctx, 'MOVE_OBJECT', `${player.name} 滑落至地下平台`, 500);
+      }
+    }
+
+    if (!traitor) {
       if (special === 'COLLAPSED') {
         const check = rollTraitCheck(state, pid, 'speed', {
           threshold: 5,
