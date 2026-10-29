@@ -4221,3 +4221,33 @@ test('rules: the same check cannot be attempted twice in one turn', () => {
   after.players.p1.customProps.rolledThisTurn = [];
   assertEqual(vaultOffered(), true, 'a new turn may try again');
 });
+
+test('rules: leaving a room with an opponent costs an extra space for everyone', () => {
+  // Rulebook, Moving Past Opponents: "for each opponent in a room with you, a
+  // Hero, monster or Traitor must use one extra space of movement to leave".
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'haunt_zombie' });
+  const raw = engine.getRawState();
+
+  const traitorId = Object.entries(raw.players).find(([, p]) => p.role === 'TRAITOR')?.[0];
+  assert(!!traitorId, 'the fixture has a traitor');
+  const heroId = Object.entries(raw.players).find(([id, p]) => id !== traitorId && p.alive)?.[0];
+  assert(!!heroId, 'the fixture has a living hero');
+
+  const room = String(raw.players[heroId!].customProps.currentRoomId);
+  movePlayerTo(raw, traitorId!, room);
+
+  assertEqual(hostilesInRoom(raw, heroId!, room), 1, 'the hero counts the traitor as an opponent');
+  assertEqual(movementCost(raw, heroId!, room), 2, 'the hero pays two spaces to leave');
+
+  assertEqual(hostilesInRoom(raw, traitorId!, room), 1, 'the traitor counts the hero as an opponent');
+  assertEqual(movementCost(raw, traitorId!, room), 2, 'the traitor also pays two spaces to leave');
+
+  // Standing with its own monsters is not an opponent for the traitor.
+  const elsewhere = Object.values(raw.mapGraph.nodes).find(
+    n => n.type === 'ROOM' && n.id !== room && String(n.props?.floor) === String(raw.mapGraph.nodes[room]?.props?.floor)
+  );
+  assert(!!elsewhere, 'another room on the same floor exists');
+  movePlayerTo(raw, traitorId!, elsewhere!.id);
+  assertEqual(hostilesInRoom(raw, traitorId!, elsewhere!.id), 0, 'no hero there, no penalty');
+  assertEqual(movementCost(raw, traitorId!, elsewhere!.id), 1, 'the traitor moves freely alone');
+});

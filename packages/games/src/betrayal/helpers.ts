@@ -1097,29 +1097,45 @@ export function movePlayerTo(state: GameState, playerId: PlayerId, roomId: strin
   player.customProps.floor = room.props.floor;
 }
 
+/**
+ * Opponents sharing the room, used for the movement penalty.
+ *
+ * Rulebook, Moving Past Opponents: "for each opponent in a room with you, a Hero,
+ * monster or Traitor must use one extra space of movement to leave that room.
+ * Stunned monsters don't slow an explorer's move in this way."
+ *
+ * A hero's opponents are the traitor plus unstunned monsters. The traitor's
+ * opponents are the heroes - the monsters are its allies, and counting them (as
+ * this used to) made the traitor pay for standing next to its own minions.
+ */
 export function hostilesInRoom(state: GameState, playerId: PlayerId, roomId: string): number {
   const player = state.players[playerId];
   if (!player) return 0;
   const haunt = !!state.globalVars.hauntTriggered;
   if (!haunt) return 0;
 
-  const isHero = player.role !== 'TRAITOR';
   let count = 0;
+  const others = Object.entries(state.players).filter(([id]) => id !== playerId);
+
+  if (player.role === 'TRAITOR') {
+    for (const [, other] of others) {
+      if (!other.alive || other.role === 'TRAITOR' || other.customProps.banished) continue;
+      if (other.customProps.currentRoomId === roomId) count += 1;
+    }
+    return count;
+  }
 
   for (const monster of monstersInRoom(state, roomId)) {
     if (!monster.components.custom?.stunned) count += 1;
   }
-
-  if (isHero) {
-    const traitor = Object.values(state.players).find(other => other.role === 'TRAITOR' && other.alive);
-    if (traitor && !traitor.customProps.banished && traitor.customProps.currentRoomId === roomId) count += 1;
-  }
+  const traitor = others.find(([, other]) => other.role === 'TRAITOR' && other.alive)?.[1];
+  if (traitor && !traitor.customProps.banished && traitor.customProps.currentRoomId === roomId) count += 1;
   return count;
 }
 
 export function movementCost(state: GameState, playerId: PlayerId, fromRoomId: string): number {
   const player = state.players[playerId];
-  if (!player || player.role === 'TRAITOR') return 1;
+  if (!player) return 1;
   return 1 + hostilesInRoom(state, playerId, fromRoomId);
 }
 

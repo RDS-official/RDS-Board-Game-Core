@@ -167,17 +167,17 @@
 - **测试**：`rules: the same check cannot be attempted twice in one turn`
 - **遗留**：其它可选检定（如谜盒）若有独立入口，后续接入同一门控。
 
-### G-2 叛徒离开有对手的房间不付额外移动力 ★ 已核实
+### G-2 叛徒离开有对手的房间不付额外移动力 ✅ **已修复**
 
 - **官方原文**：「After the Haunt starts, for each opponent in a room with you, a **Hero, monster or Traitor** must use one extra space of movement to leave that room.」
 - **实现**：`helpers.ts:1117` `if (!player || player.role === 'TRAITOR') return 1;` —— 叛徒恒定 1 步。
-- **修法**：移除叛徒豁免。
+- **修法（已实施）**：移除 `movementCost` 的叛徒豁免；英雄与叛徒都按对手数加价。
 
-### G-3 叛徒的「对手」统计错成自己人 ★ 已核实
+### G-3 叛徒的「对手」统计错成自己人 ✅ **已修复**
 
 - **实现**：`hostilesInRoom`（`helpers.ts:1108`）只在 `isHero` 时统计叛徒；对叛徒本人**只统计怪物**，而怪物是叛徒的盟友。
 - **正确语义**：叛徒的对手是英雄；英雄的对手是叛徒 + 怪物。
-- **修法**：按角色分派统计对象。
+- **修法（已实施）**：按角色分派 —— 叛徒统计房间内**英雄**，英雄统计叛徒 + 未昏迷怪物。测试同时覆盖「叛徒独处时无加价」。
 
 ### G-4 叛徒不能选择不受事件卡影响 ★ 已核实
 
