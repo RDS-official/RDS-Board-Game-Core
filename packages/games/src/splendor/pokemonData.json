@@ -14,6 +14,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "火恐龙",
    "evoCost": {
     "color": "yellow",
     "count": 3
@@ -34,6 +35,7 @@
     "yellow": 4,
     "purple": 0
    },
+   "evolvesTo": "妙蛙草",
    "evoCost": {
     "color": "pink",
     "count": 3
@@ -54,6 +56,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "火恐龙",
    "evoCost": {
     "color": "yellow",
     "count": 3
@@ -74,6 +77,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "口呆花",
    "evoCost": {
     "color": "pink",
     "count": 2
@@ -94,6 +98,7 @@
     "yellow": 1,
     "purple": 0
    },
+   "evolvesTo": "铁甲蛹",
    "evoCost": {
     "color": "blue",
     "count": 3
@@ -114,6 +119,7 @@
     "yellow": 3,
     "purple": 0
    },
+   "evolvesTo": "哈克龙",
    "evoCost": {
     "color": "blue",
     "count": 3
@@ -134,6 +140,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "卡咪龟",
    "evoCost": {
     "color": "black",
     "count": 3
@@ -154,6 +161,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "尼多娜",
    "evoCost": {
     "color": "blue",
     "count": 2
@@ -174,6 +182,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "哈克龙",
    "evoCost": {
     "color": "blue",
     "count": 3
@@ -194,6 +203,7 @@
     "yellow": 3,
     "purple": 0
    },
+   "evolvesTo": "口呆花",
    "evoCost": {
     "color": "pink",
     "count": 2
@@ -214,6 +224,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "鬼斯通",
    "evoCost": {
     "color": "black",
     "count": 3
@@ -234,6 +245,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": "比比鸟",
    "evoCost": {
     "color": "red",
     "count": 2
@@ -254,6 +266,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "妙蛙草",
    "evoCost": {
     "color": "pink",
     "count": 3
@@ -274,6 +287,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": "勇基拉",
    "evoCost": {
     "color": "red",
     "count": 3
@@ -294,6 +308,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "臭臭花",
    "evoCost": {
     "color": "yellow",
     "count": 2
@@ -314,6 +329,7 @@
     "yellow": 1,
     "purple": 0
    },
+   "evolvesTo": "豪力",
    "evoCost": {
     "color": "yellow",
     "count": 3
@@ -334,6 +350,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "鬼斯通",
    "evoCost": {
     "color": "black",
     "count": 3
@@ -354,6 +371,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": "臭臭花",
    "evoCost": {
     "color": "yellow",
     "count": 2
@@ -374,6 +392,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "尼多娜",
    "evoCost": {
     "color": "blue",
     "count": 2
@@ -394,6 +413,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "勇基拉",
    "evoCost": {
     "color": "red",
     "count": 3
@@ -414,6 +434,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "蚊香君",
    "evoCost": {
     "color": "black",
     "count": 2
@@ -434,6 +455,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "口呆花",
    "evoCost": {
     "color": "pink",
     "count": 2
@@ -454,6 +476,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "蚊香君",
    "evoCost": {
     "color": "black",
     "count": 2
@@ -474,6 +497,7 @@
     "yellow": 1,
     "purple": 0
    },
+   "evolvesTo": "铁壳蛹",
    "evoCost": {
     "color": "red",
     "count": 3
@@ -494,6 +518,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": "豪力",
    "evoCost": {
     "color": "yellow",
     "count": 3
@@ -514,6 +539,7 @@
     "yellow": 1,
     "purple": 0
    },
+   "evolvesTo": "铁甲蛹",
    "evoCost": {
     "color": "blue",
     "count": 3
@@ -534,6 +560,7 @@
     "yellow": 1,
     "purple": 0
    },
+   "evolvesTo": "隆隆石",
    "evoCost": {
     "color": "pink",
     "count": 3
@@ -554,6 +581,7 @@
     "yellow": 1,
     "purple": 0
    },
+   "evolvesTo": "隆隆石",
    "evoCost": {
     "color": "pink",
     "count": 3
@@ -574,6 +602,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": "尼多娜",
    "evoCost": {
     "color": "blue",
     "count": 2
@@ -594,6 +623,7 @@
     "yellow": 1,
     "purple": 0
    },
+   "evolvesTo": "蚊香君",
    "evoCost": {
     "color": "black",
     "count": 2
@@ -614,6 +644,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "铁壳蛹",
    "evoCost": {
     "color": "red",
     "count": 3
@@ -634,6 +665,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "卡咪龟",
    "evoCost": {
     "color": "black",
     "count": 3
@@ -654,6 +686,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "比比鸟",
    "evoCost": {
     "color": "red",
     "count": 2
@@ -674,6 +707,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "比比鸟",
    "evoCost": {
     "color": "red",
     "count": 2
@@ -694,6 +728,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "臭臭花",
    "evoCost": {
     "color": "yellow",
     "count": 2
@@ -714,6 +749,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": "隆隆岩",
    "evoCost": {
     "color": "black",
     "count": 3
@@ -734,6 +770,7 @@
     "yellow": 4,
     "purple": 0
    },
+   "evolvesTo": "怪力",
    "evoCost": {
     "color": "blue",
     "count": 3
@@ -754,6 +791,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": "大食花",
    "evoCost": {
     "color": "pink",
     "count": 4
@@ -774,6 +812,7 @@
     "yellow": 6,
     "purple": 0
    },
+   "evolvesTo": "妙蛙花",
    "evoCost": {
     "color": "blue",
     "count": 4
@@ -794,6 +833,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": "大比鸟",
    "evoCost": {
     "color": "red",
     "count": 4
@@ -814,6 +854,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "怪力",
    "evoCost": {
     "color": "blue",
     "count": 3
@@ -834,6 +875,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "尼多后",
    "evoCost": {
     "color": "blue",
     "count": 4
@@ -854,6 +896,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": "蚊香泳士",
    "evoCost": {
     "color": "black",
     "count": 4
@@ -874,6 +917,7 @@
     "yellow": 1,
     "purple": 0
    },
+   "evolvesTo": "巴大蝶",
    "evoCost": {
     "color": "yellow",
     "count": 3
@@ -894,6 +938,7 @@
     "yellow": 3,
     "purple": 0
    },
+   "evolvesTo": "尼多后",
    "evoCost": {
     "color": "blue",
     "count": 4
@@ -914,6 +959,7 @@
     "yellow": 4,
     "purple": 0
    },
+   "evolvesTo": "胡地",
    "evoCost": {
     "color": "black",
     "count": 4
@@ -934,6 +980,7 @@
     "yellow": 4,
     "purple": 0
    },
+   "evolvesTo": "喷火龙",
    "evoCost": {
     "color": "red",
     "count": 4
@@ -954,6 +1001,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": "大针蜂",
    "evoCost": {
     "color": "pink",
     "count": 3
@@ -974,6 +1022,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "大比鸟",
    "evoCost": {
     "color": "red",
     "count": 4
@@ -994,6 +1043,7 @@
     "yellow": 5,
     "purple": 0
    },
+   "evolvesTo": "耿鬼",
    "evoCost": {
     "color": "red",
     "count": 3
@@ -1014,6 +1064,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "妙蛙花",
    "evoCost": {
     "color": "blue",
     "count": 4
@@ -1034,6 +1085,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "巴大蝶",
    "evoCost": {
     "color": "yellow",
     "count": 3
@@ -1054,6 +1106,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "霸王花",
    "evoCost": {
     "color": "yellow",
     "count": 4
@@ -1074,6 +1127,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "胡地",
    "evoCost": {
     "color": "black",
     "count": 4
@@ -1094,6 +1148,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "蚊香泳士",
    "evoCost": {
     "color": "black",
     "count": 4
@@ -1114,6 +1169,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "隆隆岩",
    "evoCost": {
     "color": "black",
     "count": 3
@@ -1134,6 +1190,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "耿鬼",
    "evoCost": {
     "color": "red",
     "count": 3
@@ -1154,6 +1211,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "喷火龙",
    "evoCost": {
     "color": "red",
     "count": 4
@@ -1174,6 +1232,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "大针蜂",
    "evoCost": {
     "color": "pink",
     "count": 3
@@ -1194,6 +1253,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "快龙",
    "evoCost": {
     "color": "yellow",
     "count": 4
@@ -1214,6 +1274,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "水箭龟",
    "evoCost": {
     "color": "pink",
     "count": 4
@@ -1234,6 +1295,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": "大食花",
    "evoCost": {
     "color": "pink",
     "count": 4
@@ -1254,6 +1316,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": "水箭龟",
    "evoCost": {
     "color": "pink",
     "count": 4
@@ -1274,6 +1337,7 @@
     "yellow": 3,
     "purple": 0
    },
+   "evolvesTo": "霸王花",
    "evoCost": {
     "color": "yellow",
     "count": 4
@@ -1294,6 +1358,7 @@
     "yellow": 1,
     "purple": 0
    },
+   "evolvesTo": "快龙",
    "evoCost": {
     "color": "yellow",
     "count": 4
@@ -1314,6 +1379,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_01.webp"
   },
@@ -1331,6 +1397,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_02.webp"
   },
@@ -1348,6 +1415,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_03.webp"
   },
@@ -1365,6 +1433,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_04.webp"
   },
@@ -1382,6 +1451,7 @@
     "yellow": 5,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_05.webp"
   },
@@ -1399,6 +1469,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_06.webp"
   },
@@ -1416,6 +1487,7 @@
     "yellow": 2,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_07.webp"
   },
@@ -1433,6 +1505,7 @@
     "yellow": 7,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_08.webp"
   },
@@ -1450,6 +1523,7 @@
     "yellow": 6,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_09.webp"
   },
@@ -1467,6 +1541,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_10.webp"
   },
@@ -1484,6 +1559,7 @@
     "yellow": 3,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_11.webp"
   },
@@ -1501,6 +1577,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_12.webp"
   },
@@ -1518,6 +1595,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_13.webp"
   },
@@ -1535,6 +1613,7 @@
     "yellow": 4,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_14.webp"
   },
@@ -1552,6 +1631,7 @@
     "yellow": 0,
     "purple": 0
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/s3_15.webp"
   },
@@ -1569,6 +1649,7 @@
     "yellow": 2,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/rr_01.webp"
   },
@@ -1586,6 +1667,7 @@
     "yellow": 0,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/rr_02.webp"
   },
@@ -1603,6 +1685,7 @@
     "yellow": 3,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/rr_03.webp"
   },
@@ -1620,6 +1703,7 @@
     "yellow": 0,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/rr_04.webp"
   },
@@ -1637,6 +1721,7 @@
     "yellow": 0,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/rr_05.webp"
   },
@@ -1654,6 +1739,7 @@
     "yellow": 0,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/rr_06.webp"
   },
@@ -1671,6 +1757,7 @@
     "yellow": 3,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/rr_07.webp"
   },
@@ -1688,6 +1775,7 @@
     "yellow": 0,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/rr_08.webp"
   },
@@ -1705,6 +1793,7 @@
     "yellow": 2,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/rr_09.webp"
   },
@@ -1722,6 +1811,7 @@
     "yellow": 0,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/rr_10.webp"
   },
@@ -1739,6 +1829,7 @@
     "yellow": 0,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/lg_01.webp"
   },
@@ -1756,6 +1847,7 @@
     "yellow": 0,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/lg_02.webp"
   },
@@ -1773,6 +1865,7 @@
     "yellow": 3,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/lg_03.webp"
   },
@@ -1790,6 +1883,7 @@
     "yellow": 3,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/lg_04.webp"
   },
@@ -1807,6 +1901,7 @@
     "yellow": 3,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/lg_05.webp"
   },
@@ -1824,6 +1919,7 @@
     "yellow": 3,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/lg_06.webp"
   },
@@ -1841,6 +1937,7 @@
     "yellow": 0,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/lg_07.webp"
   },
@@ -1858,6 +1955,7 @@
     "yellow": 3,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/lg_08.webp"
   },
@@ -1875,6 +1973,7 @@
     "yellow": 0,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/lg_09.webp"
   },
@@ -1892,6 +1991,7 @@
     "yellow": 3,
     "purple": 1
    },
+   "evolvesTo": null,
    "evoCost": null,
    "img": "/pokemon/cards/lg_10.webp"
   }
@@ -2084,6 +2184,10 @@
     "yellow": 1,
     "purple": 0
    },
+   "effect": "free",
+   "effectParam": {
+    "freeFromTier": "pmL2_or_stage2"
+   },
    "img": "/pokemon/cards/pm_01.webp"
   },
   {
@@ -2100,6 +2204,10 @@
     "pink": 3,
     "yellow": 0,
     "purple": 0
+   },
+   "effect": "free",
+   "effectParam": {
+    "freeFromTier": "pmL2_or_stage2"
    },
    "img": "/pokemon/cards/pm_02.webp"
   },
@@ -2118,6 +2226,10 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "free",
+   "effectParam": {
+    "freeFromTier": "pmL2_or_stage2"
+   },
    "img": "/pokemon/cards/pm_03.webp"
   },
   {
@@ -2134,6 +2246,10 @@
     "pink": 0,
     "yellow": 3,
     "purple": 0
+   },
+   "effect": "free",
+   "effectParam": {
+    "freeFromTier": "pmL2_or_stage2"
    },
    "img": "/pokemon/cards/pm_04.webp"
   },
@@ -2152,6 +2268,10 @@
     "yellow": 6,
     "purple": 0
    },
+   "effect": "free",
+   "effectParam": {
+    "freeFromTier": "pmL2_or_stage2"
+   },
    "img": "/pokemon/cards/pm_05.webp"
   },
   {
@@ -2169,6 +2289,8 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "colorless_master",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_06.webp"
   },
   {
@@ -2186,6 +2308,8 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "colorless_master",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_07.webp"
   },
   {
@@ -2203,6 +2327,8 @@
     "yellow": 3,
     "purple": 0
    },
+   "effect": "colorless_master",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_08.webp"
   },
   {
@@ -2220,6 +2346,8 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "colorless_master",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_09.webp"
   },
   {
@@ -2237,6 +2365,8 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "colorless_master",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_10.webp"
   },
   {
@@ -2254,6 +2384,8 @@
     "yellow": 4,
     "purple": 0
    },
+   "effect": "double",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_11.webp"
   },
   {
@@ -2271,6 +2403,8 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "double",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_12.webp"
   },
   {
@@ -2288,6 +2422,8 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "double",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_13.webp"
   },
   {
@@ -2305,6 +2441,8 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "double",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_14.webp"
   },
   {
@@ -2322,6 +2460,8 @@
     "yellow": 3,
     "purple": 0
    },
+   "effect": "double",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_15.webp"
   },
   {
@@ -2338,6 +2478,10 @@
     "pink": 4,
     "yellow": 0,
     "purple": 0
+   },
+   "effect": "copy_free",
+   "effectParam": {
+    "freeFromTier": "pmL1_or_stage1"
    },
    "img": "/pokemon/cards/pm_16.webp"
   },
@@ -2356,6 +2500,10 @@
     "yellow": 4,
     "purple": 0
    },
+   "effect": "copy_free",
+   "effectParam": {
+    "freeFromTier": "pmL1_or_stage1"
+   },
    "img": "/pokemon/cards/pm_17.webp"
   },
   {
@@ -2372,6 +2520,10 @@
     "pink": 0,
     "yellow": 0,
     "purple": 0
+   },
+   "effect": "copy_free",
+   "effectParam": {
+    "freeFromTier": "pmL1_or_stage1"
    },
    "img": "/pokemon/cards/pm_18.webp"
   },
@@ -2390,6 +2542,10 @@
     "yellow": 3,
     "purple": 0
    },
+   "effect": "copy_free",
+   "effectParam": {
+    "freeFromTier": "pmL1_or_stage1"
+   },
    "img": "/pokemon/cards/pm_19.webp"
   },
   {
@@ -2406,6 +2562,10 @@
     "pink": 0,
     "yellow": 1,
     "purple": 0
+   },
+   "effect": "copy_free",
+   "effectParam": {
+    "freeFromTier": "pmL1_or_stage1"
    },
    "img": "/pokemon/cards/pm_20.webp"
   },
@@ -2424,6 +2584,8 @@
     "yellow": 3,
     "purple": 0
    },
+   "effect": "copy",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_21.webp"
   },
   {
@@ -2441,6 +2603,8 @@
     "yellow": 2,
     "purple": 0
    },
+   "effect": "copy",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_22.webp"
   },
   {
@@ -2458,6 +2622,8 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "copy",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_23.webp"
   },
   {
@@ -2475,6 +2641,8 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "copy",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_24.webp"
   },
   {
@@ -2492,6 +2660,8 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "copy",
+   "effectParam": null,
    "img": "/pokemon/cards/pm_25.webp"
   },
   {
@@ -2508,6 +2678,11 @@
     "pink": 0,
     "yellow": 0,
     "purple": 0
+   },
+   "effect": "discard_buy",
+   "effectParam": {
+    "discardColor": "red",
+    "discardCount": 2
    },
    "img": "/pokemon/cards/pm_26.webp"
   },
@@ -2526,6 +2701,11 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "discard_buy",
+   "effectParam": {
+    "discardColor": "yellow",
+    "discardCount": 2
+   },
    "img": "/pokemon/cards/pm_27.webp"
   },
   {
@@ -2542,6 +2722,11 @@
     "pink": 0,
     "yellow": 0,
     "purple": 0
+   },
+   "effect": "discard_buy",
+   "effectParam": {
+    "discardColor": "pink",
+    "discardCount": 2
    },
    "img": "/pokemon/cards/pm_28.webp"
   },
@@ -2560,6 +2745,11 @@
     "yellow": 0,
     "purple": 0
    },
+   "effect": "discard_buy",
+   "effectParam": {
+    "discardColor": "black",
+    "discardCount": 2
+   },
    "img": "/pokemon/cards/pm_29.webp"
   },
   {
@@ -2576,6 +2766,11 @@
     "pink": 0,
     "yellow": 0,
     "purple": 0
+   },
+   "effect": "discard_buy",
+   "effectParam": {
+    "discardColor": "blue",
+    "discardCount": 2
    },
    "img": "/pokemon/cards/pm_30.webp"
   }
