@@ -777,7 +777,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         useKind: 'ADRENALINE'
       },
       {
-        id: 'amulet_of_ages',
+        id: 'amulet_of_the_ages',
         name: '千古护身符',
         en: 'Amulet of the Ages',
         desc: '持有期间四维全部 +1；失去时四维全部 -3。',
@@ -862,16 +862,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         usable: true,
         useKind: 'DARK_DICE'
       },
-      {
-        id: 'druidic_charm',
-        name: '德鲁伊护符',
-        en: 'Druidic Charm',
-        desc: '获得时速度 +1；对抗野兽、昆虫、植物类怪物时获得额外防御。',
-        kind: 'relic',
-        tradeable: true,
-        onGain: [{ trait: 'speed', amount: 1 }],
-        onLoss: [{ trait: 'speed', amount: -1 }]
-      },
+
       {
         id: 'dynamite',
         name: '雷管炸药',
@@ -931,14 +922,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         usable: true,
         useKind: 'MUSIC_BOX'
       },
-      {
-        id: 'pickaxe',
-        name: '铁镐',
-        en: 'Pickaxe',
-        desc: '力量攻击 +1 骰；可无检定开凿坍塌的门扉。',
-        kind: 'weapon',
-        tradeable: true
-      },
+
       {
         id: 'puzzle_box',
         name: '解谜机关盒',
@@ -982,14 +966,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         kind: 'weapon',
         tradeable: true
       },
-      {
-        id: 'skeleton_key',
-        name: '骷髅万能钥匙',
-        en: 'Skeleton Key',
-        desc: '无需投骰直接打开金库、保险箱与山庄前门。',
-        kind: 'tool',
-        tradeable: true
-      },
+
       {
         id: 'smelling_salts',
         name: '刺激嗅盐',
@@ -1154,20 +1131,6 @@ export const EVENT_DEFS: Record<string, EventDef> = Object.fromEntries(
         true
       ),
       sanityEvent(
-        'silence',
-        '死寂',
-        'Silence',
-        '整栋房子突然失去一切声音。神智低于 3 点者陷入恐慌。',
-        '你听见自己的心跳，世界重新有了声音。',
-        '死寂灌入耳中：失去 1 点神智并丢弃一件物品。',
-        [{ kind: 'NOTHING' }],
-        [
-          { kind: 'TRAIT', trait: 'sanity', amount: -1 },
-          { kind: 'DROP_ITEM' }
-        ],
-        true
-      ),
-      sanityEvent(
         'the_voice',
         '低语魔音',
         'The Voice',
@@ -1180,19 +1143,6 @@ export const EVENT_DEFS: Record<string, EventDef> = Object.fromEntries(
           { kind: 'TO_RANDOM_ROOM' }
         ],
         true
-      ),
-      physicalEvent(
-        'collapsed_floor',
-        '地板坍塌',
-        'Collapsed Floor',
-        '脚下朽木断裂！速度检定 5+ 跳至门边，否则坠入地下室。',
-        '你抓住门框，堪堪站稳。',
-        '你坠入地下室，受到 1 点物理伤害。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TO_BASEMENT', damage: 1 }],
-        true,
-        'speed',
-        5
       ),
       physicalEvent(
         'creepy_crawlies',
@@ -1208,32 +1158,6 @@ export const EVENT_DEFS: Record<string, EventDef> = Object.fromEntries(
         ],
         true
       ),
-      physicalEvent(
-        'walls_close_in',
-        '收缩之墙',
-        'The Walls Close In',
-        '两侧铁墙带着尖刺合拢。力量检定 6+ 撑开活板门。',
-        '你硬生生撑开一条生路。',
-        '铁墙挤压你的胸腔，受到 2 点物理伤害。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'ATTACK', dice: 3, trait: 'might', damage: 'PHYSICAL' }],
-        true,
-        'might',
-        6
-      ),
-      physicalEvent(
-        'revenant',
-        '还魂尸爪',
-        'Revenant',
-        '地板缝伸出腐烂手臂抓住脚踝。力量检定 4+ 挣脱。',
-        '你踢开腐手，后退一步。',
-        '腐手撕下你一块皮肉：力量 -1，本回合无法继续移动。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'might', amount: -1 }],
-        true,
-        'might',
-        4
-      ),
       knowledgeEvent(
         'locked_safe',
         '上锁的保险箱',
@@ -1245,51 +1169,6 @@ export const EVENT_DEFS: Record<string, EventDef> = Object.fromEntries(
         [{ kind: 'NOTHING' }],
         true
       ),
-      knowledgeEvent(
-        'mirror_mirror',
-        '魔镜',
-        'Mirror, Mirror',
-        '镜中倒影拥有截然不同的眼神。知识 5+ 看破幻象，知识 +1；大失败则精神失常。',
-        '你看穿倒影的谎言，+1 知识。',
-        '镜中恶灵攫住你的意识，失去 2 点神智。',
-        [{ kind: 'TRAIT', trait: 'knowledge', amount: 1 }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -2 }],
-        true
-      ),
-      knowledgeEvent(
-        'secret_passage',
-        '秘密暗道',
-        'Secret Passage',
-        '书架后藏着旋转石门。知识 4+ 可在当前房间与任意已探索房间之间建立永久捷径。',
-        '石门转动，一条暗道被打通。',
-        '你只摸到冰冷的砖墙。',
-        [{ kind: 'SECRET_PASSAGE' }],
-        [{ kind: 'NOTHING' }],
-        true,
-        4
-      ),
-      physicalEvent(
-        'mystic_slide',
-        '神秘滑道',
-        'Mystic Slide',
-        '地面倾斜成滑槽。速度检定 5+ 抓住边缘，否则滑入地下室。',
-        '你在坠落前抓住灯架。',
-        '你一路滑进地下室，受到 1 点物理伤害。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TO_BASEMENT', damage: 1 }],
-        true,
-        'speed',
-        5
-      ),
-      {
-        id: 'disorientation',
-        name: '时空迷离',
-        en: 'Disorientation',
-        category: 'SPATIAL',
-        desc: '回廊旋转重叠。空间错位，你被送往山庄的另一处。',
-        canonical: true,
-        bands: [{ min: 0, max: 0, effects: [{ kind: 'TO_RANDOM_ROOM' }], text: '走廊在你身后合拢，你已不记得来路。' }]
-      },
       {
         id: 'drip',
         name: '滴血之声',
@@ -1310,224 +1189,6 @@ export const EVENT_DEFS: Record<string, EventDef> = Object.fromEntries(
       },
 
       /* ------------------------- archetype fillers ------------------------- */
-      sanityEvent(
-        'cold_spot',
-        '冰冷一角',
-        'Cold Spot',
-        '房间的一角冷得反常。神智检定 4+。',
-        '你对着冷气呼出一口白雾，它散了。',
-        '寒意钻进骨髓，神智 -1。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }]
-      ),
-      sanityEvent(
-        'whispers',
-        '墙中低语',
-        'Whispers in the Wall',
-        '墙壁里有人念着你的名字。神智检定 4+。',
-        '你大声回应，低语戛然而止。',
-        '你听清了那句话，神智 -1。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }]
-      ),
-      sanityEvent(
-        'portrait_gaze',
-        '肖像凝视',
-        'Portrait Gaze',
-        '画中人的眼睛跟着你转动。神智检定 5+。',
-        '你朝画像行礼，它恢复了静止。',
-        '你被那双眼睛钉在原地，神智 -2。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -2 }]
-      ),
-      sanityEvent(
-        'phantom_footsteps',
-        '幽灵脚步',
-        'Phantom Footsteps',
-        '身后传来不存在于这栋房子的脚步声。神智检定 4+。',
-        '你猛然回头，走廊空无一人。',
-        '脚步停在你的后颈，神智 -1。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }]
-      ),
-      sanityEvent(
-        'mirror_hall',
-        '镜廊',
-        'Hall of Mirrors',
-        '每一面镜子里的你都慢了半拍。神智检定 5+。',
-        '你找到真实的自己，知识 +1。',
-        '你分不清哪一个才是自己，神智 -1、知识 -1。',
-        [{ kind: 'TRAIT', trait: 'knowledge', amount: 1 }],
-        [
-          { kind: 'TRAIT', trait: 'sanity', amount: -1 },
-          { kind: 'TRAIT', trait: 'knowledge', amount: -1 }
-        ]
-      ),
-      sanityEvent(
-        'grave_whisper',
-        '墓语',
-        'Grave Whisper',
-        '脚下的泥土传来亡者的絮语。神智检定 4+。',
-        '你听懂了警告，神智 +1。',
-        '你听见自己的死期，神智 -1。',
-        [{ kind: 'TRAIT', trait: 'sanity', amount: 1 }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }]
-      ),
-      physicalEvent(
-        'rotting_floor',
-        '腐朽地板',
-        'Rotting Floor',
-        '地板在你脚下塌陷。速度检定 4+。',
-        '你跨过缺口。',
-        '木刺划开小腿，受到 1 点物理伤害。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'ATTACK', dice: 2, trait: 'might', damage: 'PHYSICAL' }]
-      ),
-      physicalEvent(
-        'falling_debris',
-        '坠落碎屑',
-        'Falling Debris',
-        '天花板落下砖石。速度检定 4+。',
-        '你闪身躲进壁龛。',
-        '碎石砸中肩膀，力量 -1。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'might', amount: -1 }]
-      ),
-      physicalEvent(
-        'chandelier',
-        '水晶吊灯',
-        'Chandelier',
-        '巨大的吊灯摇晃着坠落。速度检定 5+。',
-        '你扑出阴影范围。',
-        '玻璃碎片割伤你，受到 2 点物理伤害。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'ATTACK', dice: 3, trait: 'might', damage: 'PHYSICAL' }],
-        false,
-        'speed',
-        5
-      ),
-      physicalEvent(
-        'stinging_swarm',
-        '蛰人虫群',
-        'Stinging Swarm',
-        '一群细小的飞虫扑向你的眼睛。速度检定 4+。',
-        '你屏住呼吸穿过虫群。',
-        '毒刺留下红肿，速度 -1。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'speed', amount: -1 }]
-      ),
-      physicalEvent(
-        'collapsing_stairs',
-        '崩塌楼梯',
-        'Collapsing Stairs',
-        '楼梯在你脚下断裂。速度检定 5+。',
-        '你抓住扶手翻上平台。',
-        '你滚下楼梯，受到 1 点物理伤害。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'ATTACK', dice: 2, trait: 'might', damage: 'PHYSICAL' }],
-        false,
-        'speed',
-        5
-      ),
-      physicalEvent(
-        'scalding_pipes',
-        '滚烫管道',
-        'Scalding Pipes',
-        '蒸汽从锈蚀的管道喷出。速度检定 4+。',
-        '你贴着墙绕过蒸汽。',
-        '蒸汽烫伤手臂，力量 -1。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'might', amount: -1 }]
-      ),
-      knowledgeEvent(
-        'old_diary',
-        '旧日记',
-        'Old Diary',
-        '一本字迹潦草的日记。知识检定 4+。',
-        '你读懂了家族史的一角，知识 +1。',
-        '扭曲的文字让你头痛，神智 -1。',
-        [{ kind: 'TRAIT', trait: 'knowledge', amount: 1 }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }],
-        false,
-        4
-      ),
-      knowledgeEvent(
-        'hidden_compartment',
-        '暗格',
-        'Hidden Compartment',
-        '家具底部似乎有夹层。知识检定 5+。',
-        '你摸到机关，抽 2 张物品牌。',
-        '你撬坏了夹层，什么也没找到。',
-        [{ kind: 'DRAW_ITEM', count: 2 }],
-        [{ kind: 'NOTHING' }]
-      ),
-      knowledgeEvent(
-        'clockwork_lock',
-        '齿轮锁',
-        'Clockwork Lock',
-        '门上的齿轮锁需要正确序列。知识检定 5+。',
-        '齿轮咬合，门开了。',
-        '齿轮卡死，你失去 1 点知识。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'knowledge', amount: -1 }]
-      ),
-      knowledgeEvent(
-        'astronomy_chart',
-        '星图',
-        'Astronomy Chart',
-        '墙上的星图与真实天空不符。知识检定 5+。',
-        '你算出隐藏的方位，知识 +1。',
-        '你盯着星图太久，神智 -1。',
-        [{ kind: 'TRAIT', trait: 'knowledge', amount: 1 }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }]
-      ),
-      knowledgeEvent(
-        'chemical_spill',
-        '化学溢液',
-        'Chemical Spill',
-        '打翻的药剂在地面冒烟。知识检定 5+。',
-        '你辨认出成分并安全绕过。',
-        '你吸入了挥发物，神智 -1、知识 -1。',
-        [{ kind: 'NOTHING' }],
-        [
-          { kind: 'TRAIT', trait: 'sanity', amount: -1 },
-          { kind: 'TRAIT', trait: 'knowledge', amount: -1 }
-        ]
-      ),
-      knowledgeEvent(
-        'riddle_door',
-        '谜语之门',
-        'Riddle Door',
-        '门上刻着一句谜语。知识检定 5+。',
-        '你说出答案，门无声滑开。',
-        '你答错了，门后的东西记住了你，神智 -1。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }]
-      ),
-      {
-        id: 'shifting_hall',
-        name: '移位走廊',
-        en: 'Shifting Hall',
-        category: 'SPATIAL',
-        desc: '走廊的尽头不断变化。你被空间本身挪到了另一处。',
-        bands: [{ min: 0, max: 0, effects: [{ kind: 'TO_RANDOM_ROOM' }], text: '你迈出一步，却站在了另一个房间。' }]
-      },
-      {
-        id: 'creeping_mist',
-        name: '蔓延迷雾',
-        en: 'Creeping Mist',
-        category: 'SPATIAL',
-        desc: '浓雾吞没房间，你迷失了方向。',
-        bands: [{ min: 0, max: 0, effects: [{ kind: 'TO_RANDOM_ROOM' }], text: '雾散时，你已经不在原来的房间。' }]
-      },
-      {
-        id: 'vortex',
-        name: '空间涡旋',
-        en: 'Vortex',
-        category: 'SPATIAL',
-        desc: '空气扭曲成一个看不见的漩涡。',
-        bands: [{ min: 0, max: 0, effects: [{ kind: 'TO_RANDOM_ROOM' }], text: '你被甩出漩涡，摔在陌生的地板上。' }]
-      },
       {
         id: 'chill',
         name: '刺骨寒意',
@@ -1552,66 +1213,7 @@ export const EVENT_DEFS: Record<string, EventDef> = Object.fromEntries(
         desc: '你被某种东西标记了。每回合开始神智 4+，否则失去 1 点神智。',
         bands: [{ min: 0, max: 0, effects: [{ kind: 'ONGOING', effect: 'MARK_OF_FEAR' }], text: '你感到无数目光落在背上。' }]
       },
-      sanityEvent(
-        'dust_cobwebs',
-        '灰尘与蛛网',
-        'Dust and Cobwebs',
-        '你惊起一片灰尘。神智检定 4+。',
-        '只是灰尘，你松了口气。',
-        '灰尘里似乎有东西在动，神智 -1。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }]
-      ),
-      knowledgeEvent(
-        'dead_end',
-        '死路',
-        'Dead End',
-        '走廊在这里终止。知识检定 4+ 寻找线索。',
-        '你在尽头发现一处松动的砖块，抽 1 张物品牌。',
-        '你白费了一番功夫。',
-        [{ kind: 'DRAW_ITEM', count: 1 }],
-        [{ kind: 'NOTHING' }],
-        false,
-        4
-      ),
-      physicalEvent(
-        'rats',
-        '鼠群',
-        'Rats',
-        '一群老鼠从你脚边窜过。速度检定 4+。',
-        '你跳上箱子避开。',
-        '一只老鼠咬住你的脚踝，速度 -1。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'speed', amount: -1 }]
-      ),
-      sanityEvent(
-        'draft',
-        '穿堂冷风',
-        'Draft',
-        '不知从何而来的冷风吹灭灯火。神智检定 4+。',
-        '你在黑暗中稳住呼吸。',
-        '黑暗里有什么东西掠过你的脸，神智 -1。',
-        [{ kind: 'NOTHING' }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }]
-      ),
-      knowledgeEvent(
-        'candle_snuffed',
-        '熄灭的蜡烛',
-        'Candle Snuffed',
-        '一支蜡烛在你面前自行熄灭。知识检定 5+。',
-        '你重新点燃它，知识 +1。',
-        '你感到有人在吹你的后颈，神智 -1。',
-        [{ kind: 'TRAIT', trait: 'knowledge', amount: 1 }],
-        [{ kind: 'TRAIT', trait: 'sanity', amount: -1 }]
-      ),
-      {
-        id: 'empty_room',
-        name: '空房间',
-        en: 'Empty Room',
-        category: 'FLAVOR',
-        desc: '什么也没有发生。这反而更让人不安。',
-        bands: [{ min: 0, max: 0, effects: [{ kind: 'NOTHING' }], text: '房间里只有你自己的呼吸声。' }]
-      }
+
     ] as EventDef[]
   ).map(def => [def.id, def])
 );

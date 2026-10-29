@@ -1435,13 +1435,6 @@ export class BetrayalRules {
     const room = state.mapGraph.nodes[activeRoom(state, pid)];
     if (!room || room.props?.opened) return;
 
-    if (ownsDef(state, pid, 'skeleton_key')) {
-      room.props.opened = true;
-      this.drawItems(state, pid, 2, ctx);
-      trace(ctx, 'CARD_DRAW', `${player.name} 打开了金库`, 600);
-      return;
-    }
-
     const declares = this.checkDeclareOptions(state, pid);
     const reacts = this.checkReactOptions(state, pid);
 

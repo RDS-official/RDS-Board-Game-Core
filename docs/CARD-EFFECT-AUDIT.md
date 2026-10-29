@@ -392,3 +392,38 @@
 | --- | --- | --- |
 | 2026-10-30 | 偷窃规则（严重 #2） | **已修复**：`steal` 现在只对**近战物理**攻击开放（排除精神攻击与远程攻击，符合官方「physical damage, not a distance attack」）；并统一了「可被偷」判定 —— 原先 `hasTradeableItem` 不判 `stealable`，与 `stealItem` 不一致，导致受害者只持不可偷物品时**整次伤害被静默吞掉**。现在 `stealItem` 返回布尔值，偷不到就落回伤害分配。 |
 | 2026-10-30 | 噬咬绕过叛徒豁免（严重 #3） | **已修复**：`onDrawAttack` 增加叛徒判断。官方明写「The Traitor can choose not to be affected by an Event card or **Omens such as Bite**」，此路径原先不经 `applyEventEffects`，破坏了 C-1/G-4 的豁免契约。 |
+
+---
+
+## 自制卡清理（2026-10-30）
+
+依据官方 2E 牌表（22 物品 / 13 预兆 / 25 事件）逐张比对后，删除与本仓库牌堆不一致的自制卡。
+
+### 已删除
+
+| 类别 | 删除 | 数量 | 说明 |
+| --- | --- | --- | --- |
+| 事件 | silence, collapsed_floor, walls_close_in, revenant, mirror_mirror, secret_passage, mystic_slide, cold_spot, whispers, portrait_gaze, phantom_footsteps, mirror_hall, grave_whisper, rotting_floor, falling_debris, chandelier, stinging_swarm, collapsing_stairs, scalding_pipes, old_diary, hidden_compartment, clockwork_lock, astronomy_chart, chemical_spill, riddle_door, dust_cobwebs, dead_end, rats, draft, candle_snuffed | **30** | 官方 25 张事件里没有这些 id |
+| 事件 | disorientation, shifting_hall, creeping_mist, vortex, empty_room | **5** | 纯风味、无机制承载 |
+| 物品 | druidic_charm, pickaxe | **2** | 官方 22 张物品里没有 |
+| 物品 | skeleton_key | **1** | 同上；连带移除金库的「用钥匙直接打开」分支 |
+
+### id 对齐（非删除）
+
+`amulet_of_ages` → **`amulet_of_the_ages`**（官方 id 带冠词）。
+
+### 保留并说明
+
+- **5 张官方同名事件**：funeral / bloody_vision / the_voice / creepy_crawlies / locked_safe
+- **5 张诅咒载体**：drip / possession / chill / haunting_melody / mark_of_fear —— 官方 2E 里没有同名事件，但它们是**「持续诅咒」机制的唯一载体**（`applyEventEffects` 的 ONGOING 分支、回合开始的持续效果判定、人物卡 buff/debuff 显示都依赖它们）。删除会让该机制整体失效，故暂时保留，待实现官方对应事件（如 `mist_from_walls`、`the_walls`）后替换。
+- **rope**：属于 **Widow's Walk 扩展**，非自制，但不在 2E 基础牌堆内。它承载「攀绳上行 / 煤槽安全滑落 / 阳台免伤」三处玩法，且有 6 条测试依赖。删除属功能变更，**待确认**。
+
+### 结果
+
+| 牌堆 | 之前 | 现在 | 官方 |
+| --- | --- | --- | --- |
+| 事件 | 35 | **10** | 25（我们缺 20 张未实现） |
+| 物品 | 25 | **22** | 22 ✅ |
+| 预兆 | 13 | 13 | 13 ✅ |
+
+**已知缺口**：官方 20 张事件尚未实现，事件牌堆偏薄（10 张，其中 5 张是诅咒载体）。补齐这 20 张属于内容任务。
