@@ -65,11 +65,12 @@
 - **实现**：物品掉落已有测试覆盖；**同伴的转交**未见实现。
 - **修法**：死亡时同伴留房间，其他探索者进入即取得归属。
 
-### B-2 昏迷怪物获胜应免伤 ⚠️ 待核实
+### B-2 昏迷怪物获胜应免伤 ✅ **已修复**
 
 - **官方原文**：「**If a stunned monster is attacked and wins, it deals no damage.**」
 - **实现**：有多处 `stunned` 判断（605 / 2263 / 2903 / 2923），但未见「获胜免伤」分支。
-- **修法**：昏迷怪物攻击结算时若胜出，伤害置 0。
+- **修法（已实施）**：`attackMonster` 的「怪物胜出」分支加入昏迷判断，伤害直接跳过。
+- **说明**：攻击路径本已阻止重复攻击昏迷怪物，因此这是**防御性**补强，让规则在代码里显式成立。
 
 ---
 
@@ -209,11 +210,11 @@
 - **实现**：无怪物专用豁免。
 - **核实结论**：`moveNpc` 只调用 `moveMonster`，**从不经过 `enterRoom`**，因此怪物本来就不会触发煤槽/坍塌之室/楼座的检定 —— 已符合规则，无需改动。
 
-### G-7 怪物不能携带物品 ⚠️ 待核实
+### G-7 怪物不能携带物品 ✅ **本来就正确**
 
 - **官方原文**：「**Monsters can't explore new rooms or carry items** unless the Haunt says otherwise. If a monster allowed to carry items is stunned, he drops all items.」
 - **实现**：无通用限制；仅木乃伊「抱女孩」的特例字段。
-- **修法**：确认 NPC 是否本就没有手牌区；若有则需显式禁止。
+- **核实结论**：`getNpcLegalActions` 只提供 `MOVE_NPC` / `ATTACK_HERO` / `END_NPC_TURN`，**没有** `USE_ITEM` / `PICK_UP_ITEM` / `DROP_ITEM`；手牌区也按玩家 id 建（`zone_hand_<playerId>`），NPC 从未获得手牌。已符合规则。
 
 ### G-8 首位玩家应由生日决定 ⚠️ 待核实
 
