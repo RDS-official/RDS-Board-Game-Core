@@ -348,3 +348,62 @@
 .dock-fan .act:active {
   transform: translateY(-4px) scale(1.03);
 }
+
+/* ============================================================
+   Fisheye action row
+   ------------------------------------------------------------
+   Cards keep their full size; the gaps do the work. Under the pointer a gap is
+   about one card wide, and it decays towards the far end until those cards are
+   stacked almost on top of each other. The pure layout module
+   (ui/handLayout.ts, lockCardWidth mode) computes the offsets; this block only
+   maps them onto transforms, so any number of actions fits one row.
+   ============================================================ */
+
+.dock-actions .dock-fan {
+  position: relative;
+  display: block;
+  justify-content: initial;
+  gap: 0;
+  overflow: visible;
+  height: 92px;
+  min-height: 92px;
+  padding: 0 8px;
+}
+
+.dock-fan .act {
+  position: absolute;
+  left: 0;
+  bottom: 12px;
+  margin-left: 0;
+  margin-right: 0;
+  transform: translateX(var(--fan-x, 0px)) translateY(calc(var(--fan-lift, 0) * -8px))
+    scale(var(--fan-scale, 1));
+  transform-origin: 50% 100%;
+  transition: transform 0.12s ease-out;
+  will-change: transform;
+}
+
+.dock-fan .act:hover,
+.dock-fan .act:focus-visible {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock-fan .act {
+    transition: none;
+  }
+}
+
+/* The older hover rule above has higher specificity, so it must be re-stated
+   here: otherwise the hovered card loses its translateX and snaps to the row's
+   left edge (a ~600px jump). Scale already carries the hover bump from the
+   layout, so this only adds lift. */
+.dock-fan .act:hover,
+.dock-fan .act:focus-visible {
+  transform: translateX(var(--fan-x, 0px)) translateY(calc(var(--fan-lift, 0) * -8px - 6px))
+    scale(var(--fan-scale, 1));
+  margin-left: 0;
+  margin-right: 0;
+  z-index: 999;
+}

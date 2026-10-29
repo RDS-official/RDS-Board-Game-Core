@@ -80,6 +80,22 @@ export interface HandLayoutInput {
   focusStrength?: number;
   /** Card currently hovered: gets a lift, a size bump and the top layer. */
   hoverIndex?: number | null;
+  /**
+   * Keep every card at `cardWidth` and let overlap absorb the excess instead of
+   * shrinking the cards. This is the "stack the far end" model: a 40-card row
+   * still shows full-size cards near the pointer while the context cards pile up.
+   */
+  lockCardWidth?: boolean;
+  /** Gap under the pointer, in card widths. Defaults to FOCUS_PITCH_RATIO. */
+  focusPitchRatio?: number;
+  /** Gap at the far end, in card widths. Defaults to CONTEXT_PITCH_RATIO. */
+  contextPitchRatio?: number;
+  /**
+   * Cap on any single gap, in card widths. 1 means cards may touch but never
+   * leave empty space between them; overlap is still free to go below that.
+   * Defaults to 1 when `lockCardWidth` is set, otherwise unbounded.
+   */
+  maxPitchRatio?: number;
 }
 
 export interface HandLayoutCard {
@@ -258,6 +274,8 @@ export function handLayout(input: HandLayoutInput): HandLayoutResult {
 
   // A pitch multiplier per gap: how wide that gap wants to be, in multiples of
   // one card width. `null` cursor means a flat row (every multiplier 1).
+  const contextRatio = clamp(finiteOr(input.contextPitchRatio, CONTEXT_PITCH_RATIO), 0.02, 2);
+  const focusRatio = clamp(finiteOr(input.focusPitchRatio, FOCUS_PITCH_RATIO), 0.05, 3);
   const multipliersFor = (cursor: number | null) => {
     const pair: number[] = new Array<number>(count - 1);
     let pairMin = Number.POSITIVE_INFINITY;
@@ -282,7 +300,7 @@ export function handLayout(input: HandLayoutInput): HandLayoutResult {
     let max = 0;
     for (let i = 0; i < count - 1; i++) {
       const t = spread > 1e-9 ? (pair[i] - pairMin) / spread : 0.5;
-      const raw = CONTEXT_PITCH_RATIO + (FOCUS_PITCH_RATIO - CONTEXT_PITCH_RATIO) * t;
+      const raw = contextRatio + (focusRatio - contextRatio) * t;
       const m = 1 + (raw - 1) * blend;
       mult[i] = m;
       sum += m;
@@ -302,14 +320,21 @@ export function handLayout(input: HandLayoutInput): HandLayoutResult {
   // the pointer at the centre of the row, see `reference`), then let the single
   // scalar K absorb everything else. Both stay positive: every m > 0, and
   // cardWidth < width because m_max < Σm + m_max.
-  const cardWidth = Math.min(baseWidth, (width * reference.max) / (reference.sum + reference.max));
+  const fitted = Math.min(baseWidth, (width * reference.max) / (reference.sum + reference.max));
+  const cardWidth = input.lockCardWidth ? Math.min(baseWidth, width) : fitted;
   const cardScale = cardWidth / baseWidth;
   const K = (width - cardWidth) / actual.sum;
+  const pitchCap =
+    input.maxPitchRatio != null
+      ? cardWidth * clamp(input.maxPitchRatio, 0, 4)
+      : input.lockCardWidth
+        ? cardWidth
+        : Number.POSITIVE_INFINITY;
   const pitches: number[] = new Array<number>(count - 1);
   let minPitch = Number.POSITIVE_INFINITY;
   let maxPitch = 0;
   for (let i = 0; i < count - 1; i++) {
-    const pitch = K * actual.mult[i];
+    const pitch = Math.min(K * actual.mult[i], pitchCap);
     pitches[i] = pitch;
     if (pitch < minPitch) minPitch = pitch;
     if (pitch > maxPitch) maxPitch = pitch;
