@@ -29,37 +29,44 @@ const gitInfo = (() => {
   const slugMatch = repo.match(/github\.com\/([^/]+\/[^/]+)/);
   const repoSlug = slugMatch ? slugMatch[1] : 'RDS-official/RDS-Board-Game-Core';
 
-  // 获取 GitHub 上的 contributors 列表（仅 ID，不含邮箱）。
+  // 贡献者 ID 归一化：将 xhopo/Xhopo 的历史提交与记录统一归入 Xhopo-hk。
+  const normalizeAuthor = (raw: string): string => {
+    const s = String(raw || '').toLowerCase().trim();
+    if (s.includes('xhopo')) return 'Xhopo-hk';
+    if (s.includes('qsansi') || s.includes('qingsansi') || s.includes('西梅')) return 'QSanSi';
+    if (s.includes('zooter') || s.includes('1368129224')) return '1368129224';
+    return raw ? raw.trim() : '';
+  };
+
+  // 获取仓库的 contributors 列表及 commit 次数统计（归一化为纯 ID，xhopo 归入 Xhopo-hk）。
   const contributors = (() => {
     try {
-      const raw = run(`gh api repos/${repoSlug}/contributors --jq ".[].login" 2>/dev/null || curl -s --max-time 3 -H "User-Agent: build" https://api.github.com/repos/${repoSlug}/contributors`);
-      if (raw) {
-        if (raw.startsWith('[')) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const logins = parsed.map((item: any) => item?.login).filter(Boolean);
-            if (logins.length > 0) return logins;
-          }
-        } else {
-          const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-          if (lines.length > 0) return lines;
+      const rawLines = run('git log --format="%an|%ae"').split(/\r?\n/).filter(Boolean);
+      const map = new Map<string, number>();
+      for (const line of rawLines) {
+        const [an, ae] = line.split('|');
+        if (/^AI\s+Developer$/i.test(an)) continue;
+        const id = normalizeAuthor(an) || normalizeAuthor(ae);
+        if (id) {
+          map.set(id, (map.get(id) || 0) + 1);
         }
       }
+      const list = Array.from(map.entries())
+        .map(([login, commits]) => ({ login, commits }))
+        .sort((a, b) => b.commits - a.commits);
+      if (list.length > 0) return list;
     } catch {}
 
-    try {
-      const gitAuthors = run('git log --format="%an"')
-        .split(/\r?\n/)
-        .map(s => s.trim())
-        .filter(s => s && !/^AI\s+Developer$/i.test(s));
-      const unique = Array.from(new Set(gitAuthors));
-      if (unique.length > 0) return unique;
-    } catch {}
-
-    return ['QSanSi', '1368129224', 'Xhopo-hk'];
+    return [
+      { login: 'Xhopo-hk', commits: 72 },
+      { login: 'QSanSi', commits: 30 },
+      { login: '1368129224', commits: 24 }
+    ];
   })();
 
-  return { hash, fullHash, author, commitDate, repo, contributors };
+  const totalCommits = run('git rev-list --count HEAD') || '140+';
+
+  return { hash, fullHash, author, commitDate, repo, contributors, totalCommits };
 })();
 
 export default defineConfig({
@@ -68,6 +75,7 @@ export default defineConfig({
     __COMMIT_FULL_HASH__: JSON.stringify(gitInfo.fullHash),
     __COMMIT_AUTHOR__: JSON.stringify(gitInfo.author),
     __CONTRIBUTORS__: JSON.stringify(gitInfo.contributors),
+    __TOTAL_COMMITS__: JSON.stringify(gitInfo.totalCommits),
     __COMMIT_DATE__: JSON.stringify(gitInfo.commitDate),
     __REPO_URL__: JSON.stringify(gitInfo.repo),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString())

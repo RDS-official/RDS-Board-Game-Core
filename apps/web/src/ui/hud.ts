@@ -156,18 +156,26 @@ export class BoardGameHUD {
     const repoUrl = typeof __REPO_URL__ !== 'undefined' ? __REPO_URL__ : '';
     const buildTime = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : '';
     const repoHref = /^https?:\/\//.test(repoUrl) ? repoUrl : '';
+    const totalCommits = typeof __TOTAL_COMMITS__ !== 'undefined' ? __TOTAL_COMMITS__ : '';
 
-    const rawContributors: string[] =
+    const rawContributors: Array<{ login: string; commits?: number } | string> =
       typeof __CONTRIBUTORS__ !== 'undefined' && Array.isArray(__CONTRIBUTORS__) && __CONTRIBUTORS__.length > 0
         ? __CONTRIBUTORS__
         : typeof __COMMIT_AUTHOR__ !== 'undefined' && __COMMIT_AUTHOR__
         ? [__COMMIT_AUTHOR__]
         : ['unknown'];
 
-    // 只展示 GitHub contributor ID，剥除可能附带的邮箱地址。
+    // 只展示 GitHub contributor ID，剥除可能附带的邮箱地址，并保留对应的 commit 次数统计。
     const contributors = rawContributors
-      .map(item => item.replace(/<[^>]+>/g, '').trim())
-      .filter(Boolean);
+      .map(item => {
+        if (typeof item === 'string') {
+          const login = item.replace(/<[^>]+>/g, '').trim();
+          return login ? { login, commits: 0 } : null;
+        }
+        const login = String(item?.login || '').replace(/<[^>]+>/g, '').trim();
+        return login ? { login, commits: Number(item?.commits) || 0 } : null;
+      })
+      .filter((item): item is { login: string; commits: number } => Boolean(item));
 
     const layer = document.createElement('div');
     layer.className = 'about-layer';
@@ -175,6 +183,12 @@ export class BoardGameHUD {
     // 所有来自构建期注入的值都按纯文本转义
     const esc = (value: string): string =>
       value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    const commitBreakdown = contributors
+      .filter(c => c.commits > 0)
+      .map(c => `${esc(c.login)}: ${c.commits}`)
+      .join(' · ');
+
     layer.innerHTML = `
       <div class="about-backdrop" data-about-close></div>
       <div class="about-card" role="dialog" aria-modal="true" aria-label="关于 · 版本信息">
@@ -195,12 +209,15 @@ export class BoardGameHUD {
             <dd class="about-contributors">${
               contributors.length > 0
                 ? contributors
-                    .map(id => {
-                      const safeId = esc(id);
-                      const isGhUser = /^[\w-]+$/.test(id);
+                    .map(c => {
+                      const safeId = esc(c.login);
+                      const isGhUser = /^[\w-]+$/.test(c.login);
+                      const countBadge = c.commits > 0
+                        ? `<span class="contributor-commits" title="${c.commits} 次提交">${c.commits}</span>`
+                        : '';
                       return isGhUser
-                        ? `<a class="contributor-tag" href="https://github.com/${safeId}" target="_blank" rel="noopener noreferrer">${safeId}</a>`
-                        : `<span class="contributor-tag">${safeId}</span>`;
+                        ? `<a class="contributor-tag" href="https://github.com/${safeId}" target="_blank" rel="noopener noreferrer">${safeId}${countBadge}</a>`
+                        : `<span class="contributor-tag">${safeId}${countBadge}</span>`;
                     })
                     .join('')
                 : 'unknown'
@@ -213,6 +230,13 @@ export class BoardGameHUD {
                 ? `<a href="${esc(repoHref)}" target="_blank" rel="noopener noreferrer">${esc(repoUrl)}</a>`
                 : esc(repoUrl) || 'unknown'
             }</dd>
+          </div>
+          <div class="about-row">
+            <dt>Commits</dt>
+            <dd class="about-commits">
+              <span class="commit-total"><strong>${esc(totalCommits || '140+')}</strong> 次提交</span>
+              ${commitBreakdown ? `<span class="commit-breakdown">（${commitBreakdown}）</span>` : ''}
+            </dd>
           </div>
           ${commitDate ? `<div class="about-row"><dt>Commit Date</dt><dd>${esc(commitDate)}</dd></div>` : ''}
           ${buildTime ? `<div class="about-row"><dt>Build Time</dt><dd>${esc(buildTime)}</dd></div>` : ''}

@@ -447,3 +447,43 @@ server {
 }
 ```
 
+---
+
+## 11. 代码贡献量统计 (Contributors & Code Stats)
+
+> 感谢所有为通用桌游内核与 3D 模拟器贡献代码、架构演进与游戏夹具的开发者。
+
+### 11.1 贡献者墙 (Contributors)
+
+<p align="center">
+  <a href="https://github.com/RDS-official/RDS-Board-Game-Core/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=RDS-official/RDS-Board-Game-Core" alt="Contributors" />
+  </a>
+</p>
+
+### 11.2 代码贡献量指标 (Contribution Metrics)
+
+<p align="center">
+  <img src="https://img.shields.io/github/commit-activity/m/RDS-official/RDS-Board-Game-Core?label=Monthly%20Commits&color=d9b45b" alt="Commit Activity" />
+  <img src="https://img.shields.io/github/contributors/RDS-official/RDS-Board-Game-Core?label=Contributors&color=4ade80" alt="Contributors Count" />
+  <img src="https://img.shields.io/badge/Total%20Commits-140%2B-blue" alt="Total Commits" />
+</p>
+
+数据源自 Git 提交审计与 GitHub 贡献记录（已将早期 `xhopo`/`Xhopo` 历史提交与代码量统一归入其主账号 `Xhopo-hk`，不包含合并提交与内部自动构建机器人）：
+
+| 贡献者 (GitHub ID) | 提交次数 (Commits) | 贡献占比 | 代码增删行数 (Lines Changed) | 主要研发与贡献方向 |
+| :--- | :---: | :---: | :---: | :--- |
+| **[@Xhopo-hk](https://github.com/Xhopo-hk)** | **72 次** | 57.1% | +14,113 / -1,890 | 核心规则内核审计、UI 表现层重构（设计令牌 / Grid 布局外壳 / 键控 DOM 增量更新）、骰子动效浮层 |
+| **[@QSanSi](https://github.com/QSanSi)** | **30 次** | 23.8% | +5,146 / -1,108 | 联机房间协议设计、WebSocket / WebRTC 信令传输与断线重连、CI/CD 自动化流水线 |
+| **[@1368129224](https://github.com/1368129224)** | **24 次** | 19.0% | +4,322 / -205 | 项目整体架构设计、宝可梦璀璨宝石特性与全套材质资产、生产环境运维与版本元信息 |
+
+> 注：各核心贡献者功能与架构提交共计 126 次（占全库实质性研发绝大多数）；全库历史（含合并提交与自动化版本流水线）共计 140+ 次 Commits。已将历史别名（`xhopo`/`Xhopo`）的代码贡献统一合并归入 `Xhopo-hk`。
+
+### 11.3 仓库规模概览 (Repository Overview)
+
+- **总提交次数**：140+ 次提交
+- **工程结构**：Monorepo 多包架构（`packages/kernel` 核心内核、`packages/games` 五款游戏夹具、`packages/app` 应用状态桥接、`packages/net` 联机信令、`apps/web` Three.js 3D 渲染与 Web 调试器、`apps/server` 独立服务大厅）
+- **语言与规范**：100% 严格类型 TypeScript + ESM 模块规范，无外部框架依赖的纯函数内核与严格状态隔离
+- **实时图表**：可前往 [GitHub 官方贡献图表页面](https://github.com/RDS-official/RDS-Board-Game-Core/graphs/contributors) 查看更多维度的代码增删行数与周期统计。
+
+
