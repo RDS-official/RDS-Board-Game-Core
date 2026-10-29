@@ -20,12 +20,13 @@
 - **修法（已实施）**：`DROP_ITEM` 的合法性判定与 `dropItem` 处理器都改为只排除同伴，交易仍用 `tradeable`。
 - **测试**：`rules: a non-tradable item can still be dropped, a companion cannot`（不可交易的「咬伤」可丢；同伴「狗」不可丢）
 
-### A-2 水晶球行为与官方不符 ★ 已核实
+### A-2 水晶球行为与官方不符 ✅ **已修复**
 
 - **官方原文**：「The **Crystal Ball** can only be used to look through **undrawn Item and Event cards**.」
 - **实现**：`rules.ts:1929` 先做**知识 4+ 检定**，通过后 `takeTopCard` 把牌**抽出牌堆**，再弹决策「留原处或移牌堆底」。
 - **偏差**：①官方无检定；②官方是「查看未抽的牌」，不是「抽出并重新放置」；③牌堆顶牌离开牌堆会改变后续抽牌顺序。
-- **修法**：改为纯查看（不消耗牌），去掉检定与放置决策。
+- **修法（已实施）**：去掉知识检定与「留顶/移底」决策；只读取牌堆顶牌写入 `globalVars.peek` 供 UI 展示，**不抽走、不改变抽牌顺序**。卡面描述同步改为「无需检定，也不会把牌抽走」。
+- **测试**：`rules: the crystal ball only looks, it does not take the card`（断言 PRNG 未消耗、牌堆顺序不变、peek 已记录）
 
 ### A-3 玩具猴的每回合一次攻击 —— ⚪ **卡牌不在本仓库牌堆中**
 
@@ -59,11 +60,13 @@
 
 ## B. 死亡 / 眩晕
 
-### B-1 死亡后同伴的归属未转移 ⚠️ 待核实
+### B-1 死亡后同伴的归属未转移 ✅ **已修复**
 
 - **官方原文**：「If an explorer dies put an Item Token in the room **along with any Companion token**. Any other explorer that enters the room **gains custody of the companion** and may pick up the items.」
 - **实现**：物品掉落已有测试覆盖；**同伴的转交**未见实现。
-- **修法**：死亡时同伴留房间，其他探索者进入即取得归属。
+- **核实结果**：`dropAll` 已把同伴一并放进房间（规则前半句本来就对），缺的是「进入者取得归属」。
+- **修法（已实施）**：`enterRoom` 进入时收取房间内**无主**的同伴；转交前清理所有 zone 的残留登记（同一实体被多个 zone 列出会让内核抛 `ENTITY_MULTI_ZONE`）。
+- **测试**：`rules: a dead explorer's companion is claimed by whoever enters the room`
 
 ### B-2 昏迷怪物获胜应免伤 ✅ **已修复**
 

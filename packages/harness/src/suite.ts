@@ -4838,3 +4838,81 @@ test('rules: an exit room gates movement, and a failed roll offers stay or pay',
   assertEqual(traitValue(stayed.players.p1, 'knowledge'), knowledgeBefore, 'staying costs no trait');
   assertEqual(Number(stayed.players.p1.customProps.movesLeft), 0, 'staying ends movement');
 });
+
+test('rules: a dead explorer\'s companion is claimed by whoever enters the room', () => {
+  // Rulebook, Death and Stuns: "If an explorer dies put an Item Token in the room
+  // along with any Companion token. Any other explorer that enters the room gains
+  // custody of the companion."
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  grantOmen(raw, 'p1', 'dog');
+  const dogId = Object.values(raw.entities).find(
+    e => e.components.custom?.cardType === 'OMEN' && e.components.custom?.companion
+  )?.id;
+  assert(!!dogId, 'the dog is in hand');
+
+  // Where can p2 walk? That is the room the companion will be lying in.
+  raw.activePlayerId = 'p2';
+  raw.activeActorId = 'p2';
+  raw.players.p2.customProps.movesLeft = 3;
+  const move = engine.getLegalActions('p2').find(a => a.type === 'MOVE_TO_ROOM');
+  assert(!!move, 'p2 has somewhere to go');
+  const destination = String(
+    (move!.selection as { scope?: { neighbors?: string[] } })?.scope?.neighbors?.[0] ?? ''
+  );
+  assert(destination.length > 0, 'the destination is known');
+
+  // The dead explorer's companion lies there, unowned.
+  raw.players.p1.alive = false;
+  raw.players.p1.customProps.banished = true;
+  const hand = raw.zones['zone_hand_p1'];
+  const at = hand.orderedEntities.indexOf(dogId!);
+  if (at >= 0) hand.orderedEntities.splice(at, 1);
+  const zone = raw.zones[`zone_room_${destination}`] ?? (raw.zones[`zone_room_${destination}`] = {
+    id: `zone_room_${destination}`,
+    orderedEntities: [],
+    capacity: 99,
+    visibility: { type: 'PUBLIC' }
+  } as never);
+  // Drop stale zone listings first: the fixture's room zone carries entries whose
+  // entity.zoneId points at a deck, which the kernel rightly rejects on the next
+  // move. Only real occupants are kept.
+  (zone as { orderedEntities: string[] }).orderedEntities = (
+    zone as { orderedEntities: string[] }
+  ).orderedEntities.filter(id => raw.entities[id]?.zoneId === (zone as { id: string }).id);
+  (zone as { orderedEntities: string[] }).orderedEntities.push(dogId!);
+  raw.entities[dogId!].ownerId = undefined;
+  raw.entities[dogId!].zoneId = (zone as { id: string }).id;
+
+  const mv = engine.dispatch({ ...move!, targets: [destination] } as never);
+  assert(mv.ok, `the move dispatches (${mv.error ?? ''})`);
+
+  const after = engine.getRawState();
+  assertEqual(String(after.entities[dogId!].ownerId ?? ''), 'p2', 'the dog follows its new custodian');
+  assert(
+    after.zones['zone_hand_p2'].orderedEntities.includes(dogId!),
+    'the companion moved into the new owner hand'
+  );
+});
+
+test('rules: the crystal ball only looks, it does not take the card', () => {
+  // Rulebook, Using Items and Omens: "The Crystal Ball can only be used to look
+  // through undrawn Item and Event cards."
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  grantOmen(raw, 'p1', 'crystal_ball');
+
+  const topBefore = raw.zones.zone_event_deck.orderedEntities[0];
+  const seedBefore = raw.prngState;
+
+  const use = engine.getLegalActions('p1').find(a => a.type === 'USE_ITEM');
+  assert(!!use, 'the ball can be used');
+  assert(engine.dispatch(use!).ok, 'using it dispatches');
+
+  const after = engine.getRawState();
+  assertEqual(after.prngState, seedBefore, 'no trait roll is made');
+  assertEqual(after.zones.zone_event_deck.orderedEntities[0], topBefore, 'the deck order is untouched');
+  assert(!!after.globalVars.peek, 'the top card is revealed');
+});
