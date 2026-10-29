@@ -383,3 +383,12 @@
 5. **§3.4 `revenant`、§3.10 固定伤害一致性** —— 数值/效果对齐，纯数据修改。
 6. **§4 的 M8–M13（硬编码 → 玩家选择）** —— 统一走 `itemFields` + 掷骰后窗口，一次性解决 6 张卡。
 7. **§3.6–3.9、§5 的文案/死代码清理** —— 与 `RULES-DEVIATIONS` 的登记习惯保持一致。
+
+---
+
+## 修复记录
+
+| 日期 | 条目 | 处理 |
+| --- | --- | --- |
+| 2026-10-30 | 偷窃规则（严重 #2） | **已修复**：`steal` 现在只对**近战物理**攻击开放（排除精神攻击与远程攻击，符合官方「physical damage, not a distance attack」）；并统一了「可被偷」判定 —— 原先 `hasTradeableItem` 不判 `stealable`，与 `stealItem` 不一致，导致受害者只持不可偷物品时**整次伤害被静默吞掉**。现在 `stealItem` 返回布尔值，偷不到就落回伤害分配。 |
+| 2026-10-30 | 噬咬绕过叛徒豁免（严重 #3） | **已修复**：`onDrawAttack` 增加叛徒判断。官方明写「The Traitor can choose not to be affected by an Event card or **Omens such as Bite**」，此路径原先不经 `applyEventEffects`，破坏了 C-1/G-4 的豁免契约。 |
