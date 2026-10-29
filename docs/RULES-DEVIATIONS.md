@@ -133,11 +133,12 @@
 - **已实施**：`exitPassedRoom` 每回合在 `resetTurnResources` 清空，因此每个房间每回合只能尝试一次，符合「once per turn」。
 - **不适用部分**：本仓库没有把 Vault/Tower/Chasm/Catacombs 建模成「两侧」的屏障房，因此「过屏障不计步」没有对应概念，未实现。
 
-### D-3 地下湖楼层存疑 ⚠️ 待定
+### D-3 地下湖楼层 ✅ **已定案：地下室单层**
 
 - **官方原文**：「If found on the **upper floor**, the Lake collapses; put it and the explorer next to any door in the Basement.」
 - **冲突**：二手审计称 2E 已印为地下室单层。
-- **当前**：地下室单层。需砖面图定夺。
+- **决定（默认，可推翻）**：保持**地下室单层**。理由：二手审计称 2E 已按单层印正，且规则书那句是 1E 遗留表述，缺乏砖面证据支持多层。
+- **已加断言锁定**：`rules: the underground lake is a basement-only tile` —— 将来若要改回多层，必须显式改测试，不会悄悄漂移。
 
 ---
 
@@ -229,11 +230,11 @@
 - **实现**：无通用限制；仅木乃伊「抱女孩」的特例字段。
 - **核实结论**：`getNpcLegalActions` 只提供 `MOVE_NPC` / `ATTACK_HERO` / `END_NPC_TURN`，**没有** `USE_ITEM` / `PICK_UP_ITEM` / `DROP_ITEM`；手牌区也按玩家 id 建（`zone_hand_<playerId>`），NPC 从未获得手牌。已符合规则。
 
-### G-8 首位玩家应由生日决定 ⚠️ 待核实
+### G-8 首位玩家应由生日决定 ⚪ **不实现（缺数据）**
 
 - **官方原文**：「The explorer who has the **next birthday** starts first, with turns proceeding clockwise.」
 - **实现**：固定 `playerOrder[0]`。
-- **修法**：按角色卡生日排序（属体验项，非平衡项）。
+- **决定**：**不实现**。官方角色数据集（12 名角色）只含属性轨道与起始值，**没有生日字段**；生日印在实体角色卡上，本仓库无从获取。编造生日会让「谁先手」看起来有依据实则随机，不如保持固定顺序并如实说明。
 
 ### G-9 剧本「次数 = 探索者数」应含已死亡者 ⚪ **不适用**
 
