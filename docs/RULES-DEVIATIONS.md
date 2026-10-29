@@ -149,7 +149,9 @@
 - **官方有、我们缺**：Abandoned Room、Charred Room、Organ Room、Statuary Corridor、Creaky Hallway、Dusty Hallway、Game Room、Chasm、Patio、Stairs from Basement、Research Laboratory。
 - **影响**：剧本（`haunts.ts`）按房名触发，缺房会导致对应剧本无法触发。
 - **已实施**：5 处 id 重命名对齐官方；按官方门位/楼层/符号补齐 10 间缺失房间（房间 44 → 54）。
-- **仍多出 7 间**：widow_walk（扩展开）、observatory（承载升降梯机制）、drawing_room、study、nursery、linen_closet、workshop —— 删除属内容/功能变更，待确认。
+- **已删除 6 间无机制的自制房**：widow_walk、drawing_room、study、nursery、linen_closet、workshop（相关剧本触发房与狼人剧本已同步改用官方房间）。
+- **保留 observatory**：承载「观星室升降梯」机制，删除会移除玩法 —— 有意保留并在此标注。
+- **最终**：房间 48 间 = 官方 47 + observatory，官方房间**零缺失**。
 
 ---
 

@@ -278,18 +278,18 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
     description: '剧本 5「月圆狂兽」：叛徒化为嗜血狼人，英雄需铸造银弹或压制月相。',
     setup: seed => {
       const state = setupBetrayal(seed);
-      addExploredRoom(state, 'workshop', 1, 2, 'room_basement_landing');
+      addExploredRoom(state, 'research_laboratory', 1, 2, 'room_basement_landing');
       addExploredRoom(state, 'observatory', 3, 2, 'room_upper_landing');
       addExploredRoom(state, 'master_bedroom', 1, 2, 'room_upper_landing');
 
-      setRoom(state, 'p1', 'room_workshop');
-      setRoom(state, 'p2', 'room_workshop');
+      setRoom(state, 'p1', 'room_research_laboratory');
+      setRoom(state, 'p2', 'room_research_laboratory');
       setRoom(state, 'p3', 'room_observatory');
 
       grantItem(state, 'p2', 'revolver');
       grantItem(state, 'p3', 'candle');
 
-      BetrayalRules.beginHaunt(state, 'p1', 'werewolf', 'room_workshop', scenarioContext());
+      BetrayalRules.beginHaunt(state, 'p1', 'werewolf', 'room_research_laboratory', scenarioContext());
       state.globalVars.hauntObjectives = {
         hero: '在工坊打造银弹射杀狼人；或在观星室完成 3 次月相压制仪式驱散狼人诅咒。',
         traitor: '在黎明前猎杀并撕碎所有探索者。'
