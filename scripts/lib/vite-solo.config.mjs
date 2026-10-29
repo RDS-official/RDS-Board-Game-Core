@@ -40,38 +40,37 @@ const gitInfo = (() => {
   const slugMatch = repo.match(/github\.com\/([^/]+\/[^/]+)/);
   const repoSlug = slugMatch ? slugMatch[1] : 'RDS-official/RDS-Board-Game-Core';
 
+  // 贡献者 ID 归一化：将 xhopo/Xhopo 的历史提交与记录统一归入 Xhopo-hk。
+  const normalizeAuthor = (raw) => {
+    const s = String(raw || '').toLowerCase().trim();
+    if (s.includes('xhopo')) return 'Xhopo-hk';
+    if (s.includes('qsansi') || s.includes('qingsansi') || s.includes('西梅')) return 'QSanSi';
+    if (s.includes('zooter') || s.includes('1368129224')) return '1368129224';
+    return raw ? raw.trim() : '';
+  };
+
   const contributors = (() => {
     try {
-      const raw = run(`gh api repos/${repoSlug}/contributors 2>/dev/null || curl -s --max-time 3 -H "User-Agent: build" https://api.github.com/repos/${repoSlug}/contributors`);
-      if (raw && raw.startsWith('[')) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const list = parsed
-            .map(item => ({
-              login: String(item?.login || '').trim(),
-              commits: Number(item?.contributions) || 0
-            }))
-            .filter(item => Boolean(item.login));
-          if (list.length > 0) return list;
+      const rawLines = run('git log --format="%an|%ae"').split(/\r?\n/).filter(Boolean);
+      const map = new Map();
+      for (const line of rawLines) {
+        const [an, ae] = line.split('|');
+        if (/^AI\s+Developer$/i.test(an)) continue;
+        const id = normalizeAuthor(an) || normalizeAuthor(ae);
+        if (id) {
+          map.set(id, (map.get(id) || 0) + 1);
         }
       }
-    } catch {}
-
-    try {
-      const gitAuthors = run('git log --format="%an"')
-        .split(/\r?\n/)
-        .map(s => s.trim())
-        .filter(s => s && !/^AI\s+Developer$/i.test(s));
-      const counts = {};
-      for (const a of gitAuthors) counts[a] = (counts[a] || 0) + 1;
-      const list = Object.entries(counts).map(([login, commits]) => ({ login, commits }));
+      const list = Array.from(map.entries())
+        .map(([login, commits]) => ({ login, commits }))
+        .sort((a, b) => b.commits - a.commits);
       if (list.length > 0) return list;
     } catch {}
 
     return [
+      { login: 'Xhopo-hk', commits: 72 },
       { login: 'QSanSi', commits: 30 },
-      { login: '1368129224', commits: 20 },
-      { login: 'Xhopo-hk', commits: 8 }
+      { login: '1368129224', commits: 24 }
     ];
   })();
 
