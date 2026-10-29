@@ -192,8 +192,17 @@ function isHostile(state: GameState, playerId: PlayerId, targetId: PlayerId): bo
   return heroFaction(state, playerId) !== heroFaction(state, targetId);
 }
 
-function hasTradeableItem(state: GameState, playerId: PlayerId): boolean {
-  return handEntities(state, playerId).some(entity => tradeable(entity) && !entity.components.custom?.companion);
+function isStealable(entity: Entity | undefined): boolean {
+  return (
+    !!entity &&
+    tradeable(entity) &&
+    !entity.components.custom?.companion &&
+    entity.components.custom?.stealable !== false
+  );
+}
+
+function hasStealableItem(state: GameState, playerId: PlayerId): boolean {
+  return handEntities(state, playerId).some(entity => isStealable(entity));
 }
 
 function cardName(state: GameState, entityId: string): string {
@@ -1896,7 +1905,11 @@ export class BetrayalRules {
 
     trace(ctx, 'CARD_DRAW', `🕯️ ${state.players[pid].name} 抽到预兆「${def?.name ?? defId}」（第 ${state.globalVars.omensRevealed} 张）`, 700);
 
-    if (def?.onDrawAttack) {
+    // Rulebook, Traitor and Monster Powers: "The Traitor can choose not to be
+    // affected by an Event card or Omens such as Bite." This omen's on-draw attack
+    // bypassed the event-effect guard, so a traitor still took the bite.
+    const omenBitesTraitor = state.players[pid]?.role === 'TRAITOR';
+    if (def?.onDrawAttack && !omenBitesTraitor) {
       const attack = rollZeroDice(state.prngState, def.onDrawAttack.dice);
       state.prngState = attack.nextSeed;
       const defense = rollZeroDice(state.prngState, Math.max(1, traitValue(state.players[pid], 'might')));
@@ -2395,11 +2408,13 @@ export class BetrayalRules {
 
     const diff = attackRoll.sum - defenseRoll.sum;
     if (diff > 0) {
-      const steal = String(action.payload?.steal ?? 'no') === 'yes';
-      if (steal && diff >= 2 && hasTradeableItem(state, targetId)) {
-        this.stealItem(state, pid, targetId, ctx);
-        return;
+      const wantsSteal = String(action.payload?.steal ?? 'no') === 'yes';
+      const maySteal = !spec.mental && !spec.ranged;
+      if (wantsSteal && maySteal && diff >= 2 && hasStealableItem(state, targetId)) {
+        if (this.stealItem(state, pid, targetId, ctx)) return;
       }
+      // Anything that cannot actually be stolen falls through to damage rather
+      // than silently discarding the hit.
       this.openDamageWindow(state, targetId, diff, spec.mental ? 'MENTAL' : 'PHYSICAL', ctx, player.name);
       if (weaponId === 'blood_dagger') applyTraitSteps(state, pid, 'speed', -1);
     } else if (diff < 0) {
@@ -2508,16 +2523,14 @@ export class BetrayalRules {
     traceIdle(state, `${monster.components.custom.name} 被击晕，翻面`);
   }
 
-  private static stealItem(state: GameState, thiefId: PlayerId, victimId: PlayerId, ctx: ReduceContext): void {
-    const candidates = handEntities(state, victimId).filter(
-      entity => tradeable(entity) && !entity.components.custom?.companion && entity.components.custom?.stealable !== false
-    );
-    if (candidates.length === 0) return;
+  private static stealItem(state: GameState, thiefId: PlayerId, victimId: PlayerId, ctx: ReduceContext): boolean {
+    const candidates = handEntities(state, victimId).filter(entity => isStealable(entity));
+    if (candidates.length === 0) return false;
     const roll = DeterministicPRNG.nextInt(state.prngState, 0, candidates.length - 1);
     state.prngState = roll.nextSeed;
     const stolen = candidates[roll.value];
     const thiefHand = state.zones[`zone_hand_${thiefId}`];
-    if (!thiefHand) return;
+    if (!thiefHand) return false;
 
     applyItemLoss(state, victimId, cardDef(stolen));
     applyOmenLoss(state, victimId, cardDef(stolen));
@@ -2530,6 +2543,7 @@ export class BetrayalRules {
     this.updateResonanceFor(state, thiefId);
     this.updateResonanceFor(state, victimId);
     trace(ctx, 'TOKEN_TRANSFER', `🩸 ${state.players[thiefId].name} 抢走了「${itemLabel(stolen)}」`, 500);
+    return true;
   }
 
   private static payWeaponCost(state: GameState, pid: PlayerId, weaponId: string, ctx: ReduceContext): void {

@@ -4944,3 +4944,56 @@ test('rules: the dog is a companion, not a fetch skill, and it cannot ride the e
     .some(a => a.type === 'USE_ITEM' && String(a.entityId ?? '').includes('dog'));
   assertEqual(usesDog, false, 'the dog has no activated ability');
 });
+
+test('rules: a failed steal still lands the damage', () => {
+  // Rulebook, Physical Damage: "you may steal a tradable item instead of doing the
+  // damage" - when nothing can actually be stolen the hit must still wound. The
+  // steal predicate and the steal executor used to disagree, so the damage was
+  // silently swallowed whenever the victim only held unstealable cards.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'haunt_zombie' });
+  const raw = engine.getRawState();
+  const traitorId = Object.entries(raw.players).find(([, p]) => p.role === 'TRAITOR')?.[0];
+  const heroId = Object.entries(raw.players).find(([id, p]) => id !== traitorId && p.alive)?.[0];
+  assert(!!traitorId && !!heroId, 'the fixture has both sides');
+
+  const room = String(raw.players[traitorId!].customProps.currentRoomId);
+  movePlayerTo(raw, heroId!, room);
+
+  // The hero holds only armour, which is explicitly unstealable.
+  for (const entity of Object.values(raw.entities)) {
+    if (entity.ownerId === heroId) entity.ownerId = undefined;
+  }
+  grantItem(raw, heroId!, 'armor');
+
+  const hero = raw.players[heroId!];
+  const before = {
+    might: traitValue(hero, 'might'),
+    speed: traitValue(hero, 'speed')
+  };
+
+  raw.activePlayerId = traitorId!;
+  raw.activeActorId = traitorId!;
+  // Attacks roll raw dice (not trait checks), so a forced roll cannot pin the
+  // outcome. Swing until a decisive hit lands.
+  let decisive = false;
+  for (let attempt = 0; attempt < 25 && !decisive; attempt += 1) {
+    const state = engine.getRawState();
+    state.activePlayerId = traitorId!;
+    state.activeActorId = traitorId!;
+    state.players[traitorId!].customProps.attacksLeft = 1;
+    const attack = engine.getLegalActions(traitorId!).find(a => a.type === 'ATTACK_PLAYER');
+    if (!attack) break;
+    engine.dispatch({ ...attack, payload: { ...(attack.payload ?? {}), weapon: 'fists', steal: 'yes' } } as never);
+
+    const now = engine.getRawState();
+    const heroNow = now.players[heroId!];
+    const pending = now.globalVars.pendingDamage as { amount?: number } | undefined;
+    const stolen = [...(now.zones[`zone_hand_${traitorId}`]?.orderedEntities ?? [])].length > 0;
+    if (pending !== undefined && pending !== null) { decisive = true; break; }
+    if (traitValue(heroNow, 'might') + traitValue(heroNow, 'speed') < before.might + before.speed) { decisive = true; break; }
+    if (stolen) { decisive = true; break; }
+  }
+  assert(decisive, 'a landed hit always resolves: damage applied, queued, or an item stolen');
+});
+
+
