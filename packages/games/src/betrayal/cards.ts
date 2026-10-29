@@ -921,7 +921,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'bell',
         name: '黄铜法铃',
         en: 'Bell',
-        desc: '每回合一次，神智 5+ 可驱使同房间的怪物移动。与古籍、蜡烛集齐时四维各 +2，拆散则各 -2。',
+        desc: '每回合一次：摇响法铃安抚心神，获得 1 点神智。与古籍、蜡烛集齐时四维各 +2，拆散则各 -2。',
         kind: 'relic',
         tradeable: true,
         usable: true,
@@ -950,7 +950,11 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'candle',
         name: '冥想蜡烛',
         en: 'Candle',
-        desc: '进入事件房间时可掷 1 骰，掷出 2 则忽略事件。也是三神器配件之一。',
+        desc: '获得时知识 +1、神智 +1。也是三神器配件之一。',
+        onGain: [
+          { trait: 'knowledge', amount: 1 },
+          { trait: 'sanity', amount: 1 }
+        ],
         kind: 'relic',
         tradeable: true
       },
