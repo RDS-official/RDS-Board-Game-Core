@@ -448,7 +448,8 @@ export class BetrayalRules {
           : { type: 'USE_ITEM', playerId, entityId: entity.id });
       }
 
-      if (!companion && tradeable(entity)) {
+      // Dropping only excludes companions; non-tradable items may still be dropped.
+      if (!companion) {
         actions.push({ type: 'DROP_ITEM', playerId, entityId: entity.id });
         // Generic slot command, kept alongside the legacy drop action for old logs.
         actions.push({
@@ -1777,7 +1778,7 @@ export class BetrayalRules {
     const player = state.players[pid];
     if (!entity || !player) return;
     if (!handEntities(state, pid).some(item => item.id === entityId)) return;
-    if (!tradeable(entity) || entity.components.custom?.companion) return;
+    if (entity.components.custom?.companion) return;
 
     // The destination is owned by the game module: the discard must land in
     // the actor's current room, never in a client/renderer-selected room.

@@ -12,12 +12,13 @@
 
 ## A. 卡牌规则（本轮新发现）
 
-### A-1 不可交易的物品无法丢弃 ★ 已核实
+### A-1 不可交易的物品无法丢弃 ✅ **已修复**
 
 - **官方原文**：「Some items can't be traded, but **may be dropped or picked up**.」
 - **实现**：`rules.ts:446` `if (!companion && tradeable(entity))` 才推送 `DROP_ITEM` —— 不可交易物品既不能交易也不能丢弃。
 - **影响**：卡手牌、无法腾出物品位。
-- **修法**：丢弃只排除同伴（`if (!companion)`），交易才用 `tradeable`。
+- **修法（已实施）**：`DROP_ITEM` 的合法性判定与 `dropItem` 处理器都改为只排除同伴，交易仍用 `tradeable`。
+- **测试**：`rules: a non-tradable item can still be dropped, a companion cannot`（不可交易的「咬伤」可丢；同伴「狗」不可丢）
 
 ### A-2 水晶球行为与官方不符 ★ 已核实
 
