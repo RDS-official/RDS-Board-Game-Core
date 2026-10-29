@@ -467,7 +467,7 @@ server {
   <img src="https://img.shields.io/badge/Total%20Commits-140%2B-blue" alt="Total Commits" />
 </p>
 
-数据源自 Git 提交审计与 GitHub 贡献记录（已将早期 `xhopo`/`Xhopo` 历史提交与代码量统一归入其主账号 `Xhopo-hk`，不包含合并提交与内部自动构建机器人）：
+数据源自 Git 提交审计与 GitHub 贡献记录：
 
 | 贡献者 (GitHub ID) | 提交次数 (Commits) | 贡献占比 | 代码增删行数 (Lines Changed) | 
 | :--- | :---: | :---: | :---: |
