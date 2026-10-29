@@ -155,6 +155,16 @@ export class DiceRollOverlay {
       ? ''
       : `<p class="confirm-effect">达到 ${roll.threshold} 即成功，低于则失败。</p>`;
 
+    // What the result costs or grants, in the module's own words. Falls back to a
+    // plain restatement so the line is never empty.
+    const consequence = roll.effect
+      ? roll.effect
+      : roll.threshold === undefined
+        ? ''
+        : roll.success
+          ? `达到 ${roll.threshold}，本次检定通过`
+          : `未达到 ${roll.threshold}，本次检定失败`;
+
     const verdict =
       roll.threshold === undefined
         ? ''
@@ -209,7 +219,7 @@ export class DiceRollOverlay {
         <div class="dice-panel">
           <div class="dice-row" data-dice></div>
           <div class="dice-total"><b data-total>?</b><span>点数</span></div>
-          <div class="dice-verdict-slot">${verdict}</div>
+          <div class="dice-verdict-slot">${verdict}<p class="dice-consequence">${consequence}</p></div>
         </div>
 
       </div>

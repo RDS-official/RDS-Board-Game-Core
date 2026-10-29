@@ -1038,6 +1038,7 @@ export class UniversalSession implements GamePresenter {
           seq?: number;
           effect?: string;
           reason?: string;
+          label?: string;
         }
       | undefined;
     if (!roll || !Array.isArray(roll.dice) || typeof roll.total !== 'number') return undefined;
@@ -1051,6 +1052,7 @@ export class UniversalSession implements GamePresenter {
       seq: typeof roll.seq === 'number' ? roll.seq : undefined,
       effect: roll.effect,
       reason: roll.reason,
+      label: roll.label,
       stamp: `${roll.seq ?? 0}:${roll.trait ?? ''}:${roll.total}:${roll.dice.join(',')}`
     };
   }

@@ -1440,7 +1440,7 @@ export class BetrayalRules {
     if (declares.length === 0 && reacts.length === 0) {
       const check = rollTraitCheck(state, pid, 'knowledge', {
         threshold: 6,
-        reason: 'vault',
+        reason: 'vault', label: '金库',
         effect: '成功：撬开金库并取走 2 件物品；失败：锁芯纹丝不动'
       });
       trace(ctx, 'DICE_ROLL', `金库 · 知识检定 ${check.total} vs 6`, 600);
@@ -1677,7 +1677,7 @@ export class BetrayalRules {
       if (special === 'COLLAPSED') {
         const check = rollTraitCheck(state, pid, 'speed', {
           threshold: 5,
-          reason: 'collapsed room',
+          reason: 'collapsed room', label: '坍塌之室',
           effect: '成功：安全滑下；失败：受到 2 点物理伤害'
         });
         trace(ctx, 'DICE_ROLL', `坍塌之室 · 速度检定 ${check.total} vs 5`, 600);
@@ -2037,7 +2037,7 @@ export class BetrayalRules {
         break;
       }
       case 'bell': {
-        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: 'bell' });
+        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: 'bell', label: '铃铛' });
         if (check.success) {
           const monsters = monstersInRoom(state, roomId);
           for (const monster of monsters) {
@@ -2125,7 +2125,7 @@ export class BetrayalRules {
         break;
       }
       case 'skull': {
-        const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 5, reason: 'skull' });
+        const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 5, reason: 'skull', label: '头骨' });
         if (check.success) {
           applyTraitSteps(state, pid, 'knowledge', 1, { force: true });
           trace(ctx, 'ANNOUNCEMENT', '💀 头骨中的亡魂低声说出知识', 400);
@@ -2134,7 +2134,7 @@ export class BetrayalRules {
         break;
       }
       case 'spirit_board': {
-        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: 'spirit board' });
+        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: 'spirit board', label: '通灵板' });
         if (check.success) {
           player.customProps.movesLeft = Number(player.customProps.movesLeft ?? 0) + 4;
           const haunt = currentHaunt(state);
@@ -2174,7 +2174,7 @@ export class BetrayalRules {
         const trait = (action.payload?.trait as TraitKey) ?? 'might';
         if (target !== pid && activeRoom(state, target) !== roomId) return;
         if (!state.players[target]?.alive) return;
-        const check = rollTraitCheck(state, pid, 'knowledge', { reason: 'medical kit' });
+        const check = rollTraitCheck(state, pid, 'knowledge', { reason: 'medical kit', label: '医疗包' });
         const heal = check.total >= 6 ? 3 : check.total >= 4 ? 2 : check.total >= 2 ? 1 : 0;
         if (heal > 0) {
           for (let i = 0; i < heal; i++) this.healToGreen(state, target, trait);
@@ -2196,7 +2196,7 @@ export class BetrayalRules {
         break;
       }
       case 'puzzle_box': {
-        const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 6, reason: 'puzzle box' });
+        const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 6, reason: 'puzzle box', label: '谜盒' });
         if (check.success) {
           this.drawItems(state, pid, 2, ctx);
           this.consume(state, pid, entityId, ctx);
@@ -2213,7 +2213,7 @@ export class BetrayalRules {
         break;
       }
       case 'mask': {
-        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: 'mask' });
+        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: 'mask', label: '面具' });
         if (check.success) {
           player.customProps.maskWorn = !player.customProps.maskWorn;
           trace(ctx, 'ANNOUNCEMENT', `面具${player.customProps.maskWorn ? '戴上' : '摘下'}了`, 400);
@@ -3149,7 +3149,7 @@ export class BetrayalRules {
     // 2. 邪恶/不洁房间：回合结束停留在此进行神智检定
     if (tags.includes('crypt')) {
       if (!ownsDef(state, pid, 'medallion')) {
-        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: 'unholy room' });
+        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: 'unholy room', label: '不洁房间' });
         trace(ctx, 'DICE_ROLL', `${room.props.name} · 神智检定 ${check.total} vs 4`, 600);
         if (!check.success) {
           damagePlayer(state, pid, 'MENTAL', 1);

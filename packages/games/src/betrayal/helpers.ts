@@ -403,6 +403,8 @@ export interface CheckOptions {
   extraDice?: number;
   threshold?: number;
   reason?: string;
+  /** Player-facing name of the thing being checked (card, action or room). */
+  label?: string;
   allowLuck?: boolean;
   /**
    * What this check is for, in the player's words ("成功：撬开金库并取走 2 件物品").
@@ -481,6 +483,7 @@ export function rollTraitCheck(
       traitValue: baseValue,
       seq: Number(state.globalVars.rollSeq ?? 0),
       effect: options.effect,
+    label: options.label,
       ...result,
       reason: options.reason ?? 'check'
     };
@@ -534,6 +537,7 @@ export function rollTraitCheck(
     traitValue: baseValue,
       seq: Number(state.globalVars.rollSeq ?? 0),
     effect: options.effect,
+    label: options.label,
     ...result,
     reason: options.reason ?? 'check'
   };
