@@ -4699,3 +4699,34 @@ test('rules: a stunned monster still moves but cannot attack', () => {
     'a stunned monster cannot attack'
   );
 });
+
+test('rules: the traitor rides the elevator without rolling', () => {
+  // Rulebook, Mystic Elevator: "Traitors and Monsters can use the Elevator
+  // without rolling, but only once per Traitor/Monster set of turns."
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'haunt_zombie' });
+  const raw = engine.getRawState();
+
+  const traitorId = Object.entries(raw.players).find(([, p]) => p.role === 'TRAITOR')?.[0];
+  assert(!!traitorId, 'the fixture has a traitor');
+  addExploredRoom(raw, 'mystic_elevator', 0, 3, 'room_basement_landing');
+  movePlayerTo(raw, traitorId!, 'room_mystic_elevator');
+  raw.activePlayerId = traitorId!;
+  raw.activeActorId = traitorId!;
+  raw.players[traitorId!].customProps.movesLeft = 3;
+  raw.players[traitorId!].customProps.elevatorUsed = false;
+  raw.globalVars.elevatorRoomId = 'room_mystic_elevator';
+
+  const seedBefore = raw.prngState;
+  const ride = engine.getLegalActions(traitorId!).find(a => a.type === 'USE_ELEVATOR');
+  assert(!!ride, 'the ride is offered');
+  assert(engine.dispatch(ride!).ok, 'the ride dispatches');
+
+  const after = engine.getRawState();
+  assertEqual(after.prngState, seedBefore, 'no dice are consumed for the traitor');
+  assertEqual(after.globalVars.lastElevatorRoll, undefined, 'no roll is recorded');
+  assertEqual(
+    (after.globalVars.elevatorRide as { sum?: number } | undefined)?.sum,
+    3,
+    'the traitor may pick any floor'
+  );
+});

@@ -828,6 +828,15 @@ export class BetrayalRules {
         if (player.customProps.elevatorUsed) break;
         const fromFloor = String(s.mapGraph.nodes[activeRoom(s, pid)]?.props?.floor ?? '');
 
+        // Rulebook, Mystic Elevator: "Traitors and Monsters can use the Elevator
+        // without rolling, but only once per Traitor/Monster set of turns."
+        if (player.role === 'TRAITOR') {
+          player.customProps.elevatorUsed = true;
+          s.globalVars.elevatorRide = { sum: 3, fromFloor, allowSameFloorOnly: false };
+          trace(ctx, 'ANNOUNCEMENT', '叛徒无需掷骰，电梯随其心意移动 —— 选择目的地', 600);
+          break;
+        }
+
         // Step 1 of the ride: the dice decide what is possible, so they are rolled
         // before any destination is offered. The result stays in state and the
         // picker opens on the next legal-action pass.
