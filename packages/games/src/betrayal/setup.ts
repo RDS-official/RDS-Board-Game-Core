@@ -20,7 +20,7 @@ import {
   TraitKey,
   TRAIT_KEYS
 } from './cards';
-import { addRoomNode, connectRooms, FLOOR_ANCHORS, makeCardEntity } from './helpers';
+import { addRoomNode, connectRooms, FLOOR_ANCHORS, makeCardEntity, resetTurnResources } from './helpers';
 
 export interface CharacterDef {
   id: string;
@@ -386,6 +386,11 @@ export function setupBetrayal(seed: number = 42, roster: string[] = DEFAULT_ROST
     omen: omenShuffle.result.length,
     room: roomShuffle.result.length
   };
+
+  // Official rule: the front door stays locked until a haunt opens it.
+  state.globalVars.frontDoorLocked = true;
+
+  resetTurnResources(state, state.activePlayerId);
 
   return state;
 }

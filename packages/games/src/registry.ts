@@ -266,7 +266,9 @@ export const betrayalModule: GameModule = defineGame({
       }
     },
     MOVE_TO_ROOM: { type: 'MOVE_TO_ROOM', fields: { targetNodeId: { kind: 'string' } } },
-    USE_ELEVATOR: { type: 'USE_ELEVATOR', fields: { targetNodeId: { kind: 'string', required: true } } },
+    // Riding rolls first; the destination is a separate ELEVATOR_MOVE step.
+    USE_ELEVATOR: { type: 'USE_ELEVATOR', fields: {} },
+    ELEVATOR_MOVE: { type: 'ELEVATOR_MOVE', fields: { targetNodeId: { kind: 'string', required: true } } },
     JUMP_DOWN: { type: 'JUMP_DOWN', allowPayload: false },
     CLIMB_UP: { type: 'CLIMB_UP', fields: { targetNodeId: { kind: 'string', required: true } } },
     USE_ITEM: {

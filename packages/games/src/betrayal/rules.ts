@@ -83,7 +83,9 @@ import {
   traitIndex,
   traitValue,
   usedThisTurn,
-  weaponOptions
+  weaponOptions,
+  addRoomNode,
+  connectRooms
 } from './helpers';
 
 const TRAIT_OPTIONS: Record<'PHYSICAL' | 'MENTAL', { value: TraitKey; label: string }[]> = {
@@ -334,14 +336,40 @@ export class BetrayalRules {
           const other = nodeGrid(node);
           return other && other.floor === grid.floor && other.col === col && other.row === row;
         });
-        if (!occupied) {
-          actions.push({ type: 'EXPLORE_DOOR', playerId, payload: { direction: dir } });
+        if (occupied) continue;
+
+        // Official rule: the front door is always locked unless a haunt says
+        // otherwise. It is the only doorway that leads out of the house.
+        const isFrontDoor =
+          room.props.special === 'FRONT_DOOR' && room.props.frontDoor === dir;
+        if (isFrontDoor && state.globalVars.frontDoorLocked !== false) {
+          actions.push({ type: 'TRY_FRONT_DOOR', playerId });
+          continue;
         }
+
+        actions.push({ type: 'EXPLORE_DOOR', playerId, payload: { direction: dir } });
       }
 
+      // Riding the elevator is two steps: roll first, then choose where it stops.
       if (room.props.special === 'ELEVATOR' && !player.customProps.elevatorUsed) {
-        for (const other of exploredRooms(state)) {
-          if (other !== roomId) actions.push({ type: 'USE_ELEVATOR', playerId, targetNodeId: other });
+        actions.push({ type: 'USE_ELEVATOR', playerId });
+      }
+
+      // A finished roll opens the destination picker, limited by the dice.
+      const ride = state.globalVars.elevatorRide as
+        | { sum: number; fromFloor: string; allowSameFloorOnly: boolean }
+        | null
+        | undefined;
+      if (room.props.special === 'ELEVATOR' && ride && ride.sum >= 2) {
+        const targets = exploredRooms(state).filter(other => {
+          if (other === roomId) return false;
+          if (!ride.allowSameFloorOnly) return true;
+          return String(state.mapGraph.nodes[other]?.props?.floor ?? '') === ride.fromFloor;
+        });
+        // One action per destination, like MOVE_NPC: the UI groups them by
+        // targetNodeId, highlights the rooms and sends the chosen one back.
+        for (const target of targets) {
+          actions.push({ type: 'ELEVATOR_MOVE', playerId, targetNodeId: target });
         }
       }
 
@@ -761,13 +789,124 @@ export class BetrayalRules {
       case 'USE_ELEVATOR': {
         const player = s.players[pid];
         if (player.customProps.elevatorUsed) break;
-        movePlayerTo(s, pid, action.targetNodeId ?? '');
+        const fromFloor = String(s.mapGraph.nodes[activeRoom(s, pid)]?.props?.floor ?? '');
+
+        // Step 1 of the ride: the dice decide what is possible, so they are rolled
+        // before any destination is offered. The result stays in state and the
+        // picker opens on the next legal-action pass.
+        //   >= 3  any room with an open door, any floor
+        //   == 2  same floor only
+        //   == 1  nothing happens
+        //   == 0  the car drops: 1 physical damage
+        const roll = rollZeroDice(s.prngState, 2);
+        s.prngState = roll.nextSeed;
+        s.globalVars.lastElevatorRoll = { rolls: roll.rolls, sum: roll.sum };
         player.customProps.elevatorUsed = true;
-        player.customProps.movesLeft = Math.max(0, Number(player.customProps.movesLeft ?? 1) - 1);
-        trace(ctx, 'MOVE_OBJECT', `🛗 ${player.name} 乘神秘电梯抵达 ${roomName(s, activeRoom(s, pid))}`, 500);
-        this.enterRoom(s, pid, activeRoom(s, pid), ctx, false);
+
+        // Also publish it as the last roll so the dice overlay animates the ride.
+        s.globalVars.rollSeq = Number(s.globalVars.rollSeq ?? 0) + 1;
+        s.globalVars.lastRoll = {
+          playerId: pid,
+          dice: roll.rolls,
+          total: roll.sum,
+          seq: Number(s.globalVars.rollSeq ?? 0),
+          reason: 'elevator',
+          effect: '3+ 任意楼层 · 2 仅同层 · 1 不动 · 0 受伤'
+        };
+        trace(ctx, 'DICE_ROLL', `🛗 神秘电梯 [${roll.rolls.join('+')}] = ${roll.sum}`, 700);
+
+        if (roll.sum === 0) {
+          s.globalVars.elevatorRide = null;
+          damagePlayer(s, pid, 'PHYSICAL', 1);
+          trace(ctx, 'DAMAGE_EFFECT', `电梯骤然下坠，${player.name} 受到 1 点物理伤害`, 600);
+          break;
+        }
+        if (roll.sum === 1) {
+          s.globalVars.elevatorRide = null;
+          trace(ctx, 'ANNOUNCEMENT', '电梯纹丝不动，门又关上了', 500);
+          break;
+        }
+
+        s.globalVars.elevatorRide = {
+          sum: roll.sum,
+          fromFloor,
+          allowSameFloorOnly: roll.sum === 2
+        };
+        trace(
+          ctx,
+          'ANNOUNCEMENT',
+          roll.sum === 2 ? '电梯只在同一层滑动 —— 选择本层目的地' : '电梯随你心意移动 —— 选择目的地',
+          600
+        );
         break;
       }
+      case 'ELEVATOR_MOVE': {
+        const player = s.players[pid];
+        const ride = s.globalVars.elevatorRide as
+          | { sum: number; fromFloor: string; allowSameFloorOnly: boolean }
+          | null
+          | undefined;
+        const targetId = action.targetNodeId ?? action.targets?.[0] ?? '';
+        s.globalVars.elevatorRide = null;
+        if (!ride || !targetId || !s.mapGraph.nodes[targetId]) {
+          trace(ctx, 'ANNOUNCEMENT', '电梯停在一片虚空前，无处可去', 500);
+          break;
+        }
+
+        // The car travels with you: the elevator tile is re-placed at an empty
+        // doorway of the destination room, and its old cell is vacated.
+        const elevatorId = activeRoom(s, pid);
+        const targetRoom = s.mapGraph.nodes[targetId];
+        const tGrid = nodeGrid(targetRoom);
+        if (!tGrid) break;
+
+        const OFFSETS: Record<string, [number, number]> = { N: [0, -1], S: [0, 1], E: [1, 0], W: [-1, 0] };
+        let spot: { col: number; row: number } | null = null;
+        for (const doorDir of (targetRoom.props.doors ?? []) as string[]) {
+          const offset = OFFSETS[doorDir];
+          if (!offset) continue;
+          const col = tGrid.col + offset[0];
+          const row = tGrid.row + offset[1];
+          const taken = Object.values(s.mapGraph.nodes).some(node => {
+            if (node.type !== 'ROOM' || node.id === elevatorId) return false;
+            const g = nodeGrid(node);
+            return !!g && g.floor === tGrid.floor && g.col === col && g.row === row;
+          });
+          if (!taken) {
+            spot = { col, row };
+            break;
+          }
+        }
+        if (!spot) {
+          trace(ctx, 'ANNOUNCEMENT', '目标房间没有空着的门口，电梯无法停靠', 500);
+          break;
+        }
+
+        // Drop the old connections, move the tile, then hook it to the target.
+        // The neighbour's adjacency list has to be cleaned too, or the topology
+        // invariant reports a neighbour without an edge.
+        for (const edge of Object.values(s.mapGraph.edges)) {
+          if (edge.from !== elevatorId && edge.to !== elevatorId) continue;
+          const otherId = edge.from === elevatorId ? edge.to : edge.from;
+          const other = s.mapGraph.nodes[otherId];
+          if (other) other.neighbors = other.neighbors.filter(id => id !== elevatorId);
+          delete s.mapGraph.edges[edge.id];
+        }
+        const elevatorNode = s.mapGraph.nodes[elevatorId];
+        if (elevatorNode) elevatorNode.neighbors = [];
+        addRoomNode(s, ROOM_DEFS.mystic_elevator, spot.col, spot.row, 0, elevatorId);
+        connectRooms(s, elevatorId, targetId, 'DOOR');
+        s.globalVars.elevatorRoomId = elevatorId;
+
+        movePlayerTo(s, pid, elevatorId);
+        player.customProps.movesLeft = Math.max(0, Number(player.customProps.movesLeft ?? 1) - 1);
+        trace(ctx, 'MOVE_OBJECT', `🛗 ${player.name} 乘神秘电梯抵达 ${roomName(s, targetId)}，电梯砖随之移动`, 500);
+        this.enterRoom(s, pid, elevatorId, ctx, false);
+        break;
+      }
+      case 'TRY_FRONT_DOOR':
+        trace(ctx, 'ANNOUNCEMENT', '前门纹丝不动 —— 作祟结束前，谁也离不开这座宅子', 700);
+        break;
       case 'JUMP_DOWN': {
         const ballroom = Object.values(s.mapGraph.nodes).find(node => node.props?.name === '舞厅');
         const player = s.players[pid];
@@ -1124,7 +1263,11 @@ export class BetrayalRules {
     // Nothing to decide: keep the single-dispatch path so ordinary play is
     // unchanged and no extra clicks are forced.
     if (declares.length === 0 && reacts.length === 0) {
-      const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 6, reason: 'vault' });
+      const check = rollTraitCheck(state, pid, 'knowledge', {
+        threshold: 6,
+        reason: 'vault',
+        effect: '成功：撬开金库并取走 2 件物品；失败：锁芯纹丝不动'
+      });
       trace(ctx, 'DICE_ROLL', `金库 · 知识检定 ${check.total} vs 6`, 600);
       this.settleVault(state, pid, ctx, player, check.success === true, check.total);
       return;
@@ -1180,7 +1323,14 @@ export class BetrayalRules {
       this.consumeDef(state, pid, 'angel_feather', ctx);
     }
 
-    const check = rollTraitCheck(state, pid, trait, { threshold, reason: window.label, allowLuck: false });
+    const check = rollTraitCheck(state, pid, trait, {
+      threshold,
+      reason: window.label,
+      allowLuck: false,
+      effect: window.payload?.kind === 'VAULT'
+        ? `成功：达到 ${threshold} 即撬开金库；失败：这次没能撬开`
+        : `达到 ${threshold} 即成功`
+    });
     trace(ctx, 'DICE_ROLL', `${window.label} ${check.total} vs ${threshold}`, 600);
 
     const recorded = RollWindowManager.record(state, {
@@ -1318,7 +1468,11 @@ export class BetrayalRules {
         }
       }
       if (special === 'COLLAPSED') {
-        const check = rollTraitCheck(state, pid, 'speed', { threshold: 5, reason: 'collapsed room' });
+        const check = rollTraitCheck(state, pid, 'speed', {
+          threshold: 5,
+          reason: 'collapsed room',
+          effect: '成功：安全滑下；失败：受到 2 点物理伤害'
+        });
         trace(ctx, 'DICE_ROLL', `坍塌之室 · 速度检定 ${check.total} vs 5`, 600);
         if (!check.success) {
           damagePlayer(state, pid, 'PHYSICAL', 1);
@@ -2513,7 +2667,11 @@ export class BetrayalRules {
     const player = state.players[pid];
     if (!player) return;
     player.customProps.brewUsed = true;
-    const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 4, reason: '配制圣水' });
+    const check = rollTraitCheck(state, pid, 'knowledge', {
+      threshold: 4,
+      reason: '配制圣水',
+      effect: '成功：获得一瓶圣水；失败：材料白费'
+    });
     trace(ctx, 'DICE_ROLL', `调配圣水 · 知识 [${check.dice.join('+')}] = ${check.total} vs 4`, 800);
     if (check.success) {
       grantScenarioItem(state, pid, 'holy_water', {
@@ -2533,7 +2691,11 @@ export class BetrayalRules {
     const haunt = currentHaunt(state);
     if (!player || !haunt || haunt.id !== 'living_dead') return;
     player.customProps.sanctifyUsed = true;
-    const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 4, reason: '圣化洋馆' });
+    const check = rollTraitCheck(state, pid, 'knowledge', {
+      threshold: 4,
+      reason: '圣化洋馆',
+      effect: '成功：圣化进度 +1（需 2 次）；失败：仪式中断'
+    });
     trace(ctx, 'DICE_ROLL', `圣水池注圣 · 知识 [${check.dice.join('+')}] = ${check.total} vs 4`, 900);
     if (check.success) {
       haunt.progress = Number(haunt.progress ?? 0) + 1;
@@ -2548,7 +2710,11 @@ export class BetrayalRules {
     const player = state.players[pid];
     if (!player) return;
     player.customProps.forgeUsed = true;
-    const check = rollTraitCheck(state, pid, 'might', { threshold: 4, reason: '打造银弹' });
+    const check = rollTraitCheck(state, pid, 'might', {
+      threshold: 4,
+      reason: '打造银弹',
+      effect: '成功：得到银弹；失败：银料报废'
+    });
     trace(ctx, 'DICE_ROLL', `打造银弹 · 力量 [${check.dice.join('+')}] = ${check.total} vs 4`, 800);
     if (check.success) {
       grantScenarioItem(state, pid, 'silver_bullets', {
@@ -2740,6 +2906,24 @@ export class BetrayalRules {
       trace(ctx, 'DAMAGE_EFFECT', `🔥 ${player.name} 在熔炉房结束回合，被高温灼伤（1 点物理伤害）`, 500);
     }
 
+    // House rule: some rooms reward ending your turn in them with a permanent +1,
+    // once per explorer per game. Recorded per room so re-entering never re-pays.
+    const buff = room.props?.endTurnBuff as 'speed' | 'might' | 'sanity' | 'knowledge' | undefined;
+    if (buff) {
+      const claimed = new Set<string>((player.customProps.roomBuffs as string[]) ?? []);
+      if (!claimed.has(roomId)) {
+        claimed.add(roomId);
+        player.customProps.roomBuffs = [...claimed];
+        applyTraitSteps(state, pid, buff, 1, { force: true });
+        trace(
+          ctx,
+          'ANNOUNCEMENT',
+          `💪 ${player.name} 在${String(room.props.name)}练有所成：永久 +1 ${TRAIT_META[buff].zh}`,
+          700
+        );
+      }
+    }
+
     // 2. 邪恶/不洁房间：回合结束停留在此进行神智检定
     if (tags.includes('pentagram') || tags.includes('crypt') || tags.includes('graveyard')) {
       if (!ownsDef(state, pid, 'medallion')) {
@@ -2761,8 +2945,15 @@ export class BetrayalRules {
     // folds in the legacy `customProps.effects` array so old logs still replay.
     for (const effect of ongoingEffectKinds(state, pid)) {
       if (effect === 'DRIP') {
-        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: '滴血之声' });
-        if (!check.success) damagePlayer(state, pid, 'MENTAL', 1);
+        // Card text: the check happens at the start of your turn while you are in
+        // a *windowless* room. Outside rooms (garden, balcony, patio) have windows,
+        // so they are exempt - previously this fired every turn anywhere.
+        const dripRoom = activeRoom(state, pid);
+        const hasWindows = roomTags(state, dripRoom).includes('outside');
+        if (!hasWindows) {
+          const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: '滴血之声' });
+          if (!check.success) damagePlayer(state, pid, 'MENTAL', 1);
+        }
       } else if (effect === 'POSSESSION') {
         const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: '恶灵附体' });
         if (!check.success) {

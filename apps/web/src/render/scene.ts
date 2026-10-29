@@ -151,10 +151,15 @@ export class BoardGameScene {
     { startY: number; targetY: number; startedAt: number; duration: number }
   >();
   private highlightIds = new Set<string>();
-  private highlightedMeshes = new Map<
-    THREE.Mesh,
-    { emissive?: THREE.Color; emissiveIntensity?: number; color?: THREE.Color; opacity?: number }
-  >();
+  /**
+   * Highlighted meshes mapped to the material they had before highlighting.
+   *
+   * The highlight works by swapping in a per-mesh clone rather than mutating the
+   * material: room meshes share material instances, so tinting one tinted every
+   * room that shared it and the restore then wrote stale values back, leaving the
+   * whole house glowing.
+   */
+  private highlightedMeshes = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
   private framing = {
     isoPos: new THREE.Vector3(10.5, 22, 24.5),
     isoTarget: new THREE.Vector3(1.8, 0, -0.2),
@@ -1246,56 +1251,44 @@ export class BoardGameScene {
   }
 
   private applyHighlights(): void {
-    // 1. Restore previously highlighted meshes
-    for (const [mesh, orig] of this.highlightedMeshes) {
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-      materials.forEach(mat => {
-        const m = mat as THREE.MeshStandardMaterial;
-        if (orig.emissive !== undefined && 'emissive' in m && m.emissive) {
-          m.emissive.copy(orig.emissive);
-          m.emissiveIntensity = orig.emissiveIntensity ?? 0;
-        } else if (orig.color !== undefined && 'color' in m && m.color) {
-          // SAFETY: MeshBasicMaterial and MeshStandardMaterial both implement color and opacity in Three.js runtime
-          const basic = m as unknown as THREE.MeshBasicMaterial;
-          basic.color.copy(orig.color);
-          basic.opacity = orig.opacity ?? 1.0;
-        }
-      });
+    // 1. Put the original material back on every previously highlighted mesh.
+    //    Swapping the reference (instead of copying values into the material)
+    //    means a shared material can never be left tinted.
+    for (const [mesh, original] of this.highlightedMeshes) {
+      const tinted = mesh.material;
+      mesh.material = original;
+      const originalList = Array.isArray(original) ? original : [original];
+      for (const mat of Array.isArray(tinted) ? tinted : [tinted]) {
+        if (!originalList.includes(mat)) mat.dispose();
+      }
     }
     this.highlightedMeshes.clear();
 
     if (this.highlightIds.size === 0) return;
 
-    // 2. Pulse currently highlighted objects
+    // 2. Give each highlighted mesh its own cloned, tinted material.
     const pulse = (obj: THREE.Object3D) => {
       obj.traverse(child => {
         const mesh = child as THREE.Mesh;
-        if (!mesh.isMesh) return;
-        const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-        materials.forEach(mat => {
-          const m = mat as THREE.MeshStandardMaterial;
-          if ('emissive' in m && m.emissive) {
-            if (!this.highlightedMeshes.has(mesh)) {
-              this.highlightedMeshes.set(mesh, {
-                emissive: m.emissive.clone(),
-                emissiveIntensity: m.emissiveIntensity
-              });
-            }
-            m.emissive = new THREE.Color(0xd9b45b);
-            m.emissiveIntensity = 0.85;
-          } else if ('color' in m && m.color) {
-            // SAFETY: fallback for unlit materials that only support color/opacity tinting.
-            const basic = m as unknown as THREE.MeshBasicMaterial;
-            if (!this.highlightedMeshes.has(mesh)) {
-              this.highlightedMeshes.set(mesh, {
-                color: basic.color.clone(),
-                opacity: basic.opacity
-              });
-            }
+        if (!mesh.isMesh || this.highlightedMeshes.has(mesh)) return;
+
+        const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+        const clones = source.map(mat => {
+          const clone = mat.clone() as THREE.MeshStandardMaterial;
+          if ('emissive' in clone && clone.emissive) {
+            clone.emissive = new THREE.Color(0xd9b45b);
+            clone.emissiveIntensity = 0.85;
+          } else if ('color' in clone && (clone as unknown as THREE.MeshBasicMaterial).color) {
+            // SAFETY: MeshBasicMaterial and MeshStandardMaterial both implement color and opacity in Three.js runtime
+            const basic = clone as unknown as THREE.MeshBasicMaterial;
             basic.color = new THREE.Color(0xf6dc9c);
             basic.opacity = 0.85;
           }
+          return clone;
         });
+
+        this.highlightedMeshes.set(mesh, mesh.material);
+        mesh.material = Array.isArray(mesh.material) ? clones : clones[0];
       });
     };
 
@@ -1504,13 +1497,16 @@ export class BoardGameScene {
 
   private createFloorNavArrow(
     dir: 'N' | 'S' | 'E' | 'W',
-    kind: 'NAV' | 'EXPLORE',
+    kind: 'NAV' | 'EXPLORE' | 'CHECK' | 'LOCKED',
     targetName: string
   ): { group: THREE.Group; material: THREE.MeshStandardMaterial } {
     const group = new THREE.Group();
     const isNav = kind === 'NAV';
-    const mainColor = isNav ? 0x22dd77 : 0xe5a93c;
-    const emissiveColor = isNav ? 0x11bb66 : 0x9e6c1a;
+    const isDanger = kind === 'CHECK' || kind === 'LOCKED';
+    // Green = a plain move, amber = an unexplored doorway, red = passing this way
+    // costs something (a trait check) or is impossible (the locked front door).
+    const mainColor = isDanger ? 0xe23b2a : isNav ? 0x22dd77 : 0xe5a93c;
+    const emissiveColor = isDanger ? 0xa11f12 : isNav ? 0x11bb66 : 0x9e6c1a;
 
     const arrowMat = new THREE.MeshStandardMaterial({
       color: mainColor,
@@ -1638,7 +1634,8 @@ export class BoardGameScene {
             floor: node.props.floor,
             special: node.props.special,
             tags: node.props.tags,
-            symbol: node.props.symbol
+            symbol: node.props.symbol,
+            frontDoor: node.props.frontDoor
           }
         );
         roomMesh.position.set(node.position[0], node.position[1], node.position[2]);
@@ -1709,10 +1706,15 @@ export class BoardGameScene {
           doorMesh.userData.floor = nodeFloor;
           this.boardObjectsGroup.add(doorMesh);
 
+          const CHECK_ON_ENTRY = new Set(['COLLAPSED', 'COAL_CHUTE', 'FURNACE']);
           if (isConnected && neighborRoom) {
             const targetName = String(neighborRoom.props?.name ?? '相邻房间');
             if (isCurrentActorRoom && movesLeft > 0) {
-              const { group: navArrow, material } = this.createFloorNavArrow(dir, 'NAV', targetName);
+              // Red when stepping through costs a check or health.
+              const navKind = CHECK_ON_ENTRY.has(String(neighborRoom.props?.special ?? ''))
+                ? 'CHECK'
+                : 'NAV';
+              const { group: navArrow, material } = this.createFloorNavArrow(dir, navKind, targetName);
               const ax = dir === 'W' ? -1.02 : dir === 'E' ? 1.02 : 0;
               const az = dir === 'N' ? -1.02 : dir === 'S' ? 1.02 : 0;
               const arrowY = node.position[1] + 0.125;
@@ -1755,7 +1757,15 @@ export class BoardGameScene {
             });
           } else if (!neighborRoom) {
             if (isCurrentActorRoom && movesLeft > 0) {
-              const { group: exploreArrow, material } = this.createFloorNavArrow(dir, 'EXPLORE', '探索');
+              const isLockedFrontDoor =
+                node.props.special === 'FRONT_DOOR' &&
+                node.props.frontDoor === dir &&
+                state.globalVars.frontDoorLocked !== false;
+              const { group: exploreArrow, material } = this.createFloorNavArrow(
+                dir,
+                isLockedFrontDoor ? 'LOCKED' : 'EXPLORE',
+                isLockedFrontDoor ? '前门锁死' : '探索'
+              );
               const ax = dir === 'W' ? -1.02 : dir === 'E' ? 1.02 : 0;
               const az = dir === 'N' ? -1.02 : dir === 'S' ? 1.02 : 0;
               const arrowY = node.position[1] + 0.125;

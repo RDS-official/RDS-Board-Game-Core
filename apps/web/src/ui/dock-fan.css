@@ -231,7 +231,9 @@
 
 .dock-fan .act:hover,
 .dock-fan .act:focus-visible {
-  transform: rotate(0deg) translateY(-14px) scale(1.08);
+  transform: translateY(-8px) scale(1.12);
+  margin-left: -8px;
+  margin-right: -8px;
 }
 
 /* ---- second compaction pass --------------------------------------------
@@ -298,3 +300,51 @@
 /* The fan is narrower than the old grid, so let the dock shrink to content
    instead of reserving 859px. */
 
+
+/* ============================================================
+   Final layout · horizontal scrolling row
+   ------------------------------------------------------------
+   Supersedes the fanned-hand passes above (this file accumulated three
+   generations of geometry). Cards sit side by side without overlapping; only
+   the hovered one lifts above its neighbours.
+   ============================================================ */
+
+.dock-actions .dock-fan {
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 6px 16px;
+  min-height: 88px;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.dock-fan .act {
+  position: relative;
+  flex: 0 0 auto;
+  width: 76px;
+  height: 68px;
+  margin-left: 0;
+  transform: none;
+  transform-origin: 50% 120%;
+  scroll-margin-left: 16px;
+}
+
+.dock-fan .act .act-ico {
+  font-size: var(--type-xl);
+}
+
+.dock-fan .act:hover,
+.dock-fan .act:focus-visible {
+  transform: translateY(-8px) scale(1.1);
+  z-index: 40;
+  margin-left: -8px;
+  margin-right: -8px;
+}
+
+.dock-fan .act:active {
+  transform: translateY(-4px) scale(1.03);
+}

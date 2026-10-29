@@ -327,6 +327,32 @@ export interface GameSnapshot {
   winnerLabel: string;
   /** Why the outcome fired, shown in the end-of-game overlay. */
   winnerReason?: string;
+  /**
+   * The most recent trait check, so the UI can animate the dice. Stays put
+   * between rolls; consumers must diff it rather than assume it is fresh.
+   */
+  lastRoll?: UiRoll;
+}
+
+/** One resolved dice roll, in the shape the UI needs to draw it. */
+export interface UiRoll {
+  /** Individual die faces, in roll order. */
+  dice: number[];
+  total: number;
+  threshold?: number;
+  success?: boolean;
+  /** Trait the check used, for the caption. */
+  trait?: string;
+  /** The explorer's value in that trait before any bonuses. */
+  traitValue?: number;
+  /** What this check is for, in the player's words (shown before the dice). */
+  effect?: string;
+  /** Module tag for what the check was for (e.g. 'vault'). */
+  reason?: string;
+  /** Monotonic per-check counter; only moves when a check is actually rolled. */
+  seq?: number;
+  /** Stable stamp so the UI can tell one roll from the next. */
+  stamp: string;
 }
 
 export type NoticeKind = 'announce' | 'event' | 'error';

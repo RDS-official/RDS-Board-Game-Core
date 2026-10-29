@@ -1,6 +1,7 @@
 import confetti from 'canvas-confetti';
 import { cardArtSvg } from './cardArt';
 import { hash, reconcileKeyed, reconcileKeyedPreservingScroll } from './dom/keyed';
+import { DiceRollOverlay } from './dice-overlay';
 import {
   CameraView,
   GAME_TABS,
@@ -63,6 +64,9 @@ export class BoardGameHUD {
   /** Phone shell: whether the action drawer is expanded. */
   private dockOpen = false;
   private shellMedia?: MediaQueryList;
+  private diceOverlay?: DiceRollOverlay;
+  /** The setup roll is not animated: opening a scenario should not play a dice cutscene. */
+  private rollPrimed = false;
   /** Minimap can be collapsed to conserve screen space. */
   private minimapCollapsed = false;
 
@@ -91,6 +95,7 @@ export class BoardGameHUD {
     this.options = options;
 
     this.renderSkeleton();
+    this.diceOverlay = new DiceRollOverlay(this.container);
     this.syncSoundButton();
     this.bindPresenter(presenter);
   }
@@ -950,6 +955,7 @@ export class BoardGameHUD {
 
   private render(snapshot: GameSnapshot): void {
     this.latest = snapshot;
+    this.maybeAnimateRoll(snapshot);
     // Betrayal uses a candle-lit parchment palette; other fixtures stay slate.
     this.container.dataset.theme = snapshot.gameId === 'betrayal' ? 'gothic' : '';
     this.container.querySelectorAll<HTMLElement>('.game-pill').forEach(button => {
@@ -1121,6 +1127,34 @@ export class BoardGameHUD {
    * Recent activity feed: newest event on top, grouped by kind colour so a
    * glance separates damage from movement, cards and haunt beats.
    */
+  /**
+   * Animate a fresh trait check. `lastRoll` persists between snapshots, so the
+   * overlay dedupes on its stamp and a plain re-render never replays the roll.
+   */
+  private maybeAnimateRoll(snapshot: GameSnapshot): void {
+    const roll = snapshot.lastRoll;
+    if (!roll || !this.diceOverlay) return;
+    // The first snapshot can already carry the setup's turn-start Speed roll.
+    // Playing a cutscene the moment a scenario opens is noise, so prime the
+    // overlay with it and animate only rolls that happen from here on.
+    if (!this.rollPrimed) {
+      this.rollPrimed = true;
+      return;
+    }
+    this.diceOverlay.show({ roll, label: this.rollLabel(roll) });
+  }
+
+  private rollLabel(roll: NonNullable<GameSnapshot['lastRoll']>): string {
+    const traitZh: Record<string, string> = {
+      speed: '速度',
+      might: '力量',
+      sanity: '神智',
+      knowledge: '知识'
+    };
+    const trait = roll.trait ? traitZh[roll.trait] ?? roll.trait : '';
+    return trait ? `${trait}检定` : '检定';
+  }
+
   private renderHistory(snapshot: GameSnapshot): void {
     const feed = this.container.querySelector('#activity-feed') as HTMLElement | null;
     if (!feed) return;
@@ -1354,7 +1388,71 @@ export class BoardGameHUD {
 
     card.querySelector('#rc-focus')?.addEventListener('click', () => {
       if (this.ports.focusRoom) this.ports.focusRoom(roomId);
+      this.openRoomCardWindow(roomId, snapshot);
     });
+  }
+
+  /**
+   * The room dossier as a floating window, matching what the placement preview
+   * shows. Triggered from the room card's focus button.
+   */
+  private openRoomCardWindow(roomId: string, snapshot: GameSnapshot): void {
+    const layer = this.container.querySelector('#payload-layer') as HTMLElement | null;
+    if (!layer) return;
+
+    const node = snapshot.board.mapGraph.nodes[roomId];
+    if (!node || node.type !== 'ROOM') return;
+    const props = (node.props ?? {}) as Record<string, unknown>;
+    const doors = Array.isArray(props.doors) ? (props.doors as string[]) : [];
+
+    const floorLabel = String(props.floor ?? '') === 'BASEMENT' ? '地下室' : String(props.floor ?? '') === 'UPPER' ? '二楼' : '一楼';
+    const compass = ['N', 'E', 'S', 'W']
+      .map(dir => `<span class="rc-door ${doors.includes(dir) ? 'on' : ''}">${dir}</span>`)
+      .join('');
+
+    const occupants = Object.values(snapshot.board.players).filter(
+      p => p.alive && !p.customProps?.banished && p.customProps?.currentRoomId === roomId
+    );
+    const monsters = Object.values(snapshot.board.entities ?? {}).filter(entity => {
+      const custom = entity?.components?.custom as Record<string, unknown> | undefined;
+      return entity.type === 'MEEPLE' && !!custom?.monster && custom?.roomId === roomId && !custom?.destroyed;
+    });
+    const loot = Object.values(snapshot.board.entities ?? {}).filter(entity => {
+      return entity.zoneId === `zone_room_${roomId}` && entity.components?.custom?.cardType === 'ITEM';
+    });
+
+    const chips =
+      occupants.map(p => `<span class="rc-chip" style="--chip:${p.color}"><i></i>${p.name}</span>`).join('') +
+      monsters
+        .map(m => `<span class="rc-chip monster"><i></i>${String((m.components?.custom as Record<string, unknown>)?.name ?? '怪物')}</span>`)
+        .join('') +
+      (loot.length ? `<span class="rc-chip loot"><i></i>遗物 ×${loot.length}</span>` : '');
+
+    layer.innerHTML = `
+      <div class="payload-backdrop"></div>
+      <div class="payload-card room-card-window">
+        <header class="rc-head">
+          <span class="rc-floor">${floorLabel}</span>
+          <button type="button" class="pf-btn" id="rcw-close">关闭</button>
+        </header>
+        <div class="rc-title">${String(props.name ?? '房间')}</div>
+        <div class="rc-en">${String(props.en ?? '')}</div>
+        <div class="rc-meta">
+          <div class="rc-compass">${compass}</div>
+          <div class="rc-symbol">${props.symbol === 'OMEN' ? '👁 预兆' : props.symbol === 'ITEM' ? '◆ 遗物' : props.symbol === 'EVENT' ? '✦ 事件' : '· 无符号'}</div>
+        </div>
+        <p class="rc-text">${String(props.text ?? '')}</p>
+        <div class="rc-occupants">${chips || '<span class="rc-empty">空无一人</span>'}</div>
+      </div>
+    `;
+    layer.style.display = 'flex';
+
+    const close = () => {
+      layer.style.display = 'none';
+      layer.innerHTML = '';
+    };
+    layer.querySelector('.payload-backdrop')?.addEventListener('click', close);
+    layer.querySelector('#rcw-close')?.addEventListener('click', close);
   }
 
   private renderViewerSelect(snapshot: GameSnapshot): void {

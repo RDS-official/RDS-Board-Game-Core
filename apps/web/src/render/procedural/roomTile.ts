@@ -11,6 +11,8 @@ export interface RoomTileOptions {
   special?: string | null;
   tags?: string[];
   symbol?: string | null;
+  /** Wall the sealed front door is drawn on (FRONT_DOOR rooms only). */
+  frontDoor?: string | null;
   isPreview?: boolean;
 }
 
@@ -880,15 +882,26 @@ export class RoomTileBuilder {
    * is a free-standing leaf pair that reads taller than the wall — implying the
    * storey continues behind the cut.
    */
-  private static addFrontDoor(target: THREE.Object3D): void {
+  /**
+   * The sealed front door.
+   *
+   * It is built against the tile's +Z wall and then rotated into place, because
+   * the wall it belongs on depends on which side of the house the entrance hall
+   * ended up on. Drawing it on a fixed wall put the door facing into the house.
+   */
+  private static addFrontDoor(target: THREE.Object3D, dir: DoorDir = 'S'): void {
+    const door = new THREE.Group();
+    target.add(door);
+    target = door;
     const z = HALF - THICK - 0.02;
     const W = DOOR_HALF * 2 - 0.02;
     const H = 0.66;
     const base = 0.12;
 
-    // Stone surround + carved lintel
-    this.addBox(target, W + 0.16, H + 0.12, 0.05, MAT.paleStone, 0, base + (H + 0.12) / 2, z - 0.01, false);
-    this.addBox(target, W + 0.26, 0.07, 0.09, MAT.marble, 0, base + H + 0.12, z + 0.01);
+    // Brick surround + carved lintel. The pale stone panel read as a blank white
+    // wall behind the doors; brick ties the entrance to the house's masonry.
+    this.addBox(target, W + 0.16, H + 0.12, 0.05, MAT.brick, 0, base + (H + 0.12) / 2, z - 0.01, false);
+    this.addBox(target, W + 0.26, 0.07, 0.09, MAT.brick, 0, base + H + 0.12, z + 0.01);
     this.addBox(target, W + 0.3, 0.03, 0.11, MAT.brass, 0, base + H + 0.17, z + 0.01, false);
 
     // Two leaves
@@ -926,6 +939,10 @@ export class RoomTileBuilder {
     this.addBox(target, 0.024, H, 0.055, MAT.ebony, 0, base + H / 2, z + 0.04, false);
     this.addBox(target, 0.2, 0.035, 0.03, MAT.iron, 0, base + H * 0.6, z + 0.075, false);
     this.addBox(target, 0.05, 0.05, 0.03, MAT.agedBrass, 0, base + H * 0.6, z + 0.09, false);
+
+    // The door is built against +Z; rotate it onto the wall it belongs on.
+    const yaw = { S: 0, N: Math.PI, E: Math.PI / 2, W: -Math.PI / 2 }[dir] ?? 0;
+    door.rotation.y = yaw;
   }
 
   /**
@@ -950,7 +967,7 @@ export class RoomTileBuilder {
     const isBasement = floor === 'BASEMENT';
     const scale = size / TILE;
 
-    const cacheKey = `${roomId}|${name}|${size}|${color}|${[...doors].sort().join('')}|${floor}`;
+    const cacheKey = `${roomId}|${name}|${size}|${color}|${[...doors].sort().join('')}|${floor}|${options?.frontDoor ?? ''}`;
     if (!isPreview) {
       const cached = this.meshCache.get(cacheKey);
       if (cached) return cached.clone(true);
@@ -1034,7 +1051,7 @@ export class RoomTileBuilder {
     /* --------------------------- wall decoration --------------------------- */
     // The mansion's sealed front door anchors the entrance hall.
     if (options?.special === 'FRONT_DOOR' || roomId === 'entrance_hall') {
-      this.addFrontDoor(shell);
+      this.addFrontDoor(shell, (options?.frontDoor as DoorDir | null) ?? 'S');
     }
 
     // Tall furniture hides anything hung at eye level, so record how much each

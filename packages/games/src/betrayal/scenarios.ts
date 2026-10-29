@@ -116,7 +116,6 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
       state.activePlayerId = 'p1';
       state.globalVars.hauntTriggered = false;
       state.globalVars.haunt = null;
-      state.players.p1.customProps.movesLeft = 4;
       return state;
     }
   },
@@ -211,7 +210,6 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
       // Start on the free hero so the table has a meaningful opening action.
       state.activePlayerId = 'p3';
       state.activeActorId = 'p3';
-      state.players.p3.customProps.movesLeft = 4;
       state.players.p3.customProps.attacksLeft = 1;
       state.players.p3.customProps.usedItems = [];
       return state;
@@ -271,7 +269,6 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
       };
       state.activePlayerId = 'p2';
       state.activeActorId = 'p2';
-      state.players.p2.customProps.movesLeft = 4;
       state.players.p2.customProps.attacksLeft = 1;
       return state;
     }
@@ -299,7 +296,6 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
       };
       state.activePlayerId = 'p2';
       state.activeActorId = 'p2';
-      state.players.p2.customProps.movesLeft = 4;
       state.players.p2.customProps.attacksLeft = 1;
       return state;
     }
@@ -328,7 +324,6 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
 
       state.activePlayerId = 'p1';
       state.activeActorId = 'p1';
-      state.players.p1.customProps.movesLeft = 4;
       return state;
     }
   }

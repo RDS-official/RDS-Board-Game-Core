@@ -56,6 +56,13 @@ export interface RoomDef {
   special?: RoomSpecial;
   /** Free-form tags consumed by haunts (fire, pentagram, crypt, ...). */
   tags?: string[];
+  /** Direction of the front door on a FRONT_DOOR room (locked before the haunt). */
+  frontDoor?: DoorDir;
+  /**
+   * House rule: ending your turn here permanently raises this trait by 1, once
+   * per explorer per game. Not part of the official rules; enabled by request.
+   */
+  endTurnBuff?: 'speed' | 'might' | 'sanity' | 'knowledge';
   text: string;
 }
 
@@ -68,6 +75,7 @@ const ROOM_LIST: RoomDef[] = [
     floor: 'GROUND',
     doors: ['N', 'S', 'E'],
     special: 'FRONT_DOOR',
+    frontDoor: 'N',
     tags: ['start', 'exit'],
     text: '山庄正门在此。前门被某种力量锁死，作祟结束前无法离开。'
   },
@@ -98,7 +106,8 @@ const ROOM_LIST: RoomDef[] = [
     doors: ['N', 'E'],
     symbol: 'ITEM',
     tags: ['food'],
-    text: '锈蚀的刀具与发霉的食材。'
+    text: '锈蚀的刀具与发霉的食材。',
+    endTurnBuff: 'might',
   },
   {
     id: 'dining_room',
@@ -126,7 +135,8 @@ const ROOM_LIST: RoomDef[] = [
     doors: ['N', 'S', 'E'],
     symbol: 'ITEM',
     tags: ['books'],
-    text: '直抵天花板的书架，藏着家族的秘密。'
+    text: '直抵天花板的书架，藏着家族的秘密。',
+    endTurnBuff: 'knowledge',
   },
   {
     id: 'study',
@@ -156,7 +166,8 @@ const ROOM_LIST: RoomDef[] = [
     doors: ['N', 'E'],
     symbol: 'OMEN',
     tags: ['holy'],
-    text: '彩窗上的圣徒全都背对着你。'
+    text: '彩窗上的圣徒全都背对着你。',
+    endTurnBuff: 'sanity',
   },
   {
     id: 'garden',
@@ -185,7 +196,8 @@ const ROOM_LIST: RoomDef[] = [
     floor: 'GROUND',
     doors: ['N', 'E', 'S'],
     symbol: 'ITEM',
-    text: '生锈的器械仍保持着被人使用过的角度。'
+    text: '生锈的器械仍保持着被人使用过的角度。',
+    endTurnBuff: 'speed',
   },
 
   /* ------------------------------- UPPER (15) ----------------------------- */
@@ -485,7 +497,8 @@ const ROOM_LIST: RoomDef[] = [
     name: '神秘电梯',
     en: 'Mystic Elevator',
     floor: 'BASEMENT',
-    doors: ['E', 'W'],
+    // One door only: the elevator is a dead end you ride out of.
+    doors: ['E'],
     special: 'ELEVATOR',
     tags: ['elevator'],
     text: '一个没有缆绳的电梯，按钮上刻着不存在的楼层。'
