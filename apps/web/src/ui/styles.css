@@ -3109,6 +3109,7 @@ select.pf-control {
 .about-row .about-contributors .contributor-tag {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   padding: 2px 8px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -3120,11 +3121,41 @@ select.pf-control {
   transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease;
 }
 
+.about-row .about-contributors .contributor-commits {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  color: #f6dc9c;
+  background: rgba(201, 181, 122, 0.22);
+  border: 1px solid rgba(201, 181, 122, 0.4);
+}
+
 .about-row .about-contributors a.contributor-tag:hover,
 .about-row .about-contributors a.contributor-tag:focus-visible {
   color: var(--accent-bright, #d9b45b);
   border-color: rgba(217, 180, 91, 0.45);
   background: rgba(217, 180, 91, 0.12);
+}
+
+.about-row .about-commits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  color: var(--text-primary, #e8edf5);
+}
+
+.about-row .about-commits .commit-total {
+  font-weight: 600;
+  color: #f6dc9c;
+}
+
+.about-row .about-commits .commit-breakdown {
+  font-size: var(--type-xs);
+  color: var(--text-secondary, #8b98ab);
 }
 
 .about-row .about-repo a {

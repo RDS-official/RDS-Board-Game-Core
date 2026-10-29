@@ -42,17 +42,17 @@ const gitInfo = (() => {
 
   const contributors = (() => {
     try {
-      const raw = run(`gh api repos/${repoSlug}/contributors --jq ".[].login" 2>/dev/null || curl -s --max-time 3 -H "User-Agent: build" https://api.github.com/repos/${repoSlug}/contributors`);
-      if (raw) {
-        if (raw.startsWith('[')) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const logins = parsed.map(item => item?.login).filter(Boolean);
-            if (logins.length > 0) return logins;
-          }
-        } else {
-          const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-          if (lines.length > 0) return lines;
+      const raw = run(`gh api repos/${repoSlug}/contributors 2>/dev/null || curl -s --max-time 3 -H "User-Agent: build" https://api.github.com/repos/${repoSlug}/contributors`);
+      if (raw && raw.startsWith('[')) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const list = parsed
+            .map(item => ({
+              login: String(item?.login || '').trim(),
+              commits: Number(item?.contributions) || 0
+            }))
+            .filter(item => Boolean(item.login));
+          if (list.length > 0) return list;
         }
       }
     } catch {}
@@ -62,14 +62,22 @@ const gitInfo = (() => {
         .split(/\r?\n/)
         .map(s => s.trim())
         .filter(s => s && !/^AI\s+Developer$/i.test(s));
-      const unique = Array.from(new Set(gitAuthors));
-      if (unique.length > 0) return unique;
+      const counts = {};
+      for (const a of gitAuthors) counts[a] = (counts[a] || 0) + 1;
+      const list = Object.entries(counts).map(([login, commits]) => ({ login, commits }));
+      if (list.length > 0) return list;
     } catch {}
 
-    return ['QSanSi', '1368129224', 'Xhopo-hk'];
+    return [
+      { login: 'QSanSi', commits: 30 },
+      { login: '1368129224', commits: 20 },
+      { login: 'Xhopo-hk', commits: 8 }
+    ];
   })();
 
-  return { hash, fullHash, author, commitDate, repo, contributors };
+  const totalCommits = run('git rev-list --count HEAD') || '140+';
+
+  return { hash, fullHash, author, commitDate, repo, contributors, totalCommits };
 })();
 
 export default defineConfig({
@@ -79,6 +87,7 @@ export default defineConfig({
     __COMMIT_FULL_HASH__: JSON.stringify(gitInfo.fullHash),
     __COMMIT_AUTHOR__: JSON.stringify(gitInfo.author),
     __CONTRIBUTORS__: JSON.stringify(gitInfo.contributors),
+    __TOTAL_COMMITS__: JSON.stringify(gitInfo.totalCommits),
     __COMMIT_DATE__: JSON.stringify(gitInfo.commitDate),
     __REPO_URL__: JSON.stringify(gitInfo.repo),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString())

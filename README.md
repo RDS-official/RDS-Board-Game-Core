@@ -463,13 +463,21 @@ server {
 
 ### 11.2 代码贡献量指标 (Contribution Metrics)
 
+<p align="center">
+  <img src="https://img.shields.io/github/commit-activity/m/RDS-official/RDS-Board-Game-Core?label=Monthly%20Commits&color=d9b45b" alt="Commit Activity" />
+  <img src="https://img.shields.io/github/contributors/RDS-official/RDS-Board-Game-Core?label=Contributors&color=4ade80" alt="Contributors Count" />
+  <img src="https://img.shields.io/badge/Total%20Commits-140%2B-blue" alt="Total Commits" />
+</p>
+
 数据源自 GitHub 官方统计与主分支 Git 审计（不包含合并提交与内部自动构建机器人）：
 
-| 贡献者 (GitHub ID) | 官方贡献数 (Commits) | 贡献占比 | 主要研发与贡献方向 |
+| 贡献者 (GitHub ID) | 官方提交次数 (Commits) | 贡献占比 | 主要研发与贡献方向 |
 | :--- | :---: | :---: | :--- |
-| **[@QSanSi](https://github.com/QSanSi)** | **30** | 51.7% | 联机房间协议设计、WebSocket / WebRTC 信令传输与断线重连、CI/CD 自动化流水线 |
-| **[@1368129224](https://github.com/1368129224)** | **20** | 34.5% | 项目整体架构设计、宝可梦璀璨宝石特性与全套材质资产、生产环境运维与版本元信息 |
-| **[@Xhopo-hk](https://github.com/Xhopo-hk)** | **8** | 13.8% | 核心规则内核审计、UI 表现层重构（设计令牌 / Grid 布局外壳 / 键控 DOM 增量更新）、骰子动效浮层 |
+| **[@QSanSi](https://github.com/QSanSi)** | **30 次** | 51.7% | 联机房间协议设计、WebSocket / WebRTC 信令传输与断线重连、CI/CD 自动化流水线 |
+| **[@1368129224](https://github.com/1368129224)** | **20 次** | 34.5% | 项目整体架构设计、宝可梦璀璨宝石特性与全套材质资产、生产环境运维与版本元信息 |
+| **[@Xhopo-hk](https://github.com/Xhopo-hk)** | **8 次** | 13.8% | 核心规则内核审计、UI 表现层重构（设计令牌 / Grid 布局外壳 / 键控 DOM 增量更新）、骰子动效浮层 |
+
+> 注：各贡献者在主分支共有 58 次直接功能与架构提交；全库历史（含合并与阶段分支整合）共计 140+ 次 Commits。
 
 ### 11.3 仓库规模概览 (Repository Overview)
 
