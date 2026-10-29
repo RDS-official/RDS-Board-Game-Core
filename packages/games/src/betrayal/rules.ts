@@ -2158,13 +2158,21 @@ export class BetrayalRules {
       case 'dynamite': {
         const targetRoom = String(action.payload?.targetRoom ?? '');
         if (!state.mapGraph.nodes[targetRoom]) return;
-        const blast = rollZeroDice(state.prngState, 3);
+        const blast = rollZeroDice(state.prngState, 4);
         state.prngState = blast.nextSeed;
         for (const occupant of playersInRoom(state, targetRoom)) {
           damagePlayer(state, occupant, 'PHYSICAL', blast.sum);
         }
         for (const monster of monstersInRoom(state, targetRoom)) {
-          this.stunMonster(state, monster);
+          // Damage, not a stun: monsters carry a Might value and are defeated when
+          // it runs out.
+          const stats = monsterStats(monster);
+          const nextMight = stats.might - blast.sum;
+          if (nextMight <= 0) {
+            this.hitMonster(state, monster, ctx);
+          } else {
+            monster.components.custom = { ...(monster.components.custom ?? {}), might: nextMight };
+          }
         }
         trace(ctx, 'DAMAGE_EFFECT', `💥 炸药在 ${roomName(state, targetRoom)} 爆炸（${blast.sum} 点物理伤害）`, 800);
         this.consume(state, pid, entityId, ctx);
@@ -2195,14 +2203,19 @@ export class BetrayalRules {
         break;
       }
       case 'music_box': {
-        for (const otherId of playersInRoom(state, roomId, pid)) {
-          if (traitValue(state.players[otherId], 'sanity') < 4) {
-            state.players[otherId].customProps.movesLeft = 0;
-            state.players[otherId].customProps.attacksLeft = 0;
-            state.players[otherId].customProps.skipActions = true;
-          }
-        }
-        trace(ctx, 'ANNOUNCEMENT', '🎵 八音盒的旋律让神智薄弱者僵立原地', 600);
+        // Official text: "Play melody: make a Sanity roll: 4+ Soothing tune (Gain 1
+        // Sanity); 0-3 Agonizing discord (Lose 1 Sanity)." The old version zeroed
+        // movesLeft/attacksLeft/skipActions on nearby low-sanity players, but
+        // resetTurnResources clears those at the target's turn start, so it did
+        // nothing at all.
+        const check = rollTraitCheck(state, pid, 'sanity', {
+          threshold: 4,
+          reason: 'music box',
+          label: '八音盒',
+          effect: '成功：旋律安抚心神，神智 +1；失败：刺耳的不和谐音，神智 -1'
+        });
+        applyTraitSteps(state, pid, 'sanity', check.success ? 1 : -1, { force: true });
+        trace(ctx, 'DICE_ROLL', `八音盒：神智检定 ${check.total} vs 4`, 600);
         markUsed(state, pid, defId);
         break;
       }
