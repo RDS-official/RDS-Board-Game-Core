@@ -86,7 +86,8 @@ import {
   weaponOptions,
   addRoomNode,
   connectRooms,
-  validRotations
+  validRotations,
+  hasRolledThisTurn
 } from './helpers';
 
 const TRAIT_OPTIONS: Record<'PHYSICAL' | 'MENTAL', { value: TraitKey; label: string }[]> = {
@@ -418,7 +419,11 @@ export class BetrayalRules {
 
       // Optional room features the player can poke at instead of them firing
       // silently on entry. Only the vault is genuinely re-enterable.
-      if (room.props.special === 'VAULT' && !room.props?.opened) {
+      if (
+        room.props.special === 'VAULT' &&
+        !room.props?.opened &&
+        !hasRolledThisTurn(state, playerId, 'vault')
+      ) {
         actions.push({ type: 'ROOM_FEATURE', playerId, payload: { feature: 'VAULT' } });
       }
     }
