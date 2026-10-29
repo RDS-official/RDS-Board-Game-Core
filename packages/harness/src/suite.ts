@@ -4118,3 +4118,56 @@ test('rules: ending a turn in a buff room grants one permanent point, once', () 
   if (again) engine.dispatch(again);
   assertEqual(traitIndex(engine.getRawState().players.p1, 'speed'), claimedIndex, 'the buff pays only once');
 });
+
+test('rules: riding to another floor moves the elevator tile to that floor', () => {
+  // The car is the one tile that belongs on every floor, so the data must say so:
+  // drawing a tile is filtered by `floors ?? [floor]`.
+  assertEqual(
+    (ROOM_DEFS.mystic_elevator.floors ?? []).slice().sort().join(','),
+    'BASEMENT,GROUND,UPPER',
+    'the elevator declares every floor'
+  );
+
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'room_features' });
+  const raw = engine.getRawState();
+
+  // The car starts in the basement; the destination is upstairs.
+  addExploredRoom(raw, 'mystic_elevator', 0, 3, 'room_basement_landing');
+  movePlayerTo(raw, 'p1', 'room_mystic_elevator');
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.players.p1.customProps.movesLeft = 3;
+  raw.players.p1.customProps.elevatorUsed = true;
+  raw.globalVars.elevatorRoomId = 'room_mystic_elevator';
+  raw.globalVars.elevatorRide = { sum: 3, fromFloor: 'BASEMENT', allowSameFloorOnly: false };
+
+  const upstairs = Object.values(raw.mapGraph.nodes).find(
+    node => node.type === 'ROOM' && String(node.props?.floor) === 'UPPER'
+  );
+  assert(!!upstairs, 'the fixture has an upstairs room');
+
+  const ride = engine
+    .getLegalActions('p1')
+    .find(a => a.type === 'ELEVATOR_MOVE' && a.targetNodeId === upstairs!.id);
+  assert(!!ride, 'the upstairs room offers a doorway to dock at');
+  const rideRes = engine.dispatch(ride! as never);
+  assert(rideRes.ok, `the ride dispatches (${rideRes.error ?? ''})`);
+
+  const after = engine.getRawState();
+  const elevator = after.mapGraph.nodes.room_mystic_elevator;
+  assert(!!elevator, 'the elevator tile still exists');
+
+  // The tile must sit on the destination floor, not back down in the basement.
+  assertEqual(String(elevator!.props?.floor), 'UPPER', 'the tile moved to the upstairs floor');
+  assertEqual(String(elevator!.layer), 'UPPER', 'the tile layer follows the floor');
+  assertEqual(
+    String(after.players.p1.customProps.floor),
+    'UPPER',
+    'the rider ends up on the upstairs floor'
+  );
+  assertEqual(
+    String(after.players.p1.customProps.currentRoomId),
+    'room_mystic_elevator',
+    'the rider is inside the car'
+  );
+});

@@ -497,6 +497,9 @@ const ROOM_LIST: RoomDef[] = [
     name: '神秘电梯',
     en: 'Mystic Elevator',
     floor: 'BASEMENT',
+    // The car is the one tile that belongs on every floor: it is drawn from the
+    // deck on any level and it relocates between levels when ridden.
+    floors: ['BASEMENT', 'GROUND', 'UPPER'],
     // One door only: the elevator is a dead end you ride out of.
     doors: ['E'],
     special: 'ELEVATOR',
