@@ -40,6 +40,7 @@ export type RoomSpecial =
   | 'GALLERY'
   | 'BALCONY'
   | 'ELEVATOR'
+  | 'CHASM'
   | 'VAULT'
   | 'FURNACE';
 
@@ -173,7 +174,7 @@ const ROOM_LIST: RoomDef[] = [
     endTurnBuff: 'sanity',
   },
   {
-    id: 'garden',
+    id: 'gardens',
     name: '花园',
     en: 'Gardens',
     floor: 'GROUND',
@@ -385,7 +386,7 @@ const ROOM_LIST: RoomDef[] = [
     text: '石棺横陈，棺盖内侧布满抓痕。'
   },
   {
-    id: 'pentagram_chamber',
+    id: 'the_pentagram_chamber',
     name: '五芒星堂',
     en: 'Pentagram Chamber',
     floor: 'BASEMENT',
@@ -416,7 +417,7 @@ const ROOM_LIST: RoomDef[] = [
     text: '从地面直通地下的铁皮滑槽，边缘全是煤灰。'
   },
   {
-    id: 'vault',
+    id: 'the_vault',
     name: '金库',
     en: 'Vault',
     floor: 'BASEMENT',
@@ -454,7 +455,7 @@ const ROOM_LIST: RoomDef[] = [
     text: '工作台上散落着半成品与沾血的工具。'
   },
   {
-    id: 'laboratory',
+    id: 'research_laboratory',
     name: '实验室',
     en: 'Laboratory',
     floor: 'BASEMENT',
@@ -464,7 +465,7 @@ const ROOM_LIST: RoomDef[] = [
     text: '玻璃器皿里培养着不该存在的东西。'
   },
   {
-    id: 'operating_lab',
+    id: 'operating_laboratory',
     name: '手术室',
     en: 'Operating Laboratory',
     floor: 'BASEMENT',
@@ -517,6 +518,107 @@ const ROOM_LIST: RoomDef[] = [
     special: 'ELEVATOR',
     tags: ['elevator'],
     text: '一个没有缆绳的电梯，按钮上刻着不存在的楼层。'
+  }
+,
+  {
+    id: 'stairs_from_basement',
+    name: '地下室楼梯',
+    en: 'Stairs from Basement',
+    floor: 'BASEMENT',
+    doors: ['N', 'S'],
+    special: 'STAIRS',
+    tags: ['stairs'],
+    text: '通往门厅的暗门，只有发现它之后才能使用。'
+  },
+  {
+    id: 'patio',
+    name: '露台',
+    en: 'Patio',
+    floor: 'GROUND',
+    doors: ['N', 'S', 'W'],
+    symbol: 'EVENT',
+    tags: ['outside'],
+    text: '石板铺就的露台，雨后的水洼映着没有星光的夜。'
+  },
+  {
+    id: 'abandoned_room',
+    name: '废弃房间',
+    en: 'Abandoned Room',
+    floor: 'GROUND',
+    floors: ['BASEMENT', 'GROUND'],
+    doors: ['N', 'E', 'S', 'W'],
+    symbol: 'OMEN',
+    text: '家具被白布覆盖，像一排沉默的送葬者。'
+  },
+  {
+    id: 'charred_room',
+    name: '焦黑之室',
+    en: 'Charred Room',
+    floor: 'GROUND',
+    floors: ['GROUND', 'UPPER'],
+    doors: ['N', 'E', 'S', 'W'],
+    symbol: 'OMEN',
+    tags: ['fire'],
+    text: '墙壁烧得焦黑，空气里仍有烟味。'
+  },
+  {
+    id: 'organ_room',
+    name: '管风琴室',
+    en: 'Organ Room',
+    floor: 'GROUND',
+    floors: ['BASEMENT', 'GROUND', 'UPPER'],
+    doors: ['S', 'W'],
+    symbol: 'EVENT',
+    tags: ['music'],
+    text: '巨大的管风琴占据了整面墙，琴管里传出呼吸声。'
+  },
+  {
+    id: 'statuary_corridor',
+    name: '雕像长廊',
+    en: 'Statuary Corridor',
+    floor: 'GROUND',
+    floors: ['BASEMENT', 'GROUND', 'UPPER'],
+    doors: ['N', 'S'],
+    symbol: 'EVENT',
+    text: '一排大理石雕像，每一尊的脸都朝向你的方向。'
+  },
+  {
+    id: 'creaky_hallway',
+    name: '吱呀走廊',
+    en: 'Creaky Hallway',
+    floor: 'GROUND',
+    floors: ['BASEMENT', 'GROUND', 'UPPER'],
+    doors: ['N', 'E', 'S', 'W'],
+    text: '每一块地板都在你脚下叫出声来。'
+  },
+  {
+    id: 'dusty_hallway',
+    name: '积尘走廊',
+    en: 'Dusty Hallway',
+    floor: 'GROUND',
+    floors: ['BASEMENT', 'GROUND', 'UPPER'],
+    doors: ['N', 'E', 'S', 'W'],
+    text: '厚厚的灰尘上只有你自己的脚印。'
+  },
+  {
+    id: 'game_room',
+    name: '游戏室',
+    en: 'Game Room',
+    floor: 'GROUND',
+    floors: ['BASEMENT', 'GROUND', 'UPPER'],
+    doors: ['N', 'S', 'W'],
+    symbol: 'EVENT',
+    text: '台球桌上摆着一局未下完的棋。'
+  },
+  {
+    id: 'chasm',
+    name: '裂隙',
+    en: 'Chasm',
+    floor: 'BASEMENT',
+    doors: ['E', 'W'],
+    special: 'CHASM',
+    tags: ['edge'],
+    text: '地板裂开一道深不见底的口子。'
   }
 ];
 

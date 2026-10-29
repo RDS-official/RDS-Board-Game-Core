@@ -1641,24 +1641,24 @@ test('fixture betrayal: content tables and starting position', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 2024);
   const state = engine.getRawState();
 
-  assertEqual(Object.keys(ROOM_DEFS).length, 44, '44 room tiles are defined');
+  assertEqual(Object.keys(ROOM_DEFS).length, 54, '54 room tiles are defined');
   assertEqual(STARTING_ROOM_IDS.length, 5, 'five starting tiles');
-  assertEqual(ROOM_DECK_IDS.length, 39, '39 tiles remain in the room deck');
+  assertEqual(ROOM_DECK_IDS.length, 49, '49 tiles remain in the room deck');
   assertEqual(Object.keys(OMEN_DEFS).length, 13, '13 omens');
   assertEqual(Object.keys(ITEM_DEFS).length, 22, '22 items, matching the official 2E deck');
   assertEqual(Object.keys(EVENT_DEFS).length, 30, '30 events: 25 official plus 5 curse carriers');
   assertEqual(
     Object.values(ROOM_DEFS).filter(room => !room.symbol).length,
-    15,
-    'ten deck rooms plus five starting rooms have no symbol'
+    19,
+    'fourteen deck rooms plus five starting rooms have no symbol'
   );
 
   assertEqual(Object.keys(state.mapGraph.nodes).length, 5, 'five starting rooms on the table');
   assertEqual(state.zones.zone_event_deck.orderedEntities.length, 30, 'event deck built');
   assertEqual(state.zones.zone_item_deck.orderedEntities.length, 22, 'item deck built');
   assertEqual(state.zones.zone_omen_deck.orderedEntities.length, 13, 'omen deck built');
-  assertEqual(state.zones.zone_room_deck.orderedEntities.length, 39, 'room tile deck built');
-  assertEqual(state.globalVars.roomDeckTotal, 39, 'room deck total recorded');
+  assertEqual(state.zones.zone_room_deck.orderedEntities.length, 49, 'room tile deck built');
+  assertEqual(state.globalVars.roomDeckTotal, 49, 'room deck total recorded');
 
   const ox = state.players.p1;
   assertEqual(ox.customProps.traits.speed, 4, 'Ox speed');
@@ -2013,9 +2013,9 @@ test('fixture betrayal: phantom bones, frost trail and the requiem ritual', () =
     action => action.type === 'MOVE_TO_ROOM'
   );
   assert(!!move, 'pentagram chamber is adjacent');
-  assert(engine.dispatch({ ...move!, targets: ['room_pentagram_chamber'] }).ok, 'move accepted');
+  assert(engine.dispatch({ ...move!, targets: ['room_the_pentagram_chamber'] }).ok, 'move accepted');
   const frost = engine.getRawState().globalVars.frostRooms as string[];
-  assert(frost.includes('room_pentagram_chamber'), 'phantom frost hook marked the room');
+  assert(frost.includes('room_the_pentagram_chamber'), 'phantom frost hook marked the room');
 
   grantOmen(engine.getRawState(), 'p2', 'holy_symbol');
   const state = engine.getRawState();
@@ -2038,7 +2038,7 @@ test('fixture betrayal: zombie haunt brews holy water, sanctifies house and defe
 
   const move = engine.getLegalActions('p2').find(action => action.type === 'MOVE_TO_ROOM');
   assert(!!move, 'movement available to pentagram chamber');
-  assert(engine.dispatch({ ...move!, targets: ['room_pentagram_chamber'] }).ok, 'moved to pentagram chamber');
+  assert(engine.dispatch({ ...move!, targets: ['room_the_pentagram_chamber'] }).ok, 'moved to pentagram chamber');
 
   engine.getRawState().players.p2.customProps.forcedRoll = { value: 8 };
   const sanctify = engine.getLegalActions('p2').find(action => action.type === 'SANCTIFY_HOUSE');
@@ -4026,8 +4026,8 @@ test('rules: the drip curse only fires in a windowless room', () => {
   addEffect(raw, { kind: 'ONGOING', source: 'p1', target: 'p1', payload: { effect: 'DRIP' } });
 
   // The exploration layout has no garden, so place one and stand in it.
-  addExploredRoom(raw, 'garden', 0, 1, 'room_entrance_hall');
-  const garden = raw.mapGraph.nodes.room_garden;
+  addExploredRoom(raw, 'gardens', 0, 1, 'room_entrance_hall');
+  const garden = raw.mapGraph.nodes.room_gardens;
   assert(!!garden, 'the garden exists');
   assert(
     Array.isArray(garden!.props?.tags) && (garden!.props!.tags as string[]).includes('outside'),
@@ -4589,8 +4589,8 @@ test('rules: the same check cannot be attempted twice in one turn', () => {
   // place to prove the gate.
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
   const raw = engine.getRawState();
-  addExploredRoom(raw, 'vault', 0, 2, 'room_entrance_hall');
-  movePlayerTo(raw, 'p1', 'room_vault');
+  addExploredRoom(raw, 'the_vault', 0, 2, 'room_entrance_hall');
+  movePlayerTo(raw, 'p1', 'room_the_vault');
   raw.activePlayerId = 'p1';
   raw.activeActorId = 'p1';
   raw.players.p1.customProps.movesLeft = 2;

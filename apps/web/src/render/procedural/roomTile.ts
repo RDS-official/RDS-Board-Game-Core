@@ -76,7 +76,7 @@ const ROOM_PROPS: Record<string, Wish[]> = {
 /** Rooms whose solid walls get a window with moonlight behind them. */
 const WINDOWED = new Set([
   'conservatory',
-  'garden',
+  'gardens',
   'balcony',
   'tower',
   'observatory',
@@ -100,7 +100,7 @@ function floorStyleFor(roomId: string, floor: string): FloorStyle {
   }
   if (roomId === 'ballroom' || roomId === 'foyer' || roomId === 'chapel') return 'MARBLE';
   if (roomId === 'dining_room' || roomId === 'drawing_room' || roomId === 'library') return 'PARQUET';
-  if (roomId === 'conservatory' || roomId === 'garden') return 'DIRT';
+  if (roomId === 'conservatory' || roomId === 'gardens') return 'DIRT';
   if (floor === 'UPPER') return 'PLANK';
   return 'PLANK';
 }
@@ -335,7 +335,7 @@ export class RoomTileBuilder {
       ctx.stroke();
     }
 
-    if (roomId === 'bloody_room' || roomId === 'operating_lab') {
+    if (roomId === 'bloody_room' || roomId === 'operating_laboratory') {
       for (let i = 0; i < 26; i += 1) {
         const x = (i * 97) % 470 + 20;
         const y = (i * 163) % 470 + 20;
@@ -403,7 +403,7 @@ export class RoomTileBuilder {
       }
     }
 
-    if (roomId === 'pentagram_chamber') {
+    if (roomId === 'the_pentagram_chamber') {
       ctx.strokeStyle = 'rgba(170,30,44,0.4)';
       ctx.lineWidth = 4;
       ctx.beginPath();

@@ -101,7 +101,7 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
       addExploredRoom(state, 'tower', 3, 2, 'room_upper_landing');
       addExploredRoom(state, 'catacombs', 1, 2, 'room_basement_landing');
       addExploredRoom(state, 'furnace_room', 3, 2, 'room_basement_landing');
-      addExploredRoom(state, 'pentagram_chamber', 2, 1, 'room_basement_landing');
+      addExploredRoom(state, 'the_pentagram_chamber', 2, 1, 'room_basement_landing');
 
       setRoom(state, 'p1', 'room_ballroom');
       setRoom(state, 'p2', 'room_library');
@@ -220,13 +220,13 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
     description: '剧本 10「幽灵的拥抱」：五芒星堂开局，遗骨尚未找到。',
     setup: seed => {
       const state = setupBetrayal(seed);
-      addExploredRoom(state, 'pentagram_chamber', 2, 1, 'room_basement_landing');
+      addExploredRoom(state, 'the_pentagram_chamber', 2, 1, 'room_basement_landing');
       addExploredRoom(state, 'catacombs', 1, 2, 'room_basement_landing');
       addExploredRoom(state, 'crypt', 3, 2, 'room_basement_landing');
-      connectRooms(state, 'room_pentagram_chamber', 'room_catacombs', 'DOOR');
-      connectRooms(state, 'room_pentagram_chamber', 'room_crypt', 'DOOR');
+      connectRooms(state, 'room_the_pentagram_chamber', 'room_catacombs', 'DOOR');
+      connectRooms(state, 'room_the_pentagram_chamber', 'room_crypt', 'DOOR');
 
-      setRoom(state, 'p1', 'room_pentagram_chamber');
+      setRoom(state, 'p1', 'room_the_pentagram_chamber');
       setRoom(state, 'p2', 'room_catacombs');
       setRoom(state, 'p3', 'room_crypt');
 
@@ -234,7 +234,7 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
       grantItem(state, 'p2', 'axe');
       grantItem(state, 'p2', 'rope');
 
-      BetrayalRules.beginHaunt(state, 'p1', 'phantom', 'room_pentagram_chamber', scenarioContext());
+      BetrayalRules.beginHaunt(state, 'p1', 'phantom', 'room_the_pentagram_chamber', scenarioContext());
       state.globalVars.hauntObjectives = {
         hero: '在地下室找到遗骨，携带神圣徽记在五芒星堂完成 3 次神智 5+ 的安魂咏唱。',
         traitor: '让怨灵杀死所有英雄，把整座洋馆拖入灵界。'
@@ -248,21 +248,21 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
     description: '剧本 3「活死人之夜」：亡者大军破土而出，英雄需调配圣水净化洋馆。',
     setup: seed => {
       const state = setupBetrayal(seed);
-      addExploredRoom(state, 'pentagram_chamber', 2, 1, 'room_basement_landing');
+      addExploredRoom(state, 'the_pentagram_chamber', 2, 1, 'room_basement_landing');
       // 实验室不能放在 (2,2)：那里是地下平台（楼梯井）的格子，两块房块会
       // 叠在一起。放到 (1,2)，与其他剧本把地下室房间摆在平台两侧一致。
-      addExploredRoom(state, 'laboratory', 1, 2, 'room_basement_landing');
+      addExploredRoom(state, 'research_laboratory', 1, 2, 'room_basement_landing');
       addExploredRoom(state, 'kitchen', 1, 0, 'room_entrance_hall');
-      connectRooms(state, 'room_pentagram_chamber', 'room_laboratory', 'DOOR');
+      connectRooms(state, 'room_the_pentagram_chamber', 'room_research_laboratory', 'DOOR');
 
-      setRoom(state, 'p1', 'room_pentagram_chamber');
-      setRoom(state, 'p2', 'room_laboratory');
+      setRoom(state, 'p1', 'room_the_pentagram_chamber');
+      setRoom(state, 'p2', 'room_research_laboratory');
       setRoom(state, 'p3', 'room_kitchen');
 
       grantItem(state, 'p2', 'revolver');
       grantItem(state, 'p3', 'medical_kit');
 
-      BetrayalRules.beginHaunt(state, 'p1', 'living_dead', 'room_pentagram_chamber', scenarioContext());
+      BetrayalRules.beginHaunt(state, 'p1', 'living_dead', 'room_the_pentagram_chamber', scenarioContext());
       state.globalVars.hauntObjectives = {
         hero: '在实验室调配圣水，前往五芒星堂完成 2 次圣化仪式；或消灭死灵法师。',
         traitor: '操控活死人大军消灭所有探索者。'
@@ -306,7 +306,7 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
     setup: seed => {
       const state = setupBetrayal(seed);
       addExploredRoom(state, 'coal_chute', 1, 1, 'room_basement_landing');
-      addExploredRoom(state, 'vault', 3, 1, 'room_basement_landing');
+      addExploredRoom(state, 'the_vault', 3, 1, 'room_basement_landing');
       addExploredRoom(state, 'mystic_elevator', 1, 3, 'room_basement_landing');
       addExploredRoom(state, 'collapsed_room', 1, 3, 'room_upper_landing');
       addExploredRoom(state, 'furnace_room', 3, 3, 'room_basement_landing');
@@ -314,7 +314,7 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
       connectRooms(state, 'room_basement_landing', 'room_coal_chute', 'DOOR');
       connectRooms(state, 'room_basement_landing', 'room_furnace_room', 'DOOR');
 
-      setRoom(state, 'p1', 'room_vault');
+      setRoom(state, 'p1', 'room_the_vault');
       setRoom(state, 'p2', 'room_coal_chute');
       setRoom(state, 'p3', 'room_collapsed_room');
 
