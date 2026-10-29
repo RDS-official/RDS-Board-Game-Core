@@ -4997,3 +4997,26 @@ test('rules: a failed steal still lands the damage', () => {
 });
 
 
+
+test('rules: the music box rolls Sanity and shifts it, it does not freeze anyone', () => {
+  // Official text: "Play melody: make a Sanity roll: 4+ Soothing tune (Gain 1
+  // Sanity); 0-3 Agonizing discord (Lose 1 Sanity)." The old implementation zeroed
+  // movesLeft/attacksLeft/skipActions on nearby players, all of which
+  // resetTurnResources clears before the effect could ever matter.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  grantItem(raw, 'p1', 'music_box');
+  raw.players.p1.customProps.forcedRoll = { value: 8 };
+
+  const sanityBefore = traitIndex(raw.players.p1, 'sanity');
+  const use = engine.getLegalActions('p1').find(a => a.type === 'USE_ITEM');
+  assert(!!use, 'the box can be played');
+  assert(engine.dispatch(use!).ok, 'playing it dispatches');
+
+  const after = engine.getRawState();
+  assertEqual(traitIndex(after.players.p1, 'sanity'), sanityBefore + 1, 'a good tune restores Sanity');
+  assertEqual(Boolean(after.players.p1.customProps.skipActions), false, 'nobody is frozen');
+  assertEqual(Number(after.players.p1.customProps.movesLeft), Number(raw.players.p1.customProps.movesLeft), 'movement is untouched');
+});

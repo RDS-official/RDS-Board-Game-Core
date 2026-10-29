@@ -456,3 +456,13 @@
 | ground_tremors | 地面震动 | 速度 | 4+ / 1-3 / 0 |
 
 **牌堆现状**：事件 30 张（25 官方 + 5 诅咒载体）、物品 22、预兆 13。
+
+---
+
+## 修复记录（续）
+
+| 日期 | 条目 | 处理 |
+| --- | --- | --- |
+| 2026-10-30 | `music_box` 八音盒完全无效（严重 #1） | **已修复**。官方文本：「Play melody: make a Sanity roll: 4+ Gain 1 Sanity; 0-3 Lose 1 Sanity.」原实现给房内低神智玩家写 `movesLeft/attacksLeft/skipActions`，但这些字段会被目标回合开始的 `resetTurnResources` 无条件清零 —— 效果**永不发生**。现改为按官方做神智检定并 ±1 神智。测试：`rules: the music box rolls Sanity and shifts it, it does not freeze anyone` |
+| 2026-10-30 | `dynamite` 雷管炸药（严重 #4） | **已修复**。官方文本：「Throw into a room to deal **4 dice** of physical damage to all creatures within.」原实现掷 **3** 骰，且对怪物只做**击晕**而不造成伤害。现改为 4 骰，怪物按 Might 扣减、归零即被击败。 |
+| 2026-10-30 | `armor` 板甲 | **保持现状并记录**：官方为「Deflects physical attacks (**+1 Might**)」，本仓库实现为「受到肉体伤害时减免 1 点」（`physicalArmor: 1`）。两者机制不同但防御效果相当，改动会影响战斗平衡与既有测试，暂不调整。 |
