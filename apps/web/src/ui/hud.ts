@@ -13,7 +13,8 @@ import {
   UiCardDetail,
   UiHistoryEntry,
   UiNotice,
-  UiTraitChange
+  UiTraitChange,
+  UiPlayer
 } from '@rds/app/contracts';
 
 /**
@@ -57,6 +58,8 @@ export class BoardGameHUD {
   private onlinePlayerIds = new Set<string>();
   /** Room the player last clicked; the dossier follows it until the turn moves. */
   private pinnedRoomId?: string;
+  /** Latest snapshot, kept for click handlers that need the current data. */
+  private lastSnapshot?: GameSnapshot;
   /** Pointer position across the action row: 0 = left edge, 1 = right edge. */
   private fanFocusX = 0.5;
   /** 0 = flat row, 1 = full fisheye. Drops to 0 when the pointer leaves. */
@@ -1017,6 +1020,7 @@ export class BoardGameHUD {
     this.latest = snapshot;
     this.maybeAnimateRoll(snapshot);
     // Betrayal uses a candle-lit parchment palette; other fixtures stay slate.
+    this.lastSnapshot = snapshot;
     this.container.dataset.theme = snapshot.gameId === 'betrayal' ? 'gothic' : '';
     this.container.querySelectorAll<HTMLElement>('.game-pill').forEach(button => {
       button.classList.toggle('active', button.dataset.game === snapshot.gameId);
@@ -1616,6 +1620,16 @@ export class BoardGameHUD {
           .map(stat => `<div class="pc-row"><span class="k">${stat.label}</span><span class="v">${stat.value}</span></div>`)
           .join('');
 
+        const effectChips = (player.effects ?? [])
+          .map(
+            effect =>
+              `<span class="pc-effect ${effect.tone ?? 'neutral'}" title="${escHtml(effect.detail ?? effect.label)}">${escHtml(effect.label)}</span>`
+          )
+          .join('');
+        const effectRow = effectChips
+          ? `<div class="pc-effects">${effectChips}<button class="pc-effects-more" data-effect-open="${player.id}" title="查看全部状态">${(player.effects ?? []).length}</button></div>`
+          : '';
+
         const card = `
           <article class="pc ${player.isFocus ? 'active' : ''} ${player.alive ? '' : 'dead'}" data-player-id="${player.id}" style="--pc-color:${player.color}">
             <div class="pc-head">
@@ -1630,6 +1644,7 @@ export class BoardGameHUD {
               </div>
               <div class="pc-score"><b>${player.score}</b><span>${player.scoreLabel}</span></div>
             </div>
+            ${effectRow}
             <div class="pc-body">
               ${hp}
               ${traitRows}
@@ -1850,6 +1865,7 @@ export class BoardGameHUD {
         </div>
       `;
       this.bindDockEvents(dock);
+      this.bindPlayerRail();
     }
 
     const slot = (name: string) => dock.querySelector(`[data-slot="${name}"]`) as HTMLElement | null;
@@ -2028,6 +2044,61 @@ export class BoardGameHUD {
    * so re-binding on every render would leak listeners onto removed nodes and
    * make hover state impossible to keep.
    */
+  /**
+   * Player rail: opening the effect list for one character.
+   *
+   * Bound once and delegated, because the rail is reconciled on every snapshot.
+   */
+  private bindPlayerRail(): void {
+    const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
+    if (!rail) return;
+    rail.addEventListener('click', event => {
+      const target = event.target as HTMLElement | null;
+      const trigger = target?.closest('[data-effect-open]') as HTMLElement | null;
+      const card = target?.closest('.pc[data-player-id]') as HTMLElement | null;
+      const playerId = trigger?.dataset.effectOpen ?? card?.dataset.playerId;
+      if (!playerId) return;
+      const player = this.lastSnapshot?.players.find(entry => entry.id === playerId);
+      if (!player) return;
+      if (player.effects && player.effects.length > 0) this.openEffectsWindow(player);
+    });
+  }
+
+  /** Floating list of the character's current buffs and debuffs. */
+  private openEffectsWindow(player: UiPlayer): void {
+    const layer = this.container.querySelector('#payload-layer') as HTMLElement | null;
+    if (!layer) return;
+
+    const rows = (player.effects ?? [])
+      .map(
+        effect => `<li class="fx-row ${effect.tone ?? 'neutral'}">
+          <span class="fx-name">${escHtml(effect.label)}</span>
+          <span class="fx-detail">${escHtml(effect.detail ?? '')}</span>
+        </li>`
+      )
+      .join('');
+
+    layer.innerHTML = `
+      <div class="payload-backdrop"></div>
+      <div class="payload-card effects-window">
+        <header class="rc-head">
+          <span class="rc-floor">当前状态</span>
+          <button type="button" class="pf-btn" id="fx-close">关闭</button>
+        </header>
+        <div class="rc-title">${escHtml(player.name)}</div>
+        <ul class="fx-list">${rows || '<li class="fx-row neutral"><span class="fx-name">无</span></li>'}</ul>
+      </div>
+    `;
+    layer.style.display = 'flex';
+
+    const close = () => {
+      layer.style.display = 'none';
+      layer.innerHTML = '';
+    };
+    layer.querySelector('.payload-backdrop')?.addEventListener('click', close);
+    layer.querySelector('#fx-close')?.addEventListener('click', close);
+  }
+
   private bindDockEvents(dock: HTMLElement): void {
     const REST_HINT =
       '<span class="fh-label">悬停查看动作</span><span class="fh-detail">点击任意牌面展开详情 · 数字键直接执行</span>';

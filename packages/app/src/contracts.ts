@@ -91,6 +91,15 @@ export interface UiAction {
   fields?: UiActionField[];
 }
 
+/** One buff or debuff currently attached to a player. */
+export interface UiEffect {
+  id: string;
+  label: string;
+  detail?: string;
+  /** 'bad' paints it as a curse, 'good' as a boon. */
+  tone?: 'good' | 'bad' | 'neutral';
+}
+
 export interface UiPlayer {
   id: string;
   name: string;
@@ -105,6 +114,8 @@ export interface UiPlayer {
   roleClass?: string;
   isFocus: boolean;
   stats: { label: string; value: string }[];
+  /** Active buffs and debuffs, shown when the character card is opened. */
+  effects?: UiEffect[];
   pips: {
     color: string;
     label: string;
