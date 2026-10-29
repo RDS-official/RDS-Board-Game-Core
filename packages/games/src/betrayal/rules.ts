@@ -609,9 +609,10 @@ export class BetrayalRules {
     const entity = npc.entityId ? state.entities[npc.entityId] : undefined;
     const custom = entity?.components.custom ?? {};
     if (!entity || custom.destroyed) return [];
-    if (custom.stunned) {
-      return [{ type: 'END_NPC_TURN', playerId: npc.id, actorId: npc.id }];
-    }
+    // Rulebook, Death and Stuns: a stunned monster "can't slow an explorer's
+    // movement, but a Traitor may still move the monster". So it keeps its moves
+    // and loses only its attacks; it flips back at the end of its turn.
+    const stunned = !!custom.stunned;
 
     const roomId = String(custom.roomId ?? '');
     const actions: Action[] = [];
@@ -620,7 +621,7 @@ export class BetrayalRules {
         actions.push({ type: 'MOVE_NPC', playerId: npc.id, actorId: npc.id, targetNodeId: target });
       }
     }
-    if (Number(npc.customProps.attacksLeft ?? 0) > 0) {
+    if (!stunned && Number(npc.customProps.attacksLeft ?? 0) > 0) {
       for (const targetId of playersInRoom(state, roomId)) {
         if (state.players[targetId].role === 'TRAITOR') continue;
         actions.push({ type: 'ATTACK_HERO', playerId: npc.id, actorId: npc.id, targetPlayerId: targetId });

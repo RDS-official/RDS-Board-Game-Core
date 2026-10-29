@@ -4669,3 +4669,33 @@ test('rules: becoming the traitor clears lingering event effects', () => {
   assertEqual(String(after.players.p1.role), 'TRAITOR', 'the revealer is the traitor');
   assertEqual(ongoingEffectKinds(after, 'p1').length, 0, 'no lingering curse remains on the traitor');
 });
+
+test('rules: a stunned monster still moves but cannot attack', () => {
+  // Rulebook, Death and Stuns: "a stunned monster can't slow an explorer's
+  // movement, but a Traitor may still move the monster."
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'haunt_zombie' });
+  const raw = engine.getRawState();
+
+  const npcId = Object.keys(raw.npcs ?? {}).find(id => raw.npcs![id].status === 'ACTIVE');
+  assert(!!npcId, 'the fixture has an active monster');
+  const npc = raw.npcs![npcId!];
+  const entity = npc.entityId ? raw.entities[npc.entityId] : undefined;
+  assert(!!entity, 'the monster has an entity');
+
+  raw.activeActorId = npcId!;
+  npc.customProps.movesLeft = 2;
+  npc.customProps.attacksLeft = 1;
+  entity!.components.custom = { ...(entity!.components.custom ?? {}), stunned: true, stunTurns: 1 };
+
+  const legal = engine.getLegalActions(npcId!);
+  assertEqual(
+    legal.some(a => a.type === 'MOVE_NPC'),
+    true,
+    'a stunned monster can still be moved'
+  );
+  assertEqual(
+    legal.some(a => a.type === 'ATTACK_HERO'),
+    false,
+    'a stunned monster cannot attack'
+  );
+});
