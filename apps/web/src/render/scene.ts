@@ -19,8 +19,55 @@ import { cardGroupKey } from './cardGroups';
 import { PresentationPhysics } from './physics';
 import { BoardGameAudio } from './audio';
 import { CANVAS_FONT_STACK } from './fonts';
+import { handLayout, handRowSpan } from '../ui/handLayout';
 
 export type CameraPreset = 'ISOMETRIC' | 'TOP_DOWN' | 'PLAYER_1' | 'PLAYER_2';
+
+/* ---------------------------------------------------------------------- */
+/* Hand row geometry                                                       */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * World width of one hand row. This is the "container width" the fisheye
+ * layout normalises against, so it is the hard budget: however many cards a
+ * player holds, they are spread over exactly this strip in front of the seat.
+ */
+const HAND_ROW_SPAN = 6.4;
+/** Distance from the seat centre outwards to the hand row. */
+const HAND_ROW_DEPTH = 2.0;
+/** Table height of the hand row. */
+const HAND_ROW_Y = 0.13;
+/** World width of a card at layout scale 1. */
+const HAND_CARD_WIDTH = 0.63;
+/** Native width of the card mesh; layout scale maps straight onto mesh.scale. */
+const HAND_CARD_MESH_WIDTH = 1.12;
+/** Total in-plane fan spread (radians) from the left card to the right one. */
+const HAND_FAN_YAW = 0.5;
+/** Fan angle added per card, so a two-card hand stays almost flat. */
+const HAND_FAN_STEP = 0.055;
+/** Per-card height step, so overlapping cards keep a stable draw order. */
+const HAND_CARD_STACK_STEP = 0.0025;
+/** How far the hovered card rises out of the row. */
+const HAND_HOVER_LIFT = 0.09;
+/** The pointer has to come this close (px) to a row before it takes focus. */
+const HAND_FOCUS_BAND_PX = 160;
+
+/** A laid-out hand row: its world frame plus the cards it owns, in order. */
+interface HandRow {
+  zoneId: string;
+  ids: string[];
+  originX: number;
+  originZ: number;
+  axisX: number;
+  axisZ: number;
+  facing: number;
+  /** Width of the strip this hand is laid out in (see `handRowSpan`). */
+  span: number;
+  /** Eased fisheye state: pointer position along the row (0..1) + strength. */
+  focus: { x: number; strength: number };
+  /** Where `focus` is heading; the pointer sets it, the loop eases towards it. */
+  target: { x: number; strength: number };
+}
 
 export interface PlacementPreview {
   name: string;
@@ -128,6 +175,16 @@ export class BoardGameScene {
   private lastSyncMs = 0;
   private hoveredEntityId?: string;
   private fanZoneId?: string;
+  /** Hand rows keyed by zone id; the fisheye layout is re-applied per frame. */
+  private handRows = new Map<string, HandRow>();
+  /**
+   * Last fisheye target the pointer asked for. Rows are rebuilt whenever the
+   * board changes, so a fresh row picks this up instead of snapping back to a
+   * uniform layout under a pointer that never moved.
+   */
+  private handPointerTarget = { x: 0.5, strength: 0 };
+  private lastHandHoverId: string | null = null;
+  private reduceMotionQuery?: MediaQueryList;
   private cardVisualOffsets = new Map<string, { dx: number; dz: number }>();
   private groupMembers = new Map<string, string[]>();
   private groupDrag?: {
@@ -243,6 +300,13 @@ export class BoardGameScene {
 
     // 7. Event listeners & Render loop
     window.addEventListener('resize', this.onResize.bind(this));
+    // The hand fisheye follows the pointer; it is a presentation gesture only,
+    // so it never touches controls or picking.
+    this.renderer.domElement.addEventListener('pointermove', this.onHandPointerMove);
+    this.renderer.domElement.addEventListener('pointerleave', this.onHandPointerLeave);
+    if (typeof window.matchMedia === 'function') {
+      this.reduceMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    }
     this.renderLoop();
   }
 
@@ -1206,6 +1270,7 @@ export class BoardGameScene {
     this.physics.clear();
     this.highlightedMeshes.clear();
     this.navArrowMeshes = [];
+    this.handRows.clear();
     while (this.boardObjectsGroup.children.length > 0) {
       const child = this.boardObjectsGroup.children[0];
       this.boardObjectsGroup.remove(child);
@@ -2701,31 +2766,194 @@ export class BoardGameScene {
     items: (Partial<Entity> & { isMasked?: boolean; id: string })[]
   ): void {
     const frame = this.seatFrame(state, zone.ownerId);
-    const perpX = -frame.outZ;
-    const perpZ = frame.outX;
+    // The row runs along the seat's tangent: +row is the seat's left-hand side,
+    // so index order reads left-to-right for the player sitting there.
+    const axisX = -frame.outZ;
+    const axisZ = frame.outX;
+    const originX = frame.x + frame.outX * HAND_ROW_DEPTH;
+    const originZ = frame.z + frame.outZ * HAND_ROW_DEPTH;
 
-    const limit = Math.min(items.length, 10);
-    const cardScale = limit > 6 ? 0.5 : limit > 4 ? 0.56 : 0.62;
-    const step = 1.12 * cardScale + 0.08;
-
-    for (let i = 0; i < limit; i++) {
-      const entity = items[i];
+    // Every card in the hand gets a mesh. There is no count cap any more: the
+    // fisheye layout below normalises the whole hand into one strip, so a
+    // 50-card hand still fits the row instead of silently dropping 40 cards.
+    const ids: string[] = [];
+    for (const entity of items) {
       const face = entity.components?.cardFace || { title: 'Card' };
-      const mesh = CardMeshBuilder.createCardMesh(face, 1.12, 1.68, !!entity.isMasked);
-
-      const spread = (i - (limit - 1) / 2) * step;
-      const fanAngle = (i - (limit - 1) / 2) * 0.055;
-      mesh.scale.set(cardScale, cardScale, cardScale);
-      mesh.position.set(
-        frame.x + frame.outX * 2.0 + perpX * spread,
-        0.13 + Math.abs(fanAngle) * 0.18,
-        frame.z + frame.outZ * 2.0 + perpZ * spread
-      );
-      mesh.rotation.y = frame.facing + fanAngle;
-      this.applyCardVisualOffset(entity.id, mesh);
+      const mesh = CardMeshBuilder.createCardMesh(face, HAND_CARD_MESH_WIDTH, 1.68, !!entity.isMasked);
+      mesh.rotation.y = frame.facing;
       this.boardObjectsGroup.add(mesh);
       this.entityMeshes.set(entity.id, mesh);
       this.raycaster.registerInteractive(mesh, { type: 'ENTITY', id: entity.id, metadata: face });
+      ids.push(entity.id);
+    }
+
+    const row: HandRow = {
+      zoneId: zone.id,
+      ids,
+      originX,
+      originZ,
+      axisX,
+      axisZ,
+      facing: frame.facing,
+      span: handRowSpan(ids.length, HAND_ROW_SPAN, HAND_CARD_WIDTH),
+      // Start where the pointer already is, so rebuilding the board does not
+      // make the hand re-expand under a stationary cursor.
+      focus: { ...this.handPointerTarget },
+      target: { ...this.handPointerTarget }
+    };
+    this.handRows.set(zone.id, row);
+    this.layoutHandRow(row);
+  }
+
+  /**
+   * Place one hand row with the pure fisheye layout.
+   *
+   * The layout module owns the maths (see apps/web/src/ui/handLayout.ts); this
+   * method only maps "centre + scale along a 1-D row" onto world coordinates.
+   * It is idempotent, so the render loop can call it on every frame while the
+   * fisheye eases towards the pointer without rebuilding a single mesh.
+   */
+  private layoutHandRow(row: HandRow): void {
+    const count = row.ids.length;
+    if (count === 0) return;
+
+    const hoveredId = this.hoveredEntityId;
+    const hoverIndex = hoveredId ? row.ids.indexOf(hoveredId) : -1;
+    const layout = handLayout({
+      count,
+      containerWidth: row.span,
+      cardWidth: HAND_CARD_WIDTH,
+      focusX: row.focus.x,
+      focusStrength: row.focus.strength,
+      hoverIndex: hoverIndex >= 0 ? hoverIndex : null
+    });
+    // Small hands should stay nearly flat; the fan only opens up as the row
+    // fills, which is how the previous hand geometry behaved.
+    const yawSpread = Math.min(HAND_FAN_YAW, (count - 1) * HAND_FAN_STEP);
+
+    for (const card of layout.cards) {
+      const id = row.ids[card.index];
+      const mesh = this.entityMeshes.get(id);
+      if (!mesh) continue;
+      // A card the user is dragging (or that is settling after a drop) owns its
+      // own position; the layout must not fight it.
+      if (
+        id === this.draggedEntityId ||
+        this.cardSettles.has(id) ||
+        this.groupDrag?.bases.has(id)
+      ) {
+        continue;
+      }
+
+      const along = card.x - row.span / 2;
+      mesh.position.set(
+        row.originX + row.axisX * along,
+        HAND_ROW_Y + card.index * HAND_CARD_STACK_STEP + card.lift * HAND_HOVER_LIFT,
+        row.originZ + row.axisZ * along
+      );
+      mesh.scale.setScalar((card.scale * HAND_CARD_WIDTH) / HAND_CARD_MESH_WIDTH);
+      mesh.rotation.y = row.facing + (card.x / row.span - 0.5) * yawSpread;
+      // Overlapping cards are coplanar; renderOrder plus the tiny height step
+      // keeps the fan stacking stable instead of z-fighting.
+      mesh.renderOrder = card.z;
+      this.applyCardVisualOffset(id, mesh);
+    }
+  }
+
+  /** Project a point on a hand row into canvas pixels, or null when behind. */
+  private projectHandRowPoint(
+    row: HandRow,
+    along: number,
+    rect: DOMRect
+  ): { x: number; y: number } | null {
+    const point = BoardGameScene._scratchPoint.set(
+      row.originX + row.axisX * along,
+      HAND_ROW_Y,
+      row.originZ + row.axisZ * along
+    );
+    point.applyMatrix4(this.camera.matrixWorldInverse);
+    if (point.z > -0.2) return null; // at or behind the camera plane
+    point.applyMatrix4(this.camera.projectionMatrix);
+    return {
+      x: rect.left + (point.x * 0.5 + 0.5) * rect.width,
+      y: rect.top + (-point.y * 0.5 + 0.5) * rect.height
+    };
+  }
+
+  /**
+   * Map the pointer onto every hand row.
+   *
+   * The pointer is projected onto each row's screen-space segment and clamped
+   * to [0, 1], so hovering past either end parks the focus on that end — the
+   * requirement that the fisheye works at the edges, not only in the middle.
+   * A row the pointer is far away from goes back to uniform.
+   */
+  private onHandPointerMove = (event: PointerEvent): void => {
+    if (this.handRows.size === 0) return;
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    // Camera matrices are refreshed on render; a pointer event can arrive
+    // before the first frame, so make sure the projection is current.
+    this.camera.updateMatrixWorld();
+    let nearest = Number.POSITIVE_INFINITY;
+
+    for (const row of this.handRows.values()) {
+      const start = this.projectHandRowPoint(row, -row.span / 2, rect);
+      const end = this.projectHandRowPoint(row, row.span / 2, rect);
+      if (!start || !end) {
+        row.target = { x: 0.5, strength: 0 };
+        continue;
+      }
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const lengthSq = dx * dx + dy * dy;
+      if (lengthSq < 64) {
+        // Row is edge-on: a horizontal cursor position would be meaningless.
+        row.target = { x: 0.5, strength: 0 };
+        continue;
+      }
+      const raw = ((event.clientX - start.x) * dx + (event.clientY - start.y) * dy) / lengthSq;
+      const t = raw < 0 ? 0 : raw > 1 ? 1 : raw;
+      const distance = Math.hypot(
+        event.clientX - (start.x + dx * t),
+        event.clientY - (start.y + dy * t)
+      );
+      row.target = distance <= HAND_FOCUS_BAND_PX ? { x: t, strength: 1 } : { x: 0.5, strength: 0 };
+      if (distance < nearest) {
+        nearest = distance;
+        this.handPointerTarget = { ...row.target };
+      }
+    }
+  };
+
+  private onHandPointerLeave = (): void => {
+    this.handPointerTarget = { x: 0.5, strength: 0 };
+    for (const row of this.handRows.values()) row.target = { x: 0.5, strength: 0 };
+  };
+
+  /**
+   * Ease every row's fisheye towards its target and re-place the rows that
+   * moved. `prefers-reduced-motion` snaps instead of easing.
+   */
+  private updateHandFocus(dt: number): void {
+    if (this.handRows.size === 0) return;
+    const snap = this.reduceMotionQuery?.matches === true;
+    const ease = snap ? 1 : Math.min(1, dt * 14);
+    const hoveredId = this.hoveredEntityId ?? null;
+    const hoverChanged = hoveredId !== this.lastHandHoverId;
+    this.lastHandHoverId = hoveredId;
+
+    for (const row of this.handRows.values()) {
+      const { focus, target } = row;
+      const nextX = focus.x + (target.x - focus.x) * ease;
+      const nextStrength = focus.strength + (target.strength - focus.strength) * ease;
+      const settled = Math.abs(nextX - target.x) < 1e-4 && Math.abs(nextStrength - target.strength) < 1e-4;
+      const appliedX = settled ? target.x : nextX;
+      const appliedStrength = settled ? target.strength : nextStrength;
+      const moved =
+        Math.abs(appliedX - focus.x) > 1e-4 || Math.abs(appliedStrength - focus.strength) > 1e-4;
+      focus.x = appliedX;
+      focus.strength = appliedStrength;
+      if (moved || hoverChanged) this.layoutHandRow(row);
     }
   }
 
@@ -3317,6 +3545,7 @@ export class BoardGameScene {
     this.lastFrameTime = now;
     this.physics.step(dt);
     this.updateFocusLight();
+    this.updateHandFocus(dt);
     this.updateCardSettles(now);
     this.updateRoomSettles(now);
     this.updateNavArrows(now);
@@ -3331,6 +3560,9 @@ export class BoardGameScene {
   public destroy(): void {
     this.isDestroyed = true;
     window.removeEventListener('resize', this.onResize.bind(this));
+    this.renderer.domElement.removeEventListener('pointermove', this.onHandPointerMove);
+    this.renderer.domElement.removeEventListener('pointerleave', this.onHandPointerLeave);
+    this.handRows.clear();
     this.clearBoardObjects();
     this.labels.destroy();
     this.physics.dispose();
