@@ -1594,7 +1594,7 @@ test('fixture sanguosha: interrupt stack resolves through hidden information', (
 });
 
 /* -------------------------------------------------------------------------- */
-/* Betrayal fixture: 44 rooms, 13 omens, 45 events, three full haunts          */
+/* Betrayal fixture: 44 rooms, 13 omens, 10 events, three full haunts          */
 /* -------------------------------------------------------------------------- */
 
 function findAttackSeed(attackDice: number, defenseDice: number, wantDiff: (diff: number) => boolean): number {
@@ -1645,8 +1645,8 @@ test('fixture betrayal: content tables and starting position', () => {
   assertEqual(STARTING_ROOM_IDS.length, 5, 'five starting tiles');
   assertEqual(ROOM_DECK_IDS.length, 39, '39 tiles remain in the room deck');
   assertEqual(Object.keys(OMEN_DEFS).length, 13, '13 omens');
-  assertEqual(Object.keys(ITEM_DEFS).length, 25, 'the brief lists 25 items (not 22)');
-  assertEqual(Object.keys(EVENT_DEFS).length, 45, '45 events');
+  assertEqual(Object.keys(ITEM_DEFS).length, 22, '22 items, matching the official 2E deck');
+  assertEqual(Object.keys(EVENT_DEFS).length, 10, '10 events (the 5 official ones plus the 5 curse carriers)');
   assertEqual(
     Object.values(ROOM_DEFS).filter(room => !room.symbol).length,
     15,
@@ -1654,8 +1654,8 @@ test('fixture betrayal: content tables and starting position', () => {
   );
 
   assertEqual(Object.keys(state.mapGraph.nodes).length, 5, 'five starting rooms on the table');
-  assertEqual(state.zones.zone_event_deck.orderedEntities.length, 45, 'event deck built');
-  assertEqual(state.zones.zone_item_deck.orderedEntities.length, 25, 'item deck built');
+  assertEqual(state.zones.zone_event_deck.orderedEntities.length, 10, 'event deck built');
+  assertEqual(state.zones.zone_item_deck.orderedEntities.length, 22, 'item deck built');
   assertEqual(state.zones.zone_omen_deck.orderedEntities.length, 13, 'omen deck built');
   assertEqual(state.zones.zone_room_deck.orderedEntities.length, 39, 'room tile deck built');
   assertEqual(state.globalVars.roomDeckTotal, 39, 'room deck total recorded');
