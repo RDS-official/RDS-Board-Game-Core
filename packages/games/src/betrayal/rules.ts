@@ -926,7 +926,27 @@ export class BetrayalRules {
         }
         const elevatorNode = s.mapGraph.nodes[elevatorId];
         if (elevatorNode) elevatorNode.neighbors = [];
-        addRoomNode(s, ROOM_DEFS.mystic_elevator, col, row, rotation, elevatorId);
+
+        // The car adopts the DESTINATION's floor. addRoomNode derives the layer
+        // from the definition, and the elevator's definition says basement, so
+        // riding up to the second floor used to drop the tile into the basement
+        // at the same column/row - colliding with a basement room or stranding
+        // the rider on the wrong floor.
+        const targetFloor = String(targetRoom.props?.floor ?? 'BASEMENT') as Floor;
+        // Respect the tile's own floor list instead of assuming it may go anywhere.
+        const elevatorFloors = ROOM_DEFS.mystic_elevator.floors ?? [ROOM_DEFS.mystic_elevator.floor];
+        if (!elevatorFloors.includes(targetFloor)) {
+          trace(ctx, 'ANNOUNCEMENT', '电梯到不了那一层', 500);
+          break;
+        }
+        addRoomNode(
+          s,
+          { ...ROOM_DEFS.mystic_elevator, floor: targetFloor },
+          col,
+          row,
+          rotation,
+          elevatorId
+        );
         connectRooms(s, elevatorId, targetId, 'DOOR');
         s.globalVars.elevatorRoomId = elevatorId;
 
