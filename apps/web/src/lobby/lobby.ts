@@ -795,7 +795,16 @@ function bindRoom() {
   roomTimer = setInterval(refreshRoom, wsHealthy ? 8000 : 3000);
 }
 
-/** 网络对局启动参数契约见 docs/LOBBY-INTEGRATION.md（同页切换而非 window.open） */
+/**
+ * 网络对局启动参数契约见 docs/LOBBY-INTEGRATION.md（同页切换而非 window.open）。
+ *
+ * `authority=server`（默认）：中心模式，服务器持有唯一权威引擎，座位由服务器
+ * 按大厅玩家顺序下发；`role` 只影响 UI 文案，不再决定权威位置，也不需要
+ * WebRTC 直连（因此不再需要 `hostId`）。
+ * 传 `authority=p2p` 可回退旧的房主浏览器权威直连模式。
+ */
+const NET_AUTHORITY: 'server' | 'p2p' = 'server';
+
 function gameQuery(r: HubRoomInfo, role: 'host' | 'guest'): string {
   const q = new URLSearchParams({
     game: r.gameId,
@@ -803,9 +812,10 @@ function gameQuery(r: HubRoomInfo, role: 'host' | 'guest'): string {
     roomId: r.id,
     token: localStorage.getItem('token') ?? '',
     role,
+    authority: NET_AUTHORITY,
     playerId: 'p' + (seatOf(r, user!.sub) + 1),
   });
-  if (role === 'guest') q.set('hostId', r.hostId);
+  if (NET_AUTHORITY === 'p2p' && role === 'guest') q.set('hostId', r.hostId);
   if (r.scenarioId) q.set('scenario', r.scenarioId);
   // 阶段一：座位 → 昵称/头像，房主开局时写进内核 Player 同步全员。
   const roster: Record<string, { name: string; avatarUrl?: string }> = {};

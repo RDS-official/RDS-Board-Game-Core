@@ -358,10 +358,12 @@ class BoardGameSimulatorApp {
     if (!module) throw new Error(`Unknown game module: ${gameId}`);
     if (this.netOptions) {
       const net = new NetSession(module, this.netOptions);
-      // 阶段二：presence → HUD 在线点；房主关闭房间 → 提示后回大厅。
-      // 阶段三：房主座位离线时 guest 侧启动 5 分钟等待遮罩（超时结束对局）。
       const opts = this.netOptions;
-      const hostPid = opts.role === 'guest'
+      const centreMode = net.authority === 'server';
+      // 阶段二：presence → HUD 在线点。
+      // P2P 模式额外把「房主座位离线」变成等待遮罩；中心模式没有房主权威，
+      // 房主掉线不影响对局，因此不进入等待态。
+      const hostPid = !centreMode && opts.role === 'guest'
         ? (Object.entries(opts.seatOwners ?? {}) as [string, string][])
             .find(([, uid]) => uid === opts.hostId)?.[0]
         : undefined;
@@ -370,16 +372,19 @@ class BoardGameSimulatorApp {
         if (hostPid && !ids.includes(hostPid)) this.startHostWait();
         else this.stopHostWait();
       };
-      // 阶段三：房客单独重连遮罩（频道断开后 NetSession 自动重拨）。
+      // 断线重连遮罩（中心模式重连服务器，P2P 重连房主浏览器）。
       net.onGuestReconnecting = attempt => {
-        this.showNetWait('连接已断开', '正在重新连接房主…（第 ' + attempt + ' 次尝试）');
+        this.showNetWait(
+          '连接已断开',
+          (centreMode ? '正在重新连接对局服务器…' : '正在重新连接房主…') + '（第 ' + attempt + ' 次尝试）'
+        );
       };
       net.onGuestReconnected = () => {
         if (this.hostWaitTimer === null) this.hideNetWait();
         this.hud?.showAnnouncement('已重新连接');
       };
       net.onRoomClosed = () => {
-        this.hud?.showAnnouncement('房主已结束对局');
+        this.hud?.showAnnouncement('对局已结束');
         setTimeout(() => { location.href = location.pathname; }, 1200);
       };
       // Async connect; failures surface as onNotice toasts, not boot crashes.
@@ -747,9 +752,14 @@ if (document.readyState === 'loading') {
 
 /**
  * Lobby URL: ?hub=<origin>&roomId=<roomId>&token=<hubToken>&playerId=<playerId>
- * plus role=host, or role=guest&hostId=<hostHubUserId> (契约名见 docs/LOBBY-INTEGRATION.md；
- * 旧别名 room/player/host 仍兼容). All four base params
- * are required; anything less falls back to the local single-player session.
+ * plus role=host|guest (契约名见 docs/LOBBY-INTEGRATION.md；旧别名
+ * room/player/host 仍兼容). All four base params are required; anything less
+ * falls back to the local single-player session.
+ *
+ * **中心模式（默认）**：`authority=server`（缺省）。服务器持有唯一权威引擎，
+ * 房主与房客都只是客户端，座位由服务器按大厅玩家顺序下发，因此 `role` 与
+ * `hostId` 不再影响权威位置，也不再需要 WebRTC 直连。
+ * 传 `authority=p2p` 可回退到旧的「房主浏览器为权威」直连模式。
  */
 function parseNetSessionOptions(params: URLSearchParams): NetSessionOptions | undefined {
   const hub = params.get('hub');
@@ -758,9 +768,11 @@ function parseNetSessionOptions(params: URLSearchParams): NetSessionOptions | un
   const player = params.get('playerId') ?? params.get('player');
   if (!hub || !room || !token || !player) return undefined;
   const role = params.get('role') === 'host' ? 'host' : 'guest';
+  const authority: 'server' | 'p2p' = params.get('authority') === 'p2p' ? 'p2p' : 'server';
   const hostId = params.get('hostId') ?? params.get('host') ?? undefined;
-  if (role === 'guest' && !hostId) {
-    console.warn('[net-session] guest role requires &host=<hostHubUserId>; falling back to local session');
+  // 只有旧的 P2P 房客路径需要 hostId（要拨号到房主浏览器）；中心模式不需要。
+  if (authority === 'p2p' && role === 'guest' && !hostId) {
+    console.warn('[net-session] p2p guest role requires &host=<hostHubUserId>; falling back to local session');
     return undefined;
   }
   // 阶段一：座位 → hub 身份（JSON），房主开局时写进内核 Player 展示字段。
@@ -780,6 +792,7 @@ function parseNetSessionOptions(params: URLSearchParams): NetSessionOptions | un
     roomId: room,
     token,
     role,
+    authority,
     playerId: player,
     hostId,
     scenario: params.get('scenario') ?? undefined,

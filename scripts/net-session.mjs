@@ -18,11 +18,14 @@ const ok = (cond, name) => { if (!cond) { failed++; console.error('FAIL', name);
 const module = GAME_REGISTRY.splendor;
 
 // --- wiring: in-memory channel pair host <-> guest -------------------------
+// P2P path is exercised explicitly; centre mode has its own suite
+// (apps/server/src/selftest.ts + scripts/verify-centre-mode.mjs).
 const { session: host, transport: hostTransport } = NetSession.createLoopbackHost(module, {
   hub: 'loopback',
   roomId: 'room-lo',
   token: 't',
   role: 'host',
+  authority: 'p2p',
   playerId: 'p1'
 });
 
@@ -43,6 +46,7 @@ const guest = new NetSession(module, {
   roomId: 'room-lo',
   token: 't',
   role: 'guest',
+  authority: 'p2p',
   playerId: 'p2',
   hostId: 'u_host_lo'
 });
@@ -140,6 +144,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     roomId: 'room-seats',
     token: 't',
     role: 'host',
+    authority: 'p2p',
     playerId: 'p1',
     seatOwners: { p1: 'u_p1', p2: 'u_p2' }
   });

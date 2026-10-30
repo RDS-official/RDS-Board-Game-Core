@@ -1,15 +1,21 @@
 /**
- * Networked session (lobby mode) — GamePresenter for rds-room/1 WebRTC play.
+ * Networked session (lobby mode) — GamePresenter for rds-room/1 play.
  *
- * Host: engine authority stays local and there is exactly ONE engine — the
- * UniversalSession (HUD) and the authoritative GameRoom share it, so a local
- * dispatch is the authoritative transition; guests are served through
- * WebRtcHostTransport + startHostMesh with per-viewer deltas.
+ * Two authority placements share ONE wire protocol and ONE projection pipeline:
  *
- * Guest: no local engine. Consumes its own projection O(s, i) pushed by the
- * host, renders it with the same pure view builders as UniversalSession, and
- * forwards performed actions over the data channel. Local-only debug features
- * (rewind / replay verification / clock forcing) are no-ops with a notice.
+ *  - **centre mode** (`authority: 'server'`, 默认): the server owns the single
+ *    engine (`apps/server/src/match.ts`). Every browser — including the old
+ *    "host" — is a plain client that reads its own seat projection and submits
+ *    actions. No browser holds authority, so a malicious peer cannot rewrite
+ *    state, peek at hidden information or fabricate results.
+ *  - **p2p mode** (`authority: 'p2p'`): the legacy host-browser-authoritative
+ *    path (GameRoom + WebRtcHostTransport + startHostMesh), kept for
+ *    compatibility and offline/direct play.
+ *
+ * Both paths render through the exact same pure view builders as
+ * UniversalSession and consume the same `room-update` payload shape, so the HUD
+ * code is identical. Local-only debug features (rewind / replay verification /
+ * clock forcing) are no-ops with a notice for non-authoritative clients.
  */
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { GameModule } from '@rds/kernel/module';
@@ -34,6 +40,7 @@ import {
   openGuestChannel,
   startHostMesh
 } from '@rds/net/webrtc-transport';
+import { ServerMatchTransport } from '@rds/net/server-transport';
 import {
   BoardPick,
   GamePresenter,
@@ -80,6 +87,11 @@ export interface NetSessionOptions {
   roomId: string;
   token: string;
   role: 'host' | 'guest';
+  /**
+   * 权威位置：`server`（默认，中心模式：服务器持有唯一引擎）或 `p2p`
+   * （旧行为：房主浏览器为权威）。两者共用同一套 URL 参数与消息契约。
+   */
+  authority?: 'server' | 'p2p';
   /** This browser's seat; the host's playerId is also its local viewer. */
   playerId: PlayerId;
   /** Guest only: hub userId of the host to dial. */
@@ -105,7 +117,16 @@ interface GuestChannel {
  */
 export class NetSession implements GamePresenter {
   public readonly role: 'host' | 'guest';
-  public readonly viewer: PlayerId;
+  /** `server` = centre mode (authority in the server process); `p2p` = legacy host-browser authority. */
+  public readonly authority: 'server' | 'p2p';
+  /**
+   * True only for the legacy P2P host: it owns the local engine and drives the
+   * HUD straight from it. Every other case (centre-mode host AND guest) is a
+   * pure projection consumer.
+   */
+  public readonly isLocalAuthority: boolean;
+  /** 本客户端的座位。中心模式下由服务器下发（见 onServerSeat），其余情况来自 URL。 */
+  public viewer: PlayerId;
 
   // --- Phase 2 hooks (set by the web layer before/after start()) ---
   /** Presence updates translated from hub userIds to playerIds (via seatOwners). */
@@ -140,6 +161,9 @@ export class NetSession implements GamePresenter {
   private placementRotation?: number;
   private readonly bootstrapDependencyErrors: string[] = [];
 
+  // --- centre-mode (server-authoritative) transport ---
+  private serverTransport?: ServerMatchTransport;
+
   // --- shared transport state ---
   private signaling?: HubSignaling;
   private pc?: RTCPeerConnection;
@@ -154,12 +178,14 @@ export class NetSession implements GamePresenter {
     this.module = module;
     this.options = options;
     this.role = options.role;
+    this.authority = options.authority ?? 'server';
+    this.isLocalAuthority = options.role === 'host' && this.authority === 'p2p';
     this.viewer = options.playerId;
 
     this.hostSeed = options.seed ?? randomSeed32();
     this.aliasSecret = randomHex(32);
 
-    if (options.role === 'host') {
+    if (this.isLocalAuthority) {
       const seed = this.hostSeed;
       // 中期项 A2：房主侧只有唯一一个权威引擎。HUD（UniversalSession）与
       // 权威房间（GameRoom）共用它，因此本地 dispatch 直接就是权威跃迁，
@@ -198,11 +224,12 @@ export class NetSession implements GamePresenter {
   /* Lifecycle                                                           */
   /* ------------------------------------------------------------------ */
 
-  /** Connect signaling + WebRTC mesh. Safe to call once after construction. */
+  /** Connect to the authority. Safe to call once after construction. */
   public async start(): Promise<void> {
     if (this.disposed) return;
     try {
-      if (this.role === 'host') await this.startHost();
+      if (this.authority === 'server') await this.startServerMatch();
+      else if (this.role === 'host') await this.startHost();
       else await this.startGuest();
     } catch (error) {
       this.emitNotice({
@@ -212,6 +239,47 @@ export class NetSession implements GamePresenter {
         detail: String((error as Error)?.message ?? error),
         durationMs: 8000
       });
+    }
+  }
+
+  /**
+   * 中心模式：连接服务器权威对局。座位由服务器下发（与大厅玩家顺序一致），
+   * 收到座位后以该 viewer 渲染投影；服务端断线时客户端自动重连并重新 join。
+   */
+  private async startServerMatch(): Promise<void> {
+    const transport = new ServerMatchTransport(this.options.hub, this.options.roomId, this.options.token);
+    this.serverTransport = transport;
+    transport.on({
+      onUpdate: update => this.applyUpdate(update),
+      onSeat: seat => this.onServerSeat(seat),
+      onError: message => {
+        this.emitNotice({
+          kind: 'error',
+          icon: '⚠',
+          title: '服务器拒绝了该操作',
+          detail: message,
+          durationMs: 4200
+        });
+      },
+      onClosed: () => this.onRoomClosed?.(),
+      onReconnecting: attempt => this.onGuestReconnecting?.(attempt),
+      onReconnected: () => this.onGuestReconnected?.()
+    });
+    const { seat } = await transport.connect();
+    this.onServerSeat(seat);
+    transport.requestSnapshot();
+  }
+
+  /**
+   * 服务器座位下发：客户端不允许自报座位，以服务器结果为准。
+   * 座位在首次收到时写定，之后用于所有本地投影与动作构造。
+   */
+  private onServerSeat(seat: PlayerId): void {
+    if (!seat || seat === this.viewer) return;
+    this.viewer = seat;
+    if (this.state) {
+      this.rebuild();
+      this.publish();
     }
   }
 
@@ -371,7 +439,7 @@ export class NetSession implements GamePresenter {
   /* ------------------------------------------------------------------ */
 
   private applyUpdate(update: RoomUpdate): void {
-    if (this.role !== 'guest') return;
+    if (this.isLocalAuthority) return;
     const updateError = (update as { error?: string }).error;
     if (updateError) {
       this.emitNotice({
@@ -389,6 +457,7 @@ export class NetSession implements GamePresenter {
       if (this.appliedRevision >= 0 && update.baseRevision !== this.appliedRevision) {
         // Missed a delta (e.g. tab was suspended): resync with a full snapshot.
         this.guestTransport?.requestSnapshot();
+        this.serverTransport?.requestSnapshot();
         return;
       }
       if (this.state) this.state = applyPatch(this.state, update.patches);
@@ -404,25 +473,25 @@ export class NetSession implements GamePresenter {
   /* ------------------------------------------------------------------ */
 
   public getSnapshot(): GameSnapshot {
-    return this.role === 'host' ? this.session!.getSnapshot() : this.snapshot!;
+    return this.isLocalAuthority ? this.session!.getSnapshot() : this.snapshot!;
   }
 
   public subscribe(listener: (snapshot: GameSnapshot) => void): () => void {
-    if (this.role === 'host') return this.session!.subscribe(listener);
+    if (this.isLocalAuthority) return this.session!.subscribe(listener);
     this.listeners.add(listener);
     listener(this.snapshot!);
     return () => this.listeners.delete(listener);
   }
 
   public onNotice(listener: (notice: UiNotice) => void): () => void {
-    if (this.role === 'host') return this.session!.onNotice(listener);
+    if (this.isLocalAuthority) return this.session!.onNotice(listener);
     this.noticeListeners.add(listener);
     return () => this.noticeListeners.delete(listener);
   }
 
   /** No kernel events exist on guests; the host forwards its local engine's. */
   public onVisualEvent(listener: (events: VisualTraceEvent[]) => void): () => void {
-    if (this.role === 'host') return this.session!.onVisualEvent(listener);
+    if (this.isLocalAuthority) return this.session!.onVisualEvent(listener);
     this.visualListeners.add(listener);
     return () => this.visualListeners.delete(listener);
   }
@@ -432,7 +501,7 @@ export class NetSession implements GamePresenter {
     payload?: Record<string, unknown>,
     targets?: string[]
   ): { ok: boolean; error?: string } {
-    if (this.role === 'host') return this.session!.perform(actionId, payload, targets);
+    if (this.isLocalAuthority) return this.session!.perform(actionId, payload, targets);
 
     const bound = this.bound.find(entry => entry.ui.id === actionId);
     if (!bound) return { ok: false, error: `unknown action: ${actionId}` };
@@ -461,7 +530,7 @@ export class NetSession implements GamePresenter {
   }
 
   public armPlacement(actionId: string): { ok: boolean; error?: string } {
-    if (this.role === 'host') return this.session!.armPlacement(actionId);
+    if (this.isLocalAuthority) return this.session!.armPlacement(actionId);
     const bound = this.bound.find(entry => entry.ui.id === actionId);
     if (!bound?.action || bound.action.type !== 'PLACE_ENTITY' || !bound.action.entityId) {
       return { ok: false, error: '该动作不支持目标点选' };
@@ -472,7 +541,7 @@ export class NetSession implements GamePresenter {
   }
 
   public cancelPlacement(): void {
-    if (this.role === 'host') {
+    if (this.isLocalAuthority) {
       this.session!.cancelPlacement();
       return;
     }
@@ -480,12 +549,12 @@ export class NetSession implements GamePresenter {
   }
 
   public pickTarget(pick: BoardPick): { handled: boolean; message?: string } {
-    if (this.role === 'host') return this.session!.pickTarget(pick);
+    if (this.isLocalAuthority) return this.session!.pickTarget(pick);
     return this.guestPickTarget(pick);
   }
 
   public rotatePlacement(direction: 1 | -1 = 1): void {
-    if (this.role === 'host') {
+    if (this.isLocalAuthority) {
       this.session!.rotatePlacement(direction);
       return;
     }
@@ -498,7 +567,7 @@ export class NetSession implements GamePresenter {
   }
 
   public confirmPlacement(): { ok: boolean; error?: string } {
-    if (this.role === 'host') return this.session!.confirmPlacement();
+    if (this.isLocalAuthority) return this.session!.confirmPlacement();
     const placement = this.snapshot?.placement;
     if (!placement) return { ok: false, error: 'no pending room placement' };
     const bound = this.bound.find(entry => entry.action?.type === 'PLACE_ROOM');
@@ -507,7 +576,7 @@ export class NetSession implements GamePresenter {
   }
 
   public setViewer(viewer: ViewerId): void {
-    if (this.role === 'host') {
+    if (this.isLocalAuthority) {
       this.session!.setViewer(viewer);
       return;
     }
@@ -541,7 +610,7 @@ export class NetSession implements GamePresenter {
   }
 
   public advanceClock(ticks = 1): void {
-    if (this.role === 'host') {
+    if (this.isLocalAuthority) {
       // Local dispatch tails into the room, so guests follow the tick.
       this.session!.advanceClock(ticks);
       return;
@@ -590,11 +659,12 @@ export class NetSession implements GamePresenter {
 
   public dispose(): void {
     this.disposed = true;
-    if (this.role === 'guest') {
+    if (this.authority === 'p2p' && this.role === 'guest') {
       try { this.guestTransport?.bye(); } catch { /* channel already gone */ }
       try { this.channel?.close?.(); } catch { /* ignore */ }
       try { this.pc?.close(); } catch { /* ignore */ }
     }
+    this.serverTransport?.close();
     this.hostTransport?.dispose();
     this.session?.dispose();
     this.room?.dispose();
@@ -609,7 +679,7 @@ export class NetSession implements GamePresenter {
   /* ------------------------------------------------------------------ */
 
   public placeEntityAtNode(entityId: string, nodeId?: string): { ok: boolean; error?: string } {
-    if (this.role === 'host') return this.session!.placeEntityAtNode(entityId, nodeId);
+    if (this.isLocalAuthority) return this.session!.placeEntityAtNode(entityId, nodeId);
     const state = this.state;
     if (!state) return { ok: false, error: 'not connected' };
     const actor = state.players[this.viewer];
@@ -642,7 +712,7 @@ export class NetSession implements GamePresenter {
   }
 
   public getPlacementTargets(entityId: string): { nodeId: string; slotId: string; label: string }[] {
-    if (this.role === 'host') return this.session!.getPlacementTargets(entityId);
+    if (this.isLocalAuthority) return this.session!.getPlacementTargets(entityId);
     const state = this.state;
     if (!state) return [];
     const targets: { nodeId: string; slotId: string; label: string }[] = [];
@@ -667,10 +737,15 @@ export class NetSession implements GamePresenter {
   /* ------------------------------------------------------------------ */
 
   private submitAction(action: Action): { ok: boolean; error?: string } {
-    if (!this.guestTransport) {
-      return { ok: false, error: '尚未连接房主，操作未发送' };
+    // 中心模式：动作直接交给服务器权威引擎；P2P：交给房主。
+    if (this.serverTransport) {
+      this.serverTransport.submit(action);
+      return { ok: true };
     }
-    // Optimistic accept: illegal actions are rejected by the host and come
+    if (!this.guestTransport) {
+      return { ok: false, error: '尚未连接对局服务器，操作未发送' };
+    }
+    // Optimistic accept: illegal actions are rejected by the authority and come
     // back as an error room-update (emitted as a notice in applyUpdate).
     this.guestTransport.submit(action);
     return { ok: true };

@@ -19,6 +19,8 @@
     "dev:server": "tsx apps/server/src/index.ts",
     "test:server": "tsx apps/server/src/selftest.ts",
     "test:admin": "node scripts/verify-admin.mjs",
+    "test:centre": "node scripts/verify-centre-mode.mjs",
+    "test:centre:ui": "node scripts/verify-centre-mode-browser.mjs",
     "probe:ui": "node scripts/probe-ui-layout.mjs",
     "probe:hand": "node scripts/probe-hand-layout.mjs",
     "probe:tokens": "node scripts/probe-design-tokens.mjs",

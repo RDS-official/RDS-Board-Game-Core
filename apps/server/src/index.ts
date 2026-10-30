@@ -17,6 +17,7 @@ import {
 import { listRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoomInfo, setReady, kickPlayer, transferHost, setRoomChangedHook, sweepRooms } from './rooms.ts';
 import { GAMES } from './games.ts';
 import { SignalHub } from './signal.ts';
+import { MatchBroker } from './matchBroker.ts';
 import { log, saveDiagnostics, pruneLogs, recentLogs } from './log.ts';
 
 pruneLogs();
@@ -255,6 +256,24 @@ app.post('/api/rooms/:id/host', async c => {
   return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
 });
 app.get('/healthz', c => c.json({ ok: true }));
+// ---- 中心模式（服务器权威）：对局观察端点 ----
+// 房间成员可看到自己房间的服务端对局概况（座位、revision、在线订阅者）。
+app.get('/api/rooms/:id/match', c => {
+  const u = userFromAuthHeader(c.req.header('authorization'));
+  if (!u) return c.json({ error: 'unauthorized' }, 401);
+  const room = getRoomInfo(c.req.param('id'), u.sub);
+  if ('error' in room) return c.json({ error: room.error }, 404);
+  if (!room.players.some(player => player.id === u.sub)) return c.json({ error: '你不在该房间内' }, 403);
+  const stats = matchBroker.stats().find(entry => entry.roomId === c.req.param('id'));
+  if (!stats) return c.json({ error: '本房间暂无服务端权威对局' }, 404);
+  return c.json(stats);
+});
+
+// 中心模式健康概览（不泄露任何对局内容）
+app.get('/api/match/stats', c => {
+  const list = matchBroker.stats();
+  return c.json({ authority: 'server', matches: list.length, rooms: list.map(m => m.roomId) });
+});
 
 // ---- 游戏客户端静态托管（GAMES 目录挂载 RDS-Board-Core 构建产物 dist/ → /games/rds-board-core/） ----
 // 生产 compose 卷：./rds-board-core-dist:/app/games/rds-board-core
@@ -268,14 +287,19 @@ const server = serve({ fetch: app.fetch, port: PORT }, info => {
   log.info('hub', 'listening', { port: info.port });
 });
 
-// ---- /ws 信令 ----
-const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
-const hub = new SignalHub();
+// ---- /ws 信令 + 中心模式（服务器权威）对局通道 ----
+// 同一条 ws 上：SignalHub 处理 join-room / sdp / presence / lobby-chat，
+// MatchBroker 额外接管 match-* 消息（服务器持有唯一引擎）。联机接口零破坏。
+const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+const matchBroker = new MatchBroker();
+const hub = new SignalHub((ws, userId) => matchBroker.attach(ws, userId));
 hub.startHeartbeat();
 setRoomChangedHook(room => {
   // 审查报告 S8：房间广播面向全部大厅订阅者，必须剥掉私密房加入码（房主经 REST 拿全量）
   const { code: _code, ...safe } = room;
   hub.broadcastRoomUpdate(safe as typeof room);
+  // 中心模式：房间结束即释放服务端对局（引擎、投影缓存与时钟定时器）
+  if (room.status === 'closed') matchBroker.onRoomClosed(room.id);
 });
 // 阶段三：房间回收——60s 清扫一次（全员离线 >10min 或 6h 无动作 → 关房）。
 setInterval(() => {
@@ -295,6 +319,7 @@ server.on('upgrade', (req: http.IncomingMessage, socket, head) => {
     }
   });
 });
+
 
 // 兜底：未捕获异常记日志而不裸崩（pm2 内存阈值/显式重启仍可控）
 process.on('uncaughtException', err => log.error('hub', 'uncaught exception', { message: err?.message, stack: err?.stack }));

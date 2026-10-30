@@ -9,6 +9,12 @@ interface Client { userId: string; name: string; ws: WebSocket; roomId?: string;
 export class SignalHub {
   private clients = new Set<Client>();
 
+  /**
+   * 中心模式钩子：连接鉴权通过后把同一条 ws 交给 MatchBroker。
+   * 信令与大堂逻辑完全不变，因此 P2P 路径零影响。
+   */
+  constructor(private readonly onAuthorizedClient?: (ws: WebSocket, userId: string) => void) {}
+
   accept(ws: WebSocket, token: string | null) {
     const payload = token ? verifyJwt(token) : null;
     if (!payload) { ws.close(4001, 'unauthorized'); return; }
@@ -29,6 +35,7 @@ export class SignalHub {
     ws.on('pong', () => { client.alive = true; });
     ws.on('message', raw => this.onMessage(client, raw.toString()));
     ws.on('close', () => this.drop(client));
+    this.onAuthorizedClient?.(ws, client.userId);
   }
 
   private drop(client: Client) {
