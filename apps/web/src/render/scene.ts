@@ -196,9 +196,9 @@ const PKMN_DECK_RAIL: Record<string, [number, number, number]> = {
   zone_deck_s2: [-5.9, 0.06, 1.7],
   zone_deck_s3: [-5.9, 0.06, 0.4],
   zone_deck_rare: [-10.0, 0.06, 1.0],
-  zone_deck_legend: [-10.0, 0.06, -1.0],
-  zone_deck_mega: [-5.9, 0.06, -3.2],
-  zone_deck_pokemart: [-10.0, 0.06, -3.2]
+  zone_deck_legend: [-10.0, 0.06, -1.0]
+  // Mega Evolution and Poké Mart piles are absent from the base game, so they
+  // hold no rail slot here either. Add them back only alongside their rules.
 };
 
 /** Reveal slot anchors for the rare / legendary rows. */
