@@ -65,6 +65,22 @@ export interface PkmnMartCard {
   img: string;
 }
 
+/**
+ * The six Poké Mart effects (five cards each, one per colour).
+ *
+ *  free             进化石   — take a free face-up Level-2 card after capture
+ *  copy_free        神奇糖果 — associate + take a free face-up Level-1 card
+ *  copy             技能机   — permanent bonus colour copied from an owned card
+ *  colorless_master 图鉴     — no colour; discardable as 2 virtual master balls
+ *  discard_buy      驱虫喷雾 — pay no balls; discard 2 owned cards of a colour
+ *  double           药水     — no effect code needed: `bonusCount` already is 2
+ */
+export type PokemartEffect = 'free' | 'copy_free' | 'copy' | 'colorless_master' | 'discard_buy' | 'double';
+
+/** Poké Mart levels → the base level whose row they sit next to. */
+export const POKEMART_TIERS = ['pmL1', 'pmL2', 'pmL3'] as const;
+export type PokemartTier = (typeof POKEMART_TIERS)[number];
+
 interface RawPkmnData {
   cards: PkmnCard[];
   megas: PkmnMegaCard[];
@@ -177,6 +193,17 @@ export const MASTER_BALL_SUPPLY = 5;
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 4;
 
+/** Mega Evolution: shared pool of Mega tokens (each player may hold at most 1). */
+export const MEGA_TOKENS = 4;
+/** A single player may never hold more than one Mega token. */
+export const MAX_MEGA_TOKENS_PER_PLAYER = 1;
+/** With Mega Evolution the goal becomes 20 VP + one bonus of every colour + a Mega in play. */
+export const MEGA_WIN_SCORE = 20;
+/** The Mega offer: every Mega card is revealed face-up and removed when taken. */
+export const MEGA_OFFER_SIZE = 10;
+/** Poké Mart: each level reveals this many cards next to its row. */
+export const POKEMART_SLOTS = 2;
+
 /** Bank supply per colour, by seat count (master balls are always 5). */
 export const TOKEN_SUPPLY_BY_PLAYERS: Record<number, number> = { 2: 4, 3: 5, 4: 7 };
 
@@ -200,10 +227,18 @@ export const SPLENDOR_ZONES = {
   rareDeck: 'zone_deck_rare',
   legendDeck: 'zone_deck_legend',
   megaDeck: 'zone_deck_mega',
+  /** Every Mega card is revealed here; a taken Mega leaves the offer for good. */
+  megaOffer: 'zone_mega_offer',
   pokemartDeck: 'zone_deck_pokemart',
+  /** One face-up Poké Mart row per level (2 cards each). */
+  pokemart: (tier: PokemartTier): string => `zone_${tier}`,
+  /** One face-down deck per Poké Mart level. */
+  pokemartDeckOf: (tier: PokemartTier): string => `zone_deck_${tier}`,
   hand: (playerId: string): string => `zone_hand_${playerId}`,
   tableau: (playerId: string): string => `zone_tableau_${playerId}`,
-  buried: (playerId: string): string => `zone_buried_${playerId}`
+  buried: (playerId: string): string => `zone_buried_${playerId}`,
+  /** Cards discarded by the Poké Mart REPEL leave the game here. */
+  discarded: 'zone_discarded'
 };
 
 /* -------------------------------------------------------------------------- */
@@ -217,7 +252,7 @@ const SEATS = [
   { id: 'p4', name: '小刚', color: '#fb8c00', avatar: '🪨' }
 ];
 
-type CardTierTag = 'stage1' | 'stage2' | 'stage3' | 'rare' | 'legend' | 'mega' | 'pokemart';
+type CardTierTag = 'stage1' | 'stage2' | 'stage3' | 'rare' | 'legend' | 'mega' | 'pmL1' | 'pmL2' | 'pmL3';
 
 const TIER_LABEL: Record<CardTierTag, string> = {
   stage1: 'STAGE_1',
@@ -226,7 +261,16 @@ const TIER_LABEL: Record<CardTierTag, string> = {
   rare: 'RARE',
   legend: 'LEGEND',
   mega: 'MEGA',
-  pokemart: 'POKEMART'
+  pmL1: 'POKEMART_1',
+  pmL2: 'POKEMART_2',
+  pmL3: 'POKEMART_3'
+};
+
+/** Base level a Poké Mart card is displayed next to (and reserved as). */
+const POKEMART_BASE_TIER: Record<'pmL1' | 'pmL2' | 'pmL3', SplendorTier> = {
+  pmL1: 1,
+  pmL2: 2,
+  pmL3: 3
 };
 
 function zeroGems(): Record<string, number> {
@@ -242,7 +286,10 @@ function toCardEntity(
   visibility: Entity['visibility']
 ): Entity {
   const bonus = card.bonus && card.bonus !== 'none' ? card.bonus : null;
-  const tierIndex = tag === 'stage1' ? 1 : tag === 'stage2' ? 2 : tag === 'stage3' ? 3 : 0;
+  const tierIndex =
+    tag === 'stage1' ? 1 : tag === 'stage2' ? 2 : tag === 'stage3' ? 3 : tag === 'mega' ? 4 : 0;
+  const martTier = tag === 'pmL1' || tag === 'pmL2' || tag === 'pmL3' ? tag : null;
+  const baseTier = martTier ? POKEMART_BASE_TIER[martTier] : tierIndex > 0 && tierIndex < 4 ? tierIndex : 0;
   const evo = 'evolvesTo' in card ? (card.evolvesTo ?? null) : null;
   const evoCost = 'evoCost' in card ? (card.evoCost ?? null) : null;
   const megaFrom = 'megaFrom' in card ? card.megaFrom : null;
@@ -282,6 +329,8 @@ function toCardEntity(
         zh: card.name,
         name: card.name,
         tierIndex,
+        /** Base level (1–3) this card belongs to; 0 for rare / legendary / Mega. */
+        baseTier,
         vp: card.vp,
         bonus,
         bonusCount: card.bonusCount,
@@ -303,9 +352,9 @@ function toCardEntity(
  * Rule variant ("edition") this position is dealt under.
  *
  * The imported deck carries two expansions — Mega Evolution and the Poké Mart —
- * whose rules are not implemented yet. A variant names which rule sets a table
- * actually plays with, so the base game stays the default and an unimplemented
- * expansion can never leak a pile onto the table by accident.
+ * whose rule sets are independent of each other. A variant names which of them a
+ * table actually plays with, so the base game stays the default and an expansion
+ * that is switched off never leaks a pile onto the table.
  */
 export interface SplendorVariant {
   /** Mega Evolution: Mega tokens, super-evolution, the 20-point goal. */
@@ -358,7 +407,14 @@ export function setupSplendor(
         tokens: zeroGems(),
         bonuses: zeroGems(),
         purchasedCards: [],
-        buriedIds: []
+        buriedIds: [],
+        /** Mega Evolution: 0 or 1 held Mega token (shared pool lives in globalVars). */
+        megaToken: 0,
+        /**
+         * Poké Mart `copy` / `copy_free` cards: cardId → borrowed bonus colour.
+         * A card with no entry uses its own printed colour (or none at all).
+         */
+        assoc: {}
       }
     };
     playerOrder.push(seat.id);
@@ -384,12 +440,15 @@ export function setupSplendor(
       playerCount: seats,
       /** Evolution is once per turn and free; reset when the turn passes. */
       evolvedThisTurn: false,
-      /** Someone reached WIN_SCORE — play out the current round, then score. */
+      /** Someone reached the goal — play out the current round, then score. */
       lastRound: false,
       finalRoundComplete: false,
-      scoreToWin: WIN_SCORE,
+      /** Base goal; Mega Evolution raises it to MEGA_WIN_SCORE. */
+      scoreToWin: variant.mega ? MEGA_WIN_SCORE : WIN_SCORE,
       maxTokens: MAX_TOKENS,
       maxReserves: MAX_RESERVES,
+      /** Shared Mega token pool (0 when the expansion is off). */
+      megaTokens: variant.mega ? MEGA_TOKENS : 0,
       /** Rule set this table was dealt under; persist it so replays agree. */
       variant: { ...variant }
     },
@@ -416,14 +475,39 @@ export function setupSplendor(
   }
   state = ECSManager.createZone(state, SPLENDOR_ZONES.rareDeck, 'Rare Deck', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-8.4, 0.06, 0.0]);
   state = ECSManager.createZone(state, SPLENDOR_ZONES.legendDeck, 'Legendary Deck', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-8.4, 0.06, -2.0]);
-  // Expansion piles are created only for a variant that actually plays them.
-  // Their rules land in a later pass; until then the piles must not exist, or a
-  // player is left staring at two decks that can never be opened.
+  // Expansion zones exist only for a variant that actually plays them, so a
+  // switched-off expansion never leaves an inert pile on the table.
   if (variant.mega) {
-    state = ECSManager.createZone(state, SPLENDOR_ZONES.megaDeck, 'Mega Evolution Deck', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-6.0, 0.06, -3.4]);
+    // Every Mega card is revealed face-up in its own offer: a taken Mega leaves
+    // the offer for good, so the pile is public and open-ended.
+    state = ECSManager.createZone(state, SPLENDOR_ZONES.megaOffer, 'Mega Evolution Offer', 'MARKET', { type: 'PUBLIC' }, undefined, 'ROW', [-3.0, 0.1, -3.4]);
   }
   if (variant.pokemart) {
-    state = ECSManager.createZone(state, SPLENDOR_ZONES.pokemartDeck, 'Poké Mart Deck', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-8.4, 0.06, -3.4]);
+    // One face-down deck + one 2-card face-up row per Poké Mart level.
+    POKEMART_TIERS.forEach((martTier, index) => {
+      state = ECSManager.createZone(
+        state,
+        SPLENDOR_ZONES.pokemartDeckOf(martTier),
+        `Poké Mart ${martTier} Deck`,
+        'DECK',
+        { type: 'HIDDEN' },
+        undefined,
+        'STACK',
+        [-8.4, 0.06, -3.4 - index * 1.0]
+      );
+      state = ECSManager.createZone(
+        state,
+        SPLENDOR_ZONES.pokemart(martTier),
+        `Poké Mart ${martTier}`,
+        'MARKET',
+        { type: 'PUBLIC' },
+        undefined,
+        'ROW',
+        [1.6, 0.1, 2.5 - index * 2.4]
+      );
+    });
+    // REPEL discards leave the game: they need a zone to rest in.
+    state = ECSManager.createZone(state, SPLENDOR_ZONES.discarded, 'Discarded Cards', 'DISCARD', { type: 'PUBLIC' }, undefined, 'STACK', [-10.4, 0.06, -3.4]);
   }
 
   playerOrder.forEach(pId => {
@@ -443,7 +527,12 @@ export function setupSplendor(
 
   // A deck plan exists only when its zone does: an expansion that is not being
   // played contributes no zone and, therefore, no cards.
-  const deckPlans: { tag: CardTierTag; deck: string; cards: (PkmnCard | PkmnMegaCard | PkmnMartCard)[] }[] = [
+  const deckPlans: {
+    tag: CardTierTag;
+    deck: string;
+    cards: (PkmnCard | PkmnMegaCard | PkmnMartCard)[];
+    visibility?: Entity['visibility'];
+  }[] = [
     { tag: 'stage1', deck: SPLENDOR_ZONES.deck(1), cards: PKMN_DECK.stage1 },
     { tag: 'stage2', deck: SPLENDOR_ZONES.deck(2), cards: PKMN_DECK.stage2 },
     { tag: 'stage3', deck: SPLENDOR_ZONES.deck(3), cards: PKMN_DECK.stage3 },
@@ -451,16 +540,27 @@ export function setupSplendor(
     { tag: 'legend', deck: SPLENDOR_ZONES.legendDeck, cards: PKMN_DECK.legend }
   ];
   if (variant.mega) {
-    deckPlans.push({ tag: 'mega', deck: SPLENDOR_ZONES.megaDeck, cards: PKMN_DECK.mega });
+    // The Mega cards are not a pile: they are dealt straight into the open
+    // offer, so the whole expansion is visible from the first bid.
+    deckPlans.push({ tag: 'mega', deck: SPLENDOR_ZONES.megaOffer, cards: PKMN_DECK.mega, visibility: { type: 'PUBLIC' } });
   }
   if (variant.pokemart) {
-    deckPlans.push({ tag: 'pokemart', deck: SPLENDOR_ZONES.pokemartDeck, cards: PKMN_DECK.pokemart });
+    for (const martTier of POKEMART_TIERS) {
+      deckPlans.push({
+        tag: martTier,
+        deck: SPLENDOR_ZONES.pokemartDeckOf(martTier),
+        cards: PKMN_DECK.pokemart.filter(card => card.tier === martTier)
+      });
+    }
   }
 
   for (const plan of deckPlans) {
     const ordered = shuffled(plan.cards);
     for (const card of ordered) {
-      state = ECSManager.addEntity(state, toCardEntity(card, plan.tag, plan.deck, { type: 'HIDDEN' }));
+      state = ECSManager.addEntity(
+        state,
+        toCardEntity(card, plan.tag, plan.deck, plan.visibility ?? { type: 'HIDDEN' })
+      );
     }
   }
 
@@ -473,6 +573,19 @@ export function setupSplendor(
   }
   state = dealTopCard(state, SPLENDOR_ZONES.rareDeck, SPLENDOR_ZONES.rare);
   state = dealTopCard(state, SPLENDOR_ZONES.legendDeck, SPLENDOR_ZONES.legend);
+
+  // Poké Mart: two face-up cards per level, dealt from that level's own deck.
+  if (variant.pokemart) {
+    for (const martTier of POKEMART_TIERS) {
+      for (let i = 0; i < POKEMART_SLOTS; i++) {
+        state = dealTopCard(
+          state,
+          SPLENDOR_ZONES.pokemartDeckOf(martTier),
+          SPLENDOR_ZONES.pokemart(martTier)
+        );
+      }
+    }
+  }
 
   return state;
 }
