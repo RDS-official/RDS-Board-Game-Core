@@ -1,4 +1,4 @@
-import { Action, ActorId, GameState, PlayerId, StackFrame, StackResponseWindow } from './types';
+import { Action, ActorId, GameState, StackFrame, StackResponseWindow } from './types';
 
 /**
  * LIFO Reactive Interrupt Call Stack (\Sigma_{stack})

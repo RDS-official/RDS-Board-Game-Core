@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MAT } from './materials';
-import { PROPS, PropSpec } from './props';
-import { DoorDir, hashString, layoutRoom, PlacedProp } from './roomLayout';
+import { PROPS, } from './props';
+import { DoorDir, hashString, layoutRoom, } from './roomLayout';
 import { CANVAS_FONT_STACK } from '../fonts';
 
 export interface RoomTileOptions {

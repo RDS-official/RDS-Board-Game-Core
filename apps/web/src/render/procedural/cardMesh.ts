@@ -1229,7 +1229,7 @@ export class CardMeshBuilder {
       ctx.font = `500 16px ${CANVAS_FONT_STACK}`;
       lines = this.wrapText(ctx, face.desc ?? '', 396);
     }
-    lines.slice(0, 9).forEach((line, i) => ctx.fillText(line, 66, 512 + i * 22));
+    lines.slice(0, 9).forEach((line, i) => { ctx.fillText(line, 66, 512 + i * 22); });
     ctx.restore();
   }
 
@@ -1338,7 +1338,10 @@ export class CardMeshBuilder {
     }
 
     ctx.beginPath();
-    pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    pts.forEach(([x, y], i) => {
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
     ctx.closePath();
     ctx.fillStyle = color;
     ctx.fill();
@@ -1364,7 +1367,10 @@ export class CardMeshBuilder {
     ctx.strokeStyle = 'rgba(255,248,226,0.62)';
     ctx.lineWidth = 2.5;
     ctx.beginPath();
-    pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    pts.forEach(([x, y], i) => {
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
     ctx.closePath();
     ctx.stroke();
   }

@@ -70,7 +70,9 @@ export class RulePipeline {
       .filter((impl): impl is NonNullable<typeof impl> => !!impl);
 
     const rank = new Map<HookId, number>();
-    this.rules.order(activeImpls).forEach((impl, index) => rank.set(impl.id, index));
+    this.rules.order(activeImpls).forEach((impl, index) => {
+      rank.set(impl.id, index);
+    });
 
     const out: { instance: ActiveRuleHook; ctx: HookContext }[] = [];
 

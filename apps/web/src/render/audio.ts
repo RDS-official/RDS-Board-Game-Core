@@ -96,7 +96,7 @@ export class BoardGameAudio {
       const fadeGain = ctx.createGain();
       fadeGain.gain.setValueAtTime(1, ctx.currentTime);
       fadeGain.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 1.2);
-      oldNodes.forEach(node => node.stop());
+      oldNodes.forEach(node => { node.stop(); });
     }
 
     if (mode === 'SILENT') return;
@@ -136,7 +136,7 @@ export class BoardGameAudio {
       window.clearInterval(this.ambientTimer);
       this.ambientTimer = null;
     }
-    this.ambientNodes.forEach(n => n.stop());
+    this.ambientNodes.forEach(n => { n.stop(); });
     this.ambientNodes = [];
   }
 

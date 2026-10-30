@@ -1,7 +1,7 @@
 import { openDecision } from '@rds/kernel/decisions';
 import { ReduceContext } from '@rds/kernel/module';
 import { InterruptStackManager } from '@rds/kernel/stack';
-import { Action, DecisionWindow, GameState, PlayerId, StackFrame, VisualTraceEvent } from '@rds/kernel/types';
+import { Action, DecisionWindow, GameState, PlayerId, StackFrame, } from '@rds/kernel/types';
 
 export class DuneMahjongRules {
   public static readonly DECISION_ACTIONS = ['COMMIT_BATTLE_DIAL'];

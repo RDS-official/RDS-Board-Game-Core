@@ -1018,7 +1018,7 @@ export class BoardGameHUD {
       button.addEventListener('click', () => {
         const view = button.dataset.cam as CameraView | undefined;
         if (!view) return;
-        this.container.querySelectorAll('.cam-btn').forEach(b => b.classList.remove('active'));
+        this.container.querySelectorAll('.cam-btn').forEach(b => { b.classList.remove('active'); });
         button.classList.add('active');
         this.ports.setCamera(view);
       });

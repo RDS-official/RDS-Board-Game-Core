@@ -339,10 +339,8 @@ function describeActionZh(
           tone: 'normal',
           fields: action.fields
         };
-      case 'ACCEPT_TRADE':
-        return { icon: '✅', label: `接受交易 · ${name(action.playerId)}`, hint: '1:1 交换', tone: 'primary' };
-      case 'REJECT_TRADE':
-        return { icon: '✖️', label: `拒绝交易 · ${name(action.playerId)}`, hint: '不交换', tone: 'danger' };
+      // ACCEPT_TRADE / REJECT_TRADE 已在上面（betrayal 分支）处理；
+      // catan 的交易成交复用同一 case，重复 case 是死代码（JS 只取第一个）。
       case 'SKIP_ROAD_BUILDING':
         return { icon: '⏭️', label: '不再放置道路', hint: '结束修路卡结算', tone: 'normal' };
       case 'DISCARD_HALF':

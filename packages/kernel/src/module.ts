@@ -1,6 +1,6 @@
 import { RuleHookImpl } from './rules';
 import { ProjectionRedactor } from './observer';
-import { Action, ActorId, DecisionWindow, DiceSpec, GameOutcome, GameState, NodeId, PlayerId, RollResult, SelectionCandidate, SelectionSpec, TopologySpec, VisualTraceEvent } from './types';
+import { Action, ActorId, DecisionWindow, DiceSpec, GameOutcome, GameState, NodeId, RollResult, SelectionCandidate, SelectionSpec, TopologySpec, VisualTraceEvent } from './types';
 import { ActionSchemaMap } from './validation';
 
 /** Per-transition helpers handed to a module's reducer. */

@@ -168,7 +168,7 @@ function scheduleReadyCheck(): void {
 function flushSettle(entry: TextureEntry, texture: THREE.Texture | null): void {
   const waiters = entry.settle;
   entry.settle = [];
-  waiters.forEach(resolve => resolve(texture));
+  waiters.forEach(resolve => { resolve(texture); });
 }
 
 /* ------------------------------- loading --------------------------------- */
@@ -486,10 +486,10 @@ const DEFAULT_PRELOAD_URLS: string[] = (() => {
       urls.push(url);
     }
   };
-  ['stage1', 'stage2', 'stage3', 'rare', 'legend', 'mega', 'pmL1', 'pmL2', 'pmL3'].forEach(tier =>
-    push(PKMN_BACK_BY_TIER[tier])
-  );
-  POKEBALL_COLORS.forEach(color => push(BALL_URLS[color] ?? `/pokemon/balls/${color}.png`));
+  ['stage1', 'stage2', 'stage3', 'rare', 'legend', 'mega', 'pmL1', 'pmL2', 'pmL3'].forEach(tier => {
+    push(PKMN_BACK_BY_TIER[tier]);
+  });
+  POKEBALL_COLORS.forEach(color => { push(BALL_URLS[color] ?? `/pokemon/balls/${color}.png`); });
   return urls;
 })();
 

@@ -1,6 +1,6 @@
 import { ECSManager } from '@rds/kernel/ecs';
 import { ReduceContext } from '@rds/kernel/module';
-import { Action, Entity, GameState, Player, PlayerId } from '@rds/kernel/types';
+import { Action, Entity, GameState, PlayerId } from '@rds/kernel/types';
 import {
   dealTopCard,
   MASTER_BALL,

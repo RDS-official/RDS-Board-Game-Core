@@ -177,7 +177,7 @@ test('rules: the elevator rolls before offering a destination', () => {
   assertEqual(grid!.col, roomGrid!.col + offset[0], 'the car parks outside the chosen doorway (col)');
   assertEqual(grid!.row, roomGrid!.row + offset[1], 'the car parks outside the chosen doorway (row)');
   assert(
-    (elevator!.props?.doors as string[]).includes(OPPOSITE[doorDir]!),
+    ((elevator?.props?.doors ?? []) as string[]).includes(OPPOSITE[doorDir]!),
     'the car door faces the room it docked against'
   );
   assertEqual(

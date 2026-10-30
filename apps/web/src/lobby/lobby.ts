@@ -652,7 +652,7 @@ function openCreateModal(selectGame?: string) {
 
 function syncCreateModal(gameId: string) {
   const g = games.find(x => x.id === gameId) ?? games[0];
-  document.querySelectorAll('#cm-games .lob-chip').forEach(el => el.classList.toggle('on', (el as HTMLElement).dataset.id === g.id));
+  document.querySelectorAll('#cm-games .lob-chip').forEach(el => { el.classList.toggle('on', (el as HTMLElement).dataset.id === g.id); });
   const range = document.getElementById('cm-max') as HTMLInputElement;
   range.min = String(g.minPlayers); range.max = String(g.maxPlayers); range.value = String(g.maxPlayers);
   const label = document.getElementById('cm-max-label')!;
