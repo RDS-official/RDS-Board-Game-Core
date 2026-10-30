@@ -2628,7 +2628,22 @@ export class BetrayalRules {
     const omens = Number(pending?.omens ?? state.globalVars.omensRevealed ?? 0);
     const roll = rollZeroDice(state.prngState, 6);
     state.prngState = roll.nextSeed;
-    state.globalVars.lastHauntRoll = { rolls: roll.rolls, sum: roll.sum, omens };
+
+    // The haunt roll is the biggest moment of the game, so it has to reach the dice
+    // overlay like every other check. It used to write `lastHauntRoll`, a field
+    // nothing ever read, which is why the overlay stayed silent here.
+    state.globalVars.rollSeq = Number(state.globalVars.rollSeq ?? 0) + 1;
+    state.globalVars.lastRoll = {
+      playerId: pid,
+      dice: roll.rolls,
+      total: roll.sum,
+      threshold: omens,
+      success: roll.sum >= omens,
+      seq: Number(state.globalVars.rollSeq),
+      reason: 'haunt roll',
+      label: '作祟检定',
+      effect: `掷 6 骰，总和低于预兆数（${omens}）则作祟开始`
+    };
 
     trace(
       ctx,
