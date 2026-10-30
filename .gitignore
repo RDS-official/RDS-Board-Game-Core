@@ -19,3 +19,6 @@ apps/server/data/
 
 # tsc incremental build info
 *.tsbuildinfo
+
+# git worktrees used for parallel agent work
+.worktrees/
