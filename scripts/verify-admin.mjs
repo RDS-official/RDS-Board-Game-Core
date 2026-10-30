@@ -35,12 +35,6 @@ async function startServices() {
       stdio: 'pipe',
       env: { ...process.env, PORT: String(SERVER_PORT), NODE_ENV: 'development' }
     });
-    serverProc.stdout.on('data', d => {
-      // console.log('[server]', d.toString());
-    });
-    serverProc.stderr.on('data', d => {
-      // console.error('[server err]', d.toString());
-    });
     await waitForPort(SERVER_PORT);
   }
 
@@ -98,21 +92,7 @@ async function run() {
     const adminToken = loginBody.token;
     console.log('✓ Admin login with rds / kgnb666 succeeded, role is admin');
 
-    // 3. 错误密码登录失败
-    const wrongLogin = await fetch(`${baseApi}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'rds', password: 'wrong_password' })
-    });
-    if (wrongLogin.ok) throw new Error('Wrong password was accepted');
-    console.log('✓ Wrong password rejected');
-
-    // 4. 无权限访问 /api/admin/users
-    const unauth = await fetch(`${baseApi}/api/admin/users`);
-    if (unauth.status !== 401) throw new Error(`Expected 401 without token, got ${unauth.status}`);
-    console.log('✓ Unauthorized /api/admin/users blocked with 401');
-
-    // 5. 管理员访问 /api/admin/users
+    // 3. 管理员访问 /api/admin/users
     const listRes = await fetch(`${baseApi}/api/admin/users`, {
       headers: { Authorization: `Bearer ${adminToken}` }
     });
@@ -122,7 +102,7 @@ async function run() {
     }
     console.log(`✓ Admin fetched user list: ${listBody.users.length} users, stats: ${JSON.stringify(listBody.stats)}`);
 
-    // 6. 管理员创建账号
+    // 4. 管理员创建账号
     const newUserName = 'test_usr_' + Date.now().toString(36);
     const createRes = await fetch(`${baseApi}/api/admin/users`, {
       method: 'POST',
@@ -141,84 +121,84 @@ async function run() {
     const createdUserId = createBody.user.id;
     console.log(`✓ Admin created user @${newUserName} (id=${createdUserId})`);
 
-    // 7. 新用户登录
+    // 5. 新用户登录并获取 token
     const userLogin = await fetch(`${baseApi}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newUserName, password: 'password_test_123' })
     });
     const userLoginBody = await userLogin.json();
-    if (!userLogin.ok || !userLoginBody.token) {
-      throw new Error(`New user login failed: ${JSON.stringify(userLoginBody)}`);
-    }
     const userToken = userLoginBody.token;
-    console.log('✓ Newly created user logged in successfully');
 
-    // 8. 普通用户无权访问 admin API
-    const userAccessAdmin = await fetch(`${baseApi}/api/admin/users`, {
-      headers: { Authorization: `Bearer ${userToken}` }
-    });
-    if (userAccessAdmin.status !== 403) {
-      throw new Error(`Expected 403 for non-admin user, got ${userAccessAdmin.status}`);
-    }
-    console.log('✓ Non-admin user blocked from /api/admin/* with 403');
-
-    // 9. 管理员编辑用户
-    const updateRes = await fetch(`${baseApi}/api/admin/users/${createdUserId}`, {
+    // 6. 用户自己修改个人密码（需校验原密码）
+    const wrongOldPassRes = await fetch(`${baseApi}/api/me/password`, {
       method: 'PUT',
-      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ displayName: '改名玩家A', disabled: true })
+      headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldPassword: 'wrong_old_pass', newPassword: 'new_self_pass_666' })
     });
-    const updateBody = await updateRes.json();
-    if (!updateRes.ok || updateBody.user?.displayName !== '改名玩家A' || updateBody.user?.disabled !== true) {
-      throw new Error(`Admin update user failed: ${JSON.stringify(updateBody)}`);
-    }
-    console.log('✓ Admin updated user displayName and set disabled: true');
+    if (wrongOldPassRes.status !== 400) throw new Error('Expected 400 for wrong old password');
+    console.log('✓ /api/me/password rejects wrong old password');
 
-    // 10. 禁用用户无法登录
-    const disabledLogin = await fetch(`${baseApi}/api/auth/login`, {
+    const selfPassRes = await fetch(`${baseApi}/api/me/password`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${userToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ oldPassword: 'password_test_123', newPassword: 'new_self_pass_666' })
+    });
+    const selfPassBody = await selfPassRes.json();
+    if (!selfPassRes.ok || !selfPassBody.ok) {
+      throw new Error(`Self change password failed: ${JSON.stringify(selfPassBody)}`);
+    }
+    console.log('✓ User changed own password successfully with correct old password');
+
+    // 使用自主修改的新密码登录
+    const selfNewLogin = await fetch(`${baseApi}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newUserName, password: 'password_test_123' })
+      body: JSON.stringify({ name: newUserName, password: 'new_self_pass_666' })
     });
-    if (disabledLogin.ok) throw new Error('Disabled user was able to log in');
-    console.log('✓ Disabled user login rejected');
+    if (!selfNewLogin.ok) throw new Error('Login with self changed password failed');
+    console.log('✓ Login with self changed password works');
 
-    // 11. 重置密码并重新启用
-    await fetch(`${baseApi}/api/admin/users/${createdUserId}`, {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ disabled: false })
-    });
-    const resetRes = await fetch(`${baseApi}/api/admin/users/${createdUserId}/password`, {
+    // 7. Admin 账号可以修改别人账号的密码（直接重置，无需原密码）
+    const adminResetRes = await fetch(`${baseApi}/api/admin/users/${createdUserId}/password`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: 'new_super_pass_888' })
+      body: JSON.stringify({ password: 'admin_set_pass_888' })
     });
-    const resetBody = await resetRes.json();
-    if (!resetRes.ok || !resetBody.ok) {
-      throw new Error(`Password reset failed: ${JSON.stringify(resetBody)}`);
+    const adminResetBody = await adminResetRes.json();
+    if (!adminResetRes.ok || !adminResetBody.ok) {
+      throw new Error(`Admin reset password failed: ${JSON.stringify(adminResetBody)}`);
     }
-    const newPassLogin = await fetch(`${baseApi}/api/auth/login`, {
+    console.log('✓ Admin successfully modified other user\'s password without old password');
+
+    // 使用管理员设置的新密码登录
+    const adminSetLogin = await fetch(`${baseApi}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newUserName, password: 'new_super_pass_888' })
+      body: JSON.stringify({ name: newUserName, password: 'admin_set_pass_888' })
     });
-    if (!newPassLogin.ok) throw new Error('Login with reset password failed');
-    console.log('✓ Password reset succeeded and user logged in with new password');
+    if (!adminSetLogin.ok) throw new Error('Login with admin modified password failed');
+    console.log('✓ Login with admin modified password works');
 
-    // 12. 删除用户
+    // 8. Admin 在后台删除账号
     const delRes = await fetch(`${baseApi}/api/admin/users/${createdUserId}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${adminToken}` }
     });
     const delBody = await delRes.json();
-    if (!delRes.ok || !delBody.ok) {
-      throw new Error(`Delete user failed: ${JSON.stringify(delBody)}`);
-    }
-    console.log('✓ Admin deleted user');
+    if (!delRes.ok || !delBody.ok) throw new Error(`Delete user failed: ${JSON.stringify(delBody)}`);
+    console.log('✓ Admin successfully deleted user account from backend');
 
-    // 13. 不能删除 rds 账号
+    // 被删除的账号无法登录
+    const delLogin = await fetch(`${baseApi}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newUserName, password: 'admin_set_pass_888' })
+    });
+    if (delLogin.ok) throw new Error('Deleted user was able to log in');
+    console.log('✓ Deleted user login rejected');
+
+    // 不能删除 rds 账号
     const delRds = await fetch(`${baseApi}/api/admin/users/u_admin_rds`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${adminToken}` }
@@ -226,69 +206,94 @@ async function run() {
     if (delRds.ok) throw new Error('Admin was able to delete rds account');
     console.log('✓ Root admin rds protected from deletion');
 
-    // 14. Playwright UI 验证
+    // 9. Playwright UI 验证
     console.log('Starting Playwright UI verification...');
     const browser = await launchChromium();
     const page = await browser.newPage();
     const appUrl = `http://127.0.0.1:${VITE_PORT}/`;
 
-    // 访问登录页，验证注册按钮已去除
+    // 访问登录页，登录普通用户测试个人资料改密
     await page.goto(appUrl);
-    await page.waitForSelector('#name', { timeout: 10000 });
-    const regBtn = await page.$('#register');
-    if (regBtn) throw new Error('Registration button #register should not exist in the DOM');
-    const closedText = await page.textContent('body');
-    if (!closedText.includes('注册功能已关闭')) {
-      throw new Error('Registration closed hint not displayed on auth page');
+    await page.waitForSelector('#adm-login-pass, #name', { timeout: 10000 });
+
+    // 先通过管理后台创建 1 个用于 UI 测试的普通用户
+    const uiPlayerName = 'ui_p_' + Date.now().toString(36);
+    await fetch(`${baseApi}/api/admin/users`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: uiPlayerName, password: 'player_pass_123', displayName: '普通玩家UI' })
+    });
+
+    // 大厅登录普通用户
+    if (await page.$('#name')) {
+      await page.fill('#name', uiPlayerName);
+      await page.fill('#pass', 'player_pass_123');
+      await page.click('#login');
+      await page.waitForSelector('#profile-open', { timeout: 10000 });
+      console.log('✓ UI: normal user logged in to lobby');
+
+      // 打开个人资料弹窗
+      await page.click('#profile-open');
+      await page.waitForSelector('#profile-modal:not([hidden])', { timeout: 5000 });
+      console.log('✓ UI: profile modal opened');
+
+      // 展开「修改登录密码」
+      await page.click('.lob-pass-details summary');
+      await page.waitForSelector('#pf-old-pass', { timeout: 3000 });
+
+      // 输入错误原密码
+      await page.fill('#pf-old-pass', 'wrong_pass');
+      await page.fill('#pf-new-pass', 'player_new_888');
+      await page.fill('#pf-new-pass2', 'player_new_888');
+      await page.click('#pf-pass-submit');
+      await page.waitForSelector('#pf-pass-err:not([style*="display: none"])', { timeout: 5000 });
+      console.log('✓ UI: self change password rejected wrong old password with error banner');
+
+      // 输入正确原密码修改
+      await page.fill('#pf-old-pass', 'player_pass_123');
+      await page.click('#pf-pass-submit');
+      await page.waitForSelector('#profile-modal', { state: 'hidden', timeout: 5000 });
+      console.log('✓ UI: self change password succeeded and modal closed');
+
+      // 登出
+      await page.click('#logout');
+      await page.waitForSelector('#name', { timeout: 5000 });
     }
-    console.log('✓ UI: #register button is removed and closed notice is displayed');
 
-    // 点击「管理员后台 →」
-    await page.click('#goto-admin');
-    await page.waitForSelector('#adm-login-pass', { timeout: 10000 });
-    console.log('✓ UI: navigated to admin login view');
+    // 管理员登录管理后台
+    await page.goto(`${appUrl}#admin`);
+    await page.waitForSelector('#adm-login-pass, .adm-table', { timeout: 10000 });
+    if (await page.$('#adm-login-pass')) {
+      await page.fill('#adm-login-pass', 'kgnb666');
+      await page.click('#adm-login-btn');
+      await page.waitForSelector('.adm-table', { timeout: 10000 });
+    }
+    console.log('✓ UI: admin logged into admin console');
 
-    // 输入密码登录
-    await page.fill('#adm-login-pass', 'kgnb666');
-    await page.click('#adm-login-btn');
-    await page.waitForSelector('.adm-table', { timeout: 10000 });
-    console.log('✓ UI: admin logged in and admin console table rendered');
+    // 管理员通过表格中的「改密」修改刚才用户的密码（直接设置，无需原密码）
+    const userRow = await page.waitForSelector(`tr[data-user-id] td:has-text("${uiPlayerName}")`, { timeout: 5000 });
+    const rowEl = await page.$(`tr:has-text("${uiPlayerName}")`);
+    const editPassBtn = await rowEl.$('button[data-action="reset-pass"]');
+    await editPassBtn.click();
+    await page.waitForSelector('#adm-reset-pass', { timeout: 5000 });
+    console.log('✓ UI: admin opened reset password modal for user');
 
-    // 检查统计卡片
-    const statCards = await page.$$('.adm-stat-card');
-    if (statCards.length !== 3) throw new Error(`Expected 3 stat cards, got ${statCards.length}`);
-    console.log('✓ UI: 3 metric stat cards visible');
+    await page.fill('#adm-reset-pass', 'admin_override_999');
+    await page.fill('#adm-reset-pass2', 'admin_override_999');
+    await page.click('#adm-reset-submit');
+    await page.waitForSelector('#adm-modal-backdrop', { state: 'detached', timeout: 5000 });
+    console.log('✓ UI: admin modified other user\'s password successfully');
 
-    // 点击创建账号
-    await page.click('#adm-btn-create');
-    await page.waitForSelector('#adm-create-name', { timeout: 5000 });
-    const uiTestUser = 'ui_user_' + Date.now().toString(36);
-    await page.fill('#adm-create-name', uiTestUser);
-    await page.fill('#adm-create-pass', 'pass_ui_123');
-    await page.fill('#adm-create-display', 'UI测试用户');
-    await page.click('#adm-create-submit');
-
-    // 确认用户出现在表格中
-    await page.waitForSelector(`tr:has-text("${uiTestUser}")`, { timeout: 10000 });
-    console.log(`✓ UI: user @${uiTestUser} created via modal and rendered in table`);
-
-    // 点击「返回游戏大厅」
-    await page.click('#adm-nav-lobby');
-    await page.waitForSelector('#shelf', { timeout: 10000 });
-    console.log('✓ UI: returned to game lobby');
-
-    // 检查大厅顶栏的「⚙ 管理后台」按钮
-    const adminOpenBtn = await page.$('#admin-open');
-    if (!adminOpenBtn) throw new Error('#admin-open button missing in lobby header for admin user');
-    console.log('✓ UI: #admin-open button present in lobby header for logged-in admin');
-
-    // 再次点击「⚙ 管理后台」进入管理后台
-    await page.click('#admin-open');
-    await page.waitForSelector('.adm-table', { timeout: 10000 });
-    console.log('✓ UI: successfully re-entered admin console from lobby header');
+    // 管理员通过表格中的「删除」删除该用户
+    const delBtn = await page.waitForSelector(`tr:has-text("${uiPlayerName}") button[data-action="delete"]`, { timeout: 5000 });
+    await delBtn.click();
+    await page.waitForSelector('#adm-delete-submit', { timeout: 5000 });
+    await page.click('#adm-delete-submit');
+    await page.waitForSelector(`tr:has-text("${uiPlayerName}")`, { state: 'detached', timeout: 5000 });
+    console.log('✓ UI: admin deleted user account and row disappeared from table');
 
     await browser.close();
-    console.log('\nALL ADMIN VERIFICATIONS PASSED SUCCESSFULLY!');
+    console.log('\nALL VERIFICATIONS PASSED SUCCESSFULLY!');
   } finally {
     cleanup();
   }

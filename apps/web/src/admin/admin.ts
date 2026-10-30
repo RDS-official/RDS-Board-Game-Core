@@ -55,7 +55,7 @@ export async function startAdmin(
   let statusFilter: 'all' | 'active' | 'disabled' = 'all';
 
   // 模态弹窗状态
-  type ModalType = 'none' | 'create' | 'edit' | 'reset-pass' | 'delete-confirm';
+  type ModalType = 'none' | 'create' | 'edit' | 'reset-pass' | 'self-pass' | 'delete-confirm';
   let activeModal: ModalType = 'none';
   let modalTargetUser: AdminUserItem | null = null;
   let modalError = '';
@@ -213,6 +213,7 @@ export async function startAdmin(
             <span class="adm-avatar">${esc((adminUser.displayName || adminUser.name).slice(0, 1).toUpperCase())}</span>
             <span>${esc(adminUser.displayName || adminUser.name)} (管理员)</span>
           </div>
+          <button id="adm-nav-my-pass" class="adm-btn adm-btn-secondary">修改密码</button>
           <button id="adm-nav-lobby" class="adm-btn adm-btn-secondary">返回游戏大厅</button>
           <button id="adm-nav-logout" class="adm-btn adm-btn-secondary">退出登录</button>
         </div>
@@ -337,7 +338,11 @@ export async function startAdmin(
         <td>
           <div class="adm-actions" style="justify-content: flex-end;">
             <button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="edit" data-id="${esc(u.id)}">编辑</button>
-            <button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="reset-pass" data-id="${esc(u.id)}">改密</button>
+            ${
+              isSelf
+                ? `<button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="self-pass" data-id="${esc(u.id)}">改密</button>`
+                : `<button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="reset-pass" data-id="${esc(u.id)}" title="管理员直接修改对方密码">改密</button>`
+            }
             ${
               !isRootAdmin && !isSelf
                 ? `<button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="toggle-status" data-id="${esc(u.id)}" data-disabled="${u.disabled ? '1' : '0'}">
@@ -428,12 +433,40 @@ export async function startAdmin(
       `;
     }
 
+    if (activeModal === 'self-pass') {
+      return `
+        <div class="adm-modal-backdrop" id="adm-modal-backdrop">
+          <div class="adm-modal">
+            <h3>修改我的登录密码</h3>
+            <p style="font-size: 13px; color: var(--muted); margin: 0;">修改自身密码需要先输入原密码进行身份校验</p>
+            <div class="adm-form-group">
+              <label class="adm-form-label">原密码 *</label>
+              <input id="adm-self-old-pass" type="password" class="adm-input" placeholder="请输入当前原密码" autocomplete="current-password" />
+            </div>
+            <div class="adm-form-group">
+              <label class="adm-form-label">新密码 *</label>
+              <input id="adm-self-new-pass" type="password" class="adm-input" placeholder="至少 6 位新密码" autocomplete="new-password" />
+            </div>
+            <div class="adm-form-group">
+              <label class="adm-form-label">确认新密码 *</label>
+              <input id="adm-self-new-pass2" type="password" class="adm-input" placeholder="请再次输入新密码" autocomplete="new-password" />
+            </div>
+            <div id="adm-modal-err" class="adm-error-box" ${modalError ? 'style="display:block;"' : ''}>${esc(modalError)}</div>
+            <div class="adm-modal-foot">
+              <button id="adm-modal-cancel" class="adm-btn adm-btn-secondary">取消</button>
+              <button id="adm-self-pass-submit" class="adm-btn">确认修改</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     if (activeModal === 'reset-pass' && modalTargetUser) {
       return `
         <div class="adm-modal-backdrop" id="adm-modal-backdrop">
           <div class="adm-modal">
-            <h3>重置密码 · @${esc(modalTargetUser.name)}</h3>
-            <p style="font-size: 13px; color: var(--muted); margin: 0;">为用户 ${esc(modalTargetUser.displayName || modalTargetUser.name)} 设置新密码</p>
+            <h3>修改用户密码 · @${esc(modalTargetUser.name)}</h3>
+            <p style="font-size: 13px; color: var(--gold); margin: 0;">管理员直接修改该账号密码（无需对方原密码）</p>
             <div class="adm-form-group">
               <label class="adm-form-label">新密码 *</label>
               <input id="adm-reset-pass" type="password" class="adm-input" placeholder="至少 6 位新密码" autocomplete="new-password" />
@@ -445,7 +478,7 @@ export async function startAdmin(
             <div id="adm-modal-err" class="adm-error-box" ${modalError ? 'style="display:block;"' : ''}>${esc(modalError)}</div>
             <div class="adm-modal-foot">
               <button id="adm-modal-cancel" class="adm-btn adm-btn-secondary">取消</button>
-              <button id="adm-reset-submit" class="adm-btn">确认重置</button>
+              <button id="adm-reset-submit" class="adm-btn">确认修改密码</button>
             </div>
           </div>
         </div>
@@ -479,6 +512,12 @@ export async function startAdmin(
 
     // 导航
     $('adm-nav-lobby')?.addEventListener('click', () => opts.onReturnToLobby());
+    $('adm-nav-my-pass')?.addEventListener('click', () => {
+      activeModal = 'self-pass';
+      modalTargetUser = null;
+      modalError = '';
+      renderDashboard();
+    });
     $('adm-nav-logout')?.addEventListener('click', () => {
       localStorage.removeItem('token');
       adminUser = null;
@@ -519,6 +558,11 @@ export async function startAdmin(
       if (action === 'edit') {
         activeModal = 'edit';
         modalTargetUser = target;
+        modalError = '';
+        renderDashboard();
+      } else if (action === 'self-pass') {
+        activeModal = 'self-pass';
+        modalTargetUser = null;
         modalError = '';
         renderDashboard();
       } else if (action === 'reset-pass') {
@@ -632,6 +676,55 @@ export async function startAdmin(
         renderDashboard();
       } catch (err: any) {
         modalError = err.message || '重置密码失败';
+        renderDashboard();
+      }
+    });
+
+    // 个人修改密码提交（需验证原密码）
+    $('adm-self-pass-submit')?.addEventListener('click', async () => {
+      const oldPass = (($('adm-self-old-pass') as HTMLInputElement).value || '').trim();
+      const newPass = ($('adm-self-new-pass') as HTMLInputElement).value || '';
+      const newPass2 = ($('adm-self-new-pass2') as HTMLInputElement).value || '';
+
+      if (!oldPass) {
+        modalError = '请输入原密码';
+        renderDashboard();
+        return;
+      }
+      if (!newPass || newPass.length < 6) {
+        modalError = '新密码长度至少需 6 位';
+        renderDashboard();
+        return;
+      }
+      if (newPass !== newPass2) {
+        modalError = '两次输入的新密码不一致';
+        renderDashboard();
+        return;
+      }
+      if (newPass === oldPass) {
+        modalError = '新密码不能与原密码相同';
+        renderDashboard();
+        return;
+      }
+
+      try {
+        const token = localStorage.getItem('token');
+        const res = await fetch('/api/me/password', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ oldPassword: oldPass, newPassword: newPass }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '修改密码失败');
+        showToast('个人密码修改成功，请牢记新密码', 'success');
+        activeModal = 'none';
+        modalError = '';
+        renderDashboard();
+      } catch (err: any) {
+        modalError = err.message || '修改密码失败';
         renderDashboard();
       }
     });

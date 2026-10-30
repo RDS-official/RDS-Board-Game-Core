@@ -1,6 +1,6 @@
 /** M1 自检：不依赖浏览器，直接调用各模块断言核心行为。 */
 import {
-  register, login, verifyJwt, createUser, isAdminUser,
+  register, login, verifyJwt, createUser, isAdminUser, changeOwnPassword,
   adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
 } from './auth.ts';
 import { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo } from './rooms.ts';
@@ -34,19 +34,26 @@ const userList = adminListUsers();
 ok(userList.some(u => u.name === 'rds' && u.role === 'admin'), 'admin listed in user list');
 ok(userList.some(u => u.name === name), 'created user listed');
 
-// 密码重置
+// 管理员直接重置他人密码（无需原密码）
 const resetRes: any = adminResetPassword(reg.user.id, 'new_secret_888');
 ok(resetRes.ok === true, 'adminResetPassword works');
 ok(!!(login(name, 'new_secret_888') as any).token, 'login with new password works');
 
+// 用户自主修改密码（需校验原密码）
+ok(!!(changeOwnPassword(reg.user.id, 'wrong_old', 'user_new_pass_666') as any).error, 'changeOwnPassword rejects wrong old password');
+ok(!!(changeOwnPassword(reg.user.id, 'new_secret_888', '123') as any).error, 'changeOwnPassword rejects short password');
+const selfChangeRes: any = changeOwnPassword(reg.user.id, 'new_secret_888', 'user_new_pass_666');
+ok(selfChangeRes.ok === true, 'changeOwnPassword works with correct old password');
+ok(!!(login(name, 'user_new_pass_666') as any).token, 'login with user changed password works');
+
 // 资料与禁用更新
 const updateRes: any = adminUpdateUser(reg.user.id, { displayName: '改名测试员', disabled: true }, adminLogin.user.id);
 ok(updateRes.user && updateRes.user.displayName === '改名测试员' && updateRes.user.disabled === true, 'adminUpdateUser works');
-ok(!!(login(name, 'new_secret_888') as any).error, 'disabled user login rejected');
+ok(!!(login(name, 'user_new_pass_666') as any).error, 'disabled user login rejected');
 
 // 恢复启用
 adminUpdateUser(reg.user.id, { disabled: false }, adminLogin.user.id);
-ok(!!(login(name, 'new_secret_888') as any).token, 'enabled user login works again');
+ok(!!(login(name, 'user_new_pass_666') as any).token, 'enabled user login works again');
 
 // 删除保护：不能删除系统管理员 rds
 ok(!!(adminDeleteUser('u_admin_rds', adminLogin.user.id) as any).error, 'rds admin cannot be deleted');

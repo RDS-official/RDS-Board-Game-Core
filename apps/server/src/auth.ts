@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { users, UserRecord } from './storage.ts';
+import { users, rooms, UserRecord } from './storage.ts';
 import {
   randomId,
   JWT_SECRET,
@@ -167,6 +167,24 @@ export function updateDisplayName(id: string, displayName: string): UserProfile 
   return profileOf(id)!;
 }
 
+// ---- 用户修改自身密码（必须输入原密码） ----
+export function changeOwnPassword(userId: string, oldPass: string, newPass: string): { ok: true } | { error: string } {
+  const u = users.byId(userId);
+  if (!u) return { error: '用户不存在' };
+  if (!verify(oldPass, u.salt, u.passHash)) {
+    return { error: '原密码错误' };
+  }
+  if (!newPass || newPass.length < 6) {
+    return { error: '新密码至少 6 位' };
+  }
+  if (oldPass === newPass) {
+    return { error: '新密码不能与原密码相同' };
+  }
+  const { salt, passHash } = hashPassword(newPass);
+  users.update(userId, { salt, passHash });
+  return { ok: true };
+}
+
 // ---- 管理员后台账号管理接口 ----
 export function adminListUsers() {
   return users.all().map(u => ({
@@ -219,6 +237,7 @@ export function adminUpdateUser(
   return { user: profileOf(id)! };
 }
 
+// Admin 账号直接修改别人账号的密码（重置，不需要对方原密码）
 export function adminResetPassword(id: string, newPass: string): { ok: true } | { error: string } {
   const u = users.byId(id);
   if (!u) return { error: '用户不存在' };
@@ -228,11 +247,23 @@ export function adminResetPassword(id: string, newPass: string): { ok: true } | 
   return { ok: true };
 }
 
+// Admin 后台删除账号
 export function adminDeleteUser(id: string, operatorId?: string): { ok: true } | { error: string } {
   const u = users.byId(id);
   if (!u) return { error: '用户不存在' };
   if (u.name === 'rds') return { error: '系统管理员账号 rds 不可删除' };
   if (operatorId && operatorId === id) return { error: '不能删除当前登录的管理员账号' };
+
+  // 清理该用户在房间中的参与状态
+  for (const r of rooms.all()) {
+    if (r.hostId === id && r.status === 'open') {
+      rooms.update(r.id, { status: 'closed' });
+    } else if (r.players.includes(id)) {
+      const players = r.players.filter(p => p !== id);
+      const readyPlayers = (r.readyPlayers ?? []).filter(p => p !== id);
+      rooms.update(r.id, { players, readyPlayers });
+    }
+  }
 
   const success = users.remove(id);
   if (!success) return { error: '删除用户失败' };

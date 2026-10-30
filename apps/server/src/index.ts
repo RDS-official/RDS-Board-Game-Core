@@ -11,7 +11,7 @@ import path from 'node:path';
 import { PORT, DATA_DIR } from './config.ts';
 import { users } from './storage.ts';
 import {
-  register, login, userFromAuthHeader, profileOf, updateDisplayName,
+  register, login, userFromAuthHeader, profileOf, updateDisplayName, changeOwnPassword,
   createUser, isAdminUser, adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
 } from './auth.ts';
 import { listRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoomInfo, setReady, kickPlayer, transferHost, setRoomChangedHook, sweepRooms } from './rooms.ts';
@@ -105,6 +105,15 @@ app.put('/api/me', async c => {
   if (!u) return c.json({ error: 'unauthorized' }, 401);
   const body = await c.req.json().catch(() => ({}));
   const r = updateDisplayName(u.sub, String(body.displayName ?? ''));
+  return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
+});
+app.put('/api/me/password', async c => {
+  const u = userFromAuthHeader(c.req.header('authorization'));
+  if (!u) return c.json({ error: '未授权，请先登录' }, 401);
+  const body = await c.req.json().catch(() => ({}));
+  const oldPassword = String(body.oldPassword ?? '');
+  const newPassword = String(body.newPassword ?? '');
+  const r = changeOwnPassword(u.sub, oldPassword, newPassword);
   return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
 });
 const AVATAR_TYPES: Record<string, 'png' | 'jpg' | 'webp'> = {

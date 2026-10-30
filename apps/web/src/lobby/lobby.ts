@@ -1,5 +1,5 @@
 import type { HubGameInfo, HubRoomInfo } from '@rds/room-protocol';
-import { getGames, getRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoom, me, setReady, kickPlayer, transferHost, updateDisplayName, uploadAvatar, UserProfile } from './api.ts';
+import { getGames, getRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoom, me, setReady, kickPlayer, transferHost, updateDisplayName, changeMyPassword, uploadAvatar, UserProfile } from './api.ts';
 import { showToast } from './toast.ts';
 
 /**
@@ -367,8 +367,22 @@ function profileModalHtml() {
         <p class="lob-muted" style="font-size:12px">登录名：${esc(user!.name)}（不可更改）</p>
         <div class="lob-row" style="justify-content:flex-end">
           <button id="pf-cancel" class="lob-secondary">取消</button>
-          <button id="pf-save" class="lob-primary-btn">保存</button>
+          <button id="pf-save" class="lob-primary-btn">保存资料</button>
         </div>
+
+        <div style="border-top: 1px solid var(--line); margin: 8px 0;"></div>
+        <details class="lob-pass-details" style="cursor: pointer;">
+          <summary style="font-weight: 600; color: var(--gold); font-size: 14px; user-select: none;">修改登录密码</summary>
+          <div class="lob-stack" style="gap: 8px; margin-top: 10px;">
+            <input id="pf-old-pass" type="password" placeholder="原密码 *" autocomplete="current-password" />
+            <input id="pf-new-pass" type="password" placeholder="新密码（至少 6 位） *" autocomplete="new-password" />
+            <input id="pf-new-pass2" type="password" placeholder="确认新密码 *" autocomplete="new-password" />
+            <div id="pf-pass-err" class="lob-error" style="display: none;"></div>
+            <div class="lob-row" style="justify-content: flex-end; margin-top: 4px;">
+              <button id="pf-pass-submit" class="lob-secondary">确认修改密码</button>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
   </div>
@@ -590,6 +604,43 @@ function bind() {
       render();
       showToast('资料已更新', 'success');
     } catch (e: any) { showToast(e.message, 'error'); }
+  });
+
+  $('pf-pass-submit')?.addEventListener('click', async () => {
+    const oldPass = (($('pf-old-pass') as HTMLInputElement)?.value || '').trim();
+    const newPass = ($('pf-new-pass') as HTMLInputElement)?.value || '';
+    const newPass2 = ($('pf-new-pass2') as HTMLInputElement)?.value || '';
+    const errEl = $('pf-pass-err') as HTMLElement;
+
+    if (!oldPass) {
+      if (errEl) { errEl.textContent = '请输入原密码'; errEl.style.display = 'block'; }
+      return;
+    }
+    if (!newPass || newPass.length < 6) {
+      if (errEl) { errEl.textContent = '新密码长度至少需 6 位'; errEl.style.display = 'block'; }
+      return;
+    }
+    if (newPass !== newPass2) {
+      if (errEl) { errEl.textContent = '两次输入的新密码不一致'; errEl.style.display = 'block'; }
+      return;
+    }
+    if (newPass === oldPass) {
+      if (errEl) { errEl.textContent = '新密码不能与原密码相同'; errEl.style.display = 'block'; }
+      return;
+    }
+
+    try {
+      await changeMyPassword(oldPass, newPass);
+      const o = $('pf-old-pass') as HTMLInputElement; if (o) o.value = '';
+      const n1 = $('pf-new-pass') as HTMLInputElement; if (n1) n1.value = '';
+      const n2 = $('pf-new-pass2') as HTMLInputElement; if (n2) n2.value = '';
+      if (errEl) errEl.style.display = 'none';
+      showToast('密码修改成功，请牢记新密码', 'success');
+      ($('profile-modal') as HTMLElement).hidden = true;
+    } catch (e: any) {
+      if (errEl) { errEl.textContent = e.message || '修改密码失败'; errEl.style.display = 'block'; }
+      showToast(e.message || '修改密码失败', 'error');
+    }
   });
 
   $('logout')?.addEventListener('click', () => { localStorage.removeItem('token'); user = null; currentRoom = null; closeWs(); render(); });
