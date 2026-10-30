@@ -1700,8 +1700,23 @@ export class BetrayalRules {
       return;
     }
 
-    const successThreshold = def.bands.length > 1 ? def.bands[def.bands.length - 1].min : 0;
-    const check = rollTraitCheck(state, pid, def.check, { threshold: successThreshold, reason: def.name });
+    // Only a two-band card has a single "success" line. The three-band official
+    // events (4+ / 1-3 / 0) resolve by band, so passing a threshold produced a
+    // nonsense "成功 / 0" verdict in the dice overlay.
+    const successThreshold =
+      def.bands.length === 2 ? def.bands[def.bands.length - 1].min : undefined;
+    const check = rollTraitCheck(state, pid, def.check, {
+      ...(successThreshold === undefined ? {} : { threshold: successThreshold }),
+      reason: def.name,
+      // The overlay captions the roll with this, so the player sees which card
+      // asked for it and what each band costs.
+      label: def.name,
+      effect: def.bands
+        .slice()
+        .sort((a, b) => b.min - a.min)
+        .map(band => band.text)
+        .join('；')
+    });
     trace(
       ctx,
       'DICE_ROLL',

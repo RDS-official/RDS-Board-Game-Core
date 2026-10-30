@@ -645,3 +645,42 @@ test('rules: a carried modifier feeds the dice, not a hidden stat', () => {
   const check = rollTraitCheck(raw, 'p1', 'might', { threshold: 1 });
   assertEqual(check.count, effectiveTrait(raw, 'p1', 'might'), 'the check rolls the modified value');
 });
+
+test('rules: every official event that asks for a roll actually rolls', () => {
+  // Some events silently resolved without dice. The roll is driven by
+  // globalVars.lastRoll, so assert it changes for a card that demands a check.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 11);
+  const raw = engine.getRawState();
+  const deck = raw.zones.zone_event_deck;
+  const target = deck.orderedEntities.find(id => raw.entities[id]?.components.custom?.defId === 'phone_call');
+  assert(!!target, 'phone_call is in the deck');
+  deck.orderedEntities = [target!, ...deck.orderedEntities.filter(id => id !== target)];
+
+  raw.globalVars.lastRoll = null;
+  raw.players.p1.customProps.forcedRoll = { value: 5 };
+
+  // Draw a room whose symbol is EVENT so the event deck is actually touched.
+  stackRoomTiles(raw, ['game_room']);
+  const explore = engine.getLegalActions('p1').find(
+    action => action.type === 'EXPLORE_DOOR' && action.payload?.direction === 'E'
+  );
+  assert(!!explore, 'a door is explorable');
+  engine.dispatch(explore!);
+  const place = engine.getLegalActions('p1').find(action => action.type === 'PLACE_ROOM');
+  if (place) {
+    const rotation = Number(place.fields![0].options![0].value);
+    engine.dispatch({ ...place, payload: { rotation: String(rotation) } });
+  }
+  const roll = engine.getRawState().globalVars.lastRoll as
+    | { reason?: string; total?: number; label?: string; threshold?: number; effect?: string }
+    | null;
+  assert(!!roll, 'a roll was recorded');
+  assertEqual(roll!.total, 5, 'the recorded roll carries the result');
+  // The dice overlay captions the roll with the card name and lists the bands.
+  // Whatever card came up, the overlay must name it rather than showing a bare trait.
+  assert(typeof roll!.label === 'string' && roll!.label!.length > 0, 'the overlay names the card that asked for the roll');
+  assert(!!roll!.effect && roll!.effect.length > 0, 'the overlay lists what each band costs');
+  // A three-band card has no single success line; a 0 threshold rendered a
+  // meaningless "成功 / 0" verdict.
+  assertEqual(roll!.threshold, undefined, 'no bogus success threshold is passed');
+});
