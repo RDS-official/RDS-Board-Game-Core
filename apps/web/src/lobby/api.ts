@@ -16,7 +16,7 @@ export const createRoom = (name: string, gameId: string, opts: CreateRoomOpts = 
   api<HubRoomInfo>('/api/rooms', { method: 'POST', body: JSON.stringify({ name, gameId, ...opts }) });
 export const joinRoom = (id: string, code?: string) =>
   api<HubRoomInfo>('/api/rooms/' + id + '/join', { method: 'POST', body: JSON.stringify(code ? { code } : {}) });
-export interface UserProfile { id: string; name: string; displayName: string; avatarUrl?: string; }
+export interface UserProfile { id: string; name: string; displayName: string; role?: 'admin' | 'user'; avatarUrl?: string; }
 export const me = () => api<UserProfile>('/api/me');
 export const updateDisplayName = (displayName: string) =>
   api<UserProfile>('/api/me', { method: 'PUT', body: JSON.stringify({ displayName }) });

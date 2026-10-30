@@ -18,6 +18,7 @@
     "shots:cards": "node scripts/render-card-faces.mjs",
     "dev:server": "tsx apps/server/src/index.ts",
     "test:server": "tsx apps/server/src/selftest.ts",
+    "test:admin": "node scripts/verify-admin.mjs",
     "probe:ui": "node scripts/probe-ui-layout.mjs",
     "probe:hand": "node scripts/probe-hand-layout.mjs",
     "probe:tokens": "node scripts/probe-design-tokens.mjs",

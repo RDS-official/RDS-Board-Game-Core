@@ -10,18 +10,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PORT, DATA_DIR } from './config.ts';
 import { users } from './storage.ts';
-import { register, login, userFromAuthHeader, profileOf, updateDisplayName } from './auth.ts';
+import {
+  register, login, userFromAuthHeader, profileOf, updateDisplayName,
+  createUser, isAdminUser, adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
+} from './auth.ts';
 import { listRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoomInfo, setReady, kickPlayer, transferHost, setRoomChangedHook, sweepRooms } from './rooms.ts';
 import { GAMES } from './games.ts';
 import { SignalHub } from './signal.ts';
 
-const app = new Hono();
+interface AppEnv {
+  Variables: {
+    adminUser: { sub: string; name: string; role?: 'admin' | 'user' };
+  };
+}
+
+const app = new Hono<AppEnv>();
 
 // ---- 认证 ----
 app.post('/api/auth/register', async c => {
-  const body = await c.req.json().catch(() => ({}));
-  const r = register(String(body.name ?? ''), String(body.password ?? ''));
-  return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
+  return c.json({ error: '注册功能已关闭，请联系管理员分配账号' }, 403);
 });
 app.post('/api/auth/login', async c => {
   const body = await c.req.json().catch(() => ({}));
@@ -31,6 +38,59 @@ app.post('/api/auth/login', async c => {
 app.get('/api/auth/me', c => {
   const u = userFromAuthHeader(c.req.header('authorization'));
   return u ? c.json(u) : c.json({ error: 'unauthorized' }, 401);
+});
+
+// ---- 后台管理 (Admin) ----
+app.use('/api/admin/*', async (c, next) => {
+  const u = userFromAuthHeader(c.req.header('authorization'));
+  if (!u) return c.json({ error: '未授权，请先登录' }, 401);
+  if (!isAdminUser(u)) return c.json({ error: '拒绝访问：需要管理员权限' }, 403);
+  c.set('adminUser', u);
+  await next();
+});
+
+app.get('/api/admin/users', c => {
+  return c.json({
+    users: adminListUsers(),
+    stats: {
+      totalUsers: users.all().length,
+      adminUsers: users.all().filter(u => u.role === 'admin' || u.name === 'rds').length,
+      disabledUsers: users.all().filter(u => !!u.disabled).length,
+    }
+  });
+});
+
+app.post('/api/admin/users', async c => {
+  const body = await c.req.json().catch(() => ({}));
+  const r = createUser(String(body.name ?? ''), String(body.password ?? ''), {
+    displayName: body.displayName ? String(body.displayName) : undefined,
+    role: body.role === 'admin' ? 'admin' : 'user',
+  });
+  return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
+});
+
+app.put('/api/admin/users/:id', async c => {
+  const u = c.get('adminUser') || userFromAuthHeader(c.req.header('authorization'));
+  if (!u) return c.json({ error: '未授权' }, 401);
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const r = adminUpdateUser(id, body, u.sub);
+  return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
+});
+
+app.post('/api/admin/users/:id/password', async c => {
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => ({}));
+  const r = adminResetPassword(id, String(body.password ?? ''));
+  return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
+});
+
+app.delete('/api/admin/users/:id', c => {
+  const u = c.get('adminUser') || userFromAuthHeader(c.req.header('authorization'));
+  if (!u) return c.json({ error: '未授权' }, 401);
+  const id = c.req.param('id');
+  const r = adminDeleteUser(id, u.sub);
+  return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
 });
 
 // ---- 阶段一：用户资料（昵称/头像） ----

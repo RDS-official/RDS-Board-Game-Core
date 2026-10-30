@@ -7,6 +7,10 @@ export interface UserRecord {
   id: string; name: string; passHash: string; salt: string; createdAt: number;
   /** 阶段一：用户资料。displayName=对外昵称（缺省用登录名）；avatarExt/avatarRev=头像文件扩展与版本号（缓存击穿用）。 */
   displayName?: string; avatarExt?: 'png' | 'jpg' | 'webp'; avatarRev?: number;
+  /** 账号角色：admin / user */
+  role?: 'admin' | 'user';
+  /** 账号是否被管理员禁用 */
+  disabled?: boolean;
 }
 export interface RoomRecord {
   id: string; name: string; gameId: string; hostId: string; status: 'open' | 'playing' | 'closed';
@@ -61,6 +65,15 @@ export const users = {
     if (u) Object.assign(u, patch);
     save();
     return u;
+  },
+  remove(id: string) {
+    const idx = db.users.findIndex(x => x.id === id);
+    if (idx >= 0) {
+      db.users.splice(idx, 1);
+      save();
+      return true;
+    }
+    return false;
   },
 };
 
