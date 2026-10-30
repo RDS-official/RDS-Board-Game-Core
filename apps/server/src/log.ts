@@ -67,7 +67,7 @@ function append(name: string, line: string): void {
     } catch {
       /* 文件还不存在 */
     }
-    fs.appendFileSync(file, line + '\n');
+    fs.appendFileSync(file, `${line}\n`);
   } catch {
     /* 日志失败不影响业务 */
   }
