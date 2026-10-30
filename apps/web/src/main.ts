@@ -10,6 +10,7 @@ import { ensureCanvasFontsReady } from './render/fonts';
 import { checkWebGLSupport, renderWebGLErrorModal } from './render/webglSupport';
 import { hideGameLoading } from './gameLoading';
 import { BoardGameHUD } from './ui/hud';
+import { installDiagnostics } from './diagnostics/install';
 import { MathematicalInspectorUI } from './ui/mathInspector';
 import { CameraView, GameSnapshot, PresentationPorts } from '@rds/app/contracts';
 import { layoutForGame } from '@rds/app/layout';
@@ -708,6 +709,27 @@ function bootApp(): void {
     renderWebGLErrorModal(check.detail || check.error);
     return;
   }
+
+  // 诊断日志先装好：之后任何异常（含启动失败）都能被记录与导出。
+  const diagnostics = installDiagnostics({
+    build: import.meta.env.VITE_BUILD_ID ?? 'dev',
+    endpoint: '/api/diagnostics',
+    stateSummary: () => {
+      const app = (window as unknown as Record<string, unknown>).__boardGameApp as
+        | { session?: { getSnapshot?: () => { revision?: number; gameId?: string; phaseLabel?: string; actorName?: string; actions?: unknown[] } } }
+        | undefined;
+      const snapshot = app?.session?.getSnapshot?.();
+      if (!snapshot) return { note: 'session not ready' };
+      return {
+        gameId: snapshot.gameId,
+        revision: snapshot.revision,
+        phase: snapshot.phaseLabel,
+        actor: snapshot.actorName,
+        actionCount: snapshot.actions?.length ?? 0
+      };
+    }
+  });
+  window.addEventListener('beforeunload', () => diagnostics.log.push('info', 'lifecycle', '页面即将卸载'));
 
   try {
     new BoardGameSimulatorApp();

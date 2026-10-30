@@ -1,6 +1,7 @@
 import confetti from 'canvas-confetti';
 import { cardArtSvg } from './cardArt';
 import { handLayout } from './handLayout';
+import { diagnostics } from '../diagnostics/install';
 import { hash, reconcileKeyed, reconcileKeyedPreservingScroll } from './dom/keyed';
 import { DiceRollOverlay } from './dice-overlay';
 import {
@@ -608,7 +609,7 @@ export class BoardGameHUD {
         }
       }
 
-      const result = this.presenter.perform(action.id, payload, targets);
+      const result = this.performAction(action.id, payload, targets);
       if (!result.ok) {
         this.pushToast('⚠️', result.error ?? '动作被拒绝');
         return;
@@ -762,7 +763,7 @@ export class BoardGameHUD {
         event.stopPropagation();
         const actionId = button.dataset.cardAction;
         close();
-        if (actionId) this.presenter.perform(actionId);
+        if (actionId) this.performAction(actionId);
       });
     });
     layer.addEventListener('click', event => {
@@ -776,6 +777,25 @@ export class BoardGameHUD {
    * Discovery moment: when a newly explored room enters the projection, present
    * it like a drawn card instead of silently growing the board.
    */
+  /**
+   * 所有动作的统一入口。
+   *
+   * 除了转交 presenter，还把「做了什么、成功没有」记进诊断面包屑 —— 卡死时
+   * 这份最近动作清单就是最直接的线索（见 apps/web/src/diagnostics）。
+   */
+  private performAction(
+    actionId: string,
+    payload?: Record<string, unknown>,
+    targets?: string[]
+  ): { ok: boolean; error?: string } {
+    // Must call the presenter, not this method: an earlier mechanical edit turned
+    // this line into a self-call, so every action recursed until the stack blew.
+    const result = this.presenter.perform(actionId, payload, targets);
+    const label = payload ? `${actionId} ${JSON.stringify(payload)}` : actionId;
+    diagnostics()?.action(targets ? `${label} -> ${targets.join(',')}` : label, result.ok, result.error);
+    return result;
+  }
+
   private maybeRevealRoom(snapshot: GameSnapshot): void {
     const rooms = Object.values(snapshot.board.mapGraph.nodes).filter(node => node.type === 'ROOM');
     if (!this.knownRooms) {
@@ -937,6 +957,7 @@ export class BoardGameHUD {
           <button class="icon-btn danger" id="btn-exit-net" aria-label="退出对局" hidden>⎋<span class="tip">退出对局</span></button>
           <button class="icon-btn" id="btn-audio" aria-label="音效">♪<span class="tip">音效开关</span></button>
           <button class="icon-btn" id="btn-inspector" aria-label="数学模型">𝒢<span class="tip">内核检查器 · I</span></button>
+          <button class="icon-btn" id="btn-diagnostics" aria-label="导出诊断日志">⤓<span class="tip">导出诊断日志（问题反馈用）</span></button>
           <button class="icon-btn" id="btn-about" aria-label="关于">ⓘ<span class="tip">关于 · 版本信息</span></button>
           <button class="shell-toggle" data-toggle="side" aria-label="显示信息栏">▤ 信息</button>
         </div>
@@ -1029,6 +1050,9 @@ export class BoardGameHUD {
       this.syncSoundButton();
     });
 
+    this.container.querySelector('#btn-diagnostics')?.addEventListener('click', () => {
+      diagnostics()?.download();
+    });
     this.container.querySelector('#btn-inspector')?.addEventListener('click', () => {
       this.ports.toggleInspector();
     });
@@ -2353,6 +2377,6 @@ export class BoardGameHUD {
       if (!result.ok) this.pushToast('⚠️', result.error ?? '无法进入放置模式');
       return;
     }
-    this.presenter.perform(action.id);
+    this.performAction(action.id);
   }
 }
