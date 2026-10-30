@@ -937,8 +937,8 @@ export class BoardGameHUD {
         <button class="shell-toggle" data-toggle="rail" aria-label="显示角色栏">☰ 角色</button>
 
         <div class="topbar-actions">
-          <div class="scenario-switch" id="scenario-switch" style="display:none" title="切换起始剧本 · 会重开牌局">
-            <span class="vs-label">❖ 剧本</span>
+          <div class="scenario-switch" id="scenario-switch" style="display:none" title="切换局内场景 · 会重开牌局">
+            <span class="vs-label">❖ 局内场景</span>
             <select id="scenario-select"></select>
           </div>
 
@@ -971,7 +971,6 @@ export class BoardGameHUD {
         <div class="side-panel-extras" id="side-panel-extras"></div>
         <!-- Edition picker: only shown when the game ships several rule sets,
              so a single-variant fixture keeps the column unchanged. -->
-        <aside class="variant-panel" id="variant-panel" style="display:none"></aside>
         <aside class="room-card" id="room-card" style="display:none"></aside>
         <aside class="mansion-minimap" id="mansion-minimap" style="display:none"></aside>
         <aside class="activity-feed" id="activity-feed"></aside>
@@ -1084,7 +1083,6 @@ export class BoardGameHUD {
 
     this.renderViewerSelect(snapshot);
     this.renderScenarioSelect(snapshot);
-    this.renderVariantPanel(snapshot);
     this.renderPlayers(snapshot);
     this.renderRoomCard(snapshot);
     this.renderMinimap(snapshot);
@@ -1622,59 +1620,6 @@ export class BoardGameHUD {
     if (selected) select.value = selected;
   }
 
-  /**
-   * Edition picker for games that ship several rule sets.
-   *
-   * The top bar already carries a compact scenario dropdown, but with four
-   * editions (base / Mega / Poké Mart / both) picking from a one-line select
-   * gives no room for what each edition changes. This panel sits in the right
-   * column, above the activity feed, and spells the choice out. Games with a
-   * single variant hide it entirely, so their column is untouched.
-   */
-  private renderVariantPanel(snapshot: GameSnapshot): void {
-    const host = this.container.querySelector('#variant-panel') as HTMLElement | null;
-    if (!host) return;
-
-    const options = snapshot.scenarios ?? [];
-    if (options.length < 2) {
-      host.style.display = 'none';
-      host.dataset.signature = '';
-      return;
-    }
-    host.style.display = '';
-
-    const signature = options
-      .map(option => `${option.id}:${option.description}:${option.selected ? 1 : 0}`)
-      .join('|');
-    if (host.dataset.signature === signature) return;
-    host.dataset.signature = signature;
-
-    const buttons = options
-      .map(option => {
-        const active = option.selected ? ' active' : '';
-        return (
-          `<button type="button" class="vp-option${active}" data-scenario="${escapeAttr(option.id)}"` +
-          ` aria-pressed="${option.selected ? 'true' : 'false'}">` +
-          `<span class="vp-name">${escapeAttr(option.description)}</span>` +
-          `</button>`
-        );
-      })
-      .join('');
-
-    host.innerHTML = `
-      <div class="vp-head"><span class="vp-title">规则版本</span><span class="vp-count">${options.length}</span></div>
-      <div class="vp-options">${buttons}</div>
-    `;
-
-    // Delegated once per rebuild; `dataset.signature` gates the repaint so the
-    // handler is never stacked.
-    host.querySelectorAll('.vp-option').forEach(button => {
-      button.addEventListener('click', () => {
-        const id = (button as HTMLElement).dataset.scenario;
-        if (id) this.options.onSwitchScenario?.(id);
-      });
-    });
-  }
 
   private renderPlayers(snapshot: GameSnapshot): void {
     const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
