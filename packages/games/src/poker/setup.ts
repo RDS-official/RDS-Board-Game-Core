@@ -149,6 +149,7 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
         streetBets: Object.fromEntries(playerOrder.map(pid => [pid, 0])),
         handBets: Object.fromEntries(playerOrder.map(pid => [pid, 0])),
         actedSinceRaise: [],
+        shortRaiseAccum: 0,
         folded: [],
         allIn: [],
         community: [],

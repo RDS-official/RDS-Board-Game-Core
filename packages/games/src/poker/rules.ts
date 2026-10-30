@@ -1,4 +1,4 @@
-import { ECSManager } from '@rds/kernel/ecs';
+﻿import { ECSManager } from '@rds/kernel/ecs';
 import type { ReduceContext } from '@rds/kernel/module';
 import { DeterministicPRNG } from '@rds/kernel/prng';
 import type { Action, GameState, Player, PlayerId, VisibilityRule } from '@rds/kernel/types';
@@ -36,6 +36,12 @@ export interface PokerHandState extends BettingState {
   pot: number;
   /** Total chips each seat put in this hand (side-pot source of truth). */
   handBets: Record<string, number>;
+  /**
+   * Sum of the incomplete (all-in) raise increments since the last full raise.
+   * TDA "Multiple Short All-Ins": once these add up to a full raise, the betting
+   * reopens for the seats that had already acted.
+   */
+  shortRaiseAccum: number;
   community: string[];
   lastAggressor: string | null;
 }
@@ -258,6 +264,7 @@ export class PokerRules {
     let spent = 0;
     let raised = false;
     let reopened = false;
+    let shortRaiseAccum = hand.shortRaiseAccum;
     let label: string;
 
     switch (action.type) {
@@ -289,9 +296,26 @@ export class PokerRules {
         streetBets[playerId] = target;
         handBets[playerId] = (handBets[playerId] ?? 0) + delta;
         const increment = target - hand.currentBet;
-        raised = true;
-        reopened = increment >= hand.lastRaiseSize;
-        label = `${nameOf(state, playerId)} ${hand.currentBet > 0 ? '加注到' : '下注'} ${target}`;
+        raised = increment > 0;
+        if (raised) {
+          if (increment >= hand.lastRaiseSize) {
+            // Full raise: the betting reopens and the minimum raise grows.
+            reopened = true;
+            shortRaiseAccum = 0;
+          } else {
+            // Short all-in (TDA "Multiple Short All-Ins"): several incomplete
+            // raises in the same round may add up to a full raise, and then the
+            // betting reopens for players who had already acted.
+            shortRaiseAccum = hand.shortRaiseAccum + increment;
+            if (shortRaiseAccum >= hand.lastRaiseSize) {
+              reopened = true;
+              shortRaiseAccum = 0;
+            }
+          }
+        }
+        label = `${nameOf(state, playerId)} ${
+          hand.currentBet > 0 ? (raised ? '加注到' : '全押跟注') : '下注'
+        } ${target}`;
         break;
       }
       default:
@@ -314,6 +338,7 @@ export class PokerRules {
       allIn,
       folded,
       actedSinceRaise,
+      shortRaiseAccum,
       currentBet: raised ? Math.max(hand.currentBet, streetBets[playerId]) : hand.currentBet,
       lastRaiseSize: reopened ? streetBets[playerId] - hand.currentBet : hand.lastRaiseSize,
       lastAggressor: raised ? playerId : hand.lastAggressor
@@ -398,7 +423,8 @@ export class PokerRules {
       streetBets: zeros(state.playerOrder),
       currentBet: 0,
       lastRaiseSize: hand.bigBlind,
-      actedSinceRaise: []
+      actedSinceRaise: [],
+      shortRaiseAccum: 0
     });
   }
 
@@ -492,6 +518,7 @@ export class PokerRules {
       streetBets: zeros(order),
       handBets: zeros(order),
       actedSinceRaise: [],
+      shortRaiseAccum: 0,
       folded: [],
       allIn: [],
       community: [],
@@ -609,7 +636,8 @@ export class PokerRules {
       streetBets: zeros(next.playerOrder),
       currentBet: 0,
       street: 'COMPLETE',
-      actedSinceRaise: []
+      actedSinceRaise: [],
+      shortRaiseAccum: 0
     });
     next = this.writeHandResult(next, { handNo: hand.handNo, endedBy: 'SHOWDOWN', pots: results, showdown });
     next = pushLog(
@@ -641,7 +669,8 @@ export class PokerRules {
       streetBets: zeros(next.playerOrder),
       currentBet: 0,
       street: 'COMPLETE',
-      actedSinceRaise: []
+      actedSinceRaise: [],
+      shortRaiseAccum: 0
     });
 
     if (winnerId) {

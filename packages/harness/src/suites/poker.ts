@@ -393,6 +393,54 @@ test('poker: a short all-in still has to be matched before the next street', () 
   assertEqual(hand(settled).pot, 140, '45 + 45 + 45 (all-in) + 5 (small blind folded)');
 });
 
+test('poker: two short all-ins that add up to a full raise reopen the betting', () => {
+  // TDA "Multiple Short All-Ins": an incomplete raise on its own never reopens
+  // the action, but several of them in the same round can add up to a full
+  // raise — and then the seats that already acted may raise again.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 47, { scenario: 'seats_4' });
+  const raw = engine.getRawState();
+  setChips(raw, 'p4', 15);
+  setChips(raw, 'p2', 20);
+  startHand(engine);
+
+  act(engine, 'ALL_IN'); // p4 shoves 15: only 5 over the big blind → short
+  assertEqual(hand(engine.getRawState()).shortRaiseAccum, 5, 'the incomplete raise is banked');
+
+  callAround(engine, 1); // p1 calls 15, so it has acted
+  act(engine, 'ALL_IN'); // p2 shoves 20: 5 more, now 10 = a full raise
+
+  const reopened = engine.getRawState();
+  assertEqual(hand(reopened).shortRaiseAccum, 0, 'the accumulated short raises were consumed');
+  assertEqual(hand(reopened).currentBet, 20, 'the amount to call is the last all-in');
+
+  callAround(engine, 1); // p3 (big blind) calls the extra 10
+  assertEqual(engine.getActiveActorId(), 'p1', 'the earlier caller faces the reopened action');
+  const legal = engine.getLegalActions('p1').map(action => action.type);
+  assert(legal.includes('RAISE'), 'a full raise worth of short all-ins reopens raising');
+  assert(legal.includes('CALL'), 'and the seat may still just call the difference');
+});
+
+test('poker: one short all-in closes the street once everyone matches it', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 49, { scenario: 'seats_4' });
+  const raw = engine.getRawState();
+  setChips(raw, 'p4', 15);
+  startHand(engine);
+
+  act(engine, 'ALL_IN'); // p4 shoves 15: 5 over the big blind, short on its own
+  assertEqual(hand(engine.getRawState()).shortRaiseAccum, 5, '5 chips are banked, not a full raise');
+  callAround(engine, 1); // p1
+  callAround(engine, 1); // p2
+  callAround(engine, 1); // p3 completes to 15
+
+  const flop = engine.getRawState();
+  assertEqual(hand(flop).street, 'FLOP', 'matching the short all-in closes the round');
+  assertEqual(hand(flop).pot, 60, 'four seats put in 15 each');
+  assertEqual(hand(flop).shortRaiseAccum, 0, 'the accumulator resets with the street');
+  assertEqual(engine.getActiveActorId(), 'p2', 'first live seat left of the button acts first after the flop');
+  const legal = engine.getLegalActions('p2').map(action => action.type);
+  assert(legal.includes('RAISE'), 'a new street restores full betting rights');
+});
+
 /* -------------------------------------------------------------------------- */
 /* Hidden information and determinism                                          */
 /* -------------------------------------------------------------------------- */

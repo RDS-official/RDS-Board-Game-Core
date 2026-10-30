@@ -212,7 +212,7 @@ export function compareHands(a: HandValue, b: HandValue): number;
 ### 5.2 加注规则
 
 - 完整加注（`raiseTo - currentBet >= lastRaiseSize`）：`lastRaiseSize = raiseTo - currentBet`，清空 `actedSinceRaise`，把加注者写入。
-- 短全押（不足最小加注）：**不**更新 `lastRaiseSize`，**不**清空 `actedSinceRaise`（已行动者只能跟/弃，不能再加注）——标准 NLHE 行为。
+- 短全押（不足最小加注）：**不**更新 `lastRaiseSize`，**不**清空 `actedSinceRaise`（已行动者只能跟/弃，不能再加注）——标准 NLHE 行为；但**多次**短全押的增量会累加到 `shortRaiseAccum`，累计达到 `lastRaiseSize` 时按 TDA 45 重新打开叫注。
 - `currentBet = max(currentBet, raiseTo)`；`handBets[p] += delta`，`chips -= delta`。
 
 ### 5.3 一圈结束条件（加注必须全桌平注才发牌）
@@ -248,6 +248,31 @@ levels = 去重(handBets 中 > 0 的值) 升序
 - 最高层只有 1 人贡献 → 该层即"未被跟注的注"，等价于自动退回，无需特判。
 - 每个池只在 `eligible` 内比牌；同分平分（`Math.floor`），余数筹码从**庄家左手顺时针**第一位符合条件的赢家开始各发 1。
 - `pot` 归零后写 `lastHand`、播报、清手牌到 `zone_muck`、公共牌回 `zone_deck`。
+
+### 5.5 官方规则对照（TDA / WSOP 逐条自查）
+
+> 说明：本机网络取不到 pokerTDA.com / wsop.com / Wikipedia 的正文（分别被 521、404 与连接拦截），下表依据 **TDA 2022 规则手册** 的条文编号与通行 NLHE 规则整理。若你手上有更新的条文，欢迎指出偏差，我会立刻对齐。
+
+| # | 官方规则 | 依据 | 本实现 |
+| --- | --- | --- | --- |
+| 1 | 下注轮只在全员**平注**（或全押）后才结束，加注本身不发牌 | 下注轮定义 | ✅ `isRoundComplete`（`actedSinceRaise` + 每人 `streetBets == currentBet`） |
+| 2 | 加注额不得低于本轮此前的最大**完整**下注/加注 | TDA 43 | ✅ `minRaiseTo = currentBet + lastRaiseSize` |
+| 3 | 不足额全押**不**为已行动者重开叫注（他们只能跟/弃） | TDA 43 | ✅ `mayRaise = !actedSinceRaise.includes(me)` |
+| 4 | **多次**短全押累加达到一个完整加注时，叫注重新打开 | TDA 45 *Multiple Short All-Ins* | ✅ `shortRaiseAccum`（本轮补齐） |
+| 5 | 尚未行动者始终保留完整加注权 | TDA 43 | ✅ |
+| 6 | 大盲短码时，最低跟注额仍是**完整大盲**（多出部分进边池） | TDA 30 | ✅ 发牌时 `currentBet = bigBlind` 恒定 |
+| 7 | 翻后首次下注不得低于大盲 | 通行 NLHE | ✅ 每街 `lastRaiseSize` 重置为 BB |
+| 8 | 单挑：庄家下小盲、翻前先行动、翻后最后行动 | 通行 HU 规则 | ✅ `startHand` 的 `liveCount === 2` 分支 |
+| 9 | 翻后由庄家左手第一个未弃牌者先行动 | 通行 | ✅ `actorSeatFrom(buttonSeat)` |
+| 10 | 翻牌/转牌/河牌前各烧 1 张 | TDA 推荐流程 | ✅ `zone_burn`（暗置） |
+| 11 | 未被跟注的部分退回 | 通行 | ✅ `buildPots` 顶层单贡献者 |
+| 12 | 平分余数筹码给庄家左手最近的赢家 | TDA 68 *Odd Chips* | ✅ `splitAmount` + `seatDistance` |
+| 13 | 全员全押后剩余公共牌自动发完并摊牌 | 通行 | ✅ `settle` 循环 |
+| 14 | 摊牌由最后加注者先亮牌 | TDA 64 | ⚠️ **简化**：所有存活手牌同时亮出（模拟器/教学更直观，不改变胜负） |
+| 15 | 弃牌后不得再查看/亮出该手牌 | 通行 | ✅ 进 `zone_muck`（`HIDDEN`） |
+| 16 | 无注在身时允许弃牌（不鼓励） | TDA 84 | ✅ `FOLD` 始终可用 |
+
+**与官方规则的刻意差异（仅第 14 条）**：摊牌一次性亮出全部存活手牌，不做"输家可 muck 不亮"的处理。其余 15 条与条文一致。
 
 ---
 
@@ -364,6 +389,7 @@ HAND_OVER ─────────────► PREFLOP ──┬─► FLO
 | 加注必须平注 | 加注到 60 后，按钮跟、小盲跟，**大盲还欠 50** → 仍是翻前、无公共牌；大盲补齐才发翻牌（`a raise keeps the street open until every seat has matched it`） |
 | 短全押也必须补齐 | 全押只比当前注多 5 时，其余两个座位都要各补 5 才发翻牌（`a short all-in still has to be matched before the next street`） |
 | 短全押 | 短全押后已行动者不再获得 `RAISE` |
+| 短全押累加 | 两次各 +5 的短全押凑满一个大盲 → 叫注重开（TDA 45）；单次 +5 不重开 |
 | 边池 | 3 人不同筹码全押 → 池分层与归属正确 |
 | 平分 | 同牌型 → 均分；奇数筹码归庄家左手 |
 | 未跟注退回 | 一方超额下注无人跟 → 退还 |
