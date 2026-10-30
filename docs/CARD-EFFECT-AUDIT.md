@@ -582,3 +582,43 @@
 | 房间总数 | 48（官方 47 + observatory） |
 | 官方房间缺失 | **0** |
 | 非官方房间 | 1（observatory，有机制） |
+
+---
+
+## 修复记录（第六批：四张预兆卡）
+
+| 卡 | 官方文本 | 原实现 | 现在 |
+| --- | --- | --- | --- |
+| **bite** 噬咬 | 「Make a Might roll: 4+ You fend it off; 1-3 Lose 1 Might; 0 Lose 2 Might」 | 右侧玩家代掷 **4 骰攻击**，与探索者力量对抗 | ✅ 力量检定三档；叛徒豁免保留 |
+| **crystal_ball** 水晶球 | 「Once per turn, make a Knowledge roll: 4+ Gain 1 Knowledge; 1-3 Swirling mists; 0 Lose 1 Sanity」 | **纯窥视**牌堆顶，无检定 | ✅ 知识检定三档 |
+| **mask** 面具 | 「When you put it on, make a Sanity roll: 4+ Gain 2 Knowledge; 1-3 Faint whispers; 0 Lose 2 Sanity」 | 佩戴期间知识 +2 骰、神智 -2 骰 | ✅ 戴上时神智检定三档；死掉的 `maskWorn` 修正逻辑已移除 |
+| **spirit_board** 通灵板 | 「Once per turn, make a Knowledge roll: 4+ Gain 1 Knowledge, Gain 1 Sanity; 1-3 Gibberish; 0 Lose 1 Sanity」 | 神智检定换 +4 移动力 + 叛徒线索 | ✅ 知识检定三档 |
+
+`onDrawAttack` 字段随之删除（只剩 bite 用，且语义已变）。
+
+### ⚠️ 一处来源冲突（记录在案）
+
+`crystal_ball` 存在两个互相矛盾的一手说法：
+
+- **官方牌面**：「每回合一次，知识检定 4+ 得 1 知识；1-3 迷雾；0 失 1 神智」
+- **规则书**（`docs/RULES-CROSSCHECK.md` 引用）：「水晶球只能用于查看未抽出的物品/事件牌」
+
+本次按**牌面**实现（牌面是卡牌自身效果的第一手依据），窥视功能移除。若你认为规则书那句才权威，我可以改回窥视。
+
+---
+
+## 终检：与官方牌面的剩余差异（全部为有意保留）
+
+逐张核对官方 60 张卡（22 物品 / 13 预兆 / 25 事件）后，仓库**零缺失**，效果与卡面一致。以下为**有意保留**的偏离：
+
+| 项 | 官方 | 本仓库 | 原因 |
+| --- | --- | --- | --- |
+| `lucky_stone` / `rabbits_foot` | 被动 +1 属性 | 每回合一次重掷 / 投骰 +1 | 用户明确要求保留（四项默认之一），比官方版本更有玩法价值 |
+| `bell` | 仅「摇铃 +1 神智」 | 另有「三神器」集齐四维 +2 | 既有房规，卡面文案已注明 |
+| 预兆的 `onGain` / `onLoss` 成对 | 牌面只写「Gain +N」 | 获得时 +N、失去时 -N | 官方未明说失去预兆是否扣回；成对实现是「失去即失去加成」的合理解读 |
+| `crystal_ball` | 牌面：知识检定；规则书：查看未抽出的牌 | 按**牌面**实现（知识检定） | 牌面是卡牌自身效果的第一手依据；冲突已在上一节记录 |
+| `armor` 等被动卡 | 「+1 Might」 | 已改为携带期间力量 +1（**已对齐**） | — |
+
+### 卡面文案一致性
+
+本轮修掉了最后一处系统性问题：**代码已改但卡面文案仍是旧的自创描述**（`music_box`、`bottle`、`dark_dice`、`dynamite`、`smelling_salts`、`bite`、`crystal_ball`、`mask`、`spirit_board`、`adrenaline_shot`、`candle`）。玩家看到的说明现在与结算完全一致。

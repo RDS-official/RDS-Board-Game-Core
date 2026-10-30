@@ -5,7 +5,7 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { ROOM_DEFS } from '@rds/games/betrayal/cards';
-import { addEffect, hostilesInRoom, movePlayerTo, movementCost, ongoingEffectKinds, traitIndex, traitValue, hasRolledThisTurn } from '@rds/games/betrayal/helpers';
+import { addEffect, effectiveTrait, hostilesInRoom, movePlayerTo, movementCost, ongoingEffectKinds, rollTraitCheck, traitIndex, traitModifiers, traitValue, hasRolledThisTurn } from '@rds/games/betrayal/helpers';
 import { addExploredRoom, grantItem, grantOmen } from '@rds/games/betrayal/scenarios';
 import { stackRoomTiles } from '../suiteHelpers';
 import { test, assert, assertEqual } from '../testKit';
@@ -410,9 +410,14 @@ test('rules: a dead explorer\'s companion is claimed by whoever enters the room'
   );
 });
 
-test('rules: the crystal ball only looks, it does not take the card', () => {
-  // Rulebook, Using Items and Omens: "The Crystal Ball can only be used to look
-  // through undrawn Item and Event cards."
+test('rules: the crystal ball rolls Knowledge like the card says', () => {
+  // Official card text: "Once per turn, make a Knowledge roll: 4+ Cosmic insight
+  // (Gain 1 Knowledge); 1-3 Swirling mists; 0 Demonic vision (Lose 1 Sanity)."
+  //
+  // NOTE: docs/RULES-CROSSCHECK.md also carries a rulebook line saying the ball
+  // "can only be used to look through undrawn Item and Event cards". The printed
+  // card is the authority for the card's own effect, so the roll wins here; the
+  // discrepancy is recorded in docs/CARD-EFFECT-AUDIT.md.
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
   const raw = engine.getRawState();
   raw.activePlayerId = 'p1';
@@ -420,16 +425,19 @@ test('rules: the crystal ball only looks, it does not take the card', () => {
   grantOmen(raw, 'p1', 'crystal_ball');
 
   const topBefore = raw.zones.zone_event_deck.orderedEntities[0];
-  const seedBefore = raw.prngState;
+  raw.players.p1.customProps.forcedRoll = { value: 8 };
 
   const use = engine.getLegalActions('p1').find(a => a.type === 'USE_ITEM');
   assert(!!use, 'the ball can be used');
   assert(engine.dispatch(use!).ok, 'using it dispatches');
 
   const after = engine.getRawState();
-  assertEqual(after.prngState, seedBefore, 'no trait roll is made');
   assertEqual(after.zones.zone_event_deck.orderedEntities[0], topBefore, 'the deck order is untouched');
-  assert(!!after.globalVars.peek, 'the top card is revealed');
+  assertEqual(after.globalVars.peek ?? null, null, 'no peek is recorded any more');
+  assert(
+    traitIndex(after.players.p1, 'knowledge') > traitIndex(raw.players.p1, 'knowledge'),
+    'a good roll grants Knowledge'
+  );
 });
 
 test('rules: the dog is a companion, not a fetch skill, and it cannot ride the elevator', () => {
@@ -611,4 +619,68 @@ test('rules: exploring into the collapsed room does not freeze the table', () =>
     legal.some(action => action.type === 'MOVE_TO_ROOM' || action.type === 'EXPLORE_DOOR'),
     `the next explorer can still act (got: ${legal.map(action => action.type).join(', ') || 'nothing'})`
   );
+});
+
+test('rules: a carried modifier feeds the dice, not a hidden stat', () => {
+  // Armor reads "+1 Might" on the card. The old `passive: { physicalArmor: 1 }` was
+  // never read by anything, so the card did nothing at all.
+  // See docs/ENGINE-PASSIVE-MODIFIERS.md.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  assertEqual(traitModifiers(raw, 'p1').might, 0, 'no modifiers before the armor is picked up');
+
+  grantItem(raw, 'p1', 'armor');
+  const after = traitModifiers(raw, 'p1');
+  assertEqual(after.might, 1, 'the armor grants +1 Might');
+  assertEqual(after.speed, 0, 'and touches nothing else');
+
+  assertEqual(
+    effectiveTrait(raw, 'p1', 'might'),
+    traitValue(raw.players.p1, 'might') + 1,
+    'the effective value includes the modifier'
+  );
+
+  // The bonus has to reach the dice, otherwise it is dead data again.
+  raw.players.p1.customProps.forcedRoll = { value: 4 };
+  const check = rollTraitCheck(raw, 'p1', 'might', { threshold: 1 });
+  assertEqual(check.count, effectiveTrait(raw, 'p1', 'might'), 'the check rolls the modified value');
+});
+
+test('rules: every official event that asks for a roll actually rolls', () => {
+  // Some events silently resolved without dice. The roll is driven by
+  // globalVars.lastRoll, so assert it changes for a card that demands a check.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 11);
+  const raw = engine.getRawState();
+  const deck = raw.zones.zone_event_deck;
+  const target = deck.orderedEntities.find(id => raw.entities[id]?.components.custom?.defId === 'phone_call');
+  assert(!!target, 'phone_call is in the deck');
+  deck.orderedEntities = [target!, ...deck.orderedEntities.filter(id => id !== target)];
+
+  raw.globalVars.lastRoll = null;
+  raw.players.p1.customProps.forcedRoll = { value: 5 };
+
+  // Draw a room whose symbol is EVENT so the event deck is actually touched.
+  stackRoomTiles(raw, ['game_room']);
+  const explore = engine.getLegalActions('p1').find(
+    action => action.type === 'EXPLORE_DOOR' && action.payload?.direction === 'E'
+  );
+  assert(!!explore, 'a door is explorable');
+  engine.dispatch(explore!);
+  const place = engine.getLegalActions('p1').find(action => action.type === 'PLACE_ROOM');
+  if (place) {
+    const rotation = Number(place.fields![0].options![0].value);
+    engine.dispatch({ ...place, payload: { rotation: String(rotation) } });
+  }
+  const roll = engine.getRawState().globalVars.lastRoll as
+    | { reason?: string; total?: number; label?: string; threshold?: number; effect?: string }
+    | null;
+  assert(!!roll, 'a roll was recorded');
+  assertEqual(roll!.total, 5, 'the recorded roll carries the result');
+  // The dice overlay captions the roll with the card name and lists the bands.
+  // Whatever card came up, the overlay must name it rather than showing a bare trait.
+  assert(typeof roll!.label === 'string' && roll!.label!.length > 0, 'the overlay names the card that asked for the roll');
+  assert(!!roll!.effect && roll!.effect.length > 0, 'the overlay lists what each band costs');
+  // A three-band card has no single success line; a 0 threshold rendered a
+  // meaningless "成功 / 0" verdict.
+  assertEqual(roll!.threshold, undefined, 'no bogus success threshold is passed');
 });

@@ -750,34 +750,6 @@ export class BetrayalRules {
     const roommates = [playerId, ...playersInRoom(state, roomId, playerId)];
 
     switch (defId) {
-      case 'adrenaline_shot':
-        return [
-          {
-            key: 'mode',
-            label: '使用方式',
-            kind: 'enum',
-            options: [
-              { value: 'check', label: '本次检定 +4' },
-              { value: 'move', label: '本回合移动 +4' }
-            ],
-            default: 'check'
-          }
-        ];
-      case 'angel_feather':
-        return [{ key: 'value', label: '指定骰点 (0–8)', kind: 'number', min: 0, max: 8, step: 1, default: 8 }];
-      case 'crystal_ball':
-        return [
-          {
-            key: 'deck',
-            label: '窥视牌堆',
-            kind: 'enum',
-            options: [
-              { value: 'zone_event_deck', label: '事件牌堆' },
-              { value: 'zone_item_deck', label: '物品牌堆' }
-            ],
-            default: 'zone_event_deck'
-          }
-        ];
       case 'healing_salve':
         return [
           {
@@ -814,16 +786,6 @@ export class BetrayalRules {
             kind: 'enum',
             options: roommates.map(id => ({ value: id, label: state.players[id].name })),
             default: playerId
-          },
-          {
-            key: 'trait',
-            label: '恢复的肉体属性',
-            kind: 'enum',
-            options: [
-              { value: 'might', label: '力量' },
-              { value: 'speed', label: '速度' }
-            ],
-            default: 'might'
           }
         ];
       case 'bell':
@@ -1464,7 +1426,6 @@ export class BetrayalRules {
   /** Pre-roll modifiers the explorer may declare before the dice are thrown. */
   private static checkDeclareOptions(state: GameState, pid: PlayerId): string[] {
     const options: string[] = [];
-    if (ownsDef(state, pid, 'angel_feather')) options.push('angel_feather');
     return options;
   }
 
@@ -1489,13 +1450,6 @@ export class BetrayalRules {
     const payload = (window.payload ?? {}) as { trait?: TraitKey; threshold?: number };
     const trait = (payload.trait ?? 'knowledge') as TraitKey;
     const threshold = Number(payload.threshold ?? 6);
-
-    // Declared modifiers are applied before the throw (angel feather pins it).
-    const declared = window.declares.flatMap(slot => slot.picked);
-    if (declared.includes('angel_feather')) {
-      state.players[pid].customProps.forcedRoll = { value: 8 };
-      this.consumeDef(state, pid, 'angel_feather', ctx);
-    }
 
     const check = rollTraitCheck(state, pid, trait, {
       threshold,
@@ -1746,8 +1700,23 @@ export class BetrayalRules {
       return;
     }
 
-    const successThreshold = def.bands.length > 1 ? def.bands[def.bands.length - 1].min : 0;
-    const check = rollTraitCheck(state, pid, def.check, { threshold: successThreshold, reason: def.name });
+    // Only a two-band card has a single "success" line. The three-band official
+    // events (4+ / 1-3 / 0) resolve by band, so passing a threshold produced a
+    // nonsense "成功 / 0" verdict in the dice overlay.
+    const successThreshold =
+      def.bands.length === 2 ? def.bands[def.bands.length - 1].min : undefined;
+    const check = rollTraitCheck(state, pid, def.check, {
+      ...(successThreshold === undefined ? {} : { threshold: successThreshold }),
+      reason: def.name,
+      // The overlay captions the roll with this, so the player sees which card
+      // asked for it and what each band costs.
+      label: def.name,
+      effect: def.bands
+        .slice()
+        .sort((a, b) => b.min - a.min)
+        .map(band => band.text)
+        .join('；')
+    });
     trace(
       ctx,
       'DICE_ROLL',
@@ -1889,23 +1858,22 @@ export class BetrayalRules {
 
     trace(ctx, 'CARD_DRAW', `🕯️ ${state.players[pid].name} 抽到预兆「${def?.name ?? defId}」（第 ${state.globalVars.omensRevealed} 张）`, 700);
 
+    // Official Bite: "A shadow lunges at you! Make a Might roll: 4+ You fend it
+    // off; 1-3 Flesh wound (Lose 1 Might); 0 Savage mauling (Lose 2 Might)." The
+    // old version rolled a 4-dice attack against the explorer's Might.
+    //
     // Rulebook, Traitor and Monster Powers: "The Traitor can choose not to be
-    // affected by an Event card or Omens such as Bite." This omen's on-draw attack
-    // bypassed the event-effect guard, so a traitor still took the bite.
-    const omenBitesTraitor = state.players[pid]?.role === 'TRAITOR';
-    if (def?.onDrawAttack && !omenBitesTraitor) {
-      const attack = rollZeroDice(state.prngState, def.onDrawAttack.dice);
-      state.prngState = attack.nextSeed;
-      const defense = rollZeroDice(state.prngState, Math.max(1, traitValue(state.players[pid], 'might')));
-      state.prngState = defense.nextSeed;
-      const damage = Math.max(0, attack.sum - defense.sum);
-      if (damage > 0) damagePlayer(state, pid, 'PHYSICAL', damage, 'might');
-      trace(
-        ctx,
-        'DICE_ROLL',
-        `噬咬袭击 [${attack.rolls.join('+')}]=${attack.sum} vs 力量防御 ${defense.sum} → ${damage} 伤害`,
-        700
-      );
+    // affected by an Event card or Omens such as Bite."
+    if (defId === 'bite' && state.players[pid]?.role !== 'TRAITOR') {
+      const check = rollTraitCheck(state, pid, 'might', {
+        threshold: 4,
+        reason: 'bite',
+        label: '噬咬',
+        effect: '成功：挡开暗影；1-3 失去 1 点力量；0 失去 2 点力量'
+      });
+      if (check.total <= 0) applyTraitSteps(state, pid, 'might', -2, { force: true });
+      else if (!check.success) applyTraitSteps(state, pid, 'might', -1, { force: true });
+      trace(ctx, 'DICE_ROLL', `噬咬：力量检定 ${check.total} vs 4`, 700);
     }
 
     state.globalVars.pendingHauntRoll = { playerId: pid, omens: state.globalVars.omensRevealed };
@@ -2020,21 +1988,11 @@ export class BetrayalRules {
         break;
       }
       case 'adrenaline_shot': {
-        const mode = String(action.payload?.mode ?? 'check');
-        if (mode === 'move') {
-          player.customProps.movesLeft = Number(player.customProps.movesLeft ?? 0) + 4;
-          trace(ctx, 'ANNOUNCEMENT', `${player.name} 注射肾上腺素，移动力 +4`, 400);
-        } else {
-          player.customProps.checkBonus = Number(player.customProps.checkBonus ?? 0) + 4;
-          trace(ctx, 'ANNOUNCEMENT', `${player.name} 注射肾上腺素，下次检定 +4`, 400);
-        }
-        this.consume(state, pid, entityId, ctx);
-        break;
-      }
-      case 'angel_feather': {
-        const value = Math.max(0, Math.min(8, Number(action.payload?.value ?? 8)));
-        player.customProps.forcedRoll = { value };
-        trace(ctx, 'ANNOUNCEMENT', `${player.name} 使用天使羽毛，指定下次掷骰为 ${value}`, 400);
+        // Official: "Before you take a turn, you can use this to gain +4 Speed until
+        // end of turn." The old version also offered a +4 check bonus, which the
+        // card does not grant.
+        player.customProps.movesLeft = Number(player.customProps.movesLeft ?? 0) + 4;
+        trace(ctx, 'ANNOUNCEMENT', `${player.name} 注射肾上腺素，本回合移动力 +4`, 400);
         this.consume(state, pid, entityId, ctx);
         break;
       }
@@ -2067,26 +2025,17 @@ export class BetrayalRules {
         break;
       }
       case 'crystal_ball': {
-        // Rulebook, Using Items and Omens: "The Crystal Ball can only be used to
-        // look through undrawn Item and Event cards." It is a pure look: no trait
-        // roll, and the card is NOT taken off the deck (taking it would silently
-        // reorder every later draw, which the previous version did).
-        const requested = String(action.payload?.deck ?? 'zone_event_deck');
-        const peekDeck = requested === 'zone_item_deck' ? 'zone_item_deck' : 'zone_event_deck';
-        const zone = state.zones[peekDeck];
-        const topId = zone?.orderedEntities?.[0];
-        const top = topId ? state.entities[topId] : undefined;
-        state.globalVars.peek = {
-          deck: peekDeck,
-          title: top ? itemLabel(top) : '空',
-          ownerId: pid
-        };
-        trace(
-          ctx,
-          'ANNOUNCEMENT',
-          `🔮 水晶球映出${peekDeck === 'zone_item_deck' ? '物品' : '事件'}牌堆顶：${state.globalVars.peek.title}`,
-          600
-        );
+        // Official: "Once per turn, make a Knowledge roll: 4+ Cosmic insight (Gain
+        // 1 Knowledge); 1-3 Swirling mists; 0 Demonic vision (Lose 1 Sanity)."
+        const check = rollTraitCheck(state, pid, 'knowledge', {
+          threshold: 4,
+          reason: 'crystal ball',
+          label: '水晶球',
+          effect: '成功：获得 1 点知识；1-3 一片迷雾；0 失去 1 点神智'
+        });
+        if (check.success) applyTraitSteps(state, pid, 'knowledge', 1, { force: true });
+        else if (check.total <= 0) applyTraitSteps(state, pid, 'sanity', -1, { force: true });
+        trace(ctx, 'DICE_ROLL', `水晶球：知识检定 ${check.total} vs 4`, 600);
         markUsed(state, pid, defId);
         break;
       }
@@ -2150,13 +2099,22 @@ export class BetrayalRules {
         break;
       }
       case 'spirit_board': {
-        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: 'spirit board', label: '通灵板' });
+        // Official: "Once per turn, make a Knowledge roll: 4+ Benign spirits guide
+        // you (Gain 1 Knowledge, Gain 1 Sanity); 1-3 Gibberish; 0 Malevolent wails
+        // (Lose 1 Sanity)."
+        const check = rollTraitCheck(state, pid, 'knowledge', {
+          threshold: 4,
+          reason: 'spirit board',
+          label: '通灵板',
+          effect: '成功：知识 +1、神智 +1；1-3 胡言乱语；0 失去 1 点神智'
+        });
         if (check.success) {
-          player.customProps.movesLeft = Number(player.customProps.movesLeft ?? 0) + 4;
-          const haunt = currentHaunt(state);
-          const hint = haunt ? `叛徒的目标：${HAUNT_DEFS[haunt.id]?.traitorObjective ?? '未知'}` : '亡灵指出了尚未被发现的房间。';
-          trace(ctx, 'ANNOUNCEMENT', `🪦 通灵板：${hint}（本回合移动 +4）`, 700);
+          applyTraitSteps(state, pid, 'knowledge', 1, { force: true });
+          applyTraitSteps(state, pid, 'sanity', 1, { force: true });
+        } else if (check.total <= 0) {
+          applyTraitSteps(state, pid, 'sanity', -1, { force: true });
         }
+        trace(ctx, 'DICE_ROLL', `通灵板：知识检定 ${check.total} vs 4`, 600);
         markUsed(state, pid, defId);
         break;
       }
@@ -2184,35 +2142,38 @@ export class BetrayalRules {
         break;
       }
       case 'healing_salve': {
+        // Official: "Restore up to 2 steps to any trait." One use, two steps.
         const trait = (action.payload?.trait as TraitKey) ?? 'might';
-        this.healToGreen(state, pid, trait);
-        const charges = Number(entity.components.custom?.charges ?? 2) - 1;
-        entity.components.custom = { ...(entity.components.custom ?? {}), charges };
-        trace(ctx, 'ANNOUNCEMENT', `${player.name} 使用治疗药膏（剩余 ${charges} 次）`, 350);
-        if (charges <= 0) this.consume(state, pid, entityId, ctx);
-        markUsed(state, pid, defId);
+        for (let step = 0; step < 2; step += 1) {
+          applyTraitSteps(state, pid, trait, 1, { force: true });
+        }
+        trace(ctx, 'ANNOUNCEMENT', `${player.name} 涂抹治疗药膏，${TRAIT_META[trait].zh} +2 步`, 350);
+        this.consume(state, pid, entityId, ctx);
         break;
       }
       case 'medical_kit': {
+        // Official: "Make a Knowledge roll: 4+ Expert care (Gain 2 Might); 1-3 Basic
+        // care (Gain 1 Might); 0 Fumbled." It heals Might, not any chosen trait.
         const target = String(action.payload?.target ?? pid);
-        const trait = (action.payload?.trait as TraitKey) ?? 'might';
         if (target !== pid && activeRoom(state, target) !== roomId) return;
         if (!state.players[target]?.alive) return;
-        const check = rollTraitCheck(state, pid, 'knowledge', { reason: 'medical kit', label: '医疗包' });
-        const heal = check.total >= 6 ? 3 : check.total >= 4 ? 2 : check.total >= 2 ? 1 : 0;
-        if (heal > 0) {
-          for (let i = 0; i < heal; i++) this.healToGreen(state, target, trait);
+        const check = rollTraitCheck(state, pid, 'knowledge', {
+          threshold: 4,
+          reason: 'medical kit',
+          label: '医疗包',
+          effect: '成功：目标力量 +2；失败：目标力量 +1'
+        });
+        const gain = check.success ? 2 : check.total >= 1 ? 1 : 0;
+        for (let step = 0; step < gain; step += 1) {
+          applyTraitSteps(state, target, 'might', 1, { force: true });
         }
-        trace(ctx, 'ANNOUNCEMENT', `医疗包：知识检定 ${check.total}，恢复 ${heal} 点肉体（${TRAIT_META[trait].zh}）`, 500);
+        trace(ctx, 'DICE_ROLL', `医疗包：知识检定 ${check.total} vs 4，力量 +${gain}`, 500);
         markUsed(state, pid, defId);
         break;
       }
       case 'music_box': {
-        // Official text: "Play melody: make a Sanity roll: 4+ Soothing tune (Gain 1
-        // Sanity); 0-3 Agonizing discord (Lose 1 Sanity)." The old version zeroed
-        // movesLeft/attacksLeft/skipActions on nearby low-sanity players, but
-        // resetTurnResources clears those at the target's turn start, so it did
-        // nothing at all.
+        // Official: "Play melody: make a Sanity roll: 4+ Soothing tune (Gain 1
+        // Sanity); 0-3 Agonizing discord (Lose 1 Sanity)."
         const check = rollTraitCheck(state, pid, 'sanity', {
           threshold: 4,
           reason: 'music box',
@@ -2225,12 +2186,22 @@ export class BetrayalRules {
         break;
       }
       case 'puzzle_box': {
-        const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 6, reason: 'puzzle box', label: '谜盒' });
+        // Official: "Make a Knowledge roll: 6+ Crack the box open (Gain 2 Knowledge,
+        // Gain 1 Might); 0-5 Remains sealed."
+        const check = rollTraitCheck(state, pid, 'knowledge', {
+          threshold: 6,
+          reason: 'puzzle box',
+          label: '谜盒',
+          effect: '成功：知识 +2、力量 +1；失败：打不开'
+        });
         if (check.success) {
-          this.drawItems(state, pid, 2, ctx);
+          for (let step = 0; step < 2; step += 1) {
+            applyTraitSteps(state, pid, 'knowledge', 1, { force: true });
+          }
+          applyTraitSteps(state, pid, 'might', 1, { force: true });
           this.consume(state, pid, entityId, ctx);
         }
-        trace(ctx, 'DICE_ROLL', `机关盒：知识检定 ${check.total} vs 6`, 500);
+        trace(ctx, 'DICE_ROLL', `谜盒：知识检定 ${check.total} vs 6`, 500);
         markUsed(state, pid, defId);
         break;
       }
@@ -2244,13 +2215,21 @@ export class BetrayalRules {
         break;
       }
       case 'mask': {
-        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: 'mask', label: '面具' });
+        // Official: "When you put it on, make a Sanity roll: 4+ Ancient wisdom
+        // (Gain 2 Knowledge); 1-3 Faint whispers; 0 Maddening agony (Lose 2
+        // Sanity)." The old version left a standing +2/-2 dice modifier while worn.
+        const check = rollTraitCheck(state, pid, 'sanity', {
+          threshold: 4,
+          reason: 'mask',
+          label: '面具',
+          effect: '成功：获得 2 点知识；1-3 低语；0 失去 2 点神智'
+        });
         if (check.success) {
-          player.customProps.maskWorn = !player.customProps.maskWorn;
-          trace(ctx, 'ANNOUNCEMENT', `面具${player.customProps.maskWorn ? '戴上' : '摘下'}了`, 400);
-        } else {
-          damagePlayer(state, pid, 'MENTAL', 1);
+          for (let step = 0; step < 2; step += 1) applyTraitSteps(state, pid, 'knowledge', 1, { force: true });
+        } else if (check.total <= 0) {
+          applyTraitSteps(state, pid, 'sanity', -2, { force: true });
         }
+        trace(ctx, 'DICE_ROLL', `面具：神智检定 ${check.total} vs 4`, 500);
         markUsed(state, pid, defId);
         break;
       }

@@ -24,7 +24,7 @@ test('fixture betrayal: content tables and starting position', () => {
   assertEqual(STARTING_ROOM_IDS.length, 5, 'five starting tiles');
   assertEqual(ROOM_DECK_IDS.length, 43, '43 tiles remain in the room deck');
   assertEqual(Object.keys(OMEN_DEFS).length, 13, '13 omens');
-  assertEqual(Object.keys(ITEM_DEFS).length, 22, '22 items, matching the official 2E deck');
+  assertEqual(Object.keys(ITEM_DEFS).length, 23, "the 22 official items plus the Widow's Walk rope");
   assertEqual(Object.keys(EVENT_DEFS).length, 30, '30 events: 25 official plus 5 curse carriers');
   assertEqual(
     Object.values(ROOM_DEFS).filter(room => !room.symbol).length,
@@ -34,7 +34,7 @@ test('fixture betrayal: content tables and starting position', () => {
 
   assertEqual(Object.keys(state.mapGraph.nodes).length, 5, 'five starting rooms on the table');
   assertEqual(state.zones.zone_event_deck.orderedEntities.length, 30, 'event deck built');
-  assertEqual(state.zones.zone_item_deck.orderedEntities.length, 22, 'item deck built');
+  assertEqual(state.zones.zone_item_deck.orderedEntities.length, 23, 'item deck built');
   assertEqual(state.zones.zone_omen_deck.orderedEntities.length, 13, 'omen deck built');
   assertEqual(state.zones.zone_room_deck.orderedEntities.length, 43, 'room tile deck built');
   assertEqual(state.globalVars.roomDeckTotal, 43, 'room deck total recorded');
@@ -514,7 +514,7 @@ test('fixture betrayal: an ONGOING event card registers a kernel effect instance
   );
 });
 
-test('fixture betrayal: equipment use respects once-per-turn and restores green values', () => {
+test('fixture betrayal: equipment use respects once-per-turn and the salve restores two steps', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'trade_ready' });
   const raw = engine.getRawState();
   const salve = grantItem(raw, 'p1', 'healing_salve');
@@ -530,12 +530,11 @@ test('fixture betrayal: equipment use respects once-per-turn and restores green 
   assert(engine.dispatch({ ...use!, payload: { trait: 'might' } }).ok, 'salve used');
 
   const state = engine.getRawState();
-  assertEqual(state.players.p1.customProps.traits.might, 5, 'restored to the green value');
-  assertEqual(state.entities[salve.id].components.custom?.charges, 1, 'one charge left');
+  assertEqual(state.players.p1.customProps.traits.might, 4, 'two steps back, not all the way to green');
   assertEqual(
     engine.getLegalActions('p1').some(action => action.type === 'USE_ITEM' && action.entityId === salve.id),
     false,
-    'item is exhausted for this turn'
+    'the salve is consumed'
   );
 });
 
@@ -587,43 +586,38 @@ test('fixture betrayal: NPC movement actually relocates the monster and spends a
   );
 });
 
-test('fixture betrayal: medical kit lets the healer choose which physical trait to restore', () => {
+test('fixture betrayal: medical kit grants Might on a Knowledge roll', () => {
+  // Official: "Make a Knowledge roll: 4+ Expert care (Gain 2 Might); 1-3 Basic care
+  // (Gain 1 Might); 0 Fumbled." It is not a free choice of any trait.
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'trade_ready' });
   const raw = engine.getRawState();
   const kit = grantItem(raw, 'p1', 'medical_kit');
 
-  // Wound only the speed track; might keeps its green index.
-  damagePlayer(raw, 'p1', 'PHYSICAL', 2, 'speed');
-  const speedIdxBefore = raw.players.p1.customProps.traitIndex.speed;
+  // Wound the might track so there is room to heal.
+  damagePlayer(raw, 'p1', 'PHYSICAL', 2, 'might');
   const mightIdxBefore = raw.players.p1.customProps.traitIndex.might;
-  const greenIdx = raw.players.p1.customProps.startIndex.speed;
-  assert(speedIdxBefore < greenIdx, 'speed is below its green value');
-  assertEqual(mightIdxBefore, raw.players.p1.customProps.startIndex.might, 'might is untouched');
 
   raw.activePlayerId = 'p1';
   raw.activeActorId = 'p1';
-  raw.players.p1.customProps.forcedRoll = { value: 8 }; // knowledge 8 → heal 3 steps
+  raw.players.p1.customProps.forcedRoll = { value: 8 };
 
   const use = engine.getLegalActions('p1').find(
     action => action.type === 'USE_ITEM' && action.entityId === kit.id
   );
   assert(!!use, 'medical kit is usable');
-  const traitField = use!.fields?.find(field => field.key === 'trait');
-  assert(!!traitField, 'the medical kit exposes a trait choice');
-  assertEqual(
-    (traitField!.options ?? []).map(option => option.value).join(','),
-    'might,speed',
-    'both physical tracks are offered'
+  assert(
+    !(use!.fields ?? []).some(field => field.key === 'trait'),
+    'the kit does not offer a trait choice any more'
   );
 
-  assert(engine.dispatch({ ...use!, payload: { target: 'p1', trait: 'speed' } }).ok, 'kit used on speed');
+  assert(engine.dispatch({ ...use!, payload: { target: 'p1' } }).ok, 'kit used');
 
   const after = engine.getRawState().players.p1.customProps;
-  assertEqual(after.traitIndex.speed, greenIdx, 'the chosen track (speed) was restored to green');
+  assertEqual(after.traitIndex.might, mightIdxBefore + 2, 'a good roll restores 2 Might steps');
   assertEqual(
-    after.traitIndex.might,
-    mightIdxBefore,
-    'the previously hardcoded might track was left alone'
+    engine.getLegalActions('p1').some(action => action.type === 'USE_ITEM' && action.entityId === kit.id),
+    false,
+    'the kit is once per turn'
   );
 });
 

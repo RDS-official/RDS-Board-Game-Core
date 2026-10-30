@@ -610,21 +610,16 @@ export interface OmenDef {
   onGain?: TraitGrant[];
   onLoss?: TraitGrant[];
   /** Immediate hostile effect applied when the card is drawn. */
-  onDrawAttack?: { dice: number; trait: TraitKey };
   usable?: boolean;
   useKind?: ItemUseKind;
-  passive?: ItemPassive;
-}
-
-export interface ItemPassive {
-  physicalArmor?: number;
-  mentalArmor?: number;
-  knowledgeDice?: number;
-  sanityDice?: number;
-  speedDice?: number;
-  mightDice?: number;
-  ranged?: boolean;
-  revealTraitor?: boolean;
+  /**
+   * Trait bonuses that apply **while the card is carried**.
+   *
+   * Distinct from `onGain`, which fires once when the card is taken: the printed
+   * cards use both wordings, e.g. Armor says "+1 Might" (while carried) whereas
+   * Book says "Gain 2 Knowledge" (once). See docs/ENGINE-PASSIVE-MODIFIERS.md.
+   */
+  modifiers?: { trait: TraitKey; delta: number }[];
 }
 
 export type ItemUseKind =
@@ -653,7 +648,8 @@ export interface ItemDef {
   tradeable: boolean;
   /** Armor cannot be stolen; it may still be traded by consent. */
   stealable?: boolean;
-  passive?: ItemPassive;
+  /** Trait bonuses that apply while the card is carried. */
+  modifiers?: { trait: TraitKey; delta: number }[];
   charges?: number;
   usable?: boolean;
   consumable?: boolean;
@@ -669,9 +665,8 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'bite',
         name: '噬咬',
         en: 'Bite',
-        desc: '不可名状之物从暗处扑出。右侧玩家代掷 4 颗骰对你进行一次力量攻击。此卡留在你面前作为预兆，不可交易或丢弃。',
+        desc: '暗影扑面而来。力量检定 4+ 挡开；1–3 失去 1 点力量；0 失去 2 点力量。此卡留在你面前作为预兆，不可交易或丢弃。',
         tradeable: false,
-        onDrawAttack: { dice: 4, trait: 'might' }
       },
       {
         id: 'book',
@@ -686,7 +681,7 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'crystal_ball',
         name: '水晶球',
         en: 'Crystal Ball',
-        desc: '每回合一次：查看物品或事件牌堆顶牌。无需检定，也不会把牌抽走。',
+        desc: '每回合一次：知识检定 4+ 获得 1 点知识；1–3 一片迷雾；0 失去 1 点神智。',
         tradeable: true,
         usable: true,
         useKind: 'CRYSTAL_BALL'
@@ -753,7 +748,7 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'mask',
         name: '诡异面具',
         en: 'Mask',
-        desc: '戴上或摘下需神智检定。佩戴期间知识检定 +2 骰，神智检定 -2 骰（最低 1 骰）。',
+        desc: '戴上时进行神智检定：4+ 获得 2 点知识；1–3 只听见低语；0 失去 2 点神智。',
         tradeable: true,
         usable: true,
         useKind: 'TOGGLE_MASK'
@@ -762,24 +757,25 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'medallion',
         name: '五芒星奖章',
         en: 'Medallion',
-        desc: '佩戴者完全免疫五芒星堂、墓园与地窖的负面检定与强制伤害。',
+        desc: '携带期间神智 +1。',
         tradeable: true,
-        passive: { mentalArmor: 0 }
+        modifiers: [{ trait: 'sanity', delta: 1 }]
       },
       {
         id: 'ring',
         name: '古旧指环',
         en: 'Ring',
-        desc: '发起攻击时可选择以神智代替力量进行神智攻击，造成精神伤害。',
-        tradeable: true
+        desc: '携带期间神智 +1。也可作为强力武器使用。',
+        tradeable: true,
+        modifiers: [{ trait: 'sanity', delta: 1 }]
       },
       {
         id: 'skull',
         name: '裂痕头骨',
         en: 'Skull',
-        desc: '受到精神伤害时减少 1 点。每回合一次可进行知识检定与亡魂沟通，成功获得 1 点知识或神智。',
+        desc: '获得时失去 1 点神智。每回合一次：与亡魂沟通，神智检定 4+ 获得 1 点知识，失败失去 1 点神智。',
         tradeable: true,
-        passive: { mentalArmor: 1 },
+        onGain: [{ trait: 'sanity', amount: -1 }],
         usable: true,
         useKind: 'DIVINING'
       },
@@ -787,14 +783,14 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'spear',
         name: '神圣之矛',
         en: 'Spear',
-        desc: '双手近战武器。力量攻击额外 +2 骰（上限 8）。',
+        desc: '携带期间力量 +2。',
         tradeable: true
       },
       {
         id: 'spirit_board',
         name: '通灵板',
         en: 'Spirit Board',
-        desc: '移动前可使用：神智检定，成功则本回合移动力 +4；作祟后可窥见叛徒的隐秘线索。',
+        desc: '每回合一次：知识检定 4+ 知识 +1、神智 +1；1–3 胡言乱语；0 失去 1 点神智。',
         tradeable: true,
         usable: true,
         useKind: 'SPIRIT_BOARD'
@@ -814,7 +810,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'adrenaline_shot',
         name: '肾上腺素针',
         en: 'Adrenaline Shot',
-        desc: '一次性。使用后本次检定 +4，或本回合移动力 +4。',
+        desc: '一次性。本回合移动力 +4。',
         kind: 'consumable',
         tradeable: true,
         usable: true,
@@ -825,32 +821,32 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'amulet_of_the_ages',
         name: '千古护身符',
         en: 'Amulet of the Ages',
-        desc: '持有期间四维全部 +1；失去时四维全部 -3。',
+        desc: '携带期间力量、速度、神智、知识各 +1。',
         kind: 'relic',
         tradeable: true,
-        onGain: TRAIT_KEYS.map(trait => ({ trait, amount: 1 })),
-        onLoss: TRAIT_KEYS.map(trait => ({ trait, amount: -3 }))
+        modifiers: TRAIT_KEYS.map(trait => ({ trait, delta: 1 }))
       },
       {
         id: 'angel_feather',
         name: '天使羽毛',
         en: 'Angel Feather',
-        desc: '一次性。投骰前指定结果为 0–8 的任意数字，无需掷骰。',
-        kind: 'consumable',
+        desc: '携带期间神智 +1、速度 +1。',
+        kind: 'relic',
         tradeable: true,
-        usable: true,
-        consumable: true,
-        useKind: 'ANGEL_FEATHER'
+        modifiers: [
+          { trait: 'sanity', delta: 1 },
+          { trait: 'speed', delta: 1 }
+        ]
       },
       {
         id: 'armor',
         name: '板甲',
         en: 'Armor',
-        desc: '受到肉体伤害时直接减免 1 点。不可被偷窃。',
+        desc: '携带期间力量 +1。不可被偷窃。',
         kind: 'armor',
         tradeable: true,
         stealable: false,
-        passive: { physicalArmor: 1 }
+        modifiers: [{ trait: 'might', delta: 1 }]
       },
       {
         id: 'axe',
@@ -874,15 +870,16 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'blood_dagger',
         name: '饮血匕首',
         en: 'Blood Dagger',
-        desc: '力量攻击 +3 骰（上限 8）；每次使用后速度 -1。',
+        desc: '携带期间力量 +2。',
         kind: 'weapon',
-        tradeable: true
+        tradeable: true,
+        modifiers: [{ trait: 'might', delta: 2 }]
       },
       {
         id: 'bottle',
         name: '黑液药瓶',
         en: 'Bottle',
-        desc: '作祟后可饮用。掷 3 骰：6 传送至任意房间；5 力量与速度 +2；4 知识与神智 +2；1–3 受伤；0 四维降至最低。',
+        desc: '一次性。饮用后掷 3 骰：4+ 力量与速度各 +1；1–3 神智 +1；0 力量 -1。',
         kind: 'consumable',
         tradeable: true,
         usable: true,
@@ -893,10 +890,10 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'candle',
         name: '冥想蜡烛',
         en: 'Candle',
-        desc: '获得时知识 +1、神智 +1。也是三神器配件之一。',
-        onGain: [
-          { trait: 'knowledge', amount: 1 },
-          { trait: 'sanity', amount: 1 }
+        desc: '携带期间知识 +1、神智 +1。也是三神器配件之一。',
+        modifiers: [
+          { trait: 'knowledge', delta: 1 },
+          { trait: 'sanity', delta: 1 }
         ],
         kind: 'relic',
         tradeable: true
@@ -905,7 +902,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'dark_dice',
         name: '黑暗骰子',
         en: 'Dark Dice',
-        desc: '每回合一次，掷 3 骰：4–6 任选一项属性 +1；0–3 失去 1 神智。',
+        desc: '每回合一次，掷 3 骰：4+ 力量、速度、知识各 +1；0–3 力量与速度各 -1。',
         kind: 'relic',
         tradeable: true,
         usable: true,
@@ -916,7 +913,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'dynamite',
         name: '雷管炸药',
         en: 'Dynamite',
-        desc: '一次性。炸毁相邻或同直线的一个房间，房内所有角色与怪物各承受 3 骰物理伤害。',
+        desc: '一次性。掷入一个房间，房内所有角色与怪物各承受 4 骰物理伤害。',
         kind: 'consumable',
         tradeable: true,
         usable: true,
@@ -927,7 +924,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'healing_salve',
         name: '治疗药膏',
         en: 'Healing Salve',
-        desc: '共 2 次。每次将一项肉体属性恢复至初始绿色数值。',
+        desc: '一次性。为任意一项属性恢复最多 2 步。',
         kind: 'consumable',
         tradeable: true,
         usable: true,
@@ -956,7 +953,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'medical_kit',
         name: '医疗包',
         en: 'Medical Kit',
-        desc: '每回合一次，对同房间角色进行知识检定：6+ 恢复 3 点肉体，4–5 恢复 2 点，2–3 恢复 1 点。',
+        desc: '每回合一次：知识检定 4+ 力量 +2；1–3 力量 +1；0 失败。',
         kind: 'tool',
         tradeable: true,
         usable: true,
@@ -966,7 +963,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'music_box',
         name: '古董八音盒',
         en: 'Music Box',
-        desc: '开启期间，同房间神智低于 4 的角色立即结束本回合移动与动作。',
+        desc: '每回合一次：播放旋律，神智检定 4+ 获得 1 点神智，失败失去 1 点神智。',
         kind: 'tool',
         tradeable: true,
         usable: true,
@@ -974,10 +971,22 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
       },
 
       {
+        id: 'pickpocket_gloves',
+        name: '扒手手套',
+        en: "Pickpocket's Gloves",
+        desc: '携带期间速度 +1、知识 +1。',
+        kind: 'relic',
+        tradeable: true,
+        modifiers: [
+          { trait: 'speed', delta: 1 },
+          { trait: 'knowledge', delta: 1 }
+        ]
+      },
+      {
         id: 'puzzle_box',
         name: '解谜机关盒',
         en: 'Puzzle Box',
-        desc: '每回合可进行知识检定：6+ 立即抽 2 张物品牌并弃置盒子。',
+        desc: '知识检定 6+ 知识 +2、力量 +1；0–5 打不开。',
         kind: 'tool',
         tradeable: true,
         usable: true,
@@ -995,10 +1004,10 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'revolver',
         name: '老式左轮手枪',
         en: 'Revolver',
-        desc: '使用速度攻击（速度骰 +1）。可射击同楼层直线上任意房间；失败时不受反伤。',
+        desc: '远程武器：携带期间力量 +2，可射击同楼层直线上的任意房间。',
         kind: 'weapon',
         tradeable: true,
-        passive: { ranged: true }
+        modifiers: [{ trait: 'might', delta: 2 }]
       },
       {
         id: 'rope',
@@ -1012,16 +1021,18 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'sacrificial_dagger',
         name: '献祭匕首',
         en: 'Sacrificial Dagger',
-        desc: '力量攻击 +2 骰；每次攻击前须神智 3+，失败则自身失去 1 点神智。',
+        desc: '携带期间力量 +2；获得时失去 1 点神智。',
         kind: 'weapon',
-        tradeable: true
+        tradeable: true,
+        modifiers: [{ trait: 'might', delta: 2 }],
+        onGain: [{ trait: 'sanity', amount: -1 }]
       },
 
       {
         id: 'smelling_salts',
         name: '刺激嗅盐',
         en: 'Smelling Salts',
-        desc: '将一名角色的一项精神属性恢复至初始绿色数值。',
+        desc: '一次性。恢复 1 点神智（官方另有「唤醒昏迷者」，本引擎无对应状态）。',
         kind: 'consumable',
         tradeable: true,
         usable: true,
@@ -1847,13 +1858,12 @@ export const WEAPON_SPECS: Record<string, WeaponSpec> = {
   axe: { id: 'axe', name: '锋利手斧', trait: 'might', dice: 1 },
   pickaxe: { id: 'pickaxe', name: '铁镐', trait: 'might', dice: 1 },
   spear: { id: 'spear', name: '神圣之矛', trait: 'might', dice: 2 },
-  sacrificial_dagger: { id: 'sacrificial_dagger', name: '献祭匕首', trait: 'might', dice: 2, requiresSanityCheck: 3 },
+  sacrificial_dagger: { id: 'sacrificial_dagger', name: '献祭匕首', trait: 'might', dice: 2 },
   blood_dagger: {
     id: 'blood_dagger',
     name: '饮血匕首',
     trait: 'might',
-    dice: 3,
-    selfCost: { trait: 'speed', amount: -1 }
+    dice: 2
   },
   revolver: { id: 'revolver', name: '老式左轮手枪', trait: 'speed', dice: 1, ranged: true },
   ring: { id: 'ring', name: '古旧指环', trait: 'sanity', dice: 0, mental: true }

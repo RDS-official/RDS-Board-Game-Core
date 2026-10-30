@@ -253,6 +253,52 @@ export function traitValues(player: { customProps: Record<string, any> }): Recor
   };
 }
 
+
+/**
+ * Trait bonuses that apply right now.
+ *
+ * Sums three sources: carried cards that declare `modifiers`, the temporary
+ * `customProps.traitModifiers` bucket that scenarios and effects use, and any
+ * kernel effect carrying a `traitDelta` payload. Everything is derived from
+ * state, so replays stay deterministic — nothing is cached on the player.
+ *
+ * See docs/ENGINE-PASSIVE-MODIFIERS.md for why this lives in the module rather
+ * than in the kernel.
+ */
+export function traitModifiers(state: GameState, playerId: PlayerId): Record<TraitKey, number> {
+  const totals: Record<TraitKey, number> = { speed: 0, might: 0, sanity: 0, knowledge: 0 };
+  const player = state.players[playerId];
+  if (!player) return totals;
+
+  for (const entity of handEntities(state, playerId)) {
+    const defId = cardDef(entity);
+    const def = ITEM_DEFS[defId] ?? OMEN_DEFS[defId];
+    for (const modifier of def?.modifiers ?? []) {
+      if (modifier.trait in totals) totals[modifier.trait] += modifier.delta;
+    }
+  }
+
+  const temporary = (player.customProps.traitModifiers ?? {}) as Partial<Record<TraitKey, number>>;
+  for (const trait of TRAIT_KEYS) totals[trait] += Number(temporary[trait] ?? 0);
+
+  for (const effect of state.effects ?? []) {
+    if (effect.target !== playerId) continue;
+    const payload = (effect.payload ?? {}) as { trait?: TraitKey; traitDelta?: number };
+    if (payload.trait && payload.traitDelta && payload.trait in totals) {
+      totals[payload.trait] += Number(payload.traitDelta);
+    }
+  }
+
+  return totals;
+}
+
+/** The trait value the rules actually use: printed value plus active modifiers. */
+export function effectiveTrait(state: GameState, playerId: PlayerId, trait: TraitKey): number {
+  const player = state.players[playerId];
+  if (!player) return 0;
+  return traitValue(player, trait) + traitModifiers(state, playerId)[trait];
+}
+
 export function minTraitIndex(track: number[], haunt: boolean): number {
   if (haunt) return 0;
   const index = track.findIndex(value => value >= 1);
@@ -445,20 +491,15 @@ export function rollTraitCheck(
     player.customProps.rolledThisTurn = [...attempted];
   }
   let count = baseValue;
+  // Carried-card bonuses such as Armor's "+1 Might" (docs/ENGINE-PASSIVE-MODIFIERS.md).
+  const passiveBonus = traitModifiers(state, playerId)[trait];
+  if (passiveBonus !== 0) {
+    count += passiveBonus;
+    modifiers.push(`被动 ${passiveBonus > 0 ? '+' : ''}${passiveBonus}`);
+  }
   count += Number(player.customProps.checkBonus ?? 0);
   count += Number(options.extraDice ?? 0);
 
-  if (ownsDef(state, playerId, 'mask') && player.customProps.maskWorn) {
-    if (trait === 'knowledge') {
-      count += 2;
-      modifiers.push('面具 +2 骰');
-    }
-    if (trait === 'sanity') {
-      count -= 2;
-      modifiers.push('面具 -2 骰');
-    }
-  }
-  count = Math.max(1, Math.min(MAX_ATTACK_DICE, count));
 
   if (player.customProps.checkBonus) {
     player.customProps.checkBonus = 0;

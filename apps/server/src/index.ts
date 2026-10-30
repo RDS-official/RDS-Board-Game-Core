@@ -11,7 +11,7 @@ import path from 'node:path';
 import { PORT, DATA_DIR } from './config.ts';
 import { users } from './storage.ts';
 import {
-  register, login, userFromAuthHeader, profileOf, updateDisplayName, changeOwnPassword,
+  login, userFromAuthHeader, profileOf, updateDisplayName, changeOwnPassword,
   createUser, isAdminUser, adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
 } from './auth.ts';
 import { listRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoomInfo, setReady, kickPlayer, transferHost, setRoomChangedHook, sweepRooms } from './rooms.ts';
