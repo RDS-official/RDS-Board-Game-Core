@@ -33,12 +33,18 @@ const FACE_STYLE_VERSION = 'occult-dark-v1';
  * instead of the occult plate. Its own version string keeps the two texture
  * caches independent.
  */
-const PLAYING_STYLE_VERSION = 'playing-classic-v1';
+const PLAYING_STYLE_VERSION = 'playing-classic-v2';
 
-/** Classic playing-card palette: ivory stock, ink black, casino red. */
+/**
+ * Classic playing-card palette: ivory stock, ink black, casino red.
+ *
+ * The stock is deliberately a touch darker than paper white: the table is lit
+ * by a strong overhead key light and the renderer tone-maps with ACES, so a
+ * `#faf7ef` face clipped to flat white from most camera angles.
+ */
 const PLAYING_RED = '#c8102e';
 const PLAYING_BLACK = '#15161a';
-const PLAYING_STOCK = '#faf7ef';
+const PLAYING_STOCK = '#f2eddc';
 
 /** Which painter draws a card face: the occult plate, or a real playing card. */
 export type CardFaceStyle = 'plate' | 'playing';
@@ -2172,17 +2178,26 @@ export class CardMeshBuilder {
       backTextureOverride || (playing ? this.getPlayingCardBackTexture() : this.getCardBackTexture());
 
     // Rim reads as the dark lacquered edge of the plate, not white paper.
-    const edgeMat = new THREE.MeshStandardMaterial({
-      color: playing ? 0xece7db : 0x1a120c,
-      roughness: playing ? 0.62 : 0.7,
-      metalness: playing ? 0.02 : 0.15
-    });
-    const faceMat = new THREE.MeshStandardMaterial({
-      map: faceTexture,
-      roughness: faceTextureFinal ? 0.4 : 0.52,
-      metalness: 0.06
-    });
-    const backMat = new THREE.MeshStandardMaterial({ map: backTexture, roughness: 0.6, metalness: 0.05 });
+    //
+    // Playing cards use *unlit* materials on purpose: the table is lit by a
+    // strong overhead pendant plus a warm directional key, and both a glossy
+    // and a diffuse paper face get blown out from oblique camera angles, which
+    // is exactly when the pips have to be read. `MeshBasicMaterial` shows the
+    // painted texture as-is — no specular sheet, no light-clipped ivory — so
+    // the rank and suit stay legible from every angle.
+    const edgeMat = playing
+      ? new THREE.MeshLambertMaterial({ color: 0xcfc8b6 })
+      : new THREE.MeshStandardMaterial({ color: 0x1a120c, roughness: 0.7, metalness: 0.15 });
+    const faceMat = playing
+      ? new THREE.MeshBasicMaterial({ map: faceTexture })
+      : new THREE.MeshStandardMaterial({
+          map: faceTexture,
+          roughness: faceTextureFinal ? 0.4 : 0.52,
+          metalness: 0.06
+        });
+    const backMat = playing
+      ? new THREE.MeshBasicMaterial({ map: backTexture })
+      : new THREE.MeshStandardMaterial({ map: backTexture, roughness: 0.6, metalness: 0.05 });
 
     // Box material order: +X, -X, +Y, -Y, +Z, -Z
     const materials = [edgeMat, edgeMat, faceMat, backMat, edgeMat, edgeMat];

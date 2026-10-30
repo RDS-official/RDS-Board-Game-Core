@@ -148,13 +148,12 @@ export class TransactionalAnimationQueue {
     to: THREE.Vector3,
     peakHeight: number = 2.5,
     durationMs: number = 500,
-    onFinish?: () => void
+    onFinish?: () => void,
+    delayMs: number = 0
   ): void {
-    const startTime = performance.now();
-    const tween: ActiveTween = {
-      startTime,
-      duration: durationMs,
-      update: (p) => {
+    this.animate(
+      durationMs,
+      p => {
         // Linear interpolation X & Z
         object.position.x = THREE.MathUtils.lerp(from.x, to.x, p);
         object.position.z = THREE.MathUtils.lerp(from.z, to.z, p);
@@ -162,8 +161,27 @@ export class TransactionalAnimationQueue {
         const arc = 4 * peakHeight * p * (1 - p);
         object.position.y = THREE.MathUtils.lerp(from.y, to.y, p) + arc;
       },
-      onComplete: onFinish
-    };
-    this.activeTweens.push(tween);
+      onFinish,
+      delayMs
+    );
+  }
+
+  /**
+   * Generic tween. `delayMs` parks the object at its start state until the
+   * delay elapses (progress stays clamped at 0), which is how staggered deals
+   * and chip flights are sequenced without timers.
+   */
+  public animate(
+    durationMs: number,
+    update: (progress: number) => void,
+    onComplete?: () => void,
+    delayMs = 0
+  ): void {
+    this.activeTweens.push({
+      startTime: performance.now() + Math.max(0, delayMs),
+      duration: Math.max(1, durationMs),
+      update,
+      onComplete
+    });
   }
 }

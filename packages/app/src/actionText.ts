@@ -53,6 +53,82 @@ function pokerPotHint(state: ProjectedGameState): string {
   return `底池 ${Number(hand.pot ?? 0) + street} · 注额 ${Number(hand.currentBet ?? 0)}`;
 }
 
+/**
+ * 德州扑克操作区图标。
+ *
+ * 牌桌上的卡牌、筹码、桌布都是同一个调色板（象牙白 / 墨黑 / 赌场红 / 黄铜 /
+ * 毛毡绿），所以动作坞不用 emoji，而是用同色同形的内联 SVG：小牌面、筹码、
+ * 筹码堆。渲染层无法被 UI 层引用（分层约束），这里用矢量图形镜像同一套视觉。
+ */
+const POKER_IVORY = '#faf7ef';
+const POKER_INK = '#15161a';
+const POKER_RED = '#c8102e';
+const POKER_BRASS = '#c9a24a';
+const POKER_FELT = '#17603a';
+
+function pokerIcon(body: string): string {
+  return `<svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true" focusable="false" style="display:block">${body}</svg>`;
+}
+
+/** Ivory playing card with a corner index; `x`/`y` is its top-left corner. */
+function pokerCardFace(x: number, y: number, rank: string, suit: string, color: string, rotate = 0): string {
+  return `<g transform="translate(${x} ${y}) rotate(${rotate} 6.5 9.5)">
+    <rect x="0" y="0" width="13" height="19" rx="2" fill="${POKER_IVORY}" stroke="${POKER_INK}" stroke-width="1.1"/>
+    <text x="2.4" y="7.6" font-family="Georgia, 'Times New Roman', serif" font-size="6.4" font-weight="700" fill="${color}">${rank}</text>
+    <text x="2.4" y="13.4" font-family="Georgia, 'Times New Roman', serif" font-size="6" fill="${color}">${suit}</text>
+  </g>`;
+}
+
+/** Face-down card: the same red lattice as the 3D back. */
+function pokerCardBack(x: number, y: number, rotate = 0): string {
+  return `<g transform="translate(${x} ${y}) rotate(${rotate} 6.5 9.5)">
+    <rect x="0" y="0" width="13" height="19" rx="2" fill="#8c1c28" stroke="${POKER_IVORY}" stroke-width="1.1"/>
+    <rect x="1.6" y="1.6" width="9.8" height="15.8" rx="1" fill="none" stroke="rgba(246,236,210,0.55)" stroke-width="0.7"/>
+    <circle cx="6.5" cy="9.5" r="2.8" fill="none" stroke="rgba(246,236,210,0.8)" stroke-width="0.8"/>
+  </g>`;
+}
+
+/** One casino chip with edge dashes and a denomination. */
+function pokerChip(cx: number, cy: number, radius: number, fill: string, label: string): string {
+  const dashes = Array.from({ length: 8 }, (_, index) => {
+    const angle = (index / 8) * Math.PI * 2;
+    const x1 = cx + Math.cos(angle) * radius * 0.62;
+    const y1 = cy + Math.sin(angle) * radius * 0.62;
+    const x2 = cx + Math.cos(angle) * radius * 0.86;
+    const y2 = cy + Math.sin(angle) * radius * 0.86;
+    return `<line x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="${POKER_IVORY}" stroke-width="${(radius * 0.22).toFixed(2)}" stroke-linecap="round"/>`;
+  }).join('');
+  return `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="${fill}" stroke="${POKER_IVORY}" stroke-width="0.9"/>${dashes}
+    <circle cx="${cx}" cy="${cy}" r="${(radius * 0.5).toFixed(2)}" fill="none" stroke="rgba(250,247,239,0.6)" stroke-width="0.7"/>
+    <text x="${cx}" y="${(cy + radius * 0.34).toFixed(2)}" font-family="Georgia, 'Times New Roman', serif" font-size="${(radius * 0.95).toFixed(2)}" font-weight="700" text-anchor="middle" fill="${POKER_IVORY}">${label}</text>`;
+}
+
+const POKER_ICONS = {
+  /** Two cards fanning out of the deck: "deal the next hand". */
+  start: pokerIcon(`${pokerCardBack(4, 7, -14)}${pokerCardFace(14, 5, 'A', '♠', POKER_INK, 9)}`),
+  /** A card being thrown in. */
+  fold: pokerIcon(`${pokerCardFace(8, 4, '7', '♦', POKER_RED)}
+    <line x1="6" y1="27" x2="26" y2="5" stroke="${POKER_RED}" stroke-width="2.4" stroke-linecap="round"/>`),
+  /** Card plus a felt check mark. */
+  check: pokerIcon(`${pokerCardFace(5, 4, 'A', '♣', POKER_INK)}
+    <circle cx="23" cy="23" r="7" fill="${POKER_FELT}" stroke="${POKER_BRASS}" stroke-width="1.3"/>
+    <path d="M19.4 23.2l2.5 2.5 4.4-4.8" fill="none" stroke="${POKER_IVORY}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>`),
+  /** Card plus the chip being matched. */
+  call: pokerIcon(`${pokerCardFace(5, 4, 'K', '♥', POKER_RED)}
+    ${pokerChip(23, 23, 7.2, '#1f7a4d', '25')}`),
+  /** A stack of chips with a raise arrow. */
+  raise: pokerIcon(`<ellipse cx="16" cy="25" rx="9" ry="3.4" fill="#1c1c22" stroke="${POKER_IVORY}" stroke-width="0.9"/>
+    <ellipse cx="16" cy="22" rx="9" ry="3.4" fill="#6b3fa0" stroke="${POKER_IVORY}" stroke-width="0.9"/>
+    <ellipse cx="16" cy="19" rx="9" ry="3.4" fill="#1f7a4d" stroke="${POKER_IVORY}" stroke-width="0.9"/>
+    <path d="M16 4v10M11.4 8.6L16 4l4.6 4.6" fill="none" stroke="#f6dc9c" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>`),
+  /** The whole stack, with a red glow ring. */
+  allIn: pokerIcon(`<circle cx="16" cy="17" r="13.2" fill="none" stroke="${POKER_RED}" stroke-width="1.5" opacity="0.85"/>
+    <ellipse cx="16" cy="24" rx="8.4" ry="3.2" fill="#c9a24a" stroke="${POKER_IVORY}" stroke-width="0.9"/>
+    <ellipse cx="16" cy="20.6" rx="8.4" ry="3.2" fill="#1c1c22" stroke="${POKER_IVORY}" stroke-width="0.9"/>
+    <ellipse cx="16" cy="17.2" rx="8.4" ry="3.2" fill="${POKER_RED}" stroke="${POKER_IVORY}" stroke-width="0.9"/>
+    <path d="M16 5v8M12 9l4-4 4 4" fill="none" stroke="#f6dc9c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`)
+};
+
 function describeActionZh(
   state: ProjectedGameState,
   action: Action
@@ -370,21 +446,21 @@ function describeActionZh(
         };
       /* ---- 德州扑克 (Texas Hold'em) ------------------------------------- */
       case 'START_HAND':
-        return { icon: '🃏', label: '发下一手', hint: '庄家顺时针移动 · 重新洗牌发底牌', tone: 'primary' };
+        return { icon: POKER_ICONS.start, label: '发下一手', hint: '庄家顺时针移动 · 重新洗牌发底牌', tone: 'primary' };
       case 'FOLD':
-        return { icon: '🏳️', label: '弃牌', hint: '放弃本手底牌 · 已下的注留在底池', tone: 'danger' };
+        return { icon: POKER_ICONS.fold, label: '弃牌', hint: '放弃本手底牌 · 已下的注留在底池', tone: 'danger' };
       case 'CHECK':
-        return { icon: '✋', label: '过牌', hint: '不下注，把行动交给下一位', tone: 'normal' };
+        return { icon: POKER_ICONS.check, label: '过牌', hint: '不下注，把行动交给下一位', tone: 'normal' };
       case 'CALL': {
         const amount = Number(action.payload?.amount ?? 0);
-        return { icon: '🟰', label: `跟注 ${amount}`, hint: `匹配当前注额 · ${pokerPotHint(state)}`, tone: 'primary' };
+        return { icon: POKER_ICONS.call, label: `跟注 ${amount}`, hint: `匹配当前注额 · ${pokerPotHint(state)}`, tone: 'primary' };
       }
       case 'RAISE': {
         const currentBet = Number(
           (state.globalVars.hand as { currentBet?: number } | undefined)?.currentBet ?? 0
         );
         return {
-          icon: '⬆️',
+          icon: POKER_ICONS.raise,
           label: currentBet > 0 ? '加注' : '下注',
           hint: `输入总额，上限为全部筹码 · ${pokerPotHint(state)}`,
           tone: 'primary',
@@ -392,7 +468,7 @@ function describeActionZh(
         };
       }
       case 'ALL_IN':
-        return { icon: '💥', label: '全押', hint: '推入全部筹码 · 超出部分自动形成边池', tone: 'danger' };
+        return { icon: POKER_ICONS.allIn, label: '全押', hint: '推入全部筹码 · 超出部分自动形成边池', tone: 'danger' };
       default:
         return { icon: '•', label: action.type, hint: '合法动作', tone: 'normal' };
     }

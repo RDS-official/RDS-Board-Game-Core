@@ -4,6 +4,7 @@ import { Entity, MapGraphNode, ProjectedGameState } from '@rds/kernel/types';
 import { TransactionalAnimationQueue } from './animationQueue';
 import { BoardRaycaster, InteractiveObjectData } from './raycaster';
 import { CardMeshBuilder } from './procedural/cardMesh';
+import { ChipMeshBuilder } from './procedural/chipMesh';
 import { pokemonCardBackTexture, pokemonCardTexture } from './procedural/pokemonAssets';
 import { DiceMeshBuilder } from './procedural/diceMesh';
 import { HexTileBuilder } from './procedural/hexTile';
@@ -327,6 +328,21 @@ export class BoardGameScene {
 
   private boardObjectsGroup = new THREE.Group();
   private dragTargetGroup = new THREE.Group();
+  /**
+   * Poker effect layer: chip flights, floating amounts and the cards that are
+   * still travelling. It survives the per-sync rebuild of `boardObjectsGroup`
+   * only for the duration of one animation and is emptied at the start of every
+   * poker sync.
+   */
+  private pokerFxGroup = new THREE.Group();
+  /** Previous poker snapshot, used to detect what to animate. */
+  private pokerFxPrev: {
+    handNo: number;
+    street: string;
+    community: string[];
+    streetBets: Record<string, number>;
+    holeCards: Record<string, string[]>;
+  } | null = null;
   private isDestroyed = false;
   private lastRawState: ProjectedGameState | null = null;
   private lastState: ProjectedGameState | null = null;
@@ -469,6 +485,7 @@ export class BoardGameScene {
     this.scene.add(table);
     this.scene.add(this.boardObjectsGroup);
     this.scene.add(this.dragTargetGroup);
+    this.scene.add(this.pokerFxGroup);
 
     // 6. Raycaster & Animation Queue
     this.raycaster = new BoardRaycaster(this.camera, this.renderer.domElement);
@@ -3905,6 +3922,8 @@ export class BoardGameScene {
    * and never participates in the rules.
    */
   private renderPokerDecor(state: ProjectedGameState): void {
+    // Effects from the previous step never survive into the next one.
+    this.clearPokerFx();
     const hand = state.globalVars.hand as
       | {
           pot?: number;
@@ -3970,15 +3989,24 @@ export class BoardGameScene {
     );
     const pot = Number(hand?.pot ?? 0) + street;
     const potLabel = this.createLabelSprite(`POT · 底池 ${pot}`, '#f6dc9c', 46);
-    potLabel.position.set(0, 0.62, rz * 0.24);
+    potLabel.position.set(0, 0.78, rz * 0.24);
     potLabel.scale.set(3.4, 0.6, 1);
     this.boardObjectsGroup.add(potLabel);
+
+    // The pot itself: a real pile of chips under the readout.
+    if (pot > 0) {
+      const potChips = ChipMeshBuilder.createStack(pot);
+      potChips.position.set(0, 0.03, rz * 0.24);
+      this.boardObjectsGroup.add(potChips);
+    }
 
     state.playerOrder.forEach((pid, seatIndex) => {
       const seatNode = seats.find(node => node.props?.playerId === pid);
       if (!seatNode) return;
       const [x, , z] = seatNode.position;
       const length = Math.max(0.0001, Math.hypot(x, z));
+      const inwardX = x / length;
+      const inwardZ = z / length;
       const chips = Number(state.players[pid]?.customProps?.chips ?? 0);
       const marks: string[] = [];
       if (hand?.buttonSeat === seatIndex) marks.push('D');
@@ -3986,15 +4014,198 @@ export class BoardGameScene {
       else if (hand?.allIn?.includes(pid)) marks.push('全押');
       const text = `${state.players[pid]?.name ?? pid} · ${chips}${marks.length > 0 ? ` · ${marks.join('/')}` : ''}`;
       const label = this.createLabelSprite(text, chips > 0 ? '#e8eef5' : '#8b93a1', 36);
-      label.position.set(x - (x / length) * 2.2, 0.55, z - (z / length) * 2.2);
+      label.position.set(x - inwardX * 2.2, 0.55, z - inwardZ * 2.2);
       label.scale.set(2.6, 0.42, 1);
       this.boardObjectsGroup.add(label);
+
+      // The seat's stack sits beside the nameplate, along the table tangent.
+      const tangentX = -inwardZ;
+      const tangentZ = inwardX;
+      if (chips > 0) {
+        const stack = ChipMeshBuilder.createStack(chips);
+        stack.position.set(
+          x - inwardX * 1.9 + tangentX * 1.25,
+          0.03,
+          z - inwardZ * 1.9 + tangentZ * 1.25
+        );
+        this.boardObjectsGroup.add(stack);
+      }
+
+      // Chips already committed on this street sit between the seat and the pot.
+      const bet = Number(hand?.streetBets?.[pid] ?? 0);
+      if (bet > 0) {
+        const betStack = ChipMeshBuilder.createStack(bet);
+        betStack.position.set(x - inwardX * 3.1, 0.03, z - inwardZ * 3.1);
+        this.boardObjectsGroup.add(betStack);
+      }
     });
 
     const title = this.createLabelSprite("TEXAS HOLD'EM · 德州扑克", '#c9b57a', 38);
     title.position.set(0, 0.5, -rz - 0.9);
     title.scale.set(4.4, 0.62, 1);
     this.boardObjectsGroup.add(title);
+
+    this.animatePokerDeltas(state);
+  }
+
+  /** Drop every poker effect object (called at the start of each poker sync). */
+  private clearPokerFx(): void {
+    for (const child of [...this.pokerFxGroup.children]) {
+      this.pokerFxGroup.remove(child);
+      child.traverse(object => {
+        const mesh = object as THREE.Mesh;
+        if (mesh.geometry) mesh.geometry.dispose();
+        const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
+        if (Array.isArray(material)) {
+          for (const entry of material) entry.dispose();
+        } else material?.dispose();
+      });
+    }
+  }
+
+  /**
+   * Animate what changed since the previous poker snapshot.
+   *
+   * Three beats, each sized to be readable (roughly 2–4s):
+   *  1. **deal** — hole cards arc out of the deck, one at a time, clockwise;
+   *  2. **reveal** — community cards fly in face-down and flip over on arrival;
+   *  3. **chips** — a raise or call sends a pile of chips from the seat to the
+   *     pot, with the amount floating up over the felt.
+   */
+  private animatePokerDeltas(state: ProjectedGameState): void {
+    const hand = state.globalVars.hand as
+      | {
+          handNo?: number;
+          street?: string;
+          community?: string[];
+          streetBets?: Record<string, number>;
+        }
+      | undefined;
+    if (!hand) return;
+
+    const holeCards: Record<string, string[]> = {};
+    for (const pid of state.playerOrder) {
+      holeCards[pid] = [...(state.zones[`zone_hand_${pid}`]?.orderedEntities ?? [])];
+    }
+    const current = {
+      handNo: Number(hand.handNo ?? 0),
+      street: String(hand.street ?? ''),
+      community: [...(hand.community ?? [])],
+      streetBets: { ...(hand.streetBets ?? {}) },
+      holeCards
+    };
+    const previous = this.pokerFxPrev;
+    this.pokerFxPrev = current;
+    if (!previous) return;
+
+    const deckAnchor = state.zones.zone_deck?.anchorPosition ?? [-6, 0.06, -2.2];
+    const deckPoint = new THREE.Vector3(deckAnchor[0], deckAnchor[1] + 0.3, deckAnchor[2]);
+
+    /* 1. Deal: hole cards that were not in the hand before. */
+    const freshCards: { mesh: THREE.Object3D; to: THREE.Vector3 }[] = [];
+    const newHand = current.handNo !== previous.handNo;
+    for (const pid of state.playerOrder) {
+      const before = newHand ? [] : (previous.holeCards[pid] ?? []);
+      for (const id of holeCards[pid]) {
+        if (before.includes(id)) continue;
+        const mesh = this.entityMeshes.get(id);
+        if (!mesh) continue;
+        freshCards.push({ mesh, to: mesh.position.clone() });
+      }
+    }
+    if (freshCards.length > 0) {
+      const stagger = Math.max(90, Math.min(300, 2400 / freshCards.length));
+      freshCards.forEach(({ mesh, to }, index) => {
+        const from = deckPoint.clone();
+        mesh.position.copy(from);
+        const delay = index * stagger;
+        this.animQueue.animateArc(mesh, from, to, 1.1, 520, undefined, delay);
+        this.animQueue.animate(
+          520,
+          p => {
+            mesh.rotation.y = (1 - p) * Math.PI * 2;
+          },
+          undefined,
+          delay
+        );
+      });
+    }
+
+    /* 2. Reveal: community cards that just appeared, dealt face-down then turned. */
+    const freshBoard = current.community.filter(id => !previous.community.includes(id));
+    if (freshBoard.length > 0) {
+      const bigStreet = freshBoard.length >= 3;
+      const duration = bigStreet ? 780 : 1700;
+      const stagger = bigStreet ? 480 : 0;
+      freshBoard.forEach((id, index) => {
+        const mesh = this.entityMeshes.get(id);
+        if (!mesh) return;
+        const to = mesh.position.clone();
+        const from = deckPoint.clone();
+        const delay = 320 + index * stagger;
+        mesh.position.copy(from);
+        mesh.rotation.x = -Math.PI;
+        this.animQueue.animateArc(mesh, from, to, 1.4, duration, undefined, delay);
+        this.animQueue.animate(
+          duration,
+          p => {
+            // Stay face down for the first third, then turn over.
+            const flip = Math.max(0, Math.min(1, (p - 0.3) / 0.7));
+            mesh.rotation.x = -Math.PI * (1 - flip);
+          },
+          undefined,
+          delay
+        );
+      });
+    }
+
+    /* 3. Chips: money that moved into the pot this step. */
+    const seats = Object.values(state.mapGraph.nodes).filter(node => node.type === 'SEAT');
+    const potPoint = new THREE.Vector3(0, 0.06, this.pokerPotZ(state));
+    for (const pid of state.playerOrder) {
+      const delta = Number(current.streetBets[pid] ?? 0) - Number(previous.streetBets[pid] ?? 0);
+      if (delta <= 0) continue;
+      const seatNode = seats.find(node => node.props?.playerId === pid);
+      if (!seatNode) continue;
+      const [x, , z] = seatNode.position;
+      const length = Math.max(0.0001, Math.hypot(x, z));
+      const from = new THREE.Vector3(x - (x / length) * 1.9, 0.06, z - (z / length) * 1.9);
+      const chips = ChipMeshBuilder.decompose(delta, 6);
+      chips.forEach((value, index) => {
+        const chip = ChipMeshBuilder.createChip(value, 0.2);
+        chip.position.copy(from);
+        this.pokerFxGroup.add(chip);
+        const delay = index * 80;
+        this.animQueue.animateArc(chip, from, potPoint, 0.85, 460, undefined, delay);
+      });
+
+      // The amount floats up over the felt so a 200-chip raise is unmistakable.
+      const float = this.createLabelSprite(`+${delta}`, '#f6dc9c', 52);
+      const startY = 0.9;
+      float.position.set(from.x, startY, from.z);
+      float.scale.set(1.9, 0.42, 1);
+      this.pokerFxGroup.add(float);
+      const material = float.material as THREE.SpriteMaterial;
+      material.transparent = true;
+      this.animQueue.animate(
+        1800,
+        p => {
+          float.position.y = startY + p * 1.5;
+          float.position.x = THREE.MathUtils.lerp(from.x, potPoint.x, Math.min(1, p * 0.6));
+          float.position.z = THREE.MathUtils.lerp(from.z, potPoint.z, Math.min(1, p * 0.6));
+          material.opacity = p < 0.7 ? 1 : Math.max(0, 1 - (p - 0.7) / 0.3);
+        },
+        undefined,
+        220
+      );
+    }
+  }
+
+  /** Z of the pot pile, matching `renderPokerDecor`. */
+  private pokerPotZ(state: ProjectedGameState): number {
+    const seats = Object.values(state.mapGraph.nodes).filter(node => node.type === 'SEAT');
+    const rz = Math.max(2.6, ...seats.map(node => Math.abs(node.position[2]))) + 1.1;
+    return rz * 0.24;
   }
 
   private floorAnchorsFor(
@@ -4408,10 +4619,11 @@ export class BoardGameScene {
       } else {
         // Plain board area (poker community cards, demo displays): centre the
         // whole row and allow five cards instead of clamping at four, which
-        // used to push the fifth card off to one side.
+        // used to push the fifth card off to one side. The cards render at hole
+        // -card size — half-scale faces turn the pips into unreadable specks.
         const shown = Math.min(totalInZone, 5);
-        mesh.scale.set(0.46, 0.46, 0.46);
-        mesh.position.set(anchor[0] + (index - (shown - 1) / 2) * 0.62, anchor[1], anchor[2] + 0.85);
+        mesh.scale.set(0.62, 0.62, 0.62);
+        mesh.position.set(anchor[0] + (index - (shown - 1) / 2) * 0.98, anchor[1], anchor[2] + 0.85);
         mesh.rotation.y = 0;
       }
     } else if (zone.type === 'HAND' && zone.anchorPosition) {
