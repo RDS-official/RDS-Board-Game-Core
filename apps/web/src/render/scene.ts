@@ -400,6 +400,8 @@ export class BoardGameScene {
    * whole house glowing.
    */
   private highlightedMeshes = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
+  /** Amber outlines added while a mesh is highlighted; disposed on restore. */
+  private highlightHalos: THREE.Object3D[] = [];
   private framing = {
     isoPos: new THREE.Vector3(10.5, 22, 24.5),
     isoTarget: new THREE.Vector3(1.8, 0, -0.2),
@@ -1331,6 +1333,12 @@ export class BoardGameScene {
     }
 
     for (const [_zoneId, zone] of Object.entries(state.zones)) {
+      // Pokémon Splendor labels its own table: deck piles, per-colour tableau
+      // badges and the buried count. The generic same-card clustering would
+      // stack a second, floating "卡名 ×N" chip over the market whenever two
+      // cards in one row share a name (two 蚊香蝌蚪 at different tiers, say),
+      // so that pass is skipped for this game.
+      if (state.gameId === 'splendor') continue;
       const groups = buildCardGroups(zone, state.entities as Record<string, any>);
       for (const group of groups) {
         if (group.count < 2) continue;
@@ -1511,6 +1519,17 @@ export class BoardGameScene {
       }
     }
     this.highlightedMeshes.clear();
+    for (const halo of this.highlightHalos) {
+      halo.parent?.remove(halo);
+      halo.traverse(child => {
+        const mesh = child as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        mesh.geometry?.dispose();
+        const mat = mesh.material;
+        for (const m of Array.isArray(mat) ? mat : [mat]) m.dispose();
+      });
+    }
+    this.highlightHalos = [];
 
     if (this.highlightIds.size === 0) return;
 
@@ -1524,8 +1543,10 @@ export class BoardGameScene {
         const clones = source.map(mat => {
           const clone = mat.clone() as THREE.MeshStandardMaterial;
           if ('emissive' in clone && clone.emissive) {
-            clone.emissive = new THREE.Color(0xd9b45b);
-            clone.emissiveIntensity = 0.85;
+            // Hot amber at full strength: the old 0.85 on a dark felt read as a
+            // slightly warm card rather than "this one, right now".
+            clone.emissive = new THREE.Color(0xffc247);
+            clone.emissiveIntensity = 1.9;
           } else if ('color' in clone && (clone as unknown as THREE.MeshBasicMaterial).color) {
             // SAFETY: MeshBasicMaterial and MeshStandardMaterial both implement color and opacity in Three.js runtime
             const basic = clone as unknown as THREE.MeshBasicMaterial;
@@ -1542,8 +1563,68 @@ export class BoardGameScene {
 
     this.highlightIds.forEach(id => {
       const obj = this.nodeMeshes.get(id) || this.edgeMeshes.get(id) || this.entityMeshes.get(id);
-      if (obj) pulse(obj);
+      if (!obj) return;
+      pulse(obj);
+      this.addHighlightHalo(obj);
     });
+  }
+
+  /**
+   * A bright frame around one highlighted object.
+   *
+   * The emissive tint alone is easy to miss on a dark felt, especially when the
+   * card's own artwork is light: the outline is what makes the pick unambiguous
+   * at any camera angle.
+   */
+  private addHighlightHalo(obj: THREE.Object3D): void {
+    const box = new THREE.Box3().setFromObject(obj);
+    if (box.isEmpty()) return;
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    box.getSize(size);
+    box.getCenter(center);
+
+    // A thin plate just under the object, a touch larger than it: it reads as a
+    // glow ring from above and never hides the artwork.
+    const plate = new THREE.Mesh(
+      new THREE.BoxGeometry(size.x * 1.14, 0.012, size.z * 1.14),
+      new THREE.MeshBasicMaterial({ color: 0xffc247, transparent: true, opacity: 0.9 })
+    );
+    plate.position.set(center.x, box.min.y - 0.008, center.z);
+    plate.renderOrder = 2;
+    plate.userData.ownedGeometry = true;
+    this.boardObjectsGroup.add(plate);
+    this.highlightHalos.push(plate);
+
+    // Four corner ticks so the frame still reads when the plate is occluded by
+    // neighbouring cards.
+    const tickLen = Math.min(size.x, size.z) * 0.28;
+    const tickY = box.max.y + 0.02;
+    const corners: [number, number][] = [
+      [box.min.x, box.min.z],
+      [box.max.x, box.min.z],
+      [box.min.x, box.max.z],
+      [box.max.x, box.max.z]
+    ];
+    for (const [cx, cz] of corners) {
+      const dx = cx === box.min.x ? 1 : -1;
+      const dz = cz === box.min.z ? 1 : -1;
+      const tick = new THREE.Mesh(
+        new THREE.BoxGeometry(tickLen, 0.01, 0.03),
+        new THREE.MeshBasicMaterial({ color: 0xffd977, transparent: true, opacity: 0.95 })
+      );
+      tick.position.set(cx + (dx * tickLen) / 2, tickY, cz);
+      this.boardObjectsGroup.add(tick);
+      this.highlightHalos.push(tick);
+
+      const tickZ = new THREE.Mesh(
+        new THREE.BoxGeometry(0.03, 0.01, tickLen),
+        new THREE.MeshBasicMaterial({ color: 0xffd977, transparent: true, opacity: 0.95 })
+      );
+      tickZ.position.set(cx, tickY, cz + (dz * tickLen) / 2);
+      this.boardObjectsGroup.add(tickZ);
+      this.highlightHalos.push(tickZ);
+    }
   }
 
   /**

@@ -175,9 +175,16 @@ class BoardGameSimulatorApp {
         }
       }
       if (data.type === 'ENTITY') {
-        const face = (meta as { title?: string }).title;
-        if (face) {
-          this.hud.showHoverHint({ title: face, detail: '点击查看卡牌详情' });
+        const cardFace = meta as { title?: string; imageUrl?: string };
+        if (cardFace.title) {
+          // The imported card artwork travels with the raycast metadata, so the
+          // hover preview can show the real face instead of a text stub.
+          const art = typeof cardFace.imageUrl === 'string' ? cardFace.imageUrl : undefined;
+          this.hud.showHoverHint({
+            title: String(cardFace.title),
+            detail: '点击查看卡牌详情',
+            art
+          });
           return;
         }
       }
