@@ -90,8 +90,7 @@ const measure = ({ minFont, minTouch, tol }) => {
   const small = [];
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const seen = new Set();
-  let node;
-  while ((node = walker.nextNode())) {
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node.textContent?.trim();
     if (!text) continue;
     const parent = node.parentElement;

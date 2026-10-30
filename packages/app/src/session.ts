@@ -782,7 +782,9 @@ export class UniversalSession implements GamePresenter {
   }
 
   public dispose(): void {
-    this.unsubscribers.forEach(unsubscribe => unsubscribe());
+    this.unsubscribers.forEach(unsubscribe => {
+      unsubscribe();
+    });
     this.unsubscribers.length = 0;
     this.listeners.clear();
     this.noticeListeners.clear();
@@ -889,7 +891,9 @@ export class UniversalSession implements GamePresenter {
   }
 
   private emit(notice: UiNotice): void {
-    this.noticeListeners.forEach(listener => listener(notice));
+    this.noticeListeners.forEach(listener => {
+      listener(notice);
+    });
   }
 
   private emitEventNotice(type: string, title: string, durationMs: number): void {
@@ -913,7 +917,9 @@ export class UniversalSession implements GamePresenter {
   }
 
   private publish(): void {
-    this.listeners.forEach(listener => listener(this.snapshot));
+    this.listeners.forEach(listener => {
+      listener(this.snapshot);
+    });
     // Trait banners must land after the snapshot so the HUD animates the
     // already-updated ladder rather than the previous value.
     if (this.pendingTraitNotices.length > 0) {

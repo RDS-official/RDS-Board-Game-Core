@@ -266,7 +266,7 @@ export class BoardRaycaster {
       const mesh = this.hoveredObject as THREE.Mesh;
       const original = this.ownedMaterials.get(mesh);
       if (Array.isArray(mesh.material)) {
-        mesh.material.forEach(mat => this.disposeTint(mat as THREE.Material));
+        mesh.material.forEach(mat => { this.disposeTint(mat as THREE.Material); });
       } else {
         this.disposeTint(mesh.material as THREE.Material);
       }

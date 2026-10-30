@@ -38,7 +38,6 @@ import {
   BoardPick,
   GamePresenter,
   GameSnapshot,
-  UiAction,
   UiHistoryEntry,
   UiNotice,
   UiSpatialInfo,
@@ -473,7 +472,10 @@ export class NetSession implements GamePresenter {
   }
 
   public cancelPlacement(): void {
-    if (this.role === 'host') return this.session!.cancelPlacement();
+    if (this.role === 'host') {
+      this.session!.cancelPlacement();
+      return;
+    }
     this.armedPlacement = undefined;
   }
 
@@ -483,7 +485,10 @@ export class NetSession implements GamePresenter {
   }
 
   public rotatePlacement(direction: 1 | -1 = 1): void {
-    if (this.role === 'host') return this.session!.rotatePlacement(direction);
+    if (this.role === 'host') {
+      this.session!.rotatePlacement(direction);
+      return;
+    }
     const placement = this.snapshot?.placement;
     if (!placement || placement.rotations.length === 0) return;
     const index = placement.rotations.indexOf(placement.rotation);
@@ -1015,10 +1020,14 @@ export class NetSession implements GamePresenter {
   }
 
   private emitNotice(notice: UiNotice): void {
-    this.noticeListeners.forEach(listener => listener(notice));
+    this.noticeListeners.forEach(listener => {
+      listener(notice);
+    });
   }
 
   private publish(): void {
-    this.listeners.forEach(listener => listener(this.snapshot!));
+    this.listeners.forEach(listener => {
+      listener(this.snapshot!);
+    });
   }
 }

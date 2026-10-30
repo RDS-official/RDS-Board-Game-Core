@@ -1,4 +1,4 @@
-import { PropAnchor, PropSpec, PROPS } from './props';
+import { PropSpec, PROPS } from './props';
 
 /**
  * Door-aware furniture layout.

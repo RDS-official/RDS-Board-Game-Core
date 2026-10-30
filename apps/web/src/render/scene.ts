@@ -2339,15 +2339,15 @@ export class BoardGameScene {
         return;
       }
 
-      items.forEach((entity, index) =>
+      items.forEach((entity, index) => {
         this.renderCardEntity(
           entity,
           zone,
           index,
           items.length,
           !zone.id.startsWith('zone_room_') || index === items.length - 1
-        )
-      );
+        );
+      });
     });
 
     // ---------- Pokémon Splendor: deck piles + player tableaus ----------

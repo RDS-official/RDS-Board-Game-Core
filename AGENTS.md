@@ -94,7 +94,10 @@ pnpm test:ui
 # 6. 必跑：文档路径有效性（旧 src/ 布局引用 / 失效链接）
 pnpm docs:check
 
-# 7. 必跑：TypeScript 类型检查与生产编译构建
+# 7. 必跑：Biome lint（0 error；当前基线 179 warning / 92 info 不阻断）
+pnpm lint
+
+# 8. 必跑：TypeScript 类型检查与生产编译构建
 node node_modules/typescript/bin/tsc --noEmit && pnpm run build
 ```
 

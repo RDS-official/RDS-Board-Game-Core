@@ -139,7 +139,9 @@ export class RuleRegistry {
       }
 
       ordered.push(...ready);
-      ready.forEach(impl => remaining.delete(impl.id));
+      ready.forEach(impl => {
+        remaining.delete(impl.id);
+      });
     }
 
     return ordered;

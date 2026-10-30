@@ -1,5 +1,4 @@
 import { ECSManager } from '@rds/kernel/ecs';
-import { DeterministicPRNG } from '@rds/kernel/prng';
 import { Entity, GameState, Player } from '@rds/kernel/types';
 
 export function setupSanguosha(seed: number = 42): GameState {

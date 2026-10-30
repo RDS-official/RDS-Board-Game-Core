@@ -2,7 +2,6 @@ import { RulePipeline } from './aop';
 import {
   evaluateWindow,
   orderedSubmissions,
-  projectDecision,
   resolveDecision,
   submitDecision,
   topDecision
@@ -308,13 +307,17 @@ export class UniversalGameEngine {
 
   private emitVisual(events: VisualTraceEvent[]): void {
     if (this.silent || events.length === 0) return;
-    this.visualListeners.forEach(listener => listener(events));
+    this.visualListeners.forEach(listener => {
+      listener(events);
+    });
   }
 
   private notifyStateChange(): void {
     if (this.silent) return;
     const projected = this.getProjectedState();
-    this.stateChangeListeners.forEach(listener => listener(projected));
+    this.stateChangeListeners.forEach(listener => {
+      listener(projected);
+    });
   }
 
   /* ------------------------------------------------------------------ */

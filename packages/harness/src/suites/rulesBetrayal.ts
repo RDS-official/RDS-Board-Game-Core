@@ -5,7 +5,7 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { ROOM_DEFS } from '@rds/games/betrayal/cards';
-import { addEffect, hostilesInRoom, movePlayerTo, movementCost, ongoingEffectKinds, resetTurnResources, traitIndex, traitValue, hasRolledThisTurn } from '@rds/games/betrayal/helpers';
+import { addEffect, hostilesInRoom, movePlayerTo, movementCost, ongoingEffectKinds, traitIndex, traitValue, hasRolledThisTurn } from '@rds/games/betrayal/helpers';
 import { addExploredRoom, grantItem, grantOmen } from '@rds/games/betrayal/scenarios';
 import { test, assert, assertEqual } from '../testKit';
 
@@ -377,12 +377,17 @@ test('rules: a dead explorer\'s companion is claimed by whoever enters the room'
   const hand = raw.zones['zone_hand_p1'];
   const at = hand.orderedEntities.indexOf(dogId!);
   if (at >= 0) hand.orderedEntities.splice(at, 1);
-  const zone = raw.zones[`zone_room_${destination}`] ?? (raw.zones[`zone_room_${destination}`] = {
-    id: `zone_room_${destination}`,
-    orderedEntities: [],
-    capacity: 99,
-    visibility: { type: 'PUBLIC' }
-  } as never);
+  const zoneId = `zone_room_${destination}`;
+  let zone = raw.zones[zoneId];
+  if (!zone) {
+    zone = {
+      id: zoneId,
+      orderedEntities: [],
+      capacity: 99,
+      visibility: { type: 'PUBLIC' }
+    } as never;
+    raw.zones[zoneId] = zone;
+  }
   // Drop stale zone listings first: the fixture's room zone carries entries whose
   // entity.zoneId points at a deck, which the kernel rightly rejects on the next
   // move. Only real occupants are kept.

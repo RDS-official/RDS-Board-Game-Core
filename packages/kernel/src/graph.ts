@@ -1,4 +1,4 @@
-import { EdgeId, EntityId, GameMapGraph, MapGraphEdge, MapGraphNode, NodeId } from './types';
+import { EntityId, GameMapGraph, MapGraphEdge, MapGraphNode, NodeId } from './types';
 /**
  * Universal Map Graph Topology G_map = (V, E_grid)
  * Implements hex dual graphs (Catan), dynamic multi-floor expansion graphs (Betrayal),

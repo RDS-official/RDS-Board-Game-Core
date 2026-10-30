@@ -2,7 +2,7 @@ import { ECSManager } from '@rds/kernel/ecs';
 import { ReduceContext } from '@rds/kernel/module';
 import { DeterministicPRNG } from '@rds/kernel/prng';
 import { InterruptStackManager } from '@rds/kernel/stack';
-import { Action, Entity, GameState, PlayerId, StackFrame, VisualTraceEvent } from '@rds/kernel/types';
+import { Action, GameState, PlayerId, StackFrame, } from '@rds/kernel/types';
 
 export class SanguoshaRules {
   public static getLegalActions(state: GameState, playerId: PlayerId): Action[] {
