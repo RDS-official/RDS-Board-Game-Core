@@ -53,6 +53,27 @@ export interface GameScenario {
 }
 
 /**
+ * 一个可独立启停的规则/内容扩展包。
+ *
+ * 内核把它当纯元数据处理：校验组合、展开依赖闭包、派生回放 scenario（见
+ * `@rds/kernel/expansions`）。扩展真正解锁的卡牌、技能与规则钩子由游戏模块
+ * 自己读取 `state.globalVars.expansions` 后决定，内核不介入规则本身。
+ */
+export interface GameExpansion {
+  /** 稳定 id，回放日志依赖，不可改名 */
+  id: string;
+  /** 显示名，如 '军争篇' */
+  name: string;
+  description?: string;
+  /** 依赖的其他扩展 id（必须同时启用） */
+  requires?: string[];
+  /** 与之互斥的扩展 id（不可同时启用） */
+  conflicts?: string[];
+  /** 该扩展是否默认启用 */
+  defaultEnabled?: boolean;
+}
+
+/**
  * Optional spatial semantics. The kernel only stores the topology graph;
  * walls, doors, line of sight and floor rules stay in the module (or renderer).
  */
@@ -79,6 +100,13 @@ export interface GameModule {
   meta: GameMeta;
   /** Named start positions selectable via EngineOptions.scenario. */
   scenarios?: Record<string, GameScenario>;
+  /**
+   * 本游戏支持的扩展包。缺省表示该游戏无扩展。
+   *
+   * 组合合法性用 `validateExpansionSelection` 校验，回放用的 scenario 可用
+   * `deriveExpansionScenarios` 自动派生；模块自身不必为每种组合写一份 setup。
+   */
+  expansions?: Record<string, GameExpansion>;
   /** Rule hook implementations referenced by ActiveRuleHook.hookId. */
   hooks: RuleHookImpl[];
   /** Optional structural schemas for actions (validated before legality). */
