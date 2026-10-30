@@ -7,6 +7,7 @@ import { GAME_REGISTRY } from '@rds/games/registry';
 import { ROOM_DEFS } from '@rds/games/betrayal/cards';
 import { addEffect, hostilesInRoom, movePlayerTo, movementCost, ongoingEffectKinds, traitIndex, traitValue, hasRolledThisTurn } from '@rds/games/betrayal/helpers';
 import { addExploredRoom, grantItem, grantOmen } from '@rds/games/betrayal/scenarios';
+import { stackRoomTiles } from '../suiteHelpers';
 import { test, assert, assertEqual } from '../testKit';
 
 test('rules: riding to another floor moves the elevator tile to that floor', () => {
@@ -545,4 +546,69 @@ test('rules: the underground lake is a basement-only tile', () => {
   assert(!!lake, 'the lake exists');
   assertEqual(String(lake!.floor), 'BASEMENT', 'the lake sits on the basement floor');
   assertEqual(lake!.floors, undefined, 'the lake declares no extra floors');
+});
+
+test('rules: exploring into the collapsed room does not freeze the table', () => {
+  // Reported bug: an explorer drew the collapsed room, fell to the basement, and
+  // the tile stayed unresolved. Re-entering it collapsed again, so the room never
+  // paid out and the table looked wedged.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 11);
+  const raw = engine.getRawState();
+  stackRoomTiles(raw, ['collapsed_room']);
+
+  const explore = engine
+    .getLegalActions('p1')
+    .find(action => action.type === 'EXPLORE_DOOR' && action.payload?.direction === 'E');
+  assert(!!explore, 'a door is explorable');
+  assert(engine.dispatch(explore!).ok, 'explore draws the tile');
+
+  const pending = engine.getRawState().globalVars.pendingRoomPlacement as
+    | { defId: string; rotations: number[] }
+    | undefined;
+  assert(!!pending, 'the tile waits for orientation');
+  assertEqual(pending!.defId, 'collapsed_room', 'the collapsed room was drawn');
+
+  // Make the Speed 5+ fall check fail.
+  engine.getRawState().players.p1.customProps.forcedRoll = { value: 0 };
+  const place = engine.getLegalActions('p1').find(action => action.type === 'PLACE_ROOM');
+  assert(!!place, 'orientation is offered');
+  const rotation = Number(place!.fields![0].options![0].value);
+  assert(engine.dispatch({ ...place!, payload: { rotation: String(rotation) } }).ok, 'orientation accepted');
+
+  const afterFall = engine.getRawState();
+  assertEqual(
+    String(afterFall.players.p1.customProps.currentRoomId),
+    'room_basement_landing',
+    'the explorer fell to the basement landing'
+  );
+  assertEqual(
+    afterFall.globalVars.pendingRoomPlacement ?? null,
+    null,
+    'no room placement is left pending'
+  );
+
+  // The tile must be spent, otherwise re-entering it collapses again forever.
+  assertEqual(
+    Boolean(afterFall.mapGraph.nodes.room_collapsed_room?.props?.resolved),
+    true,
+    'the collapsed room is marked resolved'
+  );
+
+  // Hand the turn on, then make sure the next explorer is not locked out.
+  for (let guard = 0; guard < 8; guard += 1) {
+    const state = engine.getRawState();
+    if (state.activePlayerId !== 'p1') break;
+    const end = engine.getLegalActions('p1').find(action => action.type === 'END_TURN');
+    if (!end) break;
+    engine.dispatch(end);
+  }
+
+  const nextState = engine.getRawState();
+  const nextPlayer = nextState.activePlayerId;
+  assert(nextPlayer !== 'p1', 'the turn moved on');
+  const legal = engine.getLegalActions(nextPlayer);
+  assert(
+    legal.some(action => action.type === 'MOVE_TO_ROOM' || action.type === 'EXPLORE_DOOR'),
+    `the next explorer can still act (got: ${legal.map(action => action.type).join(', ') || 'nothing'})`
+  );
 });
