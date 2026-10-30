@@ -1,5 +1,6 @@
-# dependencies
-node_modules/
+# dependencies — a trailing slash matches only directories, so the
+tracking symlinks a worktree uses would slip through
+node_modules
 
 # build output
 dist/
