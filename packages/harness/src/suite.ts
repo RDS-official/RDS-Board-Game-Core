@@ -53,6 +53,9 @@ import {
   rollZeroDice,
   traitIndex,
   traitValue,
+  traitModifiers,
+  effectiveTrait,
+  rollTraitCheck,
   hasRolledThisTurn
 } from '@rds/games/betrayal/helpers';
 import { addExploredRoom, grantItem, grantOmen } from '@rds/games/betrayal/scenarios';
@@ -1645,7 +1648,7 @@ test('fixture betrayal: content tables and starting position', () => {
   assertEqual(STARTING_ROOM_IDS.length, 5, 'five starting tiles');
   assertEqual(ROOM_DECK_IDS.length, 43, '43 tiles remain in the room deck');
   assertEqual(Object.keys(OMEN_DEFS).length, 13, '13 omens');
-  assertEqual(Object.keys(ITEM_DEFS).length, 22, '22 items, matching the official 2E deck');
+  assertEqual(Object.keys(ITEM_DEFS).length, 23, "the 22 official items plus the Widow's Walk rope");
   assertEqual(Object.keys(EVENT_DEFS).length, 30, '30 events: 25 official plus 5 curse carriers');
   assertEqual(
     Object.values(ROOM_DEFS).filter(room => !room.symbol).length,
@@ -1655,7 +1658,7 @@ test('fixture betrayal: content tables and starting position', () => {
 
   assertEqual(Object.keys(state.mapGraph.nodes).length, 5, 'five starting rooms on the table');
   assertEqual(state.zones.zone_event_deck.orderedEntities.length, 30, 'event deck built');
-  assertEqual(state.zones.zone_item_deck.orderedEntities.length, 22, 'item deck built');
+  assertEqual(state.zones.zone_item_deck.orderedEntities.length, 23, 'item deck built');
   assertEqual(state.zones.zone_omen_deck.orderedEntities.length, 13, 'omen deck built');
   assertEqual(state.zones.zone_room_deck.orderedEntities.length, 43, 'room tile deck built');
   assertEqual(state.globalVars.roomDeckTotal, 43, 'room deck total recorded');
@@ -5040,4 +5043,30 @@ test('rules: the underground lake is a basement-only tile', () => {
   assert(!!lake, 'the lake exists');
   assertEqual(String(lake!.floor), 'BASEMENT', 'the lake sits on the basement floor');
   assertEqual(lake!.floors, undefined, 'the lake declares no extra floors');
+});
+
+test('rules: a carried modifier feeds the dice, not a hidden stat', () => {
+  // Armor reads "+1 Might" on the card. The old `passive: { physicalArmor: 1 }`
+  // was never read by anything, so the card did nothing at all.
+  // See docs/ENGINE-PASSIVE-MODIFIERS.md.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  const before = traitModifiers(raw, 'p1');
+  assertEqual(before.might, 0, 'no modifiers before the armor is picked up');
+
+  grantItem(raw, 'p1', 'armor');
+  const after = traitModifiers(raw, 'p1');
+  assertEqual(after.might, 1, 'the armor grants +1 Might');
+  assertEqual(after.speed, 0, 'and touches nothing else');
+
+  assertEqual(
+    effectiveTrait(raw, 'p1', 'might'),
+    traitValue(raw.players.p1, 'might') + 1,
+    'the effective value includes the modifier'
+  );
+
+  // The bonus has to reach the dice, otherwise it is dead data again.
+  raw.players.p1.customProps.forcedRoll = { value: 4 };
+  const check = rollTraitCheck(raw, 'p1', 'might', { threshold: 1 });
+  assertEqual(check.count, effectiveTrait(raw, 'p1', 'might'), 'the check rolls the modified value');
 });

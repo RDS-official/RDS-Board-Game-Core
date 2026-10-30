@@ -613,18 +613,14 @@ export interface OmenDef {
   onDrawAttack?: { dice: number; trait: TraitKey };
   usable?: boolean;
   useKind?: ItemUseKind;
-  passive?: ItemPassive;
-}
-
-export interface ItemPassive {
-  physicalArmor?: number;
-  mentalArmor?: number;
-  knowledgeDice?: number;
-  sanityDice?: number;
-  speedDice?: number;
-  mightDice?: number;
-  ranged?: boolean;
-  revealTraitor?: boolean;
+  /**
+   * Trait bonuses that apply **while the card is carried**.
+   *
+   * Distinct from `onGain`, which fires once when the card is taken: the printed
+   * cards use both wordings, e.g. Armor says "+1 Might" (while carried) whereas
+   * Book says "Gain 2 Knowledge" (once). See docs/ENGINE-PASSIVE-MODIFIERS.md.
+   */
+  modifiers?: { trait: TraitKey; delta: number }[];
 }
 
 export type ItemUseKind =
@@ -653,7 +649,8 @@ export interface ItemDef {
   tradeable: boolean;
   /** Armor cannot be stolen; it may still be traded by consent. */
   stealable?: boolean;
-  passive?: ItemPassive;
+  /** Trait bonuses that apply while the card is carried. */
+  modifiers?: { trait: TraitKey; delta: number }[];
   charges?: number;
   usable?: boolean;
   consumable?: boolean;
@@ -762,24 +759,25 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'medallion',
         name: '五芒星奖章',
         en: 'Medallion',
-        desc: '佩戴者完全免疫五芒星堂、墓园与地窖的负面检定与强制伤害。',
+        desc: '携带期间神智 +1。',
         tradeable: true,
-        passive: { mentalArmor: 0 }
+        modifiers: [{ trait: 'sanity', delta: 1 }]
       },
       {
         id: 'ring',
         name: '古旧指环',
         en: 'Ring',
-        desc: '发起攻击时可选择以神智代替力量进行神智攻击，造成精神伤害。',
-        tradeable: true
+        desc: '携带期间神智 +1。也可作为强力武器使用。',
+        tradeable: true,
+        modifiers: [{ trait: 'sanity', delta: 1 }]
       },
       {
         id: 'skull',
         name: '裂痕头骨',
         en: 'Skull',
-        desc: '受到精神伤害时减少 1 点。每回合一次可进行知识检定与亡魂沟通，成功获得 1 点知识或神智。',
+        desc: '获得时失去 1 点神智。每回合一次：与亡魂沟通，神智检定 4+ 获得 1 点知识，失败失去 1 点神智。',
         tradeable: true,
-        passive: { mentalArmor: 1 },
+        onGain: [{ trait: 'sanity', amount: -1 }],
         usable: true,
         useKind: 'DIVINING'
       },
@@ -825,32 +823,32 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'amulet_of_the_ages',
         name: '千古护身符',
         en: 'Amulet of the Ages',
-        desc: '持有期间四维全部 +1；失去时四维全部 -3。',
+        desc: '携带期间力量、速度、神智、知识各 +1。',
         kind: 'relic',
         tradeable: true,
-        onGain: TRAIT_KEYS.map(trait => ({ trait, amount: 1 })),
-        onLoss: TRAIT_KEYS.map(trait => ({ trait, amount: -3 }))
+        modifiers: TRAIT_KEYS.map(trait => ({ trait, delta: 1 }))
       },
       {
         id: 'angel_feather',
         name: '天使羽毛',
         en: 'Angel Feather',
-        desc: '一次性。投骰前指定结果为 0–8 的任意数字，无需掷骰。',
-        kind: 'consumable',
+        desc: '携带期间神智 +1、速度 +1。',
+        kind: 'relic',
         tradeable: true,
-        usable: true,
-        consumable: true,
-        useKind: 'ANGEL_FEATHER'
+        modifiers: [
+          { trait: 'sanity', delta: 1 },
+          { trait: 'speed', delta: 1 }
+        ]
       },
       {
         id: 'armor',
         name: '板甲',
         en: 'Armor',
-        desc: '受到肉体伤害时直接减免 1 点。不可被偷窃。',
+        desc: '携带期间力量 +1。不可被偷窃。',
         kind: 'armor',
         tradeable: true,
         stealable: false,
-        passive: { physicalArmor: 1 }
+        modifiers: [{ trait: 'might', delta: 1 }]
       },
       {
         id: 'axe',
@@ -974,6 +972,18 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
       },
 
       {
+        id: 'pickpocket_gloves',
+        name: '扒手手套',
+        en: "Pickpocket's Gloves",
+        desc: '携带期间速度 +1、知识 +1。',
+        kind: 'relic',
+        tradeable: true,
+        modifiers: [
+          { trait: 'speed', delta: 1 },
+          { trait: 'knowledge', delta: 1 }
+        ]
+      },
+      {
         id: 'puzzle_box',
         name: '解谜机关盒',
         en: 'Puzzle Box',
@@ -995,10 +1005,10 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'revolver',
         name: '老式左轮手枪',
         en: 'Revolver',
-        desc: '使用速度攻击（速度骰 +1）。可射击同楼层直线上任意房间；失败时不受反伤。',
+        desc: '远程武器：携带期间力量 +2，可射击同楼层直线上的任意房间。',
         kind: 'weapon',
         tradeable: true,
-        passive: { ranged: true }
+        modifiers: [{ trait: 'might', delta: 2 }]
       },
       {
         id: 'rope',
