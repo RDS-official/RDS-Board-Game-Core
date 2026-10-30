@@ -22,8 +22,24 @@ interface DbShape { users: UserRecord[]; rooms: RoomRecord[]; }
 const FILE = path.join(DATA_DIR, 'hub.json');
 
 function load(): DbShape {
-  try { return JSON.parse(fs.readFileSync(FILE, 'utf-8')); }
-  catch { return { users: [], rooms: [] }; }
+  let text: string;
+  try {
+    text = fs.readFileSync(FILE, 'utf-8');
+  } catch {
+    return { users: [], rooms: [] }; // 首次启动：文件还不存在
+  }
+  try {
+    const parsed = JSON.parse(text) as DbShape;
+    if (!parsed || !Array.isArray(parsed.users) || !Array.isArray(parsed.rooms)) throw new Error('bad shape');
+    return parsed;
+  } catch (err) {
+    // REVIEW.md 短期项 10：解析失败绝不能静默回空库（下一次 save 会覆盖全部数据）。
+    // 先留备份，再拒绝启动，交给运维修复后重启。
+    const bak = FILE + '.corrupt.' + Date.now();
+    try { fs.copyFileSync(FILE, bak); } catch { /* 只读文件系统等极端情况：仍然退出 */ }
+    console.error('[hub] hub.json 损坏，为避免覆盖已退出（备份 → ' + bak + '）：', String(err));
+    process.exit(1);
+  }
 }
 
 let db: DbShape = load();

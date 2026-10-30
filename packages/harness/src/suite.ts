@@ -868,6 +868,39 @@ test('observer: hidden cards are scrubbed, aliased and zone-remapped', () => {
   assertEqual(godView.entities['secret-1']?.components?.cardFace?.title, 'The Traitor', 'GOD sees the truth');
 });
 
+test('observer: legal actions with scope.players survive projection (TDZ regression)', () => {
+  const state = emptyState();
+  const action = {
+    type: 'PICK_TARGET',
+    playerId: 'p1',
+    selection: { prompt: 'choose', scope: { players: ['p1', 'p2', 'ghost'] } }
+  } as unknown as Action;
+  const view = CognitiveObserver.projectState(state, 'p1', () => [action]);
+  assert(view.legalActions.length === 1, 'scope.players action must not throw (REVIEW TDZ)');
+  const scope = (view.legalActions[0].selection as { scope?: { players?: string[] } } | undefined)?.scope;
+  assertEqual(JSON.stringify(scope?.players), JSON.stringify(['p1', 'p2']), 'unknown players filtered from scope');
+});
+
+test('observer: aliasSecret switches aliases to keyed HMAC (S5)', () => {
+  let state = withZone(emptyState(), 'deck', { type: 'HIDDEN' });
+  state = ECSManager.addEntity(state, {
+    id: 'roomtile_dining',
+    type: 'CARD',
+    zoneId: 'deck',
+    visibility: { type: 'HIDDEN' },
+    components: { cardFace: { title: 'X', suit: 's', rank: 'r' } }
+  });
+  CognitiveObserver.resetAliases();
+  const plain = CognitiveObserver.projectState(state, 'p1').zones.deck.orderedEntities[0];
+  const keyed = CognitiveObserver.projectState(state, 'p1', undefined, undefined, 'secret-alpha').zones.deck.orderedEntities[0];
+  const keyedAgain = CognitiveObserver.projectState(state, 'p1', undefined, undefined, 'secret-alpha').zones.deck.orderedEntities[0];
+  const keyedOther = CognitiveObserver.projectState(state, 'p1', undefined, undefined, 'secret-beta').zones.deck.orderedEntities[0];
+  assert(keyed !== plain, 'keyed alias differs from legacy FNV alias');
+  assert(/^v_id_[0-9a-f]{16}$/.test(keyed), 'keyed alias is a 64-bit HMAC slice');
+  assertEqual(keyedAgain, keyed, 'keyed alias stable within one secret');
+  assert(keyedOther !== keyed, 'different secret yields different alias (not invertible by table)');
+});
+
 test('invariants: valid state passes, corrupted states are rejected', () => {
   const rules = new RuleRegistry([]);
   const state = withZone(emptyState(), 'a');

@@ -1,4 +1,5 @@
 import { projectDecision } from './decisions';
+import { hmacSha256Hex } from './sha256';
 import {
   Action,
   Entity,
@@ -41,18 +42,24 @@ export class CognitiveObserver {
     this.aliasCache = {};
   }
 
-  public static getVirtualAlias(viewerId: string, realId: string): string {
-    if (!this.aliasCache[viewerId]) this.aliasCache[viewerId] = {};
-    if (!this.aliasCache[viewerId][realId]) {
-      let hash = 2166136261;
-      const seedText = `${viewerId}::${realId}`;
-      for (let i = 0; i < seedText.length; i++) {
-        hash ^= seedText.charCodeAt(i);
-        hash = Math.imul(hash, 16777619);
+  public static getVirtualAlias(viewerId: string, realId: string, aliasSecret?: string): string {
+    const cacheKey = aliasSecret ? `${aliasSecret}::${viewerId}` : viewerId;
+    if (!this.aliasCache[cacheKey]) this.aliasCache[cacheKey] = {};
+    if (!this.aliasCache[cacheKey][realId]) {
+      if (aliasSecret) {
+        const mac = hmacSha256Hex(aliasSecret, `${viewerId}::${realId}`);
+        this.aliasCache[cacheKey][realId] = `v_id_${mac.slice(0, 16)}`;
+      } else {
+        let hash = 2166136261;
+        const seedText = `${viewerId}::${realId}`;
+        for (let i = 0; i < seedText.length; i++) {
+          hash ^= seedText.charCodeAt(i);
+          hash = Math.imul(hash, 16777619);
+        }
+        this.aliasCache[cacheKey][realId] = `v_id_${(hash >>> 0).toString(36)}`;
       }
-      this.aliasCache[viewerId][realId] = `v_id_${(hash >>> 0).toString(36)}`;
     }
-    return this.aliasCache[viewerId][realId];
+    return this.aliasCache[cacheKey][realId];
   }
 
   public static isVisibleTo(visibility: VisibilityRule, viewerId: PlayerId | 'GOD', ownerId?: PlayerId): boolean {
@@ -75,7 +82,8 @@ export class CognitiveObserver {
     state: GameState,
     viewerId: PlayerId | 'GOD',
     legalActionProvider?: (s: GameState, pId: PlayerId) => Action[],
-    redactor?: ProjectionRedactor
+    redactor?: ProjectionRedactor,
+    aliasSecret?: string
   ): ProjectedGameState {
     const projectedEntities: Record<string, Partial<Entity> & { isMasked?: boolean }> = {};
     const idRemap: Record<string, string> = {};
@@ -87,7 +95,7 @@ export class CognitiveObserver {
         projectedEntities[entity.id] = { ...entity, isMasked: false };
       } else {
         maskedCount++;
-        const virtualId = this.getVirtualAlias(viewerId, entity.id);
+        const virtualId = this.getVirtualAlias(viewerId, entity.id, aliasSecret);
         idRemap[entity.id] = virtualId;
         projectedEntities[virtualId] = {
           id: virtualId,
@@ -113,7 +121,7 @@ export class CognitiveObserver {
     for (const zone of Object.values(state.zones)) {
       projectedZones[zone.id] = {
         ...zone,
-        orderedEntities: zone.orderedEntities.map(id => idRemap[id] ?? this.getVirtualAlias(viewerId, id))
+        orderedEntities: zone.orderedEntities.map(id => idRemap[id] ?? this.getVirtualAlias(viewerId, id, aliasSecret))
       };
     }
 
@@ -162,6 +170,12 @@ export class CognitiveObserver {
       }
     }
 
+    const projectedPlayers: Record<PlayerId, Player> = {};
+    for (const [id, player] of Object.entries(state.players)) {
+      const scrubbed = redactor?.player && viewerId !== 'GOD' ? redactor.player(player, viewerId, state) : player;
+      projectedPlayers[id] = JSON.parse(JSON.stringify(scrubbed)) as Player;
+    }
+
     const legalActions =
       viewerId !== 'GOD' && legalActionProvider ? legalActionProvider(state, viewerId) : [];
     const visibleEdgeIds = new Set(Object.keys(projectedEdges));
@@ -186,12 +200,6 @@ export class CognitiveObserver {
         }
         return { ...action, selection: { ...action.selection, scope } };
       });
-
-    const projectedPlayers: Record<PlayerId, Player> = {};
-    for (const [id, player] of Object.entries(state.players)) {
-      const scrubbed = redactor?.player && viewerId !== 'GOD' ? redactor.player(player, viewerId, state) : player;
-      projectedPlayers[id] = JSON.parse(JSON.stringify(scrubbed)) as Player;
-    }
 
     const projectedNpcs: Record<string, Npc> = {};
     for (const [id, npc] of Object.entries(state.npcs ?? {})) {

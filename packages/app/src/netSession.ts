@@ -60,6 +60,21 @@ import {
   phaseLabelOf
 } from './session';
 
+/** Cryptographically-random 32-bit helpers (S5/S6). */
+function randomSeed32(): number {
+  const c = globalThis.crypto;
+  if (c?.getRandomValues) return c.getRandomValues(new Uint32Array(1))[0] >>> 0;
+  return (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
+}
+
+function randomHex(byteLen: number): string {
+  const buf = new Uint8Array(byteLen);
+  const c = globalThis.crypto;
+  if (c?.getRandomValues) c.getRandomValues(buf);
+  else for (let i = 0; i < byteLen; i++) buf[i] = (Math.random() * 256) | 0;
+  return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('');
+}
+
 export interface NetSessionOptions {
   /** Hub origin, e.g. https://hub.example (docs/LOBBY-INTEGRATION.md). */
   hub: string;
@@ -71,7 +86,7 @@ export interface NetSessionOptions {
   /** Guest only: hub userId of the host to dial. */
   hostId?: string;
   scenario?: string;
-  /** Host only; guests ignore this (the host owns the seed). Default 42. */
+  /** Host only; guests ignore this (the host owns the seed). 未传时随机生成（S6）。 */
   seed?: number;
   /** 阶段一：座位 → hub 身份（昵称/头像）。房主开局时写进内核 Player，随 snapshot 同步全员。 */
   roster?: Partial<Record<PlayerId, { name: string; avatarUrl?: string }>>;
@@ -153,16 +168,24 @@ export class NetSession implements GamePresenter {
   private channel?: GuestChannel;
   private disposed = false;
 
+  // --- host-only: random seed + alias secret, generated once per session (S5/S6) ---
+  private readonly hostSeed: number;
+  private readonly aliasSecret: string;
+
   constructor(module: GameModule, options: NetSessionOptions) {
     this.module = module;
     this.options = options;
     this.role = options.role;
     this.viewer = options.playerId;
 
+    this.hostSeed = options.seed ?? randomSeed32();
+    this.aliasSecret = randomHex(32);
+
     if (options.role === 'host') {
-      const seed = options.seed ?? 42;
+      const seed = this.hostSeed;
       const inner = new UniversalSession(module, seed, options.scenario);
       inner.setViewer(options.playerId);
+      inner.setAliasSecret(this.aliasSecret);
       // 开局前把 hub 身份写进内核 Player（展示字段），随 snapshot 同步给房客。
       if (options.roster) {
         for (const [pid, ident] of Object.entries(options.roster)) {
@@ -178,9 +201,10 @@ export class NetSession implements GamePresenter {
         queueMicrotask(() => this.syncRoomFromSession());
       });
     } else {
-      // Bootstrap a plausible viewer projection without keeping an engine: the
-      // initial state of module+seed(42)+scenario is deterministic, and the
-      // first full room-update from the host replaces it wholesale.
+      // Bootstrap a plausible viewer projection without keeping an engine.
+      // The placeholder engine uses a FIXED public seed (never the host's real
+      // one — the real seed would leak the shuffle order, S6); the first full
+      // room-update from the host replaces this projection wholesale.
       const boot = new UniversalGameEngine(module, 42, options.scenario ? { scenario: options.scenario } : undefined);
       this.state = boot.getProjectedStateFor(options.playerId);
       this.bootstrapDependencyErrors = boot.getRules().dependencyErrors();
@@ -220,10 +244,13 @@ export class NetSession implements GamePresenter {
 
   /** Create the authoritative room mirror + host transport (signaling-agnostic). */
   private buildHostRoom(selfId: string): { transport: WebRtcHostTransport } {
-    const seed = this.options.seed ?? 42;
+    // Must match the local mirror engine (this.hostSeed) so the host HUD and
+    // guest snapshots describe the same game, and must NOT be published.
+    const seed = this.hostSeed;
     const room = new BridgedRoom(this.module, seed, this.options.scenario, action =>
       this.onGuestAction(action)
     );
+    room.engine.setAliasSecret(this.aliasSecret);
     // 开局身份同样写入权威房引擎：rename 不产生 action，不会出现在重放历史里，
     // 必须直接改 room.engine 的 Player，否则房客全量 snapshot 仍是内核默认名。
     if (this.options.roster) {

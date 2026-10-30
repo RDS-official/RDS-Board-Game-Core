@@ -82,6 +82,8 @@ export class UniversalGameEngine {
   /** Full accepted action history (survives time-machine rewinds). */
   private history: Action[] = [];
   private currentViewer: PlayerId | 'GOD' = 'GOD';
+  /** Optional per-room secret; when set, hidden-entity aliases become HMAC-keyed (S5). */
+  private aliasSecret?: string;
   private silent = false;
 
   private visualListeners: ((events: VisualTraceEvent[]) => void)[] = [];
@@ -151,6 +153,11 @@ export class UniversalGameEngine {
     return this.currentViewer;
   }
 
+  /** Per-room random secret for HMAC virtual aliases (REVIEW.md S5); never serialized. */
+  public setAliasSecret(secret: string): void {
+    this.aliasSecret = secret;
+  }
+
   public setViewer(viewer: PlayerId | 'GOD'): void {
     this.currentViewer = viewer;
     this.notifyStateChange();
@@ -166,7 +173,8 @@ export class UniversalGameEngine {
       this.state,
       viewer,
       (s, p) => this.legalActionsFor(s, p),
-      this.projectRedactor
+      this.projectRedactor,
+      this.aliasSecret
     );
   }
 

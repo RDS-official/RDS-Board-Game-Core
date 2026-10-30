@@ -23,6 +23,7 @@ jobs:
         run: |
           npm_config_manage_package_manager_versions=false pnpm install --frozen-lockfile
           npm_config_manage_package_manager_versions=false pnpm test
+          npm_config_manage_package_manager_versions=false pnpm test:server
           npm_config_manage_package_manager_versions=false pnpm build
 
       - name: Load SSH key

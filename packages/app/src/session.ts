@@ -581,6 +581,11 @@ export class UniversalSession implements GamePresenter {
     return { handled: result.ok, message: result.error };
   }
 
+  /** REVIEW.md S5：联机对局传入每房随机的别名密钥，隐藏实体虚拟 ID 改为 HMAC。 */
+  public setAliasSecret(secret: string): void {
+    this.engine.setAliasSecret(secret);
+  }
+
   public setViewer(viewer: ViewerId): void {
     // Targeting is viewer-scoped; switching seats must not leave stale highlights.
     this.activeBoardGroup = undefined;

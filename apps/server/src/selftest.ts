@@ -16,7 +16,7 @@ ok(login_r.token, 'login works');
 ok((login(name, 'wrong!!') as any).error, 'wrong password rejected');
 
 const room: any = createRoom(reg.user.id, '测试房', 'splendor');
-ok(room.id && room.maxPlayers === 4, 'create room uses game maxPlayers');
+ok(room.id && room.maxPlayers === 2, 'create room uses game maxPlayers (S9: engine fixture seats)');
 const other: any = register(name + 'b', 'secret123');
 ok((joinRoom(other.user.id, room.id) as any).players.length === 2, 'guest joins');
 ok((createRoom(reg.user.id, 'x', 'nope') as any).error, 'unknown game rejected');
@@ -44,12 +44,12 @@ ok(th.hostId === other.user.id, 'host transfer');
 const info: any = getRoomInfo(room.id, reg.user.id);
 ok(info.code === undefined, 'code only for host'); // 已转移：原房主不再见 code
 ok((getRoomInfo(room.id, other.user.id) as any).code !== undefined, 'new host sees code');
-const priv: any = createRoom(reg.user.id, '私密房', 'splendor', { isPrivate: true, maxPlayers: 3 });
+const priv: any = createRoom(reg.user.id, '私密房', 'splendor', { isPrivate: true });
 ok(priv.isPrivate && typeof priv.code === 'string' && priv.code.length === 6, 'private room gets 6-char code');
 ok((joinRoom(other.user.id, priv.id) as any).error, 'private join without code rejected');
 ok((joinRoom(other.user.id, priv.id, 'WRONG1') as any).error, 'private join wrong code rejected');
 ok((joinRoom(other.user.id, priv.id, priv.code) as any).players.length === 2, 'private join with code works');
-ok(priv.maxPlayers === 3, 'create room honors maxPlayers option');
+ok(priv.maxPlayers === 2, 'create room clamps maxPlayers to fixture seats (S9)');
 const scen: any = createRoom(reg.user.id, '变体房', 'betrayal', { scenarioId: 'exploration' });
 ok(scen.scenarioId === 'exploration', 'scenario variant stored');
 ok((createRoom(reg.user.id, 'x', 'betrayal', { scenarioId: 'nope' }) as any).error, 'unknown variant rejected');

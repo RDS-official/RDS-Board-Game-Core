@@ -174,7 +174,11 @@ export function sweepRooms(onlineOf: (roomId: string) => string[]): string[] {
   const now = Date.now();
   for (const rec of rooms.all()) {
     const r = rec as RoomRec;
-    if (r.status === 'closed') continue;
+    if (r.status === 'closed') {
+      // REVIEW.md 短期项 10：closed 房间保留 24h（客户端还能看到状态），之后物理清理。
+      if (now - (r.lastActivity ?? r.createdAt) > 24 * 3600 * 1000) rooms.remove(r.id);
+      continue;
+    }
     if (onlineOf(r.id).length > 0) {
       if (r.firstEmptyAt) rooms.update(r.id, { firstEmptyAt: undefined });
       continue;
