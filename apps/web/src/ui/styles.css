@@ -4552,7 +4552,7 @@ select.pf-control {
 
 .hover-hint.with-art .hh-art {
   display: block;
-  width: 176px;
+  width: 220px;
   aspect-ratio: 3 / 4;
   object-fit: cover;
   border-radius: 8px;
@@ -4563,14 +4563,18 @@ select.pf-control {
 .hover-hint.with-art .hh-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 0 4px 2px;
+  gap: 3px;
+  padding: 0 6px 4px;
   text-align: center;
+}
+
+.hover-hint.with-art .hh-body b {
+  font-size: var(--type-md, 15px);
 }
 
 .hover-hint.with-art .hh-body span {
   color: rgba(240, 226, 194, 0.72);
-  font-size: var(--type-2xs, 11px);
+  font-size: var(--type-xs, 12px);
   line-height: 1.35;
 }
 

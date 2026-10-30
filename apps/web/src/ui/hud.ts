@@ -2021,7 +2021,7 @@ export class BoardGameHUD {
         actionsSlot.removeAttribute('data-sig');
         actionsSlot.innerHTML =
           mode === 'fan'
-            ? `<div class="fan-hint" data-fan-hint><span class="fh-label">悬停查看动作</span><span class="fh-detail">点击任意牌面展开详情 · 数字键直接执行</span></div><div class="dock-fan" data-fan></div>`
+            ? `<div class="fan-hint" data-fan-hint><span class="fh-label">悬停查看动作</span><span class="fh-detail">点击牌面执行该动作 · 数字键直接执行</span></div><div class="dock-fan" data-fan></div>`
             : '';
       }
 
@@ -2188,7 +2188,7 @@ export class BoardGameHUD {
 
   private bindDockEvents(dock: HTMLElement): void {
     const REST_HINT =
-      '<span class="fh-label">悬停查看动作</span><span class="fh-detail">点击任意牌面展开详情 · 数字键直接执行</span>';
+      '<span class="fh-label">悬停查看动作</span><span class="fh-detail">点击牌面执行该动作 · 数字键直接执行</span>';
 
     // The action row is a fisheye: the pointer position decides which gaps open
     // up. Delegated on the dock so it survives every reconcile.
