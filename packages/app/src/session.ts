@@ -192,10 +192,15 @@ export class UniversalSession implements GamePresenter {
   /** Trait notices collected during rebuild, flushed after publish. */
   private pendingTraitNotices: UiNotice[] = [];
 
-  constructor(module: GameModule, seed = 1, scenario?: string) {
+  /**
+   * @param engine 可选注入已有引擎（中期项 A2）：房主联机时 UniversalSession
+   *               与权威 GameRoom 共用同一个实例，HUD 的 dispatch 直接就是
+   *               权威状态跃迁，无需二次重放同步。
+   */
+  constructor(module: GameModule, seed = 1, scenario?: string, engine?: UniversalGameEngine) {
     this.module = module;
     this.scenario = scenario;
-    this.engine = new UniversalGameEngine(module, seed, { scenario });
+    this.engine = engine ?? new UniversalGameEngine(module, seed, { scenario });
 
     this.unsubscribers.push(
       this.engine.onStateChange(() => {
@@ -776,20 +781,6 @@ export class UniversalSession implements GamePresenter {
     this.listeners.clear();
     this.noticeListeners.clear();
     this.visualListeners.clear();
-  }
-
-  /* ------------------------------------------------------------------ */
-  /* Network bridge seams (used by NetSession host mirroring)            */
-  /* ------------------------------------------------------------------ */
-
-  /** Tail the append-only action log so an external mirror can replay it. */
-  public getActionHistory(): Action[] {
-    return this.engine.getHistory();
-  }
-
-  /** Dispatch a raw action (guest-forwarded by NetSession) through the local engine. */
-  public dispatchAction(action: Action): { ok: boolean; error?: string } {
-    return this.dispatch(action);
   }
 
   /* ------------------------------------------------------------------ */

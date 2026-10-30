@@ -26,7 +26,8 @@
     "tokens:check": "node scripts/export-design-tokens.mjs --check",
     "test:verify": "node scripts/run-verify.mjs",
     "probe:dom": "node scripts/probe-dom-stability.mjs",
-    "probe:grid": "node scripts/probe-room-grid.mjs"
+    "probe:grid": "node scripts/probe-room-grid.mjs",
+    "docs:check": "node scripts/check-doc-paths.mjs"
   },
   "keywords": [],
   "author": "",

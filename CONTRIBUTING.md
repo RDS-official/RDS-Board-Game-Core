@@ -22,8 +22,8 @@ pnpm run dev        # http://127.0.0.1:5173/
 
 界面与画布共用一个中文字体：**阿里巴巴普惠体 Regular**（`public/fonts/Alibaba-PuHuiTi-Regular.woff`，免费商用）。
 
-- DOM 侧通过 [styles.css](src/ui/styles.css) 的 `@font-face` 引入，`--font-ui` / `--font-display` 都以它打头；
-- Canvas 侧（房间地板、卡牌、指示牌、数字片）统一走 [src/render/fonts.ts](src/render/fonts.ts) 导出的 `CANVAS_FONT_STACK`，**不要**再写字面量 `"Segoe UI"`，否则贴图与 HUD 会用到不同字形；
+- DOM 侧通过 [styles.css](apps/web/src/ui/styles.css) 的 `@font-face` 引入，`--font-ui` / `--font-display` 都以它打头；
+- Canvas 侧（房间地板、卡牌、指示牌、数字片）统一走 [apps/web/src/render/fonts.ts](apps/web/src/render/fonts.ts) 导出的 `CANVAS_FONT_STACK`，**不要**再写字面量 `"Segoe UI"`，否则贴图与 HUD 会用到不同字形；
 - 画布贴图只画一次并进缓存，所以 `main.ts` 用 `ensureCanvasFontsReady()` 把首次绘制卡在字体解码之后；缺字体时会降级到系统字体而不是白屏。
 
 换字体时改三处：把 woff 放进 `public/fonts/`、改 `@font-face` 与 `--font-ui`、改 `fonts.ts` 里的 `UI_FONT_FAMILY`。
@@ -52,9 +52,10 @@ BASE_URL=http://127.0.0.1:6000/ pnpm shots
 
 | 命令 | 覆盖 | 何时必跑 |
 | --- | --- | --- |
-| `pnpm test` | 内核一致性 131 例（116 个 `test` 展开参数化后）+ 分层边界检查 | 任何改动 |
-| `pnpm test:matrix` | 五款夹具 × 多 seed × 全场景黑盒 + 回放哈希 | 动 `src/core` 或任一 `src/games/*` |
-| `pnpm test:ui` | Playwright 流程矩阵（拖拽/旋转/落定/悬停） | 动 `src/render`、`src/ui`、`src/app` 契约 |
+| `pnpm test` | 内核一致性 206 例 + 分层边界检查 | 任何改动 |
+| `pnpm docs:check` | 文档路径有效性（旧 `src/` 布局引用、失效链接） | 动任何 `.md` / 目录结构 |
+| `pnpm test:matrix` | 五款夹具 × 多 seed × 全场景黑盒 + 回放哈希 | 动 `packages/kernel/src` 或任一 `packages/games/src/*` |
+| `pnpm test:ui` | Playwright 流程矩阵（拖拽/旋转/落定/悬停） | 动 `apps/web/src/render`、`apps/web/src/ui`、`packages/app/src` 契约 |
 | `pnpm probe:layout` | 47 个房间的家具布局与**门位冲突**（必须 0） | 动 `props.ts` / `roomLayout.ts` / 房间摆件清单 |
 | `pnpm probe:overlap` | 房间几何是否越过板块 footprint（**z-fighting 回归**） | 动 `roomTile.ts`、新增贴墙构件 |
 | `tsc --noEmit` + `pnpm build` | 类型与生产构建 | 提交前 |
@@ -82,11 +83,11 @@ pnpm shots rooms      # 只跑名称匹配的
 ## 4. 分层边界（会被测试拦住）
 
 ```
-src/ui        只 import ../app/contracts
-src/app       拥有引擎，向 UI 暴露 DTO
-src/core      纯 JSON 状态 + 纯函数转移，不存函数/时间/随机
-src/games/*   只实现 setup / legalActions / reduce / outcome
-src/render    Three.js 表现层，不写核心状态
+apps/web/src/ui        只 import ../app/contracts
+packages/app/src       拥有引擎，向 UI 暴露 DTO
+packages/kernel/src      纯 JSON 状态 + 纯函数转移，不存函数/时间/随机
+packages/games/src/*   只实现 setup / legalActions / reduce / outcome
+apps/web/src/render    Three.js 表现层，不写核心状态
 ```
 
 `pnpm test` 内含静态检查：UI 一旦 import `core/games/render/net/ai` 就失败。改 UI 时如果发现"必须拿到引擎内部数据"，正确做法是**扩展 `contracts.ts` 的 DTO**，而不是把依赖接进 UI。

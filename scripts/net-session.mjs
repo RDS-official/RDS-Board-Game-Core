@@ -1,6 +1,6 @@
 /**
  * NetSession loopback test (no browser / no WebRTC / no signaling).
- * Drives a host NetSession (inner UniversalSession + BridgedRoom mirror)
+ * Drives a host NetSession (UniversalSession + GameRoom sharing one engine)
  * against a guest NetSession (projection-only) over in-memory channels, and
  * asserts the GamePresenter semantics documented in src/app/netSession.ts.
  */
@@ -131,6 +131,39 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     ok(key in s, `guest snapshot has ${key}`);
   }
   ok(s.viewers.some(v => v.id === 'GOD'), 'viewers include GOD for reference');
+}
+
+// --- 7. seat ownership: NetSession wires seatOwners into the transport ------
+{
+  const { session: host2, transport: t2 } = NetSession.createLoopbackHost(module, {
+    hub: 'loopback',
+    roomId: 'room-seats',
+    token: 't',
+    role: 'host',
+    playerId: 'p1',
+    seatOwners: { p1: 'u_p1', p2: 'u_p2' }
+  });
+
+  let sinkEvil = () => {};
+  const chEvil = { readyState: 'open', send: text => sinkEvil(text), close() {} };
+  t2.acceptChannel('u_evil', chEvil);
+  const gEvil = new WebRtcGuestTransport(text => chEvil.onmessage?.({ data: text }));
+  sinkEvil = text => gEvil.receive(text);
+  const errors = [];
+  gEvil.onUpdate = u => { if (u.revision === -1) errors.push(u); };
+  gEvil.join('p2'); // u_evil claims p2, which belongs to u_p2
+  ok(errors.length === 1, 'guest cannot claim a seat bound to another hub user');
+  ok(errors[0].error === 'seat is bound to another user', 'rejection explains the seat binding');
+
+  let sinkOwner = () => {};
+  const chOwner = { readyState: 'open', send: text => sinkOwner(text), close() {} };
+  t2.acceptChannel('u_p2', chOwner);
+  const gOwner = new WebRtcGuestTransport(text => chOwner.onmessage?.({ data: text }));
+  sinkOwner = text => gOwner.receive(text);
+  gOwner.join('p2');
+  ok(!!gOwner.state?.players?.p2, 'the bound seat owner still joins normally');
+
+  host2.dispose();
 }
 
 host.dispose();

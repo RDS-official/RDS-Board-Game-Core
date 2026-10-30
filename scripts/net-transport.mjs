@@ -78,6 +78,40 @@ function makeGuest(transport, peerId, viewer) {
   ok(gb.revision - revB === (moved ? 1 : 0), 'other viewer delta pushed exactly once after submit');
 }
 
+// --- Seat ownership: a guest cannot claim a seat bound to another user ------
+{
+  const room = new GameRoom(GAME_REGISTRY.splendor, 11);
+  const transport = new WebRtcHostTransport(room, 'u_host', () => {}, undefined, {
+    p1: 'u_p1',
+    p2: 'u_p2'
+  });
+  const thief = makeGuest(transport, 'u_p1', 'p2'); // u_p1 tries to sit in p2's seat
+  ok(thief.state === null, 'guest cannot claim a seat owned by another user');
+
+  const owner = makeGuest(transport, 'u_p2', 'p2');
+  ok(!!owner.state, 'seat owner may join their own seat');
+  ok(owner.state?.players?.p2 !== undefined, 'owner projection has its player');
+}
+
+// --- Seat ownership off (scripts / no hub identity): first come first served -
+{
+  const room = new GameRoom(GAME_REGISTRY.splendor, 13);
+  const transport = new WebRtcHostTransport(room, 'u_host', () => {});
+  const first = makeGuest(transport, 'u_any', 'p2');
+  ok(!!first.state, 'unbound seat keeps the legacy first-come behaviour');
+}
+
+// --- Room-level actor guard (defence in depth) ------------------------------
+{
+  const room = new GameRoom(GAME_REGISTRY.splendor, 17);
+  room.join('p1');
+  room.setCurrentViewer('p1');
+  const forged = room.submit({ type: 'TAKE_3_DIFF_GEMS', playerId: 'p2', payload: {} });
+  room.setCurrentViewer(undefined);
+  ok(forged.ok === false, 'room.submit rejects an actor that is not the current viewer');
+  ok(room.getRevision() === 0, 'rejected actor does not advance the room revision');
+}
+
 // --- Disconnect: channel close leaves the room safely ----------------------
 {
   const room = new GameRoom(GAME_REGISTRY.splendor, 9);

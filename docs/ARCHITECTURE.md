@@ -3,7 +3,7 @@
 > 本文描述 **当前代码快照** 的实际实现，而不是规划稿。
 > 形式化契约、扩展步骤与测试说明见 [CORE.md](./CORE.md)；本文侧重分层、模块职责、调用链与实现细节。
 >
-> 当前基线：`131 passed / 0 failed / 0 boundary violations`，`tsc --noEmit` 通过，`vite build` 通过。
+> 当前基线：`206 passed / 0 failed / 0 boundary violations`，`tsc --noEmit` 通过，`vite build` 通过。
 > 山屋专项的规则覆盖与缺陷评估见 [BETRAYAL.md](BETRAYAL.md)。
 
 ---
@@ -32,11 +32,11 @@
 
 产品是**通用桌游内核**，不是某一款桌游：
 
-- `src/core/` 提供与游戏无关的调度、隐藏信息、中断栈、动态规则、回放、校验；
-- `src/games/` 下的五款游戏是**一致性夹具**，证明内核能覆盖不同机制组合；
-- `src/app/` 把内核翻译成 UI 可消费的 DTO；
-- `src/ui/`、`src/render/` 是可替换的调试器前端；
-- `src/net/`、`src/ai/` 是内核之上的适配层。
+- `packages/kernel/src/` 提供与游戏无关的调度、隐藏信息、中断栈、动态规则、回放、校验；
+- `packages/games/src/` 下的五款游戏是**一致性夹具**，证明内核能覆盖不同机制组合；
+- `packages/app/src/` 把内核翻译成 UI 可消费的 DTO；
+- `apps/web/src/ui/`、`apps/web/src/render/` 是可替换的调试器前端；
+- `packages/net/src/`、`packages/harness/src/` 是内核之上的适配层。
 
 ### 1.1 形式模型到代码的映射
 
@@ -62,7 +62,7 @@ G = ⟨N, S, s0, A, L, T, O, R, K⟩
 2. **确定性**：PRNG 种子化，ID 由 `ctx.id()` 生成，禁止 reducer 里使用 `Date.now()` / `Math.random()`。
 3. **单一转移管线**：正常动作、决策提交、响应窗口、逻辑时钟、回放全部走同一套校验/结算/日志逻辑。
 4. **观测在边界发生**：内核永远持有全量状态；只有投影后的 `ProjectedGameState` 能离开服务端。
-5. **UI 与内核解耦**：UI 只 import `src/app/contracts`；静态检查会在 `pnpm test` 中强制。
+5. **UI 与内核解耦**：UI 只 import `packages/app/src/contracts`；静态检查会在 `pnpm test` 中强制。
 6. **夹具优先**：不为单一游戏在 core 开特例；游戏机制通过模块状态机与钩子表达。
 
 ---
@@ -72,44 +72,35 @@ G = ⟨N, S, s0, A, L, T, O, R, K⟩
 ### 2.1 分层与依赖
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ main.ts  (composition root)                                          │
-│  创建 scene / session / HUD / inspector，接线 ports 与键盘             │
-└───────────────┬───────────────────────────────┬──────────────────────┘
-                │                               │
-                ▼                               ▼
-┌───────────────────────────────┐   ┌──────────────────────────────────┐
-│ src/app                       │   │ src/ui                           │
-│  contracts.ts  (DTO 契约)      │◀──│  hud.ts                          │
-│  session.ts    (Presenter 实现)│   │  mathInspector.ts                │
-└───────────────┬───────────────┘   └──────────────────────────────────┘
-                │ owns
-                ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│ src/core  (UniversalGameEngine)                                      │
-│  engine / decisions / stack / aop / rules / observer / invariants    │
-│  serialize / validation / ecs / graph / prng / module                │
-└───────────────┬───────────────────────────────┬──────────────────────┘
-                │                               │
-                ▼                               ▼
-┌───────────────────────────────┐   ┌──────────────────────────────────┐
-│ src/render (Three.js)         │   │ src/net / src/ai / src/games     │
-│  scene / procedural / audio   │   │  room / patch / policy / modules │
-└───────────────────────────────┘   └──────────────────────────────────┘
+apps/web/src/main.ts  (composition root：创建 scene / session / HUD / inspector，接线 ports 与键盘)
+        │
+        ├──────────────▶ apps/web/src/ui  (hud.ts / mathInspector.ts)
+        │                      ▲ GamePresenter(DTO) / PresentationPorts
+        ▼                      │
+packages/app/src  (contracts.ts DTO 契约 / session.ts Presenter 实现)
+        │ owns engine
+        ▼
+packages/kernel/src  (UniversalGameEngine：engine / decisions / stack / aop / rules /
+                      observer / invariants / serialize / validation / ecs / graph / prng / module)
+        │
+        ├──────────────▶ packages/games/src    (五款夹具：setup / legalActions / reduce / outcome)
+        ├──────────────▶ packages/net/src      (room / patch / roomPresenter / webrtc-transport)
+        ├──────────────▶ packages/harness/src  (一致性套件 + bot policy)
+        └──────────────▶ apps/web/src/render   (Three.js 表现层，只消费投影状态)
 ```
 
 依赖方向：
 
-- `ui` → `app/contracts`（仅 DTO）；
-- `app` → `core`；
-- `render` → `core/types`（只消费投影状态）；
-- `net` / `ai` / `games` → `core`；
-- `main` 是唯一同时认识所有层的装配点。
+- `apps/web/src/ui` → `packages/app/src/contracts`（仅 DTO）；
+- `packages/app/src` → `packages/kernel/src`；
+- `apps/web/src/render` → `packages/kernel/src/types`（只消费投影状态）；
+- `packages/net` / `packages/harness` / `packages/games` → `packages/kernel`；
+- `apps/web/src/main.ts` 是唯一同时认识所有层的装配点。
 
 **静态边界检查**（[scripts/test-core.mjs](../scripts/test-core.mjs)）：
 
-- `src/ui/**` 禁止引用 `core / games / render / net / ai`；
-- `src/app/**` 禁止引用 `ui / render`；
+- `apps/web/src/ui/**` 禁止引用 `core / games / render / net / ai`；
+- `packages/app/src/**` 禁止引用 `ui / render`；
 - 违规即测试失败。
 
 ### 2.2 一次玩家动作的完整链路
@@ -235,7 +226,7 @@ client.applyPatch(...)  → 重建 o_{i,t}
 
 ## 3. 数据模型
 
-实现：[src/core/types.ts](../src/core/types.ts)
+实现：[packages/kernel/src/types.ts](../packages/kernel/src/types.ts)
 
 ### 3.1 `GameState` 字段
 
@@ -300,7 +291,7 @@ interface SpatialFrame {
 
 `MapGraphNode.frameId` 指向 frame；投影时按 parent 链组合 translation → rotationY → scale。frame 只属于拓扑/表现元数据，不改变内核规则。
 
-UI 投影现在由 [render/projectionPort.ts](../src/render/projectionPort.ts) 的 `ProjectionRegistry` 完成：
+UI 投影现在由 [render/projectionPort.ts](../apps/web/src/render/projectionPort.ts) 的 `ProjectionRegistry` 完成：
 
 ```ts
 interface ProjectionPort {
@@ -317,7 +308,7 @@ interface ProjectionPort {
 - `layerMode: 'auto'` 时按当前各层节点的实际包围盒计算层偏移；楼层新增/移除/移动后自动重排（山屋）；
 - 渲染器在 `syncState` 时一次性把高维坐标投影成显示坐标，其他绘制逻辑只读 XYZ。
 
-**core 不包含相机/UI 布局**；`TopologySpec` 只描述几何与层，表现层 hints 在 [app/layout.ts](../src/app/layout.ts)；`MapGraphManager.validateFrames` 校验 frame 环、缺失 parent/frame。
+**core 不包含相机/UI 布局**；`TopologySpec` 只描述几何与层，表现层 hints 在 [app/layout.ts](../packages/app/src/layout.ts)；`MapGraphManager.validateFrames` 校验 frame 环、缺失 parent/frame。
 
 #### 坐标映射的兼容边界
 
@@ -469,7 +460,7 @@ ProjectedGameState extends Omit<GameState, 'entities' | 'zones' | 'prngState' | 
 
 ## 4. 核心内核
 
-目录：[src/core](../src/core)
+目录：[packages/kernel/src](../packages/kernel/src)
 
 ### 4.1 `engine.ts` — 调度器
 
@@ -693,7 +684,7 @@ interface GameModule {
 
 ## 5. 应用层
 
-目录：[src/app](../src/app)
+目录：[packages/app/src](../packages/app/src)
 
 ### 5.1 `contracts.ts` — UI 契约
 
@@ -792,7 +783,7 @@ new UniversalSession(module, seed = 1, scenario?)
 
 ## 6. UI 层
 
-目录：[src/ui](../src/ui)
+目录：[apps/web/src/ui](../apps/web/src/ui)
 
 ### 6.1 `hud.ts` — 头部、玩家栏、动作栏
 
@@ -853,7 +844,7 @@ new UniversalSession(module, seed = 1, scenario?)
 
 ## 7. 渲染层
 
-目录：[src/render](../src/render)
+目录：[apps/web/src/render](../apps/web/src/render)
 
 ### 7.1 `scene.ts`
 
@@ -912,28 +903,30 @@ new UniversalSession(module, seed = 1, scenario?)
 
 ## 8. 网络与持久化
 
-目录：[src/net](../src/net)
+目录：[packages/net/src](../packages/net/src)
 
 ### 8.1 `room.ts`
 
 `GameRoom` 是权威房间适配器：
 
-- 持有一个引擎；
+- 持有一个引擎（可选注入：房主侧与 `UniversalSession` 共用同一实例，见 §8.4）；
 - 每个 viewer 独立投影缓存；
-- `revision` 只在成功 dispatch 后递增；
+- `revision` 由引擎的真实状态跃迁推进——房主本地 dispatch 与房客远程 submit 走同一条路径；
 - 对外只返回 `RoomUpdate`，不返回原始状态。
 
 | 方法 | 行为 |
 | --- | --- |
-| `join(viewer)` | 全量投影 + 建立缓存 |
+| `join(viewer, token?)` | 授权通过后全量投影 + 建立缓存 |
 | `leave(viewer)` | 删除缓存 |
-| `submit(action)` | `engine.dispatch`；成功则 `revision++` |
+| `submit(action)` | `engine.dispatch`（revision 由状态通知推进，不再手工 +1） |
 | `snapshot(viewer)` | 指定视角全量 |
 | `delta(viewer)` | 基于缓存的投影 diff |
 | `applyClientDelta(previous, update)` | 客户端应用补丁 |
-| `exportState()` | 引擎日志 + revision |
-| `restore(payload)` | 重放式恢复（含 scenario） |
+| `onChange(listener)` | 任一真实状态跃迁后回调（transport 用它统一推送 delta） |
+| `setAuthorizer(fn)` | 运行期替换座位授权器（座位绑定见 §8.4） |
+| `exportState()` / `restore(payload)` | 引擎日志 + revision；重放式恢复（含 scenario） |
 
+`revision` 用引擎状态哈希去重：`setViewer()` 之类「只看、不改规则状态」的通知不会虚增计数。
 投影 diff 在**已脱敏的投影**上计算，因此隐藏信息不会出现在补丁里。
 
 ### 8.2 `patch.ts`
@@ -959,11 +952,29 @@ new UniversalSession(module, seed = 1, scenario?)
 
 这保证跨进程/跨实例的可重建性，也避免“快照格式升级”导致的状态不兼容。
 
+### 8.4 `webrtc-transport.ts`（浏览器 P2P）
+
+- `WebRtcHostTransport`：把 DataChannel 桥到 `GameRoom`。构造时订阅 `room.onChange`，
+  任一跃迁都向每个已入座 viewer 推送一次 per-viewer delta（不再由 submit 手工触发，避免重复推送）；
+- `WebRtcGuestTransport`：不持引擎，只消费自己的投影 `O(s,i)`，`submit` 转发动作；
+- **座位绑定**：`join` 时若配置了 `seatOwners`（座位 → hub userId），只有该 userId 能加入
+  对应座位，避免房客抢先占座后以他人身份操作；未配置时保持「先到先得」（脚本/单机路径）。
+  房间侧再用 `GameRoom.setAuthorizer` 二次校验，防御纵深；
+- 同一 peer 只能持有一个座位；`submit` 的 `actorId` 必须等于该 peer 的座位；
+- **单一权威引擎（中期项 A2）**：房主侧 `UniversalSession`（HUD）与 `GameRoom`（权威房间）
+  共享同一个 `UniversalGameEngine`。HUD 的本地 dispatch 直接就是权威状态跃迁，
+  同步链从「双引擎 + 尾部重放 action log」简化为「一次 dispatch + 一次 delta 推送」，
+  两引擎分歧/丢步/重放错位在结构上不再可能；
+- **反作弊边界**：房主是**信任对等体**——本仓库没有服务端权威引擎（见
+  [BACKLOG.md](BACKLOG.md) §0.2 的确认边界）。内核仍对每个动作做结构与合法性校验，
+  隐藏信息只经投影离开房主浏览器；要抵御恶意房主需要把 `GameRoom` 部署成真正的
+  服务端进程（seam 已就绪，不在当前范围）。
+
 ---
 
 ## 9. AI 层
 
-目录：[src/ai](../src/ai)
+目录：[packages/harness/src](../packages/harness/src)
 
 ### 9.1 `policy.ts`
 
@@ -987,11 +998,11 @@ AI 只看到 `engine.getLegalActions`，不直接读原始状态；这是后续�
 
 ## 10. 游戏夹具
 
-目录：[src/games](../src/games)
+目录：[packages/games/src](../packages/games/src)
 
 ### 10.1 注册表
 
-[registry.ts](../src/games/registry.ts) 用 `defineGame()` 注册五个模块：
+[registry.ts](../packages/games/src/registry.ts) 用 `defineGame()` 注册五个模块：
 
 | 模块 | topology | hidden | interrupt | simultaneous | dynamic rules | 主要机制 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -1016,10 +1027,10 @@ UI 可用 `?scenario=rich_action` 直达。
 
 文件：
 
-- [setup.ts](../src/games/catan/setup.ts)：19 地形、18 数字、9 港口、25 发展卡、银行、蛇形顺序；
-- [helpers.ts](../src/games/catan/helpers.ts)：资源/银行、建造、距离规则、港口比例、最长道路、最大军队、计分、发展卡迁移；
-- [rules.ts](../src/games/catan/rules.ts)：阶段机、合法动作、reducer、决策回调、胜利条件；
-- [scenarios.ts](../src/games/catan/scenarios.ts)：可重放测试场景。
+- [setup.ts](../packages/games/src/catan/setup.ts)：19 地形、18 数字、9 港口、25 发展卡、银行、蛇形顺序；
+- [helpers.ts](../packages/games/src/catan/helpers.ts)：资源/银行、建造、距离规则、港口比例、最长道路、最大军队、计分、发展卡迁移；
+- [rules.ts](../packages/games/src/catan/rules.ts)：阶段机、合法动作、reducer、决策回调、胜利条件；
+- [scenarios.ts](../packages/games/src/catan/scenarios.ts)：可重放测试场景。
 
 #### 初始状态
 
@@ -1082,7 +1093,7 @@ SETUP_SETTLEMENT → SETUP_ROAD → ... → ROLL → ACTION
 
 ### 10.3 Sanguosha 实现
 
-文件：[setup.ts](../src/games/sanguosha/setup.ts) · [rules.ts](../src/games/sanguosha/rules.ts) · [hooks.ts](../src/games/sanguosha/hooks.ts)
+文件：[setup.ts](../packages/games/src/sanguosha/setup.ts) · [rules.ts](../packages/games/src/sanguosha/rules.ts) · [hooks.ts](../packages/games/src/sanguosha/hooks.ts)
 
 - 4 名玩家：主公、忠臣、反贼、内奸；
 - 圆桌座位图 + 手牌/装备/判定区；
@@ -1095,7 +1106,7 @@ SETUP_SETTLEMENT → SETUP_ROAD → ... → ROLL → ACTION
 
 ### 10.4 Splendor 实现
 
-文件：[setup.ts](../src/games/splendor/setup.ts) · [rules.ts](../src/games/splendor/rules.ts)
+文件：[setup.ts](../packages/games/src/splendor/setup.ts) · [rules.ts](../packages/games/src/splendor/rules.ts)
 
 - 2 名玩家；
 - 三阶市场、贵族、宝石银行（含黄金）；
@@ -1105,7 +1116,7 @@ SETUP_SETTLEMENT → SETUP_ROAD → ... → ROLL → ACTION
 
 ### 10.5 Betrayal 实现
 
-文件：[cards.ts](../src/games/betrayal/cards.ts) · [haunts.ts](../src/games/betrayal/haunts.ts) · [helpers.ts](../src/games/betrayal/helpers.ts) · [setup.ts](../src/games/betrayal/setup.ts) · [rules.ts](../src/games/betrayal/rules.ts) · [scenarios.ts](../src/games/betrayal/scenarios.ts) · [hooks.ts](../src/games/betrayal/hooks.ts)
+文件：[cards.ts](../packages/games/src/betrayal/cards.ts) · [haunts.ts](../packages/games/src/betrayal/haunts.ts) · [helpers.ts](../packages/games/src/betrayal/helpers.ts) · [setup.ts](../packages/games/src/betrayal/setup.ts) · [rules.ts](../packages/games/src/betrayal/rules.ts) · [scenarios.ts](../packages/games/src/betrayal/scenarios.ts) · [hooks.ts](../packages/games/src/betrayal/hooks.ts)
 
 这是当前最完整的规则夹具（详见 [BETRAYAL.md](BETRAYAL.md)）：
 
@@ -1116,7 +1127,7 @@ SETUP_SETTLEMENT → SETUP_ROAD → ... → ROLL → ACTION
 - 3 个完整剧本（木乃伊 / 巨眼 / 怨灵），怪物是 NPC actor，叛徒逐只 `MOVE_NPC`/`ATTACK_HERO`/`END_NPC_TURN`；
 - 伤害分配、交易、水晶球窥视走决策窗口；剧本钩子走 AOP；
 - `MOVE_TO_ROOM` 使用 `SelectionSpec`（一个动作 + 候选房间），UI 弹选择器；探索拆成 `EXPLORE_DOOR`（抽板块）+ `PLACE_ROOM`（桌面预载、旋转/确认），相邻房间的双向门自动连通；
-- 相机取景是表现层策略：`src/app/layout.ts` 提供按游戏 id 的 padding/初始方向，renderer 只按图包围盒适配，不做 gameId 分支；
+- 相机取景是表现层策略：`packages/app/src/layout.ts` 提供按游戏 id 的 padding/初始方向，renderer 只按图包围盒适配，不做 gameId 分支；
 - 三层空间在表现层用分区呈现，对手目标由 `project.globalVars` 裁剪；
 - 23 条专项测试覆盖探索、朝向选择、相邻门连通、战斗、偷窃、远程、麻绳、击晕、NPC 回合、三剧本胜负与回放。
 
@@ -1124,7 +1135,7 @@ SETUP_SETTLEMENT → SETUP_ROAD → ... → ROLL → ACTION
 
 ### 10.6 Dune / Mahjong 实现
 
-文件：[setup.ts](../src/games/dune_mahjong/setup.ts) · [rules.ts](../src/games/dune_mahjong/rules.ts)
+文件：[setup.ts](../packages/games/src/dune_mahjong/setup.ts) · [rules.ts](../packages/games/src/dune_mahjong/rules.ts)
 
 - 3 个家族，香料/军团/将领/武器；
 - 沙丘模式：`OPEN_BATTLE_WINDOW` 打开秘密同步决策，双方提交 `COMMIT_BATTLE_DIAL`（不可见），全部提交后揭晓并结算；
@@ -1136,7 +1147,7 @@ SETUP_SETTLEMENT → SETUP_ROAD → ... → ROLL → ACTION
 
 ## 11. 组合根与启动流程
 
-实现：[src/main.ts](../src/main.ts)
+实现：[apps/web/src/main.ts](../apps/web/src/main.ts)
 
 ### 11.1 启动
 
@@ -1198,7 +1209,7 @@ pnpm build
 
 测试运行器：[scripts/test-core.mjs](../scripts/test-core.mjs)
 
-- 用 Vite `middlewareMode` 加载 `/src/core/testing/suite.ts`；
+- 用 Vite `middlewareMode` 加载 `/packages/harness/src/suite.ts`；
 - 逐条打印用例与耗时；
 - 跑架构边界静态检查；
 - 任一失败退出码为 1。
@@ -1206,12 +1217,12 @@ pnpm build
 ### 12.2 当前结果
 
 ```text
-131 passed, 0 failed, 131 cases, 0 boundary violations
+206 passed, 0 failed, 206 cases, 0 boundary violations
 ```
 
 构成：
 
-- 47 条显式用例（内核 + 应用层 + 网络 + 五个夹具专项）；
+- 191 条显式用例（内核 + 应用层 + 网络 + 五个夹具专项）；
 - 5 个夹具 × 3 条矩阵用例（初始化/随机回放/投影安全）= 15；
 - 架构边界检查 1 组。
 
@@ -1244,7 +1255,7 @@ pnpm build
 
 ### 13.1 新增一款游戏
 
-1. 新建 `src/games/<id>/setup.ts`：
+1. 新建 `packages/games/src/<id>/setup.ts`：
    - 返回完整 `GameState`（`players / zones / entities / mapGraph / globalVars / pendingDecisions / activeHooks`）；
    - 所有随机性使用 `DeterministicPRNG`；
 2. 新建 `rules.ts`：
@@ -1336,58 +1347,58 @@ scenarios: {
 
 | 文件 | 作用 |
 | --- | --- |
-| [core/types.ts](../src/core/types.ts) | 全部状态/动作/栈/决策/钩子类型 |
-| [core/engine.ts](../src/core/engine.ts) | 调度、校验、决策/响应、时钟、回放 |
-| [core/module.ts](../src/core/module.ts) | `GameModule` / `ReduceContext` / `GameScenario` |
-| [core/decisions.ts](../src/core/decisions.ts) | 决策窗口与策略 |
-| [core/stack.ts](../src/core/stack.ts) | LIFO 响应栈 |
-| [core/aop.ts](../src/core/aop.ts) | 规则 AOP 管线 |
-| [core/rules.ts](../src/core/rules.ts) | 钩子注册表、依赖图、拓扑排序 |
-| [core/observer.ts](../src/core/observer.ts) | 信息投影与反作弊 |
-| [core/invariants.ts](../src/core/invariants.ts) | 结构不变量 |
-| [core/serialize.ts](../src/core/serialize.ts) | 规范化 JSON 与哈希 |
-| [core/validation.ts](../src/core/validation.ts) | 动作 Schema |
-| [core/actionPayload.ts](../src/core/actionPayload.ts) | 字段默认值填充 |
-| [core/ecs.ts](../src/core/ecs.ts) | 区域/实体管理 |
-| [core/graph.ts](../src/core/graph.ts) | 拓扑与 Catan 六边形双图 |
-| [core/prng.ts](../src/core/prng.ts) | Mulberry32 |
-| [core/testing/suite.ts](../src/core/testing/suite.ts) | 一致性测试套件 |
+| [core/types.ts](../packages/kernel/src/types.ts) | 全部状态/动作/栈/决策/钩子类型 |
+| [core/engine.ts](../packages/kernel/src/engine.ts) | 调度、校验、决策/响应、时钟、回放 |
+| [core/module.ts](../packages/kernel/src/module.ts) | `GameModule` / `ReduceContext` / `GameScenario` |
+| [core/decisions.ts](../packages/kernel/src/decisions.ts) | 决策窗口与策略 |
+| [core/stack.ts](../packages/kernel/src/stack.ts) | LIFO 响应栈 |
+| [core/aop.ts](../packages/kernel/src/aop.ts) | 规则 AOP 管线 |
+| [core/rules.ts](../packages/kernel/src/rules.ts) | 钩子注册表、依赖图、拓扑排序 |
+| [core/observer.ts](../packages/kernel/src/observer.ts) | 信息投影与反作弊 |
+| [core/invariants.ts](../packages/kernel/src/invariants.ts) | 结构不变量 |
+| [core/serialize.ts](../packages/kernel/src/serialize.ts) | 规范化 JSON 与哈希 |
+| [core/validation.ts](../packages/kernel/src/validation.ts) | 动作 Schema |
+| [core/actionPayload.ts](../packages/kernel/src/actionPayload.ts) | 字段默认值填充 |
+| [core/ecs.ts](../packages/kernel/src/ecs.ts) | 区域/实体管理 |
+| [core/graph.ts](../packages/kernel/src/graph.ts) | 拓扑与 Catan 六边形双图 |
+| [core/prng.ts](../packages/kernel/src/prng.ts) | Mulberry32 |
+| [core/testing/suite.ts](../packages/harness/src/suite.ts) | 一致性测试套件 |
 
 ### 15.2 应用与 UI
 
 | 文件 | 作用 |
 | --- | --- |
-| [app/contracts.ts](../src/app/contracts.ts) | UI DTO / Presenter / Ports |
-| [app/session.ts](../src/app/session.ts) | Presenter 实现、快照构建、动作绑定 |
-| [ui/hud.ts](../src/ui/hud.ts) | 顶部/玩家栏/动作栏/表单 |
-| [ui/mathInspector.ts](../src/ui/mathInspector.ts) | 五页签数学检查器 |
-| [ui/styles.css](../src/ui/styles.css) | 设计系统 |
+| [app/contracts.ts](../packages/app/src/contracts.ts) | UI DTO / Presenter / Ports |
+| [app/session.ts](../packages/app/src/session.ts) | Presenter 实现、快照构建、动作绑定 |
+| [ui/hud.ts](../apps/web/src/ui/hud.ts) | 顶部/玩家栏/动作栏/表单 |
+| [ui/mathInspector.ts](../apps/web/src/ui/mathInspector.ts) | 五页签数学检查器 |
+| [ui/styles.css](../apps/web/src/ui/styles.css) | 设计系统 |
 
 ### 15.3 渲染/网络/AI
 
 | 文件 | 作用 |
 | --- | --- |
-| [render/scene.ts](../src/render/scene.ts) | Three.js 场景与状态同步 |
-| [render/table.ts](../src/render/table.ts) | 桌面/绒布 |
-| [render/raycaster.ts](../src/render/raycaster.ts) | 拾取与 hover |
-| [render/animationQueue.ts](../src/render/animationQueue.ts) | 视觉事件动画队列 |
-| [render/audio.ts](../src/render/audio.ts) | WebAudio 音效 |
-| [render/procedural](../src/render/procedural) | 六边形/卡牌/骰子/房间/筹码 |
-| [net/room.ts](../src/net/room.ts) | 权威房间与投影补丁 |
-| [net/patch.ts](../src/net/patch.ts) | JSON Patch |
-| [ai/policy.ts](../src/ai/policy.ts) | Bot 接口与随机策略 |
+| [render/scene.ts](../apps/web/src/render/scene.ts) | Three.js 场景与状态同步 |
+| [render/table.ts](../apps/web/src/render/table.ts) | 桌面/绒布 |
+| [render/raycaster.ts](../apps/web/src/render/raycaster.ts) | 拾取与 hover |
+| [render/animationQueue.ts](../apps/web/src/render/animationQueue.ts) | 视觉事件动画队列 |
+| [render/audio.ts](../apps/web/src/render/audio.ts) | WebAudio 音效 |
+| [render/procedural](../apps/web/src/render/procedural) | 六边形/卡牌/骰子/房间/筹码 |
+| [net/room.ts](../packages/net/src/room.ts) | 权威房间与投影补丁 |
+| [net/patch.ts](../packages/net/src/patch.ts) | JSON Patch |
+| [ai/policy.ts](../packages/harness/src/policy.ts) | Bot 接口与随机策略 |
 
 ### 15.4 游戏与入口
 
 | 文件 | 作用 |
 | --- | --- |
-| [games/registry.ts](../src/games/registry.ts) | 五个模块注册与能力矩阵 |
-| [games/catan](../src/games/catan) | 卡坦岛 setup/helpers/rules/scenarios |
-| [games/sanguosha](../src/games/sanguosha) | 三国杀 setup/rules/hooks |
-| [games/splendor](../src/games/splendor) | 璀璨宝石 setup/rules |
-| [games/betrayal](../src/games/betrayal) | 山屋 cards/haunts/helpers/rules/setup/scenarios/hooks |
-| [games/dune_mahjong](../src/games/dune_mahjong) | 沙丘/麻将 setup/rules |
-| [main.ts](../src/main.ts) | 组合根 |
+| [games/registry.ts](../packages/games/src/registry.ts) | 五个模块注册与能力矩阵 |
+| [games/catan](../packages/games/src/catan) | 卡坦岛 setup/helpers/rules/scenarios |
+| [games/sanguosha](../packages/games/src/sanguosha) | 三国杀 setup/rules/hooks |
+| [games/splendor](../packages/games/src/splendor) | 璀璨宝石 setup/rules |
+| [games/betrayal](../packages/games/src/betrayal) | 山屋 cards/haunts/helpers/rules/setup/scenarios/hooks |
+| [games/dune_mahjong](../packages/games/src/dune_mahjong) | 沙丘/麻将 setup/rules |
+| [main.ts](../apps/web/src/main.ts) | 组合根 |
 | [scripts/test-core.mjs](../scripts/test-core.mjs) | 测试运行器与边界检查 |
 
 ---
