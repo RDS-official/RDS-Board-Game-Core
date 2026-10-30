@@ -39,7 +39,10 @@ const LEGACY_LAYOUT = [
 const EXTERNAL_ALLOWLIST = [
   { file: 'docs/RULES-CROSSCHECK.md', snippet: 'BachNewton/Novelty-World' },
   // 历史审计记录：临时诊断脚本，验证完即删，不再要求存在。
-  { file: 'docs/SIMULATOR-AUDIT.md', snippet: 'scripts/tmp-' }
+  { file: 'docs/SIMULATOR-AUDIT.md', snippet: 'scripts/tmp-' },
+  // Biome 忽略名单：这一行列出的正是**不该进仓库**的运行期目录，要求它
+  // 存在与文档的原意相反。
+  { file: 'docs/QUALITY-GATES.md', snippet: 'files.ignore' }
 ];
 
 function listMd(dir) {
