@@ -1034,7 +1034,8 @@ export class UniversalSession implements GamePresenter {
           : ''
         : '',
       winnerReason: state.gameOver ? state.winnerReason : undefined,
-      lastRoll: this.buildLastRoll(state)
+      lastRoll: this.buildLastRoll(state),
+      blockedReason: this.buildBlockedReason(raw)
     };
 
     // Diff trait ladders last: the snapshot above already carries the new
@@ -1049,6 +1050,25 @@ export class UniversalSession implements GamePresenter {
    * `globalVars` and persists until the next check, so the stamp includes the
    * action cursor: that makes two identical totals in a row distinguishable.
    */
+  /**
+   * Explain why the active explorer cannot move or explore.
+   *
+   * Every branch below is a legitimate rule that silently removes every action
+   * except END_TURN; without this the dock shows one card and the player assumes
+   * the game is stuck.
+   */
+  private buildBlockedReason(raw: ReturnType<UniversalGameEngine['getRawState']>): string | undefined {
+    const actorId = String(raw.activePlayerId ?? '');
+    const player = raw.players[actorId];
+    if (!player) return undefined;
+    if (!player.alive) return '角色已死亡';
+    const props = (player.customProps ?? {}) as Record<string, unknown>;
+    if (props.controlled) return '被精神控制，正被迫走向飞船';
+    if (props.skipActions) return '本回合无法行动（回合开始时的检定失败）';
+    if (Number(props.movesLeft ?? 0) <= 0) return '本回合已无剩余移动力（探索并抽牌会结束移动）';
+    return undefined;
+  }
+
   private buildLastRoll(state: ProjectedGameState): UiRoll | undefined {
     const roll = state.globalVars?.lastRoll as
       | {

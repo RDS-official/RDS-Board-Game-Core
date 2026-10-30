@@ -1180,7 +1180,7 @@ export const EVENT_DEFS: Record<string, EventDef> = Object.fromEntries(
         name: '恶灵附体',
         en: 'Possession',
         category: 'ONGOING',
-        desc: '此卡挂在角色身上。每回合开始须神智 4+ 夺回身体控制权，否则本回合无法行动。',
+        desc: '此卡挂在角色身上。每回合开始时神智检定：4+ 稳住心神，失败则失去 1 点神智。',
         canonical: true,
         bands: [{ min: 0, max: 0, effects: [{ kind: 'ONGOING', effect: 'POSSESSION' }], text: '某种冰冷的东西钻进了你的身体。' }]
       },

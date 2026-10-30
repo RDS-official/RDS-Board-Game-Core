@@ -1997,7 +1997,8 @@ export class BoardGameHUD {
 
       const onlyEndTurn =
         snapshot.actions.length === 1 && (snapshot.actions[0]?.actionType ?? '') === 'END_TURN';
-      const dockShape = onlyEndTurn ? `${mode}:only-end` : mode;
+      const blockedReason = onlyEndTurn ? (snapshot.blockedReason ?? '') : '';
+      const dockShape = onlyEndTurn ? `${mode}:only-end:${blockedReason}` : mode;
 
       // Rebuilding is only correct when the dock changes shape. The hint text
       // differs between "actions available" and "only end turn", so that state is
@@ -2009,7 +2010,7 @@ export class BoardGameHUD {
         actionsSlot.innerHTML =
           mode === 'fan'
             ? onlyEndTurn
-              ? `<div class="fan-hint" data-fan-hint><span class="fh-label">本回合已无剩余移动力</span><span class="fh-detail">探索并抽牌会结束移动 · 点「结束回合」交给下一位</span></div><div class="dock-fan" data-fan></div>`
+              ? `<div class="fan-hint" data-fan-hint><span class="fh-label">${blockedReason || '本回合已无可用动作'}</span><span class="fh-detail">点「结束回合」交给下一位</span></div><div class="dock-fan" data-fan></div>`
               : `<div class="fan-hint" data-fan-hint><span class="fh-label">悬停查看动作</span><span class="fh-detail">点击牌面执行该动作 · 数字键直接执行</span></div><div class="dock-fan" data-fan></div>`
             : '';
       }

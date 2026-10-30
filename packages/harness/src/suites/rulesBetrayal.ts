@@ -730,3 +730,43 @@ test('rules: the haunt roll reaches the dice overlay', () => {
     'success means the house stays quiet this time'
   );
 });
+
+test('rules: the possession curse costs sanity, it does not lock the turn', () => {
+  // It used to set skipActions on every failed turn-start roll, so a low-Sanity
+  // explorer could be locked out turn after turn with no way out.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  raw.effects = raw.effects ?? [];
+  raw.effects.push({
+    id: 'test_possession',
+    kind: 'ONGOING',
+    source: 'p1',
+    target: 'p1',
+    payload: { effect: 'POSSESSION', label: '恶灵附体' }
+  });
+  const sanityBefore = traitIndex(raw.players.p1, 'sanity');
+
+  raw.players.p1.customProps.forcedRoll = { value: 0 };
+  const end = engine.getLegalActions('p1').find(action => action.type === 'END_TURN');
+  assert(!!end, 'the turn can be ended');
+  assert(engine.dispatch(end!).ok, 'turn ended');
+
+  for (let guard = 0; guard < 8; guard += 1) {
+    const state = engine.getRawState();
+    if (state.activePlayerId === 'p1') break;
+    const next = engine.getLegalActions(state.activePlayerId).find(action => action.type === 'END_TURN');
+    if (!next) break;
+    engine.dispatch(next);
+  }
+
+  const state = engine.getRawState();
+  assertEqual(state.activePlayerId, 'p1', "it is p1's turn again");
+  assertEqual(Boolean(state.players.p1.customProps.skipActions), false, 'the turn is not skipped');
+  assert(traitIndex(state.players.p1, 'sanity') < sanityBefore, 'the failed roll costs a Sanity step');
+
+  const legal = engine.getLegalActions('p1').map(action => action.type);
+  assert(
+    legal.includes('MOVE_TO_ROOM') || legal.includes('EXPLORE_DOOR'),
+    `p1 can act on their turn (got: ${legal.join(', ')})`
+  );
+});
