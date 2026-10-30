@@ -1,6 +1,12 @@
 import crypto from 'node:crypto';
 import { users, UserRecord } from './storage.ts';
-import { randomId, JWT_SECRET, TOKEN_TTL_SEC } from './config.ts';
+import {
+  randomId,
+  JWT_SECRET,
+  TOKEN_TTL_SEC,
+  DEFAULT_ADMIN_USER,
+  DEFAULT_ADMIN_PASSWORD,
+} from './config.ts';
 
 // ---- 密码：scrypt（node:crypto 内置，零依赖） ----
 export function hashPassword(password: string, salt?: string) {
@@ -35,14 +41,14 @@ export function verifyJwt(token: string): { sub: string; name: string; role?: 'a
   } catch { return null; }
 }
 
-// ---- 默认管理员初始化（admin 账号: rds，密码: kgnb666） ----
+// ---- 默认管理员初始化（仅在首次部署且不存在时自举初始管理员，绝不覆写生产中已修改的密码） ----
 export function ensureDefaultAdmin(): void {
-  const existing = users.byName('rds');
+  const existing = users.byName(DEFAULT_ADMIN_USER);
   if (!existing) {
-    const { salt, passHash } = hashPassword('kgnb666');
+    const { salt, passHash } = hashPassword(DEFAULT_ADMIN_PASSWORD);
     users.add({
       id: 'u_admin_rds',
-      name: 'rds',
+      name: DEFAULT_ADMIN_USER,
       displayName: '管理员',
       role: 'admin',
       passHash,
@@ -51,16 +57,9 @@ export function ensureDefaultAdmin(): void {
       disabled: false,
     });
   } else {
-    const updates: Partial<UserRecord> = {};
-    if (existing.role !== 'admin') updates.role = 'admin';
-    if (existing.disabled) updates.disabled = false;
-    if (!verify('kgnb666', existing.salt, existing.passHash)) {
-      const { salt, passHash } = hashPassword('kgnb666');
-      updates.salt = salt;
-      updates.passHash = passHash;
-    }
-    if (Object.keys(updates).length > 0) {
-      users.update(existing.id, updates);
+    // 仅确保其角色具有管理员权限，绝不覆盖已有密码
+    if (existing.role !== 'admin') {
+      users.update(existing.id, { role: 'admin' });
     }
   }
 }
