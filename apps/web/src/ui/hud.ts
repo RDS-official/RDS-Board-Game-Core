@@ -44,6 +44,12 @@ export interface HUDOptions {
  * It renders `GameSnapshot` DTOs and forwards intents to the presenter/ports.
  * It must not import the engine, game modules, audio or Three.js.
  */
+function escapeAttr(value: string): string {
+  return value.replace(/[&<>"']/g, ch =>
+    ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;'
+  );
+}
+
 export class BoardGameHUD {
   private readonly container: HTMLElement;
   private presenter: GamePresenter;
@@ -296,7 +302,9 @@ export class BoardGameHUD {
    * Lightweight hover chip for the 3D board: shows what the cursor is over and
    * what a click will do, without stealing focus from the action dock.
    */
-  public showHoverHint(hint: { title: string; detail?: string } | null): void {
+  public showHoverHint(
+    hint: { title: string; detail?: string; art?: string } | null
+  ): void {
     let el = this.container.querySelector('#hover-hint') as HTMLElement | null;
     if (!el) {
       el = document.createElement('div');
@@ -306,15 +314,21 @@ export class BoardGameHUD {
     }
     if (!hint) {
       el.classList.remove('on');
+      el.classList.remove('with-art');
       return;
     }
-    const signature = `${hint.title}|${hint.detail ?? ''}`;
+    const signature = `${hint.title}|${hint.detail ?? ''}|${hint.art ?? ''}`;
     if (el.dataset.signature === signature) {
       el.classList.add('on');
       return;
     }
     el.dataset.signature = signature;
-    el.innerHTML = `<b>${hint.title}</b>${hint.detail ? `<span>${hint.detail}</span>` : ''}`;
+    // A card face gets a full preview above the caption: a one-line tooltip
+    // cannot convey a card's art at board scale.
+    el.classList.toggle('with-art', !!hint.art);
+    el.innerHTML =
+      (hint.art ? `<img class="hh-art" src="${escapeAttr(hint.art)}" alt="${escapeAttr(hint.title)}" />` : '') +
+      `<span class="hh-body"><b>${hint.title}</b>${hint.detail ? `<span>${hint.detail}</span>` : ''}</span>`;
     el.classList.add('on');
   }
 
