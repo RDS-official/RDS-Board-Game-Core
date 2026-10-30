@@ -582,3 +582,25 @@
 | 房间总数 | 48（官方 47 + observatory） |
 | 官方房间缺失 | **0** |
 | 非官方房间 | 1（observatory，有机制） |
+
+---
+
+## 修复记录（第六批：四张预兆卡）
+
+| 卡 | 官方文本 | 原实现 | 现在 |
+| --- | --- | --- | --- |
+| **bite** 噬咬 | 「Make a Might roll: 4+ You fend it off; 1-3 Lose 1 Might; 0 Lose 2 Might」 | 右侧玩家代掷 **4 骰攻击**，与探索者力量对抗 | ✅ 力量检定三档；叛徒豁免保留 |
+| **crystal_ball** 水晶球 | 「Once per turn, make a Knowledge roll: 4+ Gain 1 Knowledge; 1-3 Swirling mists; 0 Lose 1 Sanity」 | **纯窥视**牌堆顶，无检定 | ✅ 知识检定三档 |
+| **mask** 面具 | 「When you put it on, make a Sanity roll: 4+ Gain 2 Knowledge; 1-3 Faint whispers; 0 Lose 2 Sanity」 | 佩戴期间知识 +2 骰、神智 -2 骰 | ✅ 戴上时神智检定三档；死掉的 `maskWorn` 修正逻辑已移除 |
+| **spirit_board** 通灵板 | 「Once per turn, make a Knowledge roll: 4+ Gain 1 Knowledge, Gain 1 Sanity; 1-3 Gibberish; 0 Lose 1 Sanity」 | 神智检定换 +4 移动力 + 叛徒线索 | ✅ 知识检定三档 |
+
+`onDrawAttack` 字段随之删除（只剩 bite 用，且语义已变）。
+
+### ⚠️ 一处来源冲突（记录在案）
+
+`crystal_ball` 存在两个互相矛盾的一手说法：
+
+- **官方牌面**：「每回合一次，知识检定 4+ 得 1 知识；1-3 迷雾；0 失 1 神智」
+- **规则书**（`docs/RULES-CROSSCHECK.md` 引用）：「水晶球只能用于查看未抽出的物品/事件牌」
+
+本次按**牌面**实现（牌面是卡牌自身效果的第一手依据），窥视功能移除。若你认为规则书那句才权威，我可以改回窥视。

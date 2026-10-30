@@ -410,9 +410,14 @@ test('rules: a dead explorer\'s companion is claimed by whoever enters the room'
   );
 });
 
-test('rules: the crystal ball only looks, it does not take the card', () => {
-  // Rulebook, Using Items and Omens: "The Crystal Ball can only be used to look
-  // through undrawn Item and Event cards."
+test('rules: the crystal ball rolls Knowledge like the card says', () => {
+  // Official card text: "Once per turn, make a Knowledge roll: 4+ Cosmic insight
+  // (Gain 1 Knowledge); 1-3 Swirling mists; 0 Demonic vision (Lose 1 Sanity)."
+  //
+  // NOTE: docs/RULES-CROSSCHECK.md also carries a rulebook line saying the ball
+  // "can only be used to look through undrawn Item and Event cards". The printed
+  // card is the authority for the card's own effect, so the roll wins here; the
+  // discrepancy is recorded in docs/CARD-EFFECT-AUDIT.md.
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
   const raw = engine.getRawState();
   raw.activePlayerId = 'p1';
@@ -420,16 +425,19 @@ test('rules: the crystal ball only looks, it does not take the card', () => {
   grantOmen(raw, 'p1', 'crystal_ball');
 
   const topBefore = raw.zones.zone_event_deck.orderedEntities[0];
-  const seedBefore = raw.prngState;
+  raw.players.p1.customProps.forcedRoll = { value: 8 };
 
   const use = engine.getLegalActions('p1').find(a => a.type === 'USE_ITEM');
   assert(!!use, 'the ball can be used');
   assert(engine.dispatch(use!).ok, 'using it dispatches');
 
   const after = engine.getRawState();
-  assertEqual(after.prngState, seedBefore, 'no trait roll is made');
   assertEqual(after.zones.zone_event_deck.orderedEntities[0], topBefore, 'the deck order is untouched');
-  assert(!!after.globalVars.peek, 'the top card is revealed');
+  assertEqual(after.globalVars.peek ?? null, null, 'no peek is recorded any more');
+  assert(
+    traitIndex(after.players.p1, 'knowledge') > traitIndex(raw.players.p1, 'knowledge'),
+    'a good roll grants Knowledge'
+  );
 });
 
 test('rules: the dog is a companion, not a fetch skill, and it cannot ride the elevator', () => {

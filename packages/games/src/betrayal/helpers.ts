@@ -500,17 +500,6 @@ export function rollTraitCheck(
   count += Number(player.customProps.checkBonus ?? 0);
   count += Number(options.extraDice ?? 0);
 
-  if (ownsDef(state, playerId, 'mask') && player.customProps.maskWorn) {
-    if (trait === 'knowledge') {
-      count += 2;
-      modifiers.push('面具 +2 骰');
-    }
-    if (trait === 'sanity') {
-      count -= 2;
-      modifiers.push('面具 -2 骰');
-    }
-  }
-  count = Math.max(1, Math.min(MAX_ATTACK_DICE, count));
 
   if (player.customProps.checkBonus) {
     player.customProps.checkBonus = 0;

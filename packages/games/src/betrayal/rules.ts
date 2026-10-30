@@ -1868,23 +1868,22 @@ export class BetrayalRules {
 
     trace(ctx, 'CARD_DRAW', `🕯️ ${state.players[pid].name} 抽到预兆「${def?.name ?? defId}」（第 ${state.globalVars.omensRevealed} 张）`, 700);
 
+    // Official Bite: "A shadow lunges at you! Make a Might roll: 4+ You fend it
+    // off; 1-3 Flesh wound (Lose 1 Might); 0 Savage mauling (Lose 2 Might)." The
+    // old version rolled a 4-dice attack against the explorer's Might.
+    //
     // Rulebook, Traitor and Monster Powers: "The Traitor can choose not to be
-    // affected by an Event card or Omens such as Bite." This omen's on-draw attack
-    // bypassed the event-effect guard, so a traitor still took the bite.
-    const omenBitesTraitor = state.players[pid]?.role === 'TRAITOR';
-    if (def?.onDrawAttack && !omenBitesTraitor) {
-      const attack = rollZeroDice(state.prngState, def.onDrawAttack.dice);
-      state.prngState = attack.nextSeed;
-      const defense = rollZeroDice(state.prngState, Math.max(1, traitValue(state.players[pid], 'might')));
-      state.prngState = defense.nextSeed;
-      const damage = Math.max(0, attack.sum - defense.sum);
-      if (damage > 0) damagePlayer(state, pid, 'PHYSICAL', damage, 'might');
-      trace(
-        ctx,
-        'DICE_ROLL',
-        `噬咬袭击 [${attack.rolls.join('+')}]=${attack.sum} vs 力量防御 ${defense.sum} → ${damage} 伤害`,
-        700
-      );
+    // affected by an Event card or Omens such as Bite."
+    if (defId === 'bite' && state.players[pid]?.role !== 'TRAITOR') {
+      const check = rollTraitCheck(state, pid, 'might', {
+        threshold: 4,
+        reason: 'bite',
+        label: '噬咬',
+        effect: '成功：挡开暗影；1-3 失去 1 点力量；0 失去 2 点力量'
+      });
+      if (check.total <= 0) applyTraitSteps(state, pid, 'might', -2, { force: true });
+      else if (!check.success) applyTraitSteps(state, pid, 'might', -1, { force: true });
+      trace(ctx, 'DICE_ROLL', `噬咬：力量检定 ${check.total} vs 4`, 700);
     }
 
     state.globalVars.pendingHauntRoll = { playerId: pid, omens: state.globalVars.omensRevealed };
@@ -2039,26 +2038,17 @@ export class BetrayalRules {
         break;
       }
       case 'crystal_ball': {
-        // Rulebook, Using Items and Omens: "The Crystal Ball can only be used to
-        // look through undrawn Item and Event cards." It is a pure look: no trait
-        // roll, and the card is NOT taken off the deck (taking it would silently
-        // reorder every later draw, which the previous version did).
-        const requested = String(action.payload?.deck ?? 'zone_event_deck');
-        const peekDeck = requested === 'zone_item_deck' ? 'zone_item_deck' : 'zone_event_deck';
-        const zone = state.zones[peekDeck];
-        const topId = zone?.orderedEntities?.[0];
-        const top = topId ? state.entities[topId] : undefined;
-        state.globalVars.peek = {
-          deck: peekDeck,
-          title: top ? itemLabel(top) : '空',
-          ownerId: pid
-        };
-        trace(
-          ctx,
-          'ANNOUNCEMENT',
-          `🔮 水晶球映出${peekDeck === 'zone_item_deck' ? '物品' : '事件'}牌堆顶：${state.globalVars.peek.title}`,
-          600
-        );
+        // Official: "Once per turn, make a Knowledge roll: 4+ Cosmic insight (Gain
+        // 1 Knowledge); 1-3 Swirling mists; 0 Demonic vision (Lose 1 Sanity)."
+        const check = rollTraitCheck(state, pid, 'knowledge', {
+          threshold: 4,
+          reason: 'crystal ball',
+          label: '水晶球',
+          effect: '成功：获得 1 点知识；1-3 一片迷雾；0 失去 1 点神智'
+        });
+        if (check.success) applyTraitSteps(state, pid, 'knowledge', 1, { force: true });
+        else if (check.total <= 0) applyTraitSteps(state, pid, 'sanity', -1, { force: true });
+        trace(ctx, 'DICE_ROLL', `水晶球：知识检定 ${check.total} vs 4`, 600);
         markUsed(state, pid, defId);
         break;
       }
@@ -2122,13 +2112,22 @@ export class BetrayalRules {
         break;
       }
       case 'spirit_board': {
-        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: 'spirit board', label: '通灵板' });
+        // Official: "Once per turn, make a Knowledge roll: 4+ Benign spirits guide
+        // you (Gain 1 Knowledge, Gain 1 Sanity); 1-3 Gibberish; 0 Malevolent wails
+        // (Lose 1 Sanity)."
+        const check = rollTraitCheck(state, pid, 'knowledge', {
+          threshold: 4,
+          reason: 'spirit board',
+          label: '通灵板',
+          effect: '成功：知识 +1、神智 +1；1-3 胡言乱语；0 失去 1 点神智'
+        });
         if (check.success) {
-          player.customProps.movesLeft = Number(player.customProps.movesLeft ?? 0) + 4;
-          const haunt = currentHaunt(state);
-          const hint = haunt ? `叛徒的目标：${HAUNT_DEFS[haunt.id]?.traitorObjective ?? '未知'}` : '亡灵指出了尚未被发现的房间。';
-          trace(ctx, 'ANNOUNCEMENT', `🪦 通灵板：${hint}（本回合移动 +4）`, 700);
+          applyTraitSteps(state, pid, 'knowledge', 1, { force: true });
+          applyTraitSteps(state, pid, 'sanity', 1, { force: true });
+        } else if (check.total <= 0) {
+          applyTraitSteps(state, pid, 'sanity', -1, { force: true });
         }
+        trace(ctx, 'DICE_ROLL', `通灵板：知识检定 ${check.total} vs 4`, 600);
         markUsed(state, pid, defId);
         break;
       }
@@ -2229,13 +2228,21 @@ export class BetrayalRules {
         break;
       }
       case 'mask': {
-        const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: 'mask', label: '面具' });
+        // Official: "When you put it on, make a Sanity roll: 4+ Ancient wisdom
+        // (Gain 2 Knowledge); 1-3 Faint whispers; 0 Maddening agony (Lose 2
+        // Sanity)." The old version left a standing +2/-2 dice modifier while worn.
+        const check = rollTraitCheck(state, pid, 'sanity', {
+          threshold: 4,
+          reason: 'mask',
+          label: '面具',
+          effect: '成功：获得 2 点知识；1-3 低语；0 失去 2 点神智'
+        });
         if (check.success) {
-          player.customProps.maskWorn = !player.customProps.maskWorn;
-          trace(ctx, 'ANNOUNCEMENT', `面具${player.customProps.maskWorn ? '戴上' : '摘下'}了`, 400);
-        } else {
-          damagePlayer(state, pid, 'MENTAL', 1);
+          for (let step = 0; step < 2; step += 1) applyTraitSteps(state, pid, 'knowledge', 1, { force: true });
+        } else if (check.total <= 0) {
+          applyTraitSteps(state, pid, 'sanity', -2, { force: true });
         }
+        trace(ctx, 'DICE_ROLL', `面具：神智检定 ${check.total} vs 4`, 500);
         markUsed(state, pid, defId);
         break;
       }

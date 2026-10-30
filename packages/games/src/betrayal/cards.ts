@@ -610,7 +610,6 @@ export interface OmenDef {
   onGain?: TraitGrant[];
   onLoss?: TraitGrant[];
   /** Immediate hostile effect applied when the card is drawn. */
-  onDrawAttack?: { dice: number; trait: TraitKey };
   usable?: boolean;
   useKind?: ItemUseKind;
   /**
@@ -668,7 +667,6 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         en: 'Bite',
         desc: '不可名状之物从暗处扑出。右侧玩家代掷 4 颗骰对你进行一次力量攻击。此卡留在你面前作为预兆，不可交易或丢弃。',
         tradeable: false,
-        onDrawAttack: { dice: 4, trait: 'might' }
       },
       {
         id: 'book',
