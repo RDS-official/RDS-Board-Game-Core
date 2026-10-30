@@ -665,7 +665,7 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'bite',
         name: '噬咬',
         en: 'Bite',
-        desc: '不可名状之物从暗处扑出。右侧玩家代掷 4 颗骰对你进行一次力量攻击。此卡留在你面前作为预兆，不可交易或丢弃。',
+        desc: '暗影扑面而来。力量检定 4+ 挡开；1–3 失去 1 点力量；0 失去 2 点力量。此卡留在你面前作为预兆，不可交易或丢弃。',
         tradeable: false,
       },
       {
@@ -681,7 +681,7 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'crystal_ball',
         name: '水晶球',
         en: 'Crystal Ball',
-        desc: '每回合一次：查看物品或事件牌堆顶牌。无需检定，也不会把牌抽走。',
+        desc: '每回合一次：知识检定 4+ 获得 1 点知识；1–3 一片迷雾；0 失去 1 点神智。',
         tradeable: true,
         usable: true,
         useKind: 'CRYSTAL_BALL'
@@ -748,7 +748,7 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'mask',
         name: '诡异面具',
         en: 'Mask',
-        desc: '戴上或摘下需神智检定。佩戴期间知识检定 +2 骰，神智检定 -2 骰（最低 1 骰）。',
+        desc: '戴上时进行神智检定：4+ 获得 2 点知识；1–3 只听见低语；0 失去 2 点神智。',
         tradeable: true,
         usable: true,
         useKind: 'TOGGLE_MASK'
@@ -790,7 +790,7 @@ export const OMEN_DEFS: Record<string, OmenDef> = Object.fromEntries(
         id: 'spirit_board',
         name: '通灵板',
         en: 'Spirit Board',
-        desc: '移动前可使用：神智检定，成功则本回合移动力 +4；作祟后可窥见叛徒的隐秘线索。',
+        desc: '每回合一次：知识检定 4+ 知识 +1、神智 +1；1–3 胡言乱语；0 失去 1 点神智。',
         tradeable: true,
         usable: true,
         useKind: 'SPIRIT_BOARD'
@@ -810,7 +810,7 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'adrenaline_shot',
         name: '肾上腺素针',
         en: 'Adrenaline Shot',
-        desc: '一次性。使用后本次检定 +4，或本回合移动力 +4。',
+        desc: '一次性。本回合移动力 +4。',
         kind: 'consumable',
         tradeable: true,
         usable: true,
@@ -890,10 +890,10 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'candle',
         name: '冥想蜡烛',
         en: 'Candle',
-        desc: '获得时知识 +1、神智 +1。也是三神器配件之一。',
-        onGain: [
-          { trait: 'knowledge', amount: 1 },
-          { trait: 'sanity', amount: 1 }
+        desc: '携带期间知识 +1、神智 +1。也是三神器配件之一。',
+        modifiers: [
+          { trait: 'knowledge', delta: 1 },
+          { trait: 'sanity', delta: 1 }
         ],
         kind: 'relic',
         tradeable: true

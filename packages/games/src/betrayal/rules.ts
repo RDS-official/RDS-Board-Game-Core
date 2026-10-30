@@ -750,31 +750,6 @@ export class BetrayalRules {
     const roommates = [playerId, ...playersInRoom(state, roomId, playerId)];
 
     switch (defId) {
-      case 'adrenaline_shot':
-        return [
-          {
-            key: 'mode',
-            label: '使用方式',
-            kind: 'enum',
-            options: [
-              { value: 'check', label: '本次检定 +4' },
-              { value: 'move', label: '本回合移动 +4' }
-            ],
-            default: 'check'
-          }
-        ];
-        return [
-          {
-            key: 'deck',
-            label: '窥视牌堆',
-            kind: 'enum',
-            options: [
-              { value: 'zone_event_deck', label: '事件牌堆' },
-              { value: 'zone_item_deck', label: '物品牌堆' }
-            ],
-            default: 'zone_event_deck'
-          }
-        ];
       case 'healing_salve':
         return [
           {
@@ -1998,14 +1973,11 @@ export class BetrayalRules {
         break;
       }
       case 'adrenaline_shot': {
-        const mode = String(action.payload?.mode ?? 'check');
-        if (mode === 'move') {
-          player.customProps.movesLeft = Number(player.customProps.movesLeft ?? 0) + 4;
-          trace(ctx, 'ANNOUNCEMENT', `${player.name} 注射肾上腺素，移动力 +4`, 400);
-        } else {
-          player.customProps.checkBonus = Number(player.customProps.checkBonus ?? 0) + 4;
-          trace(ctx, 'ANNOUNCEMENT', `${player.name} 注射肾上腺素，下次检定 +4`, 400);
-        }
+        // Official: "Before you take a turn, you can use this to gain +4 Speed until
+        // end of turn." The old version also offered a +4 check bonus, which the
+        // card does not grant.
+        player.customProps.movesLeft = Number(player.customProps.movesLeft ?? 0) + 4;
+        trace(ctx, 'ANNOUNCEMENT', `${player.name} 注射肾上腺素，本回合移动力 +4`, 400);
         this.consume(state, pid, entityId, ctx);
         break;
       }
