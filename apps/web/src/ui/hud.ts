@@ -788,7 +788,9 @@ export class BoardGameHUD {
     payload?: Record<string, unknown>,
     targets?: string[]
   ): { ok: boolean; error?: string } {
-    const result = this.performAction(actionId, payload, targets);
+    // Must call the presenter, not this method: an earlier mechanical edit turned
+    // this line into a self-call, so every action recursed until the stack blew.
+    const result = this.presenter.perform(actionId, payload, targets);
     const label = payload ? `${actionId} ${JSON.stringify(payload)}` : actionId;
     diagnostics()?.action(targets ? `${label} -> ${targets.join(',')}` : label, result.ok, result.error);
     return result;
