@@ -15,7 +15,8 @@ export interface LobbyHandle { destroy(): void; }
 
 export interface EnterGameParams { query: string; }
 
-let user: { sub: string; name: string; displayName?: string; avatarUrl?: string } | null = null;
+let user: { sub: string; name: string; displayName?: string; avatarUrl?: string; role?: 'admin' | 'user' } | null = null;
+let onAdmin: (() => void) | null = null;
 
 /** 个人资料弹窗里待上传的头像（已压缩）。 */
 let pendingAvatar: { blob: Blob; dataUrl: string } | null = null;
@@ -176,9 +177,14 @@ function lobbyVisible(): boolean {
   return !!rootEl && !(rootEl as HTMLElement & { hidden?: boolean }).hidden && !document.hidden;
 }
 
-export async function startLobby(container: HTMLElement, enterGame: (p: EnterGameParams) => void): Promise<LobbyHandle> {
+export async function startLobby(
+  container: HTMLElement,
+  enterGame: (p: EnterGameParams) => void,
+  onOpenAdmin?: () => void
+): Promise<LobbyHandle> {
   rootEl = container;
   onEnterGame = enterGame;
+  onAdmin = onOpenAdmin ?? null;
   visibilityHandler = () => {
     if (lobbyVisible()) {
       if (currentRoom) void refreshRoom(); else void refreshRooms();
@@ -192,7 +198,7 @@ export async function startLobby(container: HTMLElement, enterGame: (p: EnterGam
       closeWs();
       if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler);
       if (rootEl) rootEl.innerHTML = '';
-      rootEl = null; onEnterGame = null; currentRoom = null; lastRoomSig = ''; roomsCacheSig = ''; onlineIds = [];
+      rootEl = null; onEnterGame = null; onAdmin = null; currentRoom = null; lastRoomSig = ''; roomsCacheSig = ''; onlineIds = [];
     }
   };
 }
@@ -227,13 +233,16 @@ function authHtml() {
     <div class="lob-card lob-auth">
       <div class="lob-brand"><span class="lob-brand-dot"></span>RDS Board</div>
       <h2>联机大厅</h2>
-      <p class="lob-muted">创建账号，和朋友来一局桌游。</p>
+      <p class="lob-muted">请登录已有账号，和朋友来一局桌游。</p>
       <div class="lob-stack">
-        <input id="name" placeholder="用户名（2-24 位字母数字下划线）" autocomplete="username" />
-        <input id="pass" type="password" placeholder="密码（至少 6 位）" autocomplete="current-password" />
+        <input id="name" placeholder="用户名" autocomplete="username" />
+        <input id="pass" type="password" placeholder="密码" autocomplete="current-password" />
         <div class="lob-row">
-          <button id="login">登录</button>
-          <button id="register" class="lob-secondary">注册</button>
+          <button id="login" style="flex: 1;">登录</button>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--muted); margin-top: 4px;">
+          <span>注册功能已关闭</span>
+          <button id="goto-admin" style="background: none; border: none; color: var(--gold); cursor: pointer; font-size: 13px; padding: 0; text-decoration: underline;">管理员后台 →</button>
         </div>
         <div id="err" class="lob-error"></div>
       </div>
@@ -244,11 +253,13 @@ function authHtml() {
 // ---------------- 首页：货架 + 快速加入 ----------------
 
 function lobbyHtml() {
+  const isAdmin = user && (user.role === 'admin' || user.name === 'rds');
   return `
   <header class="lob-header">
     <div class="lob-brand"><span class="lob-brand-dot"></span>RDS Board<span class="lob-muted lob-brand-sub">联机大厅</span></div>
     <div class="lob-row">
       <button id="solo" class="lob-secondary">本地单机</button>
+      ${isAdmin ? '<button id="admin-open" class="lob-secondary" style="color: var(--gold); border-color: rgba(217, 180, 91, 0.4);">⚙ 管理后台</button>' : ''}
       <button id="profile-open" class="lob-userchip lob-userchip-btn" title="个人资料">${avatarChipHtml(user)}<span>${esc(displayNameOf(user))}</span></button>
       <button id="logout" class="lob-secondary">退出</button>
     </div>
@@ -510,9 +521,9 @@ function bind() {
   const err = (m: string) => { const e = $('err'); if (e) e.textContent = m; };
 
   if (!user) {
-    const doAuth = async (path: string) => {
+    const doLogin = async () => {
       try {
-        const res = await fetch('/api/auth/' + path, {
+        const res = await fetch('/api/auth/login', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: ($('name') as HTMLInputElement).value, password: ($('pass') as HTMLInputElement).value }),
         });
@@ -522,10 +533,20 @@ function bind() {
         await boot();
       } catch (e: any) { err(e.message); }
     };
-    $('login')?.addEventListener('click', () => doAuth('login'));
-    $('register')?.addEventListener('click', () => doAuth('register'));
+    $('login')?.addEventListener('click', doLogin);
+    $('name')?.addEventListener('keydown', ev => { if (ev.key === 'Enter') doLogin(); });
+    $('pass')?.addEventListener('keydown', ev => { if (ev.key === 'Enter') doLogin(); });
+    $('goto-admin')?.addEventListener('click', () => {
+      if (onAdmin) onAdmin();
+      else location.hash = '#admin';
+    });
     return;
   }
+
+  $('admin-open')?.addEventListener('click', () => {
+    if (onAdmin) onAdmin();
+    else location.hash = '#admin';
+  });
 
   // ---- 阶段一：个人资料弹窗 ----
   $('profile-open')?.addEventListener('click', () => {
@@ -756,7 +777,7 @@ async function boot() {
   if (token) {
     try {
       const p: UserProfile = await me();
-      user = { sub: p.id, name: p.name, displayName: p.displayName, avatarUrl: p.avatarUrl };
+      user = { sub: p.id, name: p.name, displayName: p.displayName, avatarUrl: p.avatarUrl, role: p.role };
     } catch { localStorage.removeItem('token'); }
   }
   if (user) { wsWanted = true; openWs(); }
