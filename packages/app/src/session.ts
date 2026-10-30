@@ -497,6 +497,9 @@ export class UniversalSession implements GamePresenter {
                 kind,
                 desc: String(face.desc ?? ''),
                 color: String(face.color ?? ''),
+                // Imported decks carry their own face; the sheet shows it
+                // rather than inventing a plate drawing for it.
+                art: typeof face.imageUrl === 'string' && face.imageUrl ? face.imageUrl : undefined,
                 facts,
                 actions: this.snapshot.actions
                   .filter(action => action.entityId === entity.id || action.placementEntityId === entity.id)

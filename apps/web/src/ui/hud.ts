@@ -317,6 +317,13 @@ export class BoardGameHUD {
       el.classList.remove('with-art');
       return;
     }
+    // A new hover invalidates an open sheet for a previous card: keeping it up
+    // would show one card's detail beside another card's preview.
+    const sheetLayer = this.container.querySelector('#card-sheet-layer');
+    if (sheetLayer?.classList.contains('open')) {
+      sheetLayer.classList.remove('open', 'is-reveal');
+      sheetLayer.innerHTML = '';
+    }
     const signature = `${hint.title}|${hint.detail ?? ''}|${hint.art ?? ''}`;
     if (el.dataset.signature === signature) {
       el.classList.add('on');
@@ -694,6 +701,10 @@ export class BoardGameHUD {
    * parchment, a suit-coloured header ribbon, and a wax seal for omens.
    */
   public showCardSheet(card: UiCardDetail, options: { reveal?: boolean; footer?: string } = {}): void {
+    // The sheet supersedes the hover preview: both describe the same card, and
+    // leaving the little preview up next to the full sheet reads as two
+    // different cards (the tooltip sits behind the sheet's corner).
+    this.showHoverHint(null);
     let layer = this.container.querySelector('#card-sheet-layer') as HTMLElement | null;
     if (!layer) {
       layer = document.createElement('div');
@@ -721,7 +732,11 @@ export class BoardGameHUD {
         <button class="cs-close" type="button" aria-label="关闭">×</button>
         <div class="cs-ribbon"><span>${theme.label}</span></div>
         <div class="cs-body">
-          <div class="cs-art">${cardArtSvg(card)}</div>
+          <div class="cs-art">${
+            card.art
+              ? `<img class="cs-art-img" src="${escapeAttr(card.art)}" alt="${escapeAttr(card.title)}" />`
+              : cardArtSvg(card)
+          }</div>
           ${card.actions?.length ? `<div class="cs-actions">${card.actions
             .map(action => `<button type="button" class="cs-action" data-card-action="${action.id}"><span>${action.icon}</span>${action.label}</button>`)
             .join('')}</div>` : ''}

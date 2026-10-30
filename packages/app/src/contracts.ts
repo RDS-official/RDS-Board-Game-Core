@@ -377,6 +377,14 @@ export interface UiCardDetail {
   kind: 'OMEN' | 'ITEM' | 'EVENT' | 'ROOM' | string;
   desc: string;
   color?: string;
+  /**
+   * The card's own artwork, when the game ships one.
+   *
+   * Imported decks (Pokémon Splendor) have a real face, so the detail sheet
+   * shows that instead of inventing a plate drawing. Games without artwork
+   * leave this unset and keep the procedural illustration.
+   */
+  art?: string;
   /** Extra key/value rows (e.g. "使用方式", "剩余次数"). */
   facts?: { label: string; value: string }[];
   /** Entity-centric shortcuts rendered on the card sheet. */
