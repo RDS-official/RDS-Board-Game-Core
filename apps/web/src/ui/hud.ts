@@ -90,6 +90,8 @@ export class BoardGameHUD {
   private diceOverlay?: DiceRollOverlay;
   /** The setup roll is not animated: opening a scenario should not play a dice cutscene. */
   private rollPrimed = false;
+  /** Stamp of the last roll handed to the overlay, so each roll animates once. */
+  private lastAnimatedStamp = '';
   /** Minimap can be collapsed to conserve screen space. */
   private minimapCollapsed = false;
 
@@ -1073,6 +1075,12 @@ export class BoardGameHUD {
 
   private render(snapshot: GameSnapshot): void {
     this.latest = snapshot;
+    if (!this.rollPrimed) {
+      // Mark whatever the session already carries as seen: reloading mid-game must
+      // not replay an old roll, but any roll after this point must animate.
+      this.rollPrimed = true;
+      this.lastAnimatedStamp = snapshot.lastRoll?.stamp ?? '';
+    }
     this.maybeAnimateRoll(snapshot);
     // Betrayal uses a candle-lit parchment palette; other fixtures stay slate.
     this.lastSnapshot = snapshot;
@@ -1253,13 +1261,11 @@ export class BoardGameHUD {
   private maybeAnimateRoll(snapshot: GameSnapshot): void {
     const roll = snapshot.lastRoll;
     if (!roll || !this.diceOverlay) return;
-    // The first snapshot can already carry the setup's turn-start Speed roll.
-    // Playing a cutscene the moment a scenario opens is noise, so prime the
-    // overlay with it and animate only rolls that happen from here on.
-    if (!this.rollPrimed) {
-      this.rollPrimed = true;
-      return;
-    }
+
+    // Animate every roll we have not shown yet; the stamp keeps a single roll from
+    // replaying on each repaint.
+    if (roll.stamp === this.lastAnimatedStamp) return;
+    this.lastAnimatedStamp = roll.stamp;
     this.diceOverlay.show({ roll, label: this.rollLabel(roll) });
   }
 

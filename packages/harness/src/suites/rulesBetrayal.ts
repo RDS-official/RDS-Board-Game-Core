@@ -684,3 +684,36 @@ test('rules: every official event that asks for a roll actually rolls', () => {
   // meaningless "成功 / 0" verdict.
   assertEqual(roll!.threshold, undefined, 'no bogus success threshold is passed');
 });
+
+test('rules: the haunt roll reaches the dice overlay', () => {
+  // The haunt roll is the biggest moment of the game, but it used to write
+  // `lastHauntRoll`, a field nothing read, so the overlay stayed silent.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 11);
+  const raw = engine.getRawState();
+  raw.globalVars.omensRevealed = 2;
+  raw.globalVars.pendingHauntRoll = { playerId: 'p1', omens: 2 };
+  raw.activePlayerId = 'p1';
+  raw.activeActorId = 'p1';
+  raw.globalVars.lastRoll = null;
+
+  const end = engine.getLegalActions('p1').find(action => action.type === 'END_TURN');
+  assert(!!end, 'the turn can be ended');
+  assert(engine.dispatch(end!).ok, 'ending the turn pushes the haunt check');
+
+  const roll = engine.getLegalActions('p1').find(action => action.type === 'ROLL_HAUNT_CHECK');
+  assert(!!roll, 'the haunt check is offered');
+  assert(engine.dispatch(roll!).ok, 'the haunt roll dispatches');
+
+  const recorded = engine.getRawState().globalVars.lastRoll as
+    | { label?: string; threshold?: number; dice?: number[]; total?: number; success?: boolean }
+    | null;
+  assert(!!recorded, 'a roll is recorded for the overlay');
+  assertEqual(recorded!.label, '作祟检定', 'the overlay names the haunt roll');
+  assertEqual(recorded!.threshold, 2, 'the omens count is the threshold');
+  assertEqual((recorded!.dice ?? []).length, 6, 'six dice are rolled');
+  assertEqual(
+    recorded!.success,
+    Number(recorded!.total) >= 2,
+    'success means the house stays quiet this time'
+  );
+});
