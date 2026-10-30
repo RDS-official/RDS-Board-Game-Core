@@ -313,7 +313,7 @@ class BoardGameSimulatorApp {
           phaseLabel?: string;
           actorName?: string;
           focusActors?: string[];
-          actions?: { type?: string; id?: string }[];
+          actions?: { actionType?: string; id?: string; label?: string }[];
           lastRoll?: { label?: string; total?: number; stamp?: string };
         }
       | undefined;
@@ -330,7 +330,11 @@ class BoardGameSimulatorApp {
       actor: snapshot.actorName,
       focusActors: snapshot.focusActors ?? [],
       // If this list is empty the turn is stuck; that is the first thing to look at.
-      actions: (snapshot.actions ?? []).map(action => action.type ?? action.id ?? '?'),
+      actions: (snapshot.actions ?? []).map(action => ({
+        id: action.id ?? '?',
+        type: action.actionType ?? null,
+        label: action.label ?? null
+      })),
       lastRoll: snapshot.lastRoll
         ? { label: snapshot.lastRoll.label, total: snapshot.lastRoll.total }
         : null,
@@ -342,7 +346,15 @@ class BoardGameSimulatorApp {
         ? { playerId: (globalVars.pendingRoomPlacement as { playerId?: string }).playerId }
         : null,
       activePlayerId: raw?.activePlayerId ?? null,
-      activeActorId: raw?.activeActorId ?? null
+      activeActorId: raw?.activeActorId ?? null,
+      // Movement gates moving/exploring, so record it: "only END_TURN left" almost
+      // always means movesLeft hit 0.
+      activeMovesLeft: (() => {
+        const players = (raw?.players ?? {}) as Record<string, { alive?: boolean; customProps?: { movesLeft?: number } }>;
+        const player = players[String(raw?.activePlayerId ?? '')];
+        if (!player) return null;
+        return { alive: player.alive ?? true, movesLeft: Number(player.customProps?.movesLeft ?? 0) };
+      })()
     };
   }
 

@@ -1367,6 +1367,9 @@ export function buildPlayersView(
             value: `${room?.props?.name ?? '未知'} · ${floorNames[String(room?.props?.floor ?? '')] ?? ''}`
           },
           { label: '物品 / 预兆', value: `${items} / ${omens}` },
+          // Movement gates moving and exploring; showing 0 explains a turn whose
+          // only remaining option is END_TURN.
+          { label: '移动力', value: String(Number(player.customProps.movesLeft ?? 0)) },
           ...(player.customProps.controlled ? [{ label: '状态', value: '👁️ 被精神控制' }] : []),
           ...(player.customProps.banished ? [{ label: '状态', value: '🛸 已被母舰接引' }] : []),
           ...(player.alive ? [] : [{ label: '状态', value: '💀 已死亡' }])
