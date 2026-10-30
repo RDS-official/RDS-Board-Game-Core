@@ -811,16 +811,6 @@ export class BetrayalRules {
             kind: 'enum',
             options: roommates.map(id => ({ value: id, label: state.players[id].name })),
             default: playerId
-          },
-          {
-            key: 'trait',
-            label: '恢复的肉体属性',
-            kind: 'enum',
-            options: [
-              { value: 'might', label: '力量' },
-              { value: 'speed', label: '速度' }
-            ],
-            default: 'might'
           }
         ];
       case 'bell':
@@ -2166,35 +2156,38 @@ export class BetrayalRules {
         break;
       }
       case 'healing_salve': {
+        // Official: "Restore up to 2 steps to any trait." One use, two steps.
         const trait = (action.payload?.trait as TraitKey) ?? 'might';
-        this.healToGreen(state, pid, trait);
-        const charges = Number(entity.components.custom?.charges ?? 2) - 1;
-        entity.components.custom = { ...(entity.components.custom ?? {}), charges };
-        trace(ctx, 'ANNOUNCEMENT', `${player.name} 使用治疗药膏（剩余 ${charges} 次）`, 350);
-        if (charges <= 0) this.consume(state, pid, entityId, ctx);
-        markUsed(state, pid, defId);
+        for (let step = 0; step < 2; step += 1) {
+          applyTraitSteps(state, pid, trait, 1, { force: true });
+        }
+        trace(ctx, 'ANNOUNCEMENT', `${player.name} 涂抹治疗药膏，${TRAIT_META[trait].zh} +2 步`, 350);
+        this.consume(state, pid, entityId, ctx);
         break;
       }
       case 'medical_kit': {
+        // Official: "Make a Knowledge roll: 4+ Expert care (Gain 2 Might); 1-3 Basic
+        // care (Gain 1 Might); 0 Fumbled." It heals Might, not any chosen trait.
         const target = String(action.payload?.target ?? pid);
-        const trait = (action.payload?.trait as TraitKey) ?? 'might';
         if (target !== pid && activeRoom(state, target) !== roomId) return;
         if (!state.players[target]?.alive) return;
-        const check = rollTraitCheck(state, pid, 'knowledge', { reason: 'medical kit', label: '医疗包' });
-        const heal = check.total >= 6 ? 3 : check.total >= 4 ? 2 : check.total >= 2 ? 1 : 0;
-        if (heal > 0) {
-          for (let i = 0; i < heal; i++) this.healToGreen(state, target, trait);
+        const check = rollTraitCheck(state, pid, 'knowledge', {
+          threshold: 4,
+          reason: 'medical kit',
+          label: '医疗包',
+          effect: '成功：目标力量 +2；失败：目标力量 +1'
+        });
+        const gain = check.success ? 2 : check.total >= 1 ? 1 : 0;
+        for (let step = 0; step < gain; step += 1) {
+          applyTraitSteps(state, target, 'might', 1, { force: true });
         }
-        trace(ctx, 'ANNOUNCEMENT', `医疗包：知识检定 ${check.total}，恢复 ${heal} 点肉体（${TRAIT_META[trait].zh}）`, 500);
+        trace(ctx, 'DICE_ROLL', `医疗包：知识检定 ${check.total} vs 4，力量 +${gain}`, 500);
         markUsed(state, pid, defId);
         break;
       }
       case 'music_box': {
-        // Official text: "Play melody: make a Sanity roll: 4+ Soothing tune (Gain 1
-        // Sanity); 0-3 Agonizing discord (Lose 1 Sanity)." The old version zeroed
-        // movesLeft/attacksLeft/skipActions on nearby low-sanity players, but
-        // resetTurnResources clears those at the target's turn start, so it did
-        // nothing at all.
+        // Official: "Play melody: make a Sanity roll: 4+ Soothing tune (Gain 1
+        // Sanity); 0-3 Agonizing discord (Lose 1 Sanity)."
         const check = rollTraitCheck(state, pid, 'sanity', {
           threshold: 4,
           reason: 'music box',
@@ -2207,12 +2200,22 @@ export class BetrayalRules {
         break;
       }
       case 'puzzle_box': {
-        const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 6, reason: 'puzzle box', label: '谜盒' });
+        // Official: "Make a Knowledge roll: 6+ Crack the box open (Gain 2 Knowledge,
+        // Gain 1 Might); 0-5 Remains sealed."
+        const check = rollTraitCheck(state, pid, 'knowledge', {
+          threshold: 6,
+          reason: 'puzzle box',
+          label: '谜盒',
+          effect: '成功：知识 +2、力量 +1；失败：打不开'
+        });
         if (check.success) {
-          this.drawItems(state, pid, 2, ctx);
+          for (let step = 0; step < 2; step += 1) {
+            applyTraitSteps(state, pid, 'knowledge', 1, { force: true });
+          }
+          applyTraitSteps(state, pid, 'might', 1, { force: true });
           this.consume(state, pid, entityId, ctx);
         }
-        trace(ctx, 'DICE_ROLL', `机关盒：知识检定 ${check.total} vs 6`, 500);
+        trace(ctx, 'DICE_ROLL', `谜盒：知识检定 ${check.total} vs 6`, 500);
         markUsed(state, pid, defId);
         break;
       }
