@@ -2,6 +2,7 @@ import { rooms, users } from './storage.ts';
 import { profileOf } from './auth.ts';
 import { randomId } from './config.ts';
 import { gameById } from './games.ts';
+import { GAME_REGISTRY } from '@rds/games/registry';
 import type { HubRoomInfo } from '@rds/room-protocol';
 
 interface RoomRec {
@@ -71,12 +72,33 @@ export function listRooms(): HubRoomInfo[] {
 
 export interface CreateRoomOpts { maxPlayers?: number; isPrivate?: boolean; scenarioId?: string; }
 
+/**
+ * Seats a room will actually be dealt.
+ *
+ * The kernel's `setup` only takes a seed, so a fixture's player count is fixed
+ * per scenario. Reading it back from the fixture (one throwaway `setup(1)`)
+ * keeps the room cap in sync with the seats that exist — the alternative is a
+ * room that accepts players the engine has no seat for (REVIEW.md S9).
+ */
+function fixtureSeats(gameId: string, scenarioId?: string): number | undefined {
+  const module = GAME_REGISTRY[gameId];
+  if (!module) return undefined;
+  const factory = scenarioId ? module.scenarios?.[scenarioId]?.setup : module.setup;
+  if (!factory) return undefined;
+  try {
+    return factory(1).playerOrder.length;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createRoom(userId: string, name: string, gameId: string, opts: CreateRoomOpts = {}): HubRoomInfo | { error: string } {
   const game = gameById(gameId);
   if (!game) return { error: '未知游戏：' + gameId };
   const variantOk = !opts.scenarioId || game.variants?.some(v => v.id === opts.scenarioId);
   if (!variantOk) return { error: '未知开局变体' };
-  const maxPlayers = Math.min(Math.max(opts.maxPlayers ?? game.maxPlayers, game.minPlayers), game.maxPlayers);
+  const ceiling = fixtureSeats(gameId, opts.scenarioId) ?? game.maxPlayers;
+  const maxPlayers = Math.min(Math.max(opts.maxPlayers ?? ceiling, game.minPlayers), ceiling);
   const id = randomId('r_');
   const rec: RoomRec = {
     id, name: (name || '未命名房间').slice(0, 40), gameId, hostId: userId,

@@ -1243,12 +1243,64 @@ export function phaseLabelOf(state: ProjectedGameState): string {
       }
       case 'dune_mahjong':
         return state.globalVars.battleMode === 'MAHJONG' ? 'PRIORITY CLAIM · 抢断窗口' : 'SIMULTANEOUS COMMIT · 同步盲提';
+      case 'poker': {
+        const hand = state.globalVars.hand as
+          | {
+              street?: string;
+              pot?: number;
+              streetBets?: Record<string, number>;
+              currentBet?: number;
+              buttonSeat?: number;
+              handNo?: number;
+            }
+          | undefined;
+        if (!hand) return 'HAND OVER · 等待发牌';
+        const street = hand.street ?? 'COMPLETE';
+        if (street === 'COMPLETE') return `HAND OVER · 第 ${Number(hand.handNo ?? 0) + 1} 手待发`;
+        const streetLabels: Record<string, string> = {
+          PREFLOP: 'PRE-FLOP · 翻前',
+          FLOP: 'FLOP · 翻牌圈',
+          TURN: 'TURN · 转牌圈',
+          RIVER: 'RIVER · 河牌圈'
+        };
+        const streetChips = Object.values(hand.streetBets ?? {}).reduce(
+          (sum, amount) => sum + Number(amount ?? 0),
+          0
+        );
+        const pot = Number(hand.pot ?? 0) + streetChips;
+        const owed = Number(hand.currentBet ?? 0);
+        return `${streetLabels[street] ?? street} · 底池 ${pot} · 需跟 ${owed}`;
+      }
       default:
         return state.phase;
     }
   }
 
 export function missionLineOf(state: ProjectedGameState): string | undefined {
+    if (state.gameId === 'poker') {
+      const hand = state.globalVars.hand as { handNo?: number; buttonSeat?: number } | undefined;
+      const config = state.globalVars.config as
+        | { startingStack?: number; smallBlind?: number; bigBlind?: number }
+        | undefined;
+      const last = state.globalVars.lastHand as
+        | { pots?: { amount: number; winners: string[] }[]; endedBy?: string }
+        | null
+        | undefined;
+      const buttonId = state.playerOrder[Number(hand?.buttonSeat ?? 0)];
+      const bits = [
+        `盲注 ${Number(config?.smallBlind ?? 5)} / ${Number(config?.bigBlind ?? 10)}`,
+        `初始 ${Number(config?.startingStack ?? 1000)}`,
+        `第 ${Number(hand?.handNo ?? 0)} 手`,
+        buttonId ? `庄家 ${state.players[buttonId]?.name ?? buttonId}` : null
+      ].filter(Boolean) as string[];
+      const pots = last?.pots ?? [];
+      if (pots.length > 0) {
+        const winners = [...new Set(pots.flatMap(pot => pot.winners.map(pid => state.players[pid]?.name ?? pid)))];
+        const total = pots.reduce((sum, pot) => sum + Number(pot.amount ?? 0), 0);
+        bits.push(`上一手：${winners.join(' / ')} 赢得 ${total}`);
+      }
+      return bits.join(' · ');
+    }
     if (state.gameId !== 'betrayal') return undefined;
     const objectives = state.globalVars.hauntObjectives as { hero?: string; traitor?: string } | undefined;
     if (!objectives) {
@@ -1443,6 +1495,51 @@ export function buildPlayersView(
         ];
         base.stats = [
           { label: player.customProps.leader ?? '将领', value: submitted ? '🔒 已锁定转盘' : '⚪ 未提交' }
+        ];
+      } else if (state.gameId === 'poker') {
+        const hand = state.globalVars.hand as
+          | {
+              street?: string;
+              buttonSeat?: number;
+              sbSeat?: number;
+              bbSeat?: number;
+              streetBets?: Record<string, number>;
+              folded?: string[];
+              allIn?: string[];
+            }
+          | undefined;
+        const chips = Number(player.customProps.chips ?? 0);
+        const seat = Number(player.customProps.seat ?? -1);
+        const streetBet = Number(hand?.streetBets?.[pid] ?? 0);
+        const folded = hand?.folded?.includes(pid) ?? false;
+        const allIn = hand?.allIn?.includes(pid) ?? false;
+        const marks: string[] = [];
+        if (hand?.buttonSeat === seat) marks.push('D 庄家');
+        if (hand?.sbSeat === seat) marks.push('SB');
+        if (hand?.bbSeat === seat) marks.push('BB');
+
+        base.score = chips;
+        base.scoreLabel = '筹码';
+        base.pips = [
+          { color: player.color, label: '筹码', short: '筹码', value: String(chips) },
+          ...(streetBet > 0
+            ? [{ color: '#e3b341', label: '本街已下注', short: '注', value: String(streetBet) }]
+            : [])
+        ];
+        base.stats = [
+          { label: '位置', value: marks.length > 0 ? marks.join(' · ') : '—' },
+          {
+            label: '状态',
+            value: folded
+              ? '🏳️ 已弃牌'
+              : allIn
+                ? '💥 全押'
+                : chips <= 0
+                  ? '💀 已出局'
+                  : hand?.street === 'COMPLETE'
+                    ? '等待下一手'
+                    : '在手牌中'
+          }
         ];
       }
 

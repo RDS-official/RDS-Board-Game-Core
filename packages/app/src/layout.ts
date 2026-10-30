@@ -19,7 +19,10 @@ const PRESENTATION: Record<string, LayoutHints> = {
   sanguosha: { padding: 4, cameraDirection: [0.06, 0.7, 0.9], minDistance: 17 },
   splendor: { padding: 4, cameraDirection: [0.05, 0.7, 0.9], minDistance: 15 },
   betrayal: { padding: 4, cameraDirection: [0.03, 0.68, 0.9], minDistance: 18 },
-  dune_mahjong: { padding: 4, cameraDirection: [0.05, 0.7, 0.9], minDistance: 15 }
+  dune_mahjong: { padding: 4, cameraDirection: [0.05, 0.7, 0.9], minDistance: 15 },
+  // A poker table reads best from a high seat: the board, the pot and every
+  // stack label have to be legible at once.
+  poker: { padding: 6, cameraDirection: [0.02, 0.86, 0.5], minDistance: 16 }
 };
 
 export function layoutForGame(gameId: string): LayoutHints {

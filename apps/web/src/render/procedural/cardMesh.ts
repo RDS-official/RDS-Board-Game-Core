@@ -28,6 +28,27 @@ import { CANVAS_FONT_STACK, CANVAS_SERIF_STACK } from '../fonts';
 /** Bumped whenever the painter changes: part of the texture cache key. */
 const FACE_STYLE_VERSION = 'occult-dark-v1';
 
+/**
+ * Poker uses a second painter (see "Playing cards" below): a real deck face
+ * instead of the occult plate. Its own version string keeps the two texture
+ * caches independent.
+ */
+const PLAYING_STYLE_VERSION = 'playing-classic-v2';
+
+/**
+ * Classic playing-card palette: ivory stock, ink black, casino red.
+ *
+ * The stock is deliberately a touch darker than paper white: the table is lit
+ * by a strong overhead key light and the renderer tone-maps with ACES, so a
+ * `#faf7ef` face clipped to flat white from most camera angles.
+ */
+const PLAYING_RED = '#c8102e';
+const PLAYING_BLACK = '#15161a';
+const PLAYING_STOCK = '#f2eddc';
+
+/** Which painter draws a card face: the occult plate, or a real playing card. */
+export type CardFaceStyle = 'plate' | 'playing';
+
 type PlateKind = 'OMEN' | 'ITEM' | 'EVENT' | 'ROOM' | 'RELIC';
 
 type Motif =
@@ -1738,6 +1759,402 @@ export class CardMeshBuilder {
     return result;
   }
 
+  /* ---------------------------------------------------------------------- */
+  /* Playing cards (poker)                                                   */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * A separate painter for real playing cards.
+   *
+   * The occult plate is the house style for Betrayal / Splendor / Sanguosha, but
+   * a poker table has to read like a deck of cards: ivory stock, oversized rank
+   * and suit in the corners, classic pip layouts, court figures for J/Q/K and a
+   * red lattice back. Faces are drawn with paths (not glyphs) so the pips keep
+   * their shape on every platform.
+   */
+
+  private static playingCache = new Map<string, THREE.CanvasTexture>();
+  private static playingBack: THREE.CanvasTexture | null = null;
+
+  private static isRedSuit(suit: string): boolean {
+    return suit === '♥' || suit === '♦' || suit === 'h' || suit === 'd';
+  }
+
+  private static rankText(rank: CardFace['rank']): string {
+    if (typeof rank === 'number') {
+      if (rank === 14) return 'A';
+      if (rank === 13) return 'K';
+      if (rank === 12) return 'Q';
+      if (rank === 11) return 'J';
+      return String(rank);
+    }
+    return String(rank ?? '');
+  }
+
+  /** Classic face (or the lattice back when the card is face down). */
+  public static createPlayingCardFaceTexture(face: CardFace, isMasked = false): THREE.CanvasTexture {
+    const key = [
+      PLAYING_STYLE_VERSION,
+      face.title,
+      face.suit ?? '',
+      face.rank ?? '',
+      isMasked ? 'masked' : 'open'
+    ].join('|');
+    const cached = this.playingCache.get(key);
+    if (cached) return cached;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 768;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('2D canvas context unavailable for the playing card face');
+
+    if (isMasked) this.paintPlayingBack(ctx);
+    else this.paintPlayingFace(ctx, face);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    this.playingCache.set(key, texture);
+    return texture;
+  }
+
+  private static paintPlayingFace(ctx: CanvasRenderingContext2D, face: CardFace): void {
+    const suit = face.suit ?? '♠';
+    const color = this.isRedSuit(suit) ? PLAYING_RED : PLAYING_BLACK;
+    const label = this.rankText(face.rank);
+
+    ctx.fillStyle = PLAYING_STOCK;
+    ctx.fillRect(0, 0, 512, 768);
+    ctx.strokeStyle = 'rgba(24,24,30,0.16)';
+    ctx.lineWidth = 6;
+    ctx.strokeRect(9, 9, 494, 750);
+    ctx.strokeStyle = 'rgba(24,24,30,0.07)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(24, 24, 464, 720);
+
+    this.paintPlayingCorner(ctx, label, suit, color, false);
+    this.paintPlayingCorner(ctx, label, suit, color, true);
+
+    const rankNumber = typeof face.rank === 'number' ? face.rank : 0;
+    if (label === 'A') {
+      this.drawPip(ctx, suit, 256, 404, 232, color);
+    } else if (label === 'J' || label === 'Q' || label === 'K') {
+      this.paintCourtFigure(ctx, label, suit, color);
+    } else {
+      this.paintPips(ctx, rankNumber, suit, color);
+    }
+  }
+
+  /** Oversized rank + suit in the top-left and (rotated) bottom-right corners. */
+  private static paintPlayingCorner(
+    ctx: CanvasRenderingContext2D,
+    label: string,
+    suit: string,
+    color: string,
+    flipped: boolean
+  ): void {
+    ctx.save();
+    if (flipped) {
+      ctx.translate(512, 768);
+      ctx.rotate(Math.PI);
+    }
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = color;
+    ctx.font = `bold ${label.length > 1 ? 128 : 172}px "Georgia", "Times New Roman", serif`;
+    ctx.fillText(label, 80, 164);
+    this.drawPip(ctx, suit, 80, 248, 104, color);
+    ctx.restore();
+  }
+
+  /** Standard pip arrangement for 2..10, mirrored across the middle like a real deck. */
+  private static paintPips(
+    ctx: CanvasRenderingContext2D,
+    rank: number,
+    suit: string,
+    color: string
+  ): void {
+    const layouts: Record<number, [number, number][]> = {
+      2: [[0.5, 0.26], [0.5, 0.74]],
+      3: [[0.5, 0.22], [0.5, 0.5], [0.5, 0.78]],
+      4: [[0.34, 0.25], [0.66, 0.25], [0.34, 0.75], [0.66, 0.75]],
+      5: [[0.34, 0.25], [0.66, 0.25], [0.5, 0.5], [0.34, 0.75], [0.66, 0.75]],
+      6: [[0.34, 0.2], [0.66, 0.2], [0.34, 0.5], [0.66, 0.5], [0.34, 0.8], [0.66, 0.8]],
+      7: [[0.34, 0.18], [0.66, 0.18], [0.5, 0.34], [0.34, 0.5], [0.66, 0.5], [0.34, 0.82], [0.66, 0.82]],
+      8: [
+        [0.34, 0.18], [0.66, 0.18], [0.5, 0.34], [0.34, 0.5],
+        [0.66, 0.5], [0.5, 0.66], [0.34, 0.82], [0.66, 0.82]
+      ],
+      9: [
+        [0.34, 0.16], [0.66, 0.16], [0.34, 0.38], [0.66, 0.38], [0.5, 0.5],
+        [0.34, 0.62], [0.66, 0.62], [0.34, 0.84], [0.66, 0.84]
+      ],
+      10: [
+        [0.34, 0.15], [0.66, 0.15], [0.5, 0.28], [0.34, 0.4], [0.66, 0.4],
+        [0.34, 0.6], [0.66, 0.6], [0.5, 0.72], [0.34, 0.85], [0.66, 0.85]
+      ]
+    };
+    const layout = layouts[rank] ?? layouts[2];
+    const size = rank >= 9 ? 54 : 64;
+    const top = 262;
+    const bottom = 700;
+    for (const [fx, fy] of layout) {
+      const y = top + fy * (bottom - top);
+      this.drawPip(ctx, suit, fx * 512, y, size, color, fy > 0.52);
+    }
+  }
+
+  /** J / Q / K: a framed court figure, crowned for Q and K, feathered for J. */
+  private static paintCourtFigure(
+    ctx: CanvasRenderingContext2D,
+    label: string,
+    suit: string,
+    color: string
+  ): void {
+    const left = 126;
+    const top = 244;
+    const width = 260;
+    const height = 404;
+    const gold = '#c9a227';
+    const cx = left + width / 2;
+
+    ctx.fillStyle = '#fffdf7';
+    ctx.fillRect(left, top, width, height);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 5;
+    ctx.strokeRect(left, top, width, height);
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(left + 9, top + 9, width - 18, height - 18);
+
+    const shoulderY = top + height - 92;
+    const headR = 44;
+    const headY = shoulderY - 150;
+
+    // Robe.
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(cx - 92, shoulderY);
+    ctx.quadraticCurveTo(cx - 74, shoulderY - 116, cx - 30, shoulderY - 138);
+    ctx.lineTo(cx + 30, shoulderY - 138);
+    ctx.quadraticCurveTo(cx + 74, shoulderY - 116, cx + 92, shoulderY);
+    ctx.closePath();
+    ctx.fill();
+
+    // Gold collar.
+    ctx.strokeStyle = gold;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(cx - 26, shoulderY - 136);
+    ctx.lineTo(cx, shoulderY - 92);
+    ctx.lineTo(cx + 26, shoulderY - 136);
+    ctx.stroke();
+
+    // Head.
+    ctx.fillStyle = '#f3d8b6';
+    ctx.beginPath();
+    ctx.ellipse(cx, headY, headR * 0.88, headR, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(60,40,30,0.35)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Hair, plus a beard for the king and long hair for the queen.
+    ctx.fillStyle = label === 'Q' ? '#6b3410' : '#3b2a20';
+    ctx.beginPath();
+    ctx.ellipse(cx, headY - headR * 0.52, headR * 0.94, headR * 0.62, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+    if (label === 'Q') {
+      ctx.beginPath();
+      ctx.ellipse(cx - headR * 0.9, headY + 26, 13, 42, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(cx + headR * 0.9, headY + 26, 13, 42, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (label === 'K') {
+      ctx.beginPath();
+      ctx.ellipse(cx, headY + headR * 0.6, headR * 0.54, headR * 0.44, 0, 0, Math.PI);
+      ctx.fill();
+    }
+
+    // Eyes.
+    ctx.fillStyle = '#241a14';
+    ctx.beginPath();
+    ctx.arc(cx - 14, headY - 4, 3.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + 14, headY - 4, 3.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (label === 'J') {
+      // Feathered cap.
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(cx - 46, headY - headR * 0.82);
+      ctx.quadraticCurveTo(cx, headY - headR * 1.9, cx + 42, headY - headR * 0.82);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = gold;
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(cx + 34, headY - headR * 1.1);
+      ctx.quadraticCurveTo(cx + 74, headY - headR * 1.95, cx + 94, headY - headR * 1.35);
+      ctx.stroke();
+    } else {
+      // Crown with three points and a jewel.
+      const crownY = headY - headR * 0.92;
+      ctx.fillStyle = gold;
+      ctx.beginPath();
+      ctx.moveTo(cx - 42, crownY);
+      ctx.lineTo(cx - 42, crownY - 36);
+      ctx.lineTo(cx - 21, crownY - 12);
+      ctx.lineTo(cx, crownY - 44);
+      ctx.lineTo(cx + 21, crownY - 12);
+      ctx.lineTo(cx + 42, crownY - 36);
+      ctx.lineTo(cx + 42, crownY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(cx, crownY - 10, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    this.drawPip(ctx, suit, cx, top + height - 40, 32, color);
+  }
+
+  /** Face-down poker card: deep red lattice with a spade medallion. */
+  private static paintPlayingBack(ctx: CanvasRenderingContext2D): void {
+    ctx.fillStyle = '#8c1c28';
+    ctx.fillRect(0, 0, 512, 768);
+    ctx.strokeStyle = '#f6ecd2';
+    ctx.lineWidth = 11;
+    ctx.strokeRect(14, 14, 484, 740);
+    ctx.strokeStyle = 'rgba(246,236,210,0.5)';
+    ctx.lineWidth = 3;
+    ctx.strokeRect(34, 34, 444, 700);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(34, 34, 444, 700);
+    ctx.clip();
+    ctx.strokeStyle = 'rgba(246,236,210,0.18)';
+    ctx.lineWidth = 3;
+    for (let offset = -768; offset < 1024; offset += 46) {
+      ctx.beginPath();
+      ctx.moveTo(offset, 34);
+      ctx.lineTo(offset + 700, 734);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(offset + 700, 34);
+      ctx.lineTo(offset, 734);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.fillStyle = 'rgba(140,28,40,0.94)';
+    ctx.beginPath();
+    ctx.arc(256, 384, 98, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#f6ecd2';
+    ctx.lineWidth = 5;
+    ctx.stroke();
+    this.drawPip(ctx, '♠', 256, 384, 112, '#f6ecd2');
+  }
+
+  private static getPlayingCardBackTexture(): THREE.CanvasTexture {
+    if (this.playingBack) return this.playingBack;
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 768;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('2D canvas context unavailable for the playing card back');
+    this.paintPlayingBack(ctx);
+    this.playingBack = new THREE.CanvasTexture(canvas);
+    this.playingBack.colorSpace = THREE.SRGBColorSpace;
+    return this.playingBack;
+  }
+
+  /**
+   * One suit pip, drawn as paths so it keeps its shape at any size.
+   * `size` is the pip's full height in pixels; `flipped` mirrors it for the
+   * lower half of a pip layout.
+   */
+  private static drawPip(
+    ctx: CanvasRenderingContext2D,
+    suit: string,
+    cx: number,
+    cy: number,
+    size: number,
+    color: string,
+    flipped = false
+  ): void {
+    ctx.save();
+    ctx.translate(cx, cy);
+    if (flipped) ctx.rotate(Math.PI);
+    ctx.scale(size, size);
+    ctx.fillStyle = color;
+
+    if (suit === '♦' || suit === 'd') {
+      ctx.beginPath();
+      ctx.moveTo(0, -0.58);
+      ctx.lineTo(0.4, 0);
+      ctx.lineTo(0, 0.58);
+      ctx.lineTo(-0.4, 0);
+      ctx.closePath();
+      ctx.fill();
+    } else if (suit === '♥' || suit === 'h') {
+      this.traceHeart(ctx);
+      ctx.fill();
+    } else if (suit === '♣' || suit === 'c') {
+      const lobe = 0.27;
+      ctx.beginPath();
+      ctx.arc(0, -0.26, lobe, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(-0.24, 0.12, lobe, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(0.24, 0.12, lobe, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-0.09, 0.18);
+      ctx.lineTo(0.09, 0.18);
+      ctx.lineTo(0.19, 0.58);
+      ctx.lineTo(-0.19, 0.58);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // Spade: an upside-down heart plus a stem.
+      ctx.save();
+      ctx.scale(1, -1);
+      this.traceHeart(ctx);
+      ctx.fill();
+      ctx.restore();
+      ctx.beginPath();
+      ctx.moveTo(-0.1, 0.2);
+      ctx.lineTo(0.1, 0.2);
+      ctx.lineTo(0.2, 0.58);
+      ctx.lineTo(-0.2, 0.58);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /** Heart outline centred on the origin, point at +y. */
+  private static traceHeart(ctx: CanvasRenderingContext2D): void {
+    ctx.beginPath();
+    ctx.moveTo(0, 0.56);
+    ctx.bezierCurveTo(-0.56, 0.1, -0.5, -0.46, -0.2, -0.48);
+    ctx.bezierCurveTo(-0.07, -0.5, 0, -0.4, 0, -0.3);
+    ctx.bezierCurveTo(0, -0.4, 0.07, -0.5, 0.2, -0.48);
+    ctx.bezierCurveTo(0.5, -0.46, 0.56, 0.1, 0, 0.56);
+    ctx.closePath();
+  }
+
   /**
    * Builds the complete card mesh with a dark lacquered rim.
    */
@@ -1747,22 +2164,40 @@ export class CardMeshBuilder {
     height = 2.1,
     isMasked = false,
     faceTextureOverride?: THREE.Texture | null,
-    backTextureOverride?: THREE.Texture | null
+    backTextureOverride?: THREE.Texture | null,
+    style: CardFaceStyle = 'plate'
   ): THREE.Mesh {
     const geom = new THREE.BoxGeometry(width, 0.02, height);
+    const playing = style === 'playing';
 
     const faceTextureFinal = faceTextureOverride ?? (face.imageUrl ? this.loadImageTexture(face.imageUrl) : null);
-    const faceTexture = faceTextureFinal || this.createCardFaceTexture(face, isMasked);
-    const backTexture = backTextureOverride || this.getCardBackTexture();
+    const faceTexture =
+      faceTextureFinal ||
+      (playing ? this.createPlayingCardFaceTexture(face, isMasked) : this.createCardFaceTexture(face, isMasked));
+    const backTexture =
+      backTextureOverride || (playing ? this.getPlayingCardBackTexture() : this.getCardBackTexture());
 
     // Rim reads as the dark lacquered edge of the plate, not white paper.
-    const edgeMat = new THREE.MeshStandardMaterial({ color: 0x1a120c, roughness: 0.7, metalness: 0.15 });
-    const faceMat = new THREE.MeshStandardMaterial({
-      map: faceTexture,
-      roughness: faceTextureFinal ? 0.4 : 0.52,
-      metalness: 0.06
-    });
-    const backMat = new THREE.MeshStandardMaterial({ map: backTexture, roughness: 0.6, metalness: 0.05 });
+    //
+    // Playing cards use *unlit* materials on purpose: the table is lit by a
+    // strong overhead pendant plus a warm directional key, and both a glossy
+    // and a diffuse paper face get blown out from oblique camera angles, which
+    // is exactly when the pips have to be read. `MeshBasicMaterial` shows the
+    // painted texture as-is — no specular sheet, no light-clipped ivory — so
+    // the rank and suit stay legible from every angle.
+    const edgeMat = playing
+      ? new THREE.MeshLambertMaterial({ color: 0xcfc8b6 })
+      : new THREE.MeshStandardMaterial({ color: 0x1a120c, roughness: 0.7, metalness: 0.15 });
+    const faceMat = playing
+      ? new THREE.MeshBasicMaterial({ map: faceTexture })
+      : new THREE.MeshStandardMaterial({
+          map: faceTexture,
+          roughness: faceTextureFinal ? 0.4 : 0.52,
+          metalness: 0.06
+        });
+    const backMat = playing
+      ? new THREE.MeshBasicMaterial({ map: backTexture })
+      : new THREE.MeshStandardMaterial({ map: backTexture, roughness: 0.6, metalness: 0.05 });
 
     // Box material order: +X, -X, +Y, -Y, +Z, -Z
     const materials = [edgeMat, edgeMat, faceMat, backMat, edgeMat, edgeMat];

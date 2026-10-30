@@ -503,7 +503,8 @@ export const GAME_TABS: GameTab[] = [
   { id: 'sanguosha', icon: '⚔️', name: '三国杀' },
   { id: 'splendor', icon: '💎', name: '璀璨宝石' },
   { id: 'betrayal', icon: '🕯️', name: '山屋惊魂' },
-  { id: 'dune_mahjong', icon: '🀄', name: '沙丘 & 麻将' }
+  { id: 'dune_mahjong', icon: '🀄', name: '沙丘 & 麻将' },
+  { id: 'poker', icon: '♠️', name: '德州扑克' }
 ];
 
 /** One selectable starting position of the current game. */
