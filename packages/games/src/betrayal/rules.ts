@@ -1614,7 +1614,7 @@ export class BetrayalRules {
     if (special === 'COAL_CHUTE') {
       const hasRope = ownsDef(state, pid, 'rope');
       if (!hasRope) {
-        damagePlayer(state, pid, 'PHYSICAL', 1);
+        this.dealDamage(state, pid, 'PHYSICAL', 1, ctx, '煤槽滑落');
         trace(ctx, 'DAMAGE_EFFECT', `${player.name} 从煤槽滑下擦伤（1 点物理伤害）`, 500);
       } else {
         trace(ctx, 'ANNOUNCEMENT', `${player.name} 借助绳索安全滑落煤槽`, 500);
@@ -1634,7 +1634,7 @@ export class BetrayalRules {
         });
         trace(ctx, 'DICE_ROLL', `坍塌之室 · 速度检定 ${check.total} vs 5`, 600);
         if (!check.success) {
-          damagePlayer(state, pid, 'PHYSICAL', 1);
+          this.dealDamage(state, pid, 'PHYSICAL', 1, ctx, '坍塌之室坠落');
           if (state.mapGraph.nodes.room_basement_landing) {
             movePlayerTo(state, pid, 'room_basement_landing');
           }
@@ -1760,7 +1760,7 @@ export class BetrayalRules {
           const defense = rollZeroDice(state.prngState, Math.max(1, traitValue(state.players[pid], 'might')));
           state.prngState = defense.nextSeed;
           const damage = Math.max(0, attack.sum - defense.sum);
-          if (damage > 0) damagePlayer(state, pid, effect.damage, damage);
+          if (damage > 0) this.dealDamage(state, pid, effect.damage, damage, ctx, '事件袭击');
           trace(ctx, 'DICE_ROLL', `袭击 [${attack.rolls.join('+')}]=${attack.sum} vs 防御 ${defense.sum}`, 600);
           break;
         }
@@ -1768,7 +1768,7 @@ export class BetrayalRules {
           if (state.mapGraph.nodes.room_basement_landing) {
             movePlayerTo(state, pid, 'room_basement_landing');
             state.players[pid].customProps.movesLeft = 0;
-            if (effect.damage > 0) damagePlayer(state, pid, 'PHYSICAL', effect.damage);
+            if (effect.damage > 0) this.dealDamage(state, pid, 'PHYSICAL', effect.damage, ctx, '坠落');
           }
           break;
         }
@@ -2571,6 +2571,30 @@ export class BetrayalRules {
     } else {
       trace(ctx, 'ANNOUNCEMENT', `${player.name} 没能唤醒 ${target.name}`, 400);
     }
+  }
+
+  /**
+   * "Takes N physical/mental damage" — the rulebook lets the explorer choose which
+   * trait absorbs it, so this opens the allocation window. Effects worded
+   * "lose 1 Might" are not damage and keep calling damagePlayer() with an explicit
+   * trait. See docs/RULES-DEVIATIONS.md (damage allocation).
+   */
+  private static dealDamage(
+    state: GameState,
+    pid: PlayerId,
+    kind: 'PHYSICAL' | 'MENTAL',
+    amount: number,
+    ctx: ReduceContext,
+    source: string
+  ): void {
+    if (amount <= 0) return;
+    // Only one allocation can be open at a time; anything beyond it is applied
+    // immediately so no damage is silently dropped.
+    if (state.globalVars.pendingDamage) {
+      damagePlayer(state, pid, kind, amount);
+      return;
+    }
+    this.openDamageWindow(state, pid, amount, kind, ctx, source);
   }
 
   private static openDamageWindow(

@@ -602,6 +602,19 @@ test('rules: exploring into the collapsed room does not freeze the table', () =>
     'the collapsed room is marked resolved'
   );
 
+  // The fall is damage, so the explorer chooses which trait absorbs it.
+  const allocate = engine.getLegalActions('p1').find(action => action.type === 'ALLOCATE_DAMAGE');
+  assert(!!allocate, 'the fall asks the explorer which trait takes the damage');
+  const speedBefore = traitIndex(engine.getRawState().players.p1, 'speed');
+  const mightBefore = traitIndex(engine.getRawState().players.p1, 'might');
+  assert(
+    engine.dispatch({ ...allocate!, payload: { trait: 'speed' } }).ok,
+    'allocating to Speed is accepted'
+  );
+  const wounded = engine.getRawState().players.p1;
+  assertEqual(traitIndex(wounded, 'speed'), speedBefore - 1, 'the chosen trait took the damage');
+  assertEqual(traitIndex(wounded, 'might'), mightBefore, 'the other physical trait is untouched');
+
   // Hand the turn on, then make sure the next explorer is not locked out.
   for (let guard = 0; guard < 8; guard += 1) {
     const state = engine.getRawState();
