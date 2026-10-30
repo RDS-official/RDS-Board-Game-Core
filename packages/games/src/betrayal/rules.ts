@@ -1686,6 +1686,9 @@ export class BetrayalRules {
             movePlayerTo(state, pid, 'room_basement_landing');
           }
           player.customProps.movesLeft = 0;
+          // Spend the tile: without this the room stays unresolved and every later
+          // entry re-triggers the collapse, which is what wedged the table.
+          room.props.resolved = true;
           trace(ctx, 'DAMAGE_EFFECT', `${player.name} 坠入地下室平台（1 点物理伤害）`, 700);
           return;
         }

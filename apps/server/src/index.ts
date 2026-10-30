@@ -17,6 +17,9 @@ import {
 import { listRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoomInfo, setReady, kickPlayer, transferHost, setRoomChangedHook, sweepRooms } from './rooms.ts';
 import { GAMES } from './games.ts';
 import { SignalHub } from './signal.ts';
+import { log, saveDiagnostics, pruneLogs, recentLogs } from './log.ts';
+
+pruneLogs();
 
 interface AppEnv {
   Variables: {
@@ -153,6 +156,42 @@ app.get('/avatars/:file', c => {
 });
 
 // ---- 游戏 / 房间 ----
+
+// ---- 诊断上报（客户端异常时自动发送，也可手动导出） ----
+const diagnosticsHits = new Map<string, { count: number; resetAt: number }>();
+const DIAG_WINDOW_MS = 60_000;
+const DIAG_MAX_PER_WINDOW = 12;
+const DIAG_MAX_BYTES = 256 * 1024;
+
+app.post('/api/diagnostics', async c => {
+  const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('x-real-ip') || 'unknown';
+  const now = Date.now();
+  const hit = diagnosticsHits.get(ip);
+  if (!hit || hit.resetAt < now) diagnosticsHits.set(ip, { count: 1, resetAt: now + DIAG_WINDOW_MS });
+  else if (hit.count >= DIAG_MAX_PER_WINDOW) return c.body(null, 429);
+  else hit.count += 1;
+
+  const text = await c.req.text().catch(() => '');
+  if (!text) return c.body(null, 400);
+  if (text.length > DIAG_MAX_BYTES) return c.body(null, 413);
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    payload = { unparsable: text.slice(0, 2000) };
+  }
+  saveDiagnostics(payload, { ip });
+  log.warn('diagnostics', 'client report received', { ip });
+  return c.body(null, 204);
+});
+
+app.get('/api/diagnostics/recent', c => {
+  // 仅用于本机排障：默认关闭，需显式开启环境变量。
+  if (process.env.HUB_DEBUG_LOGS !== '1') return c.body(null, 404);
+  return c.json(recentLogs(200));
+});
+
 app.get('/api/games', c => c.json(GAMES));
 app.get('/api/rooms', c => c.json(listRooms()));
 app.post('/api/rooms', async c => {
@@ -226,7 +265,7 @@ app.use('/*', serveStatic({ root: '../../dist' }));
 app.get('/*', serveStatic({ path: '../../dist/index.html' }));
 
 const server = serve({ fetch: app.fetch, port: PORT }, info => {
-  console.log('[hub] listening on http://127.0.0.1:' + info.port);
+  log.info('hub', 'listening', { port: info.port });
 });
 
 // ---- /ws 信令 ----
@@ -241,7 +280,7 @@ setRoomChangedHook(room => {
 // 阶段三：房间回收——60s 清扫一次（全员离线 >10min 或 6h 无动作 → 关房）。
 setInterval(() => {
   const closedIds = sweepRooms(id => hub.onlineUsers(id));
-  if (closedIds.length) console.log('[hub] room-sweep closed:', closedIds.join(','));
+  if (closedIds.length) log.info('hub', 'room-sweep closed', { rooms: closedIds });
 }, 60_000);
 server.on('upgrade', (req: http.IncomingMessage, socket, head) => {
   const url = new URL(req.url ?? '/', 'http://x');
@@ -251,12 +290,12 @@ server.on('upgrade', (req: http.IncomingMessage, socket, head) => {
     try {
       hub.accept(ws, url.searchParams.get('token'));
     } catch (err) {
-      console.error('[hub] ws accept error:', err);
+      log.error('hub', 'ws accept error', { message: (err as Error)?.message });
       try { ws.close(4000, 'error'); } catch { /* already closed */ }
     }
   });
 });
 
 // 兜底：未捕获异常记日志而不裸崩（pm2 内存阈值/显式重启仍可控）
-process.on('uncaughtException', err => console.error('[hub] uncaught exception:', err));
-process.on('unhandledRejection', err => console.error('[hub] unhandled rejection:', err));
+process.on('uncaughtException', err => log.error('hub', 'uncaught exception', { message: err?.message, stack: err?.stack }));
+process.on('unhandledRejection', err => log.error('hub', 'unhandled rejection', { message: (err as Error)?.message, stack: (err as Error)?.stack }));

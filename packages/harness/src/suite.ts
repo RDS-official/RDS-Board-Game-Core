@@ -21,6 +21,7 @@ import './suites/rules';
 import './suites/splendor';
 import './suites/splendorExpansions';
 import './suites/rulesBetrayal';
+import './suites/diagnostics';
 
 export { AssertionError, runCoreSuite } from './testKit';
 export type { SuiteCaseResult, SuiteResult } from './testKit';
