@@ -489,7 +489,10 @@ export class UniversalSession implements GamePresenter {
           title: entity.isMasked ? '未揭示的卡牌' : face.title,
           detail: entity.isMasked ? '需要先揭示这张牌。' : face.desc,
           durationMs: 6500,
-          card: entity.isMasked
+          // Games with hover previews do not need a click-sheet as well: the
+          // tooltip already shows the face, and two previews for one card read
+          // as two different cards. The notice above still fires.
+          card: entity.isMasked || this.module.meta.id === 'splendor'
             ? undefined
             : {
                 title: face.title,
