@@ -763,9 +763,6 @@ export class BetrayalRules {
             default: 'check'
           }
         ];
-      case 'angel_feather':
-        return [{ key: 'value', label: '指定骰点 (0–8)', kind: 'number', min: 0, max: 8, step: 1, default: 8 }];
-      case 'crystal_ball':
         return [
           {
             key: 'deck',
@@ -1464,7 +1461,6 @@ export class BetrayalRules {
   /** Pre-roll modifiers the explorer may declare before the dice are thrown. */
   private static checkDeclareOptions(state: GameState, pid: PlayerId): string[] {
     const options: string[] = [];
-    if (ownsDef(state, pid, 'angel_feather')) options.push('angel_feather');
     return options;
   }
 
@@ -1489,13 +1485,6 @@ export class BetrayalRules {
     const payload = (window.payload ?? {}) as { trait?: TraitKey; threshold?: number };
     const trait = (payload.trait ?? 'knowledge') as TraitKey;
     const threshold = Number(payload.threshold ?? 6);
-
-    // Declared modifiers are applied before the throw (angel feather pins it).
-    const declared = window.declares.flatMap(slot => slot.picked);
-    if (declared.includes('angel_feather')) {
-      state.players[pid].customProps.forcedRoll = { value: 8 };
-      this.consumeDef(state, pid, 'angel_feather', ctx);
-    }
 
     const check = rollTraitCheck(state, pid, trait, {
       threshold,
@@ -2028,13 +2017,6 @@ export class BetrayalRules {
           player.customProps.checkBonus = Number(player.customProps.checkBonus ?? 0) + 4;
           trace(ctx, 'ANNOUNCEMENT', `${player.name} 注射肾上腺素，下次检定 +4`, 400);
         }
-        this.consume(state, pid, entityId, ctx);
-        break;
-      }
-      case 'angel_feather': {
-        const value = Math.max(0, Math.min(8, Number(action.payload?.value ?? 8)));
-        player.customProps.forcedRoll = { value };
-        trace(ctx, 'ANNOUNCEMENT', `${player.name} 使用天使羽毛，指定下次掷骰为 ${value}`, 400);
         this.consume(state, pid, entityId, ctx);
         break;
       }
