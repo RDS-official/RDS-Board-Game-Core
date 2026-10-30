@@ -878,7 +878,7 @@ export class BetrayalRules {
 
         if (roll.sum === 0) {
           s.globalVars.elevatorRide = null;
-          damagePlayer(s, pid, 'PHYSICAL', 1);
+          this.dealDamage(s, pid, 'PHYSICAL', 1, ctx, '电梯失控');
           trace(ctx, 'DAMAGE_EFFECT', `电梯骤然下坠，${player.name} 受到 1 点物理伤害`, 600);
           break;
         }
@@ -1002,7 +1002,7 @@ export class BetrayalRules {
         // of a room while ignoring its harmful text, so the Gallery drop is free
         // for them and only the movement applies.
         if (!rope && player.role !== 'TRAITOR') {
-          damagePlayer(s, pid, 'PHYSICAL', 1);
+          this.dealDamage(s, pid, 'PHYSICAL', 1, ctx, '跳下楼层');
           trace(ctx, 'DAMAGE_EFFECT', `${player.name} 从楼座坠落，受到 1 点伤害`, 500);
         } else {
           trace(ctx, 'MOVE_OBJECT', `${player.name} 沿麻绳滑入舞厅`, 500);
@@ -2123,7 +2123,7 @@ export class BetrayalRules {
         const blast = rollZeroDice(state.prngState, 4);
         state.prngState = blast.nextSeed;
         for (const occupant of playersInRoom(state, targetRoom)) {
-          damagePlayer(state, occupant, 'PHYSICAL', blast.sum);
+          this.dealDamage(state, occupant, 'PHYSICAL', blast.sum, ctx, '雷管爆炸');
         }
         for (const monster of monstersInRoom(state, targetRoom)) {
           // Damage, not a stun: monsters carry a Might value and are defeated when
@@ -2413,7 +2413,7 @@ export class BetrayalRules {
         trace(ctx, 'ANNOUNCEMENT', `${target.name} 反击落空——远程攻击不受反伤`, 350);
         return;
       }
-      damagePlayer(state, pid, spec.mental ? 'MENTAL' : 'PHYSICAL', -diff);
+      this.dealDamage(state, pid, spec.mental ? 'MENTAL' : 'PHYSICAL', -diff, ctx, '攻击反伤');
       trace(ctx, 'DAMAGE_EFFECT', `${target.name} 反击 ${player.name}，造成 ${-diff} 点伤害`, 600);
     } else {
       trace(ctx, 'ANNOUNCEMENT', '双方势均力敌，无人受伤', 300);
@@ -2481,7 +2481,7 @@ export class BetrayalRules {
         trace(ctx, 'ANNOUNCEMENT', '昏迷的怪物虽然挡住了攻击，却无力反击', 350);
         return;
       }
-      damagePlayer(state, pid, monster.components.custom.attack === 'MENTAL' ? 'MENTAL' : 'PHYSICAL', -diff);
+      this.dealDamage(state, pid, monster.components.custom.attack === 'MENTAL' ? 'MENTAL' : 'PHYSICAL', -diff, ctx, '攻击反伤');
     } else {
       trace(ctx, 'ANNOUNCEMENT', '攻击被挡下', 300);
     }
@@ -2543,7 +2543,7 @@ export class BetrayalRules {
     if (spec.requiresSanityCheck) {
       const check = rollTraitCheck(state, pid, 'sanity', { threshold: spec.requiresSanityCheck, reason: '献祭匕首' });
       if (!check.success) {
-        damagePlayer(state, pid, 'MENTAL', 1);
+        this.dealDamage(state, pid, 'MENTAL', 1, ctx, '献祭匕首');
         trace(ctx, 'DAMAGE_EFFECT', '献祭匕首吸取了使用者的神智（-1）', 400);
       }
     }
@@ -2883,7 +2883,7 @@ export class BetrayalRules {
       haunt.progress = Number(haunt.progress ?? 0) + 1;
       trace(ctx, 'RULE_MUTATE', `封印进度 ${haunt.progress}/2`, 900);
     } else {
-      damagePlayer(state, pid, 'MENTAL', 1);
+      this.dealDamage(state, pid, 'MENTAL', 1, ctx, '封印仪式失败');
       trace(ctx, 'DAMAGE_EFFECT', '符文反噬，神智 -1', 500);
     }
   }
@@ -2916,7 +2916,7 @@ export class BetrayalRules {
       haunt.progress = Number(haunt.progress ?? 0) + 1;
       trace(ctx, 'RULE_MUTATE', `安魂仪式进度 ${haunt.progress}/3`, 900);
     } else {
-      damagePlayer(state, pid, 'MENTAL', 1);
+      this.dealDamage(state, pid, 'MENTAL', 1, ctx, '安魂仪式失败');
       trace(ctx, 'DAMAGE_EFFECT', '怨灵的哀嚎撕裂心智，神智 -1', 500);
     }
   }
@@ -2970,7 +2970,7 @@ export class BetrayalRules {
       haunt.progress = Number(haunt.progress ?? 0) + 1;
       trace(ctx, 'RULE_MUTATE', `✨ 【${player.name}】将圣水倒入圣水池！（圣化进度：${haunt.progress}/2）`, 1000);
     } else {
-      damagePlayer(state, pid, 'MENTAL', 1);
+      this.dealDamage(state, pid, 'MENTAL', 1, ctx, '圣化仪式失败');
       trace(ctx, 'DAMAGE_EFFECT', '阴风骤起扑灭了烛光，神智 -1', 500);
     }
   }
@@ -3009,7 +3009,7 @@ export class BetrayalRules {
       haunt.progress = Number(haunt.progress ?? 0) + 1;
       trace(ctx, 'RULE_MUTATE', `🌕 【${player.name}】引导星光压制满月诅咒！（压制进度：${haunt.progress}/3）`, 1000);
     } else {
-      damagePlayer(state, pid, 'PHYSICAL', 1);
+      this.dealDamage(state, pid, 'PHYSICAL', 1, ctx, '月相压制失败');
       trace(ctx, 'DAMAGE_EFFECT', '狼人感应到了星象干扰发出怒嚎，力量震荡受到 1 点创伤', 500);
     }
   }
@@ -3171,7 +3171,7 @@ export class BetrayalRules {
 
     // 1. 熔炉房：回合结束停留在此受到 1 点物理伤害（仅穿行无伤）
     if (special === 'FURNACE') {
-      damagePlayer(state, pid, 'PHYSICAL', 1);
+      this.dealDamage(state, pid, 'PHYSICAL', 1, ctx, '熔炉房');
       trace(ctx, 'DAMAGE_EFFECT', `🔥 ${player.name} 在熔炉房结束回合，被高温灼伤（1 点物理伤害）`, 500);
     }
 
@@ -3199,7 +3199,7 @@ export class BetrayalRules {
         const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: 'unholy room', label: '不洁房间' });
         trace(ctx, 'DICE_ROLL', `${room.props.name} · 神智检定 ${check.total} vs 4`, 600);
         if (!check.success) {
-          damagePlayer(state, pid, 'MENTAL', 1);
+          this.dealDamage(state, pid, 'MENTAL', 1, ctx, '阴冷房间');
           trace(ctx, 'DAMAGE_EFFECT', `👻 ${room.props.name} 的阴冷寒气侵蚀 ${player.name}（1 点精神伤害）`, 500);
         }
       }
@@ -3221,7 +3221,7 @@ export class BetrayalRules {
         const hasWindows = roomTags(state, dripRoom).includes('outside');
         if (!hasWindows) {
           const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: '滴血之声' });
-          if (!check.success) damagePlayer(state, pid, 'MENTAL', 1);
+          this.dealDamage(state, pid, 'MENTAL', 1, ctx, '滴血之声');
         }
       } else if (effect === 'POSSESSION') {
         const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: '恶灵附体' });
@@ -3231,13 +3231,13 @@ export class BetrayalRules {
         }
       } else if (effect === 'CHILL') {
         const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: '刺骨寒意' });
-        if (!check.success) damagePlayer(state, pid, 'MENTAL', 1);
+        this.dealDamage(state, pid, 'MENTAL', 1, ctx, '刺骨寒意');
       } else if (effect === 'HAUNTING_MELODY') {
         const check = rollTraitCheck(state, pid, 'knowledge', { threshold: 5, reason: '萦绕旋律' });
         if (!check.success) applyTraitSteps(state, pid, 'knowledge', -1);
       } else if (effect === 'MARK_OF_FEAR') {
         const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: '恐惧印记' });
-        if (!check.success) damagePlayer(state, pid, 'MENTAL', 1);
+        this.dealDamage(state, pid, 'MENTAL', 1, ctx, '恐惧印记');
       }
     }
 
@@ -3415,7 +3415,7 @@ export class BetrayalRules {
           trace(ctx, 'RULE_MUTATE', '木乃伊夺走了小女孩，开始走向石棺', 1100);
         }
       } else {
-        damagePlayer(state, victimId, mental ? 'MENTAL' : 'PHYSICAL', diff);
+        this.dealDamage(state, victimId, mental ? 'MENTAL' : 'PHYSICAL', diff, ctx, '怪物攻击');
       }
     } else if (defense.sum > attackDice.sum) {
       this.stunMonster(state, monster, ctx);

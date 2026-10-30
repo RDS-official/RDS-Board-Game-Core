@@ -9,6 +9,7 @@ import { GAME_MODULES, GAME_REGISTRY } from '@rds/games/registry'
 import { RandomPolicy, runPolicies } from '../policy'
 import { GameRoom } from '@rds/net/room'
 import { UniversalSession } from '@rds/app/session'
+import { resolvePendingDamage } from '../suiteHelpers';
 import { test, assert, assertEqual } from '../testKit';
 
 test('room: checkpoints restore through replay', () => {
@@ -55,6 +56,7 @@ test('kernel: NPC actions require the controlling viewer', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'haunt_mummy' });
   for (const playerId of ['p2', 'p3', 'p1']) {
     assert(engine.dispatch({ type: 'END_TURN', playerId }).ok, `${playerId} ends turn`);
+    resolvePendingDamage(engine);
   }
   const npc = engine.getFocusActors()[0];
   assert(!!npc, 'NPC has focus');
