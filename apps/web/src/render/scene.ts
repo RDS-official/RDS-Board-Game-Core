@@ -191,20 +191,57 @@ const PKMN_NO_BONUS_COLUMN = 'none';
  * Stage decks form one column; the special decks sit outboard of their reveal
  * slot so no pile ever covers a face-up card.
  */
+/**
+ * The printed card aspect (560×747 artwork, 180×240 backs: both 0.75).
+ *
+ * Every Pokémon card — market, deck, tableau, rare/legend reveal — is derived
+ * from this one width/height pair. A card that does not match it shows its art
+ * stretched, and a pile sized differently from the card it deals reads as two
+ * kinds of card instead of the same card, face down.
+ */
+const PKMN_CARD_W = 1.2;
+const PKMN_CARD_H = PKMN_CARD_W / 0.75;
+/** Deck piles share the face-up footprint but sit a touch smaller for depth. */
+const PKMN_DECK_CARD_W = 1.08;
+const PKMN_DECK_CARD_H = PKMN_DECK_CARD_W / 0.75;
+/** Tableau cards: same aspect, reduced so a full column still fits its band. */
+const PKMN_SMALL_CARD_W = 0.78;
+const PKMN_SMALL_CARD_H = PKMN_SMALL_CARD_W / 0.75;
+
+/**
+ * Four fixed bands, left to right, each sized from the card footprint so no
+ * band can drift into its neighbour:
+ *
+ *   deck rail | reveal slots | market grid | ball bank
+ *
+ * The deck rail is a *grid*, not a column: five 1.44-tall cards stacked in one
+ * column need 7.2 units of depth and push the rare/legend slots off the table.
+ * Two columns of three keeps every pile inside the felt.
+ */
+const PKMN_DECK_RAIL_X = -8.9;
+const PKMN_DECK_COLUMN_STEP = PKMN_DECK_CARD_W + 0.5;
+const PKMN_DECK_ROW_STEP = PKMN_DECK_CARD_H + 0.5;
+const PKMN_DECK_Z_TOP = 1.6;
+
 const PKMN_DECK_RAIL: Record<string, [number, number, number]> = {
-  zone_deck_s1: [-5.9, 0.06, 3.0],
-  zone_deck_s2: [-5.9, 0.06, 1.7],
-  zone_deck_s3: [-5.9, 0.06, 0.4],
-  zone_deck_rare: [-10.0, 0.06, 1.0],
-  zone_deck_legend: [-10.0, 0.06, -1.0]
+  // Left column: the three stage piles.
+  zone_deck_s1: [PKMN_DECK_RAIL_X, 0.06, PKMN_DECK_Z_TOP],
+  zone_deck_s2: [PKMN_DECK_RAIL_X, 0.06, PKMN_DECK_Z_TOP - PKMN_DECK_ROW_STEP],
+  zone_deck_s3: [PKMN_DECK_RAIL_X, 0.06, PKMN_DECK_Z_TOP - 2 * PKMN_DECK_ROW_STEP],
+  // Right column, top two cells: the special piles.
+  zone_deck_rare: [PKMN_DECK_RAIL_X + PKMN_DECK_COLUMN_STEP, 0.06, PKMN_DECK_Z_TOP],
+  zone_deck_legend: [PKMN_DECK_RAIL_X + PKMN_DECK_COLUMN_STEP, 0.06, PKMN_DECK_Z_TOP - PKMN_DECK_ROW_STEP]
   // Mega Evolution and Poké Mart piles are absent from the base game, so they
   // hold no rail slot here either. Add them back only alongside their rules.
 };
 
-/** Reveal slot anchors for the rare / legendary rows. */
+/**
+ * Reveal slots: the two face-up special cards, in the right column's third cell
+ * — below their own face-down piles, not on top of them.
+ */
 const PKMN_REVEAL_RAIL: Record<string, [number, number, number]> = {
-  zone_rare: [-8.0, 0.1, 1.0],
-  zone_legend: [-8.0, 0.1, -1.0]
+  zone_rare: [PKMN_DECK_RAIL_X + PKMN_DECK_COLUMN_STEP, 0.1, PKMN_DECK_Z_TOP - 2 * PKMN_DECK_ROW_STEP],
+  zone_legend: [PKMN_DECK_RAIL_X + 2 * PKMN_DECK_COLUMN_STEP, 0.1, PKMN_DECK_Z_TOP - 2 * PKMN_DECK_ROW_STEP]
 };
 
 /**
@@ -240,9 +277,20 @@ const PKMN_TABLEAU_SLOT_WIDTH = 5.3;
 const PKMN_TABLEAU_COLUMN_STEP = 0.66;
 /** Distance from a tableau's centre to its buried-Pokémon pile. */
 const PKMN_BURIED_OFFSET_X = 2.28;
-/** Small face-down card used for decks and buried Pokémon. */
-const PKMN_SMALL_CARD_W = 0.78;
-const PKMN_SMALL_CARD_H = 1.24;
+
+/**
+ * Market grid: four cards per tier, three tiers.
+ *
+ * The gutters are derived from the card footprint rather than written as
+ * absolute numbers, so a card that grows cannot silently overlap its neighbour
+ * (the bug this replaced: a 2.0-tall card on a 2.4 row pitch, captions
+ * colliding with the row below).
+ */
+const PKMN_MARKET_COLUMNS = 4;
+const PKMN_MARKET_X = -1.4;
+const PKMN_MARKET_Z1 = 2.0;
+const PKMN_MARKET_PITCH_X = PKMN_CARD_W + 0.34;
+const PKMN_MARKET_PITCH_Z = PKMN_CARD_H + 0.52;
 
 export class BoardGameScene {
   private static readonly _scratchNdc = new THREE.Vector2();
@@ -2935,14 +2983,14 @@ export class BoardGameScene {
 
     // Cap the visible slab so a 35-card deck stays a tidy pile, not a tower.
     const layers = Math.min(count, 18);
-    const layerStep = 0.014;
+    const layerStep = 0.008;
     const slabHeight = Math.max(0.02, layers * layerStep);
     const topY = anchor[1] + slabHeight;
 
     // Block body sits entirely *below* the top card, so the back art is never
     // occluded by its own edge band.
     const slab = new THREE.Mesh(
-      new THREE.BoxGeometry(PKMN_SMALL_CARD_W - 0.03, slabHeight, PKMN_SMALL_CARD_H - 0.03),
+      new THREE.BoxGeometry(PKMN_DECK_CARD_W - 0.03, slabHeight, PKMN_DECK_CARD_H - 0.03),
       new THREE.MeshStandardMaterial({ color: 0x1c2430, roughness: 0.85, metalness: 0.05 })
     );
     slab.position.set(anchor[0], anchor[1] + slabHeight / 2, anchor[2]);
@@ -2951,8 +2999,8 @@ export class BoardGameScene {
 
     const mesh = this.createPokemonFaceDownMesh(
       art,
-      PKMN_SMALL_CARD_W,
-      PKMN_SMALL_CARD_H,
+      PKMN_DECK_CARD_W,
+      PKMN_DECK_CARD_H,
       PKMN_DECK_LABEL[zoneId] ?? zone.name
     );
     // +0.012 clears the slab's own top face.
@@ -2967,8 +3015,10 @@ export class BoardGameScene {
       '#cbb57a',
       34
     );
-    label.position.set(anchor[0], topY + 0.42, anchor[2] + PKMN_SMALL_CARD_H * 0.5 + 0.26);
-    label.scale.set(1.7, 0.4, 1);
+    // The caption belongs to its own pile: sit it just inside the front edge so
+    // the next pile in the rail (one row step away) is never covered.
+    label.position.set(anchor[0], topY + 0.05, anchor[2] + PKMN_DECK_CARD_H * 0.5 - 0.16);
+    label.scale.set(PKMN_DECK_CARD_W * 0.95, 0.26, 1);
     this.boardObjectsGroup.add(label);
   }
 
@@ -2996,7 +3046,7 @@ export class BoardGameScene {
 
     // Mat + accent ring: presentation only, never a hit target.
     const mat = new THREE.Mesh(
-      new THREE.BoxGeometry(1.32, 0.02, 1.98),
+      new THREE.BoxGeometry(PKMN_CARD_W + 0.26, 0.02, PKMN_CARD_H + 0.26),
       new THREE.MeshStandardMaterial({ color: 0x0a1712, roughness: 0.96, metalness: 0.02 })
     );
     mat.position.set(anchor[0], 0.02, anchor[2]);
@@ -3135,8 +3185,10 @@ export class BoardGameScene {
       // `红 ×N` badge above the column.
       const caption = PKMN_BALL_LABEL[column] ?? PKMN_BONUS_LABEL_EXTRA[column] ?? column;
       const badge = this.createLabelSprite(`${caption} ×${bucket.length}`, PKMN_BALL_TINT[column] ?? '#cbd5e1', 30);
-      badge.position.set(columnX, 0.62, slotZ - PKMN_SMALL_CARD_H * 0.5 - 0.18);
-      badge.scale.set(1.05, 0.26, 1);
+      // Keep the badge near the felt: a sprite that rides too high floats over
+      // the market row in the isometric view and reads as part of it.
+      badge.position.set(columnX, 0.22, slotZ - PKMN_SMALL_CARD_H * 0.5 - 0.14);
+      badge.scale.set(0.86, 0.2, 1);
       this.boardObjectsGroup.add(badge);
     });
 
@@ -3544,16 +3596,29 @@ export class BoardGameScene {
     }
 
     if (state.gameId === 'splendor') {
-      // Market rows (three tiers of four cards).
-      this.addTableMat(10.2, 7.6, 0.2, 0.1);
-      // Deck rail: stage decks nearest the market, special decks outboard.
-      this.addTableMat(1.5, 9.2, -5.9, 0.1);
-      this.addTableMat(1.5, 9.2, -10.0, 0.1);
-      // Rare / legendary reveal column between the two rails.
-      this.addTableMat(2.4, 6.4, -8.0, 0.1);
-      const title = this.createLabelSprite('POKÉMON MARKET · 宝可梦市场', '#c9b57a', 38);
-      title.position.set(0.2, 0.5, -3.9);
-      title.scale.set(5.2, 0.68, 1);
+      // Market grid, sized to the actual card extent so the felt never shows a
+      // mismatch between the mat and the cards standing on it.
+      // One mat per band, each sized from the cards that stand on it.
+      const gridW = (PKMN_MARKET_COLUMNS - 1) * PKMN_MARKET_PITCH_X + PKMN_CARD_W + 0.7;
+      const gridD = 2 * PKMN_MARKET_PITCH_Z + PKMN_CARD_H + 0.7;
+      const gridZ = PKMN_MARKET_Z1 - PKMN_MARKET_PITCH_Z;
+      this.addTableMat(gridW, gridD, PKMN_MARKET_X, gridZ);
+
+      // Deck rail: two columns of three, so all five piles stay on the felt.
+      const deckTopZ = PKMN_DECK_Z_TOP + PKMN_DECK_CARD_H / 2 + 0.32;
+      const deckBottomZ = PKMN_DECK_Z_TOP - 2 * PKMN_DECK_ROW_STEP - PKMN_DECK_CARD_H / 2 - 0.32;
+      this.addTableMat(
+        PKMN_DECK_COLUMN_STEP + PKMN_DECK_CARD_W + 0.6,
+        deckTopZ - deckBottomZ,
+        PKMN_DECK_RAIL_X + PKMN_DECK_COLUMN_STEP / 2,
+        (deckTopZ + deckBottomZ) / 2
+      );
+
+      const title = this.createLabelSprite('POKÉMON MARKET · 宝可梦市场', '#c9b57a', 34);
+      // Low and just clear of the first row: a tall sprite at this depth is
+      // projected back across the cards behind it.
+      title.position.set(PKMN_MARKET_X, 0.24, PKMN_MARKET_Z1 + PKMN_CARD_H * 0.5 + 0.52);
+      title.scale.set(4.0, 0.44, 1);
       this.boardObjectsGroup.add(title);
 
       // Poké Ball bank tray — widened to hold all six colours side by side.
@@ -3995,14 +4060,22 @@ export class BoardGameScene {
     const isPkmn = this.lastState?.gameId === 'splendor';
     const mesh = CardMeshBuilder.createCardMesh(
       face,
-      1.35,
-      2.0,
+      isPkmn ? PKMN_CARD_W : 1.35,
+      isPkmn ? PKMN_CARD_H : 2.0,
       isMasked,
       isPkmn ? pokemonCardTexture(custom) : null,
       isPkmn ? pokemonCardBackTexture(custom) : null
     );
 
-    if (zone.id === 'zone_market_t1') {
+    if (isPkmn && (zone.id === 'zone_market_t1' || zone.id === 'zone_market_t2' || zone.id === 'zone_market_t3')) {
+      // One row per tier, laid out from the card size: `PKMN_MARKET_PITCH_X`
+      // leaves a readable gutter, and the row pitch leaves room for the caption
+      // strip under each card.
+      const row = zone.id === 'zone_market_t1' ? 0 : zone.id === 'zone_market_t2' ? 1 : 2;
+      const firstX = PKMN_MARKET_X - ((PKMN_MARKET_COLUMNS - 1) * PKMN_MARKET_PITCH_X) / 2;
+      mesh.position.set(firstX + index * PKMN_MARKET_PITCH_X, 0.1, PKMN_MARKET_Z1 - row * PKMN_MARKET_PITCH_Z);
+      mesh.rotation.y = 0;
+    } else if (zone.id === 'zone_market_t1') {
       mesh.position.set(-3.9 + index * 1.52, 0.1, 2.5);
       mesh.rotation.y = 0;
     } else if (zone.id === 'zone_market_t2') {
