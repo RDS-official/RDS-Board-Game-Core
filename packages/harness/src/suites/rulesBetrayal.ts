@@ -5,7 +5,7 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { ROOM_DEFS } from '@rds/games/betrayal/cards';
-import { addEffect, hostilesInRoom, movePlayerTo, movementCost, ongoingEffectKinds, traitIndex, traitValue, hasRolledThisTurn } from '@rds/games/betrayal/helpers';
+import { addEffect, effectiveTrait, hostilesInRoom, movePlayerTo, movementCost, ongoingEffectKinds, rollTraitCheck, traitIndex, traitModifiers, traitValue, hasRolledThisTurn } from '@rds/games/betrayal/helpers';
 import { addExploredRoom, grantItem, grantOmen } from '@rds/games/betrayal/scenarios';
 import { stackRoomTiles } from '../suiteHelpers';
 import { test, assert, assertEqual } from '../testKit';
@@ -611,4 +611,29 @@ test('rules: exploring into the collapsed room does not freeze the table', () =>
     legal.some(action => action.type === 'MOVE_TO_ROOM' || action.type === 'EXPLORE_DOOR'),
     `the next explorer can still act (got: ${legal.map(action => action.type).join(', ') || 'nothing'})`
   );
+});
+
+test('rules: a carried modifier feeds the dice, not a hidden stat', () => {
+  // Armor reads "+1 Might" on the card. The old `passive: { physicalArmor: 1 }` was
+  // never read by anything, so the card did nothing at all.
+  // See docs/ENGINE-PASSIVE-MODIFIERS.md.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'exploration' });
+  const raw = engine.getRawState();
+  assertEqual(traitModifiers(raw, 'p1').might, 0, 'no modifiers before the armor is picked up');
+
+  grantItem(raw, 'p1', 'armor');
+  const after = traitModifiers(raw, 'p1');
+  assertEqual(after.might, 1, 'the armor grants +1 Might');
+  assertEqual(after.speed, 0, 'and touches nothing else');
+
+  assertEqual(
+    effectiveTrait(raw, 'p1', 'might'),
+    traitValue(raw.players.p1, 'might') + 1,
+    'the effective value includes the modifier'
+  );
+
+  // The bonus has to reach the dice, otherwise it is dead data again.
+  raw.players.p1.customProps.forcedRoll = { value: 4 };
+  const check = rollTraitCheck(raw, 'p1', 'might', { threshold: 1 });
+  assertEqual(check.count, effectiveTrait(raw, 'p1', 'might'), 'the check rolls the modified value');
 });
