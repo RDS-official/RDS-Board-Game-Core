@@ -4641,3 +4641,18 @@ select.pf-control {
   color: #ffe9bd;
   font-weight: 600;
 }
+
+/* Real artwork inside the card sheet (imported decks).
+
+   The sheet's frame was built for a plate drawing; a photograph-like Pokémon
+   face wants the same width but its own aspect, so it fills the art slot and
+   keeps the rounded corners of the plate. */
+.card-sheet .cs-art-img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 178, 108, 0.28);
+  background: rgba(0, 0, 0, 0.4);
+}
