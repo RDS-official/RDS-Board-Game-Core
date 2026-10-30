@@ -211,11 +211,11 @@ export async function startAdmin(
         <div class="adm-nav">
           <div class="adm-userchip">
             <span class="adm-avatar">${esc((adminUser.displayName || adminUser.name).slice(0, 1).toUpperCase())}</span>
-            <span>${esc(adminUser.displayName || adminUser.name)} (管理员)</span>
+            <span class="adm-userchip-name">${esc(adminUser.displayName || adminUser.name)}</span>
           </div>
           <button id="adm-nav-my-pass" class="adm-btn adm-btn-secondary">修改密码</button>
-          <button id="adm-nav-lobby" class="adm-btn adm-btn-secondary">返回游戏大厅</button>
-          <button id="adm-nav-logout" class="adm-btn adm-btn-secondary">退出登录</button>
+          <button id="adm-nav-lobby" class="adm-btn adm-btn-secondary">返回大厅</button>
+          <button id="adm-nav-logout" class="adm-btn adm-btn-secondary">退出</button>
         </div>
       </header>
 
@@ -224,21 +224,21 @@ export async function startAdmin(
         <section class="adm-stats">
           <div class="adm-stat-card">
             <div class="adm-stat-meta">
-              <span class="adm-stat-label">注册总账号</span>
+              <span class="adm-stat-label">总账号</span>
               <span class="adm-stat-val">${stats.totalUsers}</span>
             </div>
             <div class="adm-stat-icon">👥</div>
           </div>
           <div class="adm-stat-card">
             <div class="adm-stat-meta">
-              <span class="adm-stat-label">管理员账号</span>
+              <span class="adm-stat-label">管理员</span>
               <span class="adm-stat-val" style="color: var(--gold);">${stats.adminUsers}</span>
             </div>
             <div class="adm-stat-icon">🛡️</div>
           </div>
           <div class="adm-stat-card">
             <div class="adm-stat-meta">
-              <span class="adm-stat-label">已禁用账号</span>
+              <span class="adm-stat-label">已禁用</span>
               <span class="adm-stat-val" style="color: ${stats.disabledUsers > 0 ? 'var(--err)' : 'var(--muted)'};">${stats.disabledUsers}</span>
             </div>
             <div class="adm-stat-icon">🚫</div>
@@ -248,7 +248,7 @@ export async function startAdmin(
         <!-- 工具栏 -->
         <section class="adm-toolbar">
           <div class="adm-filters">
-            <input id="adm-filter-search" class="adm-input" placeholder="搜索用户名 / 昵称 / ID…" value="${esc(searchQuery)}" />
+            <input id="adm-filter-search" class="adm-input" placeholder="搜索用户名 / 昵称…" value="${esc(searchQuery)}" />
             <select id="adm-filter-role" class="adm-select">
               <option value="all" ${roleFilter === 'all' ? 'selected' : ''}>全部角色</option>
               <option value="user" ${roleFilter === 'user' ? 'selected' : ''}>普通玩家 (user)</option>
@@ -270,18 +270,17 @@ export async function startAdmin(
           <table class="adm-table">
             <thead>
               <tr>
-                <th style="width: 260px;">账号信息</th>
-                <th style="width: 160px;">用户 ID</th>
-                <th style="width: 120px;">角色权限</th>
-                <th style="width: 110px;">状态</th>
-                <th style="width: 160px;">创建时间</th>
-                <th style="text-align: right;">管理操作</th>
+                <th style="min-width: 200px;">账号信息</th>
+                <th class="adm-col-role" style="width: 120px;">角色权限</th>
+                <th class="adm-col-status" style="width: 100px;">状态</th>
+                <th class="adm-col-time" style="width: 160px;">创建时间</th>
+                <th style="text-align: right; min-width: 160px;">管理操作</th>
               </tr>
             </thead>
             <tbody>
               ${
                 filtered.length === 0
-                  ? `<tr><td colspan="6" class="adm-empty">没有匹配的账号数据</td></tr>`
+                  ? `<tr><td colspan="5" class="adm-empty">没有匹配的账号数据</td></tr>`
                   : filtered.map(u => renderUserRow(u, adminUser!)).join('')
               }
             </tbody>
@@ -310,49 +309,60 @@ export async function startAdmin(
           <div class="adm-user-cell">
             ${avatarHtml}
             <div class="adm-cell-info">
-              <span class="adm-cell-title">${esc(u.displayName || u.name)}</span>
-              <span class="adm-cell-sub">@${esc(u.name)}</span>
+              <div class="adm-cell-name-row">
+                <span class="adm-cell-title">${esc(u.displayName || u.name)}</span>
+                <span class="adm-cell-sub">@${esc(u.name)}</span>
+              </div>
+              <div class="adm-mobile-badges">
+                ${
+                  u.role === 'admin'
+                    ? `<span class="adm-badge adm-badge-admin">👑 管理员</span>`
+                    : `<span class="adm-badge adm-badge-user">普通用户</span>`
+                }
+                ${
+                  u.disabled
+                    ? `<span class="adm-badge adm-badge-disabled">已禁用</span>`
+                    : `<span class="adm-badge adm-badge-ok">正常</span>`
+                }
+              </div>
             </div>
           </div>
         </td>
-        <td>
-          <span style="font-family: monospace; font-size: 13px; color: var(--muted);">${esc(u.id)}</span>
-        </td>
-        <td>
+        <td class="adm-col-role">
           ${
             u.role === 'admin'
               ? `<span class="adm-badge adm-badge-admin">👑 管理员</span>`
               : `<span class="adm-badge adm-badge-user">普通用户</span>`
           }
         </td>
-        <td>
+        <td class="adm-col-status">
           ${
             u.disabled
               ? `<span class="adm-badge adm-badge-disabled">已禁用</span>`
               : `<span class="adm-badge adm-badge-ok">正常</span>`
           }
         </td>
-        <td style="color: var(--muted); font-size: 13px;">
+        <td class="adm-col-time" style="color: var(--muted); font-size: 13px;">
           ${formatDate(u.createdAt)}
         </td>
         <td>
           <div class="adm-actions" style="justify-content: flex-end;">
-            <button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="edit" data-id="${esc(u.id)}">编辑</button>
             ${
               isSelf
-                ? `<button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="self-pass" data-id="${esc(u.id)}">改密</button>`
-                : `<button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="reset-pass" data-id="${esc(u.id)}" title="管理员直接修改对方密码">改密</button>`
+                ? `<button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="self-pass">修改密码</button>`
+                : `<button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="reset-pass" data-id="${esc(u.id)}" title="管理员直接修改对方密码">修改密码</button>`
             }
+            ${
+              !isRootAdmin && !isSelf
+                ? `<button class="adm-btn adm-btn-danger adm-btn-mini" data-action="delete" data-id="${esc(u.id)}">删除</button>`
+                : ''
+            }
+            <button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="edit" data-id="${esc(u.id)}">编辑</button>
             ${
               !isRootAdmin && !isSelf
                 ? `<button class="adm-btn adm-btn-secondary adm-btn-mini" data-action="toggle-status" data-id="${esc(u.id)}" data-disabled="${u.disabled ? '1' : '0'}">
                     ${u.disabled ? '启用' : '禁用'}
                   </button>`
-                : ''
-            }
-            ${
-              !isRootAdmin && !isSelf
-                ? `<button class="adm-btn adm-btn-danger adm-btn-mini" data-action="delete" data-id="${esc(u.id)}">删除</button>`
                 : ''
             }
           </div>

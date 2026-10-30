@@ -491,3 +491,154 @@
 .adm-text-link:hover {
   filter: brightness(1.2);
 }
+
+.adm-mobile-badges {
+  display: none;
+}
+
+.adm-cell-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 响应式断点优化 (<= 768px 移动端完美适配) */
+@media (max-width: 768px) {
+  .adm-header {
+    padding: 12px 14px;
+    gap: 8px;
+  }
+  .adm-brand {
+    font-size: 16px;
+  }
+  .adm-brand-badge {
+    font-size: 11px;
+    padding: 1px 6px;
+  }
+  .adm-nav {
+    width: 100%;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .adm-userchip {
+    padding: 3px 8px;
+    font-size: 12px;
+  }
+  .adm-userchip-name {
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .adm-container {
+    margin: 14px auto 32px;
+    padding: 0 10px;
+    gap: 14px;
+  }
+  .adm-stats {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+  .adm-stat-card {
+    padding: 10px 8px;
+  }
+  .adm-stat-val {
+    font-size: 18px;
+  }
+  .adm-stat-label {
+    font-size: 11px;
+  }
+  .adm-stat-icon {
+    display: none;
+  }
+  .adm-toolbar {
+    padding: 10px;
+    gap: 8px;
+  }
+  .adm-filters {
+    flex-direction: column;
+    width: 100%;
+    gap: 8px;
+  }
+  .adm-input {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  .adm-select {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .adm-toolbar button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* 移动端表格自动转换为卡片行，彻底解决横向被截断问题 */
+  .adm-table thead {
+    display: none;
+  }
+  .adm-table, .adm-table tbody {
+    display: block;
+    width: 100%;
+  }
+  .adm-table tr {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--line);
+    gap: 8px;
+  }
+  .adm-table td {
+    padding: 0;
+    border: none;
+  }
+  .adm-table td:first-child {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .adm-table td:last-child {
+    flex-shrink: 0;
+  }
+
+  .adm-col-role,
+  .adm-col-status,
+  .adm-col-time {
+    display: none !important;
+  }
+
+  .adm-mobile-badges {
+    display: flex;
+    gap: 4px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+  }
+
+  .adm-cell-avatar {
+    width: 34px;
+    height: 34px;
+    font-size: 13px;
+  }
+  .adm-cell-title {
+    font-size: 14px;
+  }
+  .adm-cell-sub {
+    font-size: 12px;
+  }
+
+  .adm-actions {
+    display: flex;
+    flex-direction: row;
+    gap: 4px;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  .adm-btn-mini {
+    padding: 5px 8px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+}
