@@ -32,7 +32,6 @@ import {
 import { HAUNT_DEFS, resolveHauntId } from './haunts';
 import { BETRAYAL_SPATIAL } from './spatial';
 import {
-  actionLogLine,
   addEffect,
   addFrost,
   applyItemGain,
@@ -2503,16 +2502,16 @@ export class BetrayalRules {
       }
       return;
     }
-    this.stunMonster(state, monster);
+    this.stunMonster(state, monster, ctx);
   }
 
-  private static stunMonster(state: GameState, monster: Entity): void {
+  private static stunMonster(state: GameState, monster: Entity, ctx: ReduceContext): void {
     monster.components.custom = {
       ...(monster.components.custom ?? {}),
       stunned: true,
       stunTurns: monster.components.custom?.monster === 'EYE' ? 2 : 1
     };
-    traceIdle(state, `${monster.components.custom.name} 被击晕，翻面`);
+    trace(ctx, 'ANNOUNCEMENT', `${monster.components.custom.name} 被击晕，翻面`, 500);
   }
 
   private static stealItem(state: GameState, thiefId: PlayerId, victimId: PlayerId, ctx: ReduceContext): boolean {
@@ -2805,7 +2804,6 @@ export class BetrayalRules {
 
     trace(ctx, 'RULE_MUTATE', `🔥 作祟降临 · 第 ${def.number} 号剧本「${def.title}」 · 叛徒：${traitor.name}`, 1600);
     trace(ctx, 'ANNOUNCEMENT', `英雄目标：${def.heroObjective}`, 1400);
-    actionLogLine(state, `作祟 #${def.number} ${def.title} — 叛徒 ${traitor.name}`);
   }
 
   private static spawnMarker(state: GameState, roomId: string, marker: string, label: string, ctx: ReduceContext): Entity {
@@ -2875,7 +2873,6 @@ export class BetrayalRules {
     trace(ctx, 'DICE_ROLL', `搜寻遗骨 · 知识 ${check.total} vs 4`, 700);
     if (check.success) {
       haunt.bonesFound = true;
-      state.globalVars.bonesRoomId = activeRoom(state, pid);
       trace(ctx, 'RULE_MUTATE', `🦴 ${player.name} 在 ${roomName(state, activeRoom(state, pid))} 找到了怨灵的遗骨`, 900);
     }
   }
@@ -3397,7 +3394,7 @@ export class BetrayalRules {
         damagePlayer(state, victimId, mental ? 'MENTAL' : 'PHYSICAL', diff);
       }
     } else if (defense.sum > attackDice.sum) {
-      this.stunMonster(state, monster);
+      this.stunMonster(state, monster, ctx);
       trace(ctx, 'ANNOUNCEMENT', `${victim.name} 击退了 ${custom.name}，怪物被击晕`, 600);
     }
   }
@@ -3496,10 +3493,6 @@ export class BetrayalRules {
 /* -------------------------------------------------------------------------- */
 /* Local utilities                                                             */
 /* -------------------------------------------------------------------------- */
-
-function traceIdle(state: GameState, text: string): void {
-  state.globalVars.lastNarration = text;
-}
 
 function graphDistances(state: GameState, from: string): Map<string, number> {
   const distances = new Map<string, number>();

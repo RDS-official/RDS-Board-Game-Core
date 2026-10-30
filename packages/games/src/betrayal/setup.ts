@@ -380,12 +380,6 @@ export function setupBetrayal(seed: number = 42, roster: string[] = DEFAULT_ROST
     state = ECSManager.addEntity(state, entity);
   }
 
-  state.globalVars.deckCounts = {
-    event: eventShuffle.result.length,
-    item: itemShuffle.result.length,
-    omen: omenShuffle.result.length,
-    room: roomShuffle.result.length
-  };
 
   // Official rule: the front door stays locked until a haunt opens it.
   state.globalVars.frontDoorLocked = true;

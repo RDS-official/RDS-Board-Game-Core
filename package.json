@@ -30,6 +30,7 @@
     "test:verify": "node scripts/run-verify.mjs",
     "probe:dom": "node scripts/probe-dom-stability.mjs",
     "probe:grid": "node scripts/probe-room-grid.mjs",
+    "probe:dead": "node scripts/probe-dead-state.mjs",
     "docs:check": "node scripts/check-doc-paths.mjs",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write --unsafe .",
