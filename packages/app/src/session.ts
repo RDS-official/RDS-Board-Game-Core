@@ -950,11 +950,18 @@ export class UniversalSession implements GamePresenter {
       capabilities: { ...module.meta.capabilities },
       schemaCount: Object.keys(module.actionSchemas ?? {}).length,
       dependencyErrors: this.engine.getRules().dependencyErrors(),
-      scenarios: Object.entries(module.scenarios ?? {}).map(([id, scenario]) => ({
-        id,
-        description: scenario.description ?? id,
-        selected: id === this.scenario
-      })),
+      // `this.scenario` is undefined while a table plays its plain setup, which
+      // is the first declared scenario for a module that ships several. Marking
+      // it selected keeps the picker honest instead of showing no active choice.
+      scenarios: (() => {
+        const entries = Object.entries(module.scenarios ?? {});
+        const plain = this.scenario ?? entries[0]?.[0];
+        return entries.map(([id, scenario]) => ({
+          id,
+          description: scenario.description ?? id,
+          selected: id === plain
+        }));
+      })(),
 
       phaseLabel: phaseLabelOf(state),
       mission: missionLineOf(state),
