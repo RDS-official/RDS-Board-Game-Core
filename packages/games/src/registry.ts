@@ -172,8 +172,8 @@ export const splendorModule: GameModule = defineGame({
   meta: {
     id: 'splendor',
     name: '宝可梦璀璨宝石 (Pokémon Splendor)',
-    description: '六色精灵球 · 三阶宝可梦市场 · 大师球稀有捕捉 · 免费进化 · 18 分终局',
-    version: '2.0.0',
+    description: '六色精灵球 · 三阶宝可梦市场 · 大师球稀有捕捉 · 免费进化 · 18 分终局（可选超级进化 / 宝可梦商店扩展）',
+    version: '2.1.0',
     schemaVersion: 2,
     capabilities: {
       simultaneousMoves: false,
@@ -201,14 +201,22 @@ export const splendorModule: GameModule = defineGame({
     },
     BUY_CARD: {
       type: 'BUY_CARD',
-      fields: { entityId: { kind: 'string', required: true } }
+      fields: { entityId: { kind: 'string', required: true } },
+      // Poké Mart expansion: the capture's effect choices. Every field is
+      // optional — a plain Pokémon capture and a no-choice effect need none of
+      // them — and all of them are re-validated by the reducer.
+      payload: {
+        captureOpts: { kind: 'object' }
+      }
     },
     RESERVE_CARD: {
       type: 'RESERVE_CARD',
-      // Either a face-up card (`entityId`) or a blind draw from the level deck
-      // (`payload.fromTier`), so neither may be mandatory on its own.
-      fields: { entityId: { kind: 'string' } },
-      payload: { fromTier: { kind: 'integer', min: 1, max: 3 } }
+      // Either a face-up card (`entityId`) or a blind draw from a level deck
+      // (`payload.fromTier`: a base level 1–3, or a Poké Mart level id), so
+      // neither may be mandatory on its own. The tier is deliberately typed
+      // loosely here: it is a number for base decks and a string for Poké Mart
+      // decks, and the reducer is the single place that decodes it.
+      fields: { entityId: { kind: 'string' } }
     },
     EVOLVE: {
       type: 'EVOLVE',
@@ -217,8 +225,29 @@ export const splendorModule: GameModule = defineGame({
         toId: { kind: 'string', required: true }
       }
     },
+    // Mega Evolution: spend the whole action on a shared Mega token.
+    TAKE_MEGA_TOKEN: { type: 'TAKE_MEGA_TOKEN', allowPayload: false },
+    // Super-evolution: consumes the Mega token and counts as this turn's evolution.
+    MEGA_EVOLVE: {
+      type: 'MEGA_EVOLVE',
+      payload: {
+        megaId: { kind: 'string', required: true },
+        fromId: { kind: 'string', required: true }
+      }
+    },
     // Only offered when a player has no other legal move (see getLegalActions).
     END_TURN: { type: 'END_TURN', allowPayload: false }
+  },
+  /**
+   * Named start positions: the base game plus its two expansions, alone and in
+   * combination. The kernel's `setup(seed)` contract carries no configuration,
+   * so the variant is baked into each closure.
+   */
+  scenarios: {
+    base: { description: '基础版', setup: seed => setupSplendor(seed, 2, { mega: false, pokemart: false }) },
+    mega: { description: '超级进化', setup: seed => setupSplendor(seed, 2, { mega: true, pokemart: false }) },
+    pokemart: { description: '宝可梦商店', setup: seed => setupSplendor(seed, 2, { mega: false, pokemart: true }) },
+    full: { description: '全扩展', setup: seed => setupSplendor(seed, 2, { mega: true, pokemart: true }) }
   },
   setup: seed => setupSplendor(seed),
   legalActions: (state, playerId) => SplendorRules.getLegalActions(state, playerId),

@@ -4,12 +4,17 @@ import { Action, Entity, GameState, Player, PlayerId } from '@rds/kernel/types';
 import {
   dealTopCard,
   MASTER_BALL,
+  MAX_MEGA_TOKENS_PER_PLAYER,
   MAX_RESERVES,
   MAX_TOKENS,
+  MEGA_WIN_SCORE,
   POKEBALL_COLORS,
+  POKEMART_TIERS,
+  PokemartTier,
   SPLENDOR_TIERS,
   SPLENDOR_ZONES,
   SplendorTier,
+  SplendorVariant,
   TOKEN_COLORS,
   WIN_SCORE
 } from './setup';
@@ -24,9 +29,14 @@ import {
  * Action set
  *   TAKE_3_DIFF_GEMS  收服 1–3 种不同色的精灵球（不含大师球）
  *   TAKE_2_SAME_GEMS  同色双取（该色供应 ≥ 4）
- *   BUY_CARD          捕捉市场 / 保留区的宝可梦
+ *   BUY_CARD          捕捉市场 / 保留区的宝可梦（Poké Mart 卡可带 captureOpts）
  *   RESERVE_CARD      保留（附赠 1 颗大师球，上限 3 张）
  *   EVOLVE            进化：免费，不消耗行动，每回合 1 次
+ *   TAKE_MEGA_TOKEN   拿取 Mega 代币（消耗整个行动）
+ *   MEGA_EVOLVE       超级进化：消耗代币 + 支付 Mega 卡成本，每回合 1 次
+ *
+ * Expansion rule sets are gated on `globalVars.variant`, which setup persists so
+ * a replay always agrees with the table that was dealt.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -43,9 +53,36 @@ interface CardMeta {
   evolvesTo: string | null;
   evoCost: { color: string; count: number } | null;
   requiresMasterBall: boolean;
+  /** `stage1` … `stage3`, `rare`, `legend`, `mega`, `pmL1` … `pmL3`. */
+  tier: string;
+  /** Base level (1–3) the card belongs to; 0 for rare / legendary / Mega / unknown. */
+  baseTier: number;
+  /** Poké Mart effect code, or null for a plain Pokémon card. */
+  effect: string | null;
+  effectParam: Record<string, unknown> | null;
+  /** The base Pokémon a Mega card super-evolves from. */
+  megaFrom: string | null;
 }
 
-function cardMeta(entity: Entity): CardMeta {
+const EMPTY_META: CardMeta = {
+  id: '',
+  name: '',
+  vp: 0,
+  bonus: null,
+  bonusCount: 1,
+  cost: {},
+  evolvesTo: null,
+  evoCost: null,
+  requiresMasterBall: false,
+  tier: '',
+  baseTier: 0,
+  effect: null,
+  effectParam: null,
+  megaFrom: null
+};
+
+function cardMeta(entity: Entity | undefined): CardMeta {
+  if (!entity) return EMPTY_META;
   const custom = entity.components.custom ?? {};
   const face = entity.components.cardFace;
   const evoCost = custom.evoCost as { color?: unknown; count?: unknown } | null | undefined;
@@ -61,7 +98,12 @@ function cardMeta(entity: Entity): CardMeta {
       evoCost && typeof evoCost.color === 'string' && typeof evoCost.count === 'number'
         ? { color: evoCost.color, count: evoCost.count }
         : null,
-    requiresMasterBall: custom.requiresMasterBall === true
+    requiresMasterBall: custom.requiresMasterBall === true,
+    tier: typeof custom.pkmnTier === 'string' ? custom.pkmnTier : '',
+    baseTier: Number(custom.baseTier ?? 0) || 0,
+    effect: typeof custom.effect === 'string' && custom.effect ? custom.effect : null,
+    effectParam: (custom.effectParam as Record<string, unknown> | null | undefined) ?? null,
+    megaFrom: typeof custom.megaFrom === 'string' && custom.megaFrom ? custom.megaFrom : null
   };
 }
 
@@ -90,17 +132,27 @@ function tokenTotal(tokens: Record<string, number>): number {
  * mega) can only be caught by actually handing master balls over, so that
  * portion is reserved before any substitution happens.
  *
+ * `virtualMaster` adds that many master-ball-equivalents which are *not* tokens
+ * (a Poké Mart POKÉDEX card is worth 2 when discarded). Virtual balls are spent
+ * first and any leftover is wasted, so they never reduce the real master bill
+ * for a card that prints a purple cost... they do: the caller discards the
+ * physical card when the payment succeeds.
+ *
  * Returns `null` when the player cannot pay.
  */
 function paymentPlan(
   cost: Record<string, number>,
   tokens: Record<string, number>,
-  bonuses: Record<string, number>
-): { tokens: Record<string, number>; masterBallsPaid: number } | null {
+  bonuses: Record<string, number>,
+  virtualMaster = 0
+): { tokens: Record<string, number>; masterBallsPaid: number; virtualMasterUsed: number } | null {
   const requiredMaster = Math.max(0, Math.floor(Number(cost[MASTER_BALL] ?? 0)));
   const heldMaster = Math.max(0, Number(tokens[MASTER_BALL] ?? 0));
-  if (heldMaster < requiredMaster) return null;
+  const virtual = Math.max(0, Math.floor(virtualMaster));
+  if (heldMaster + virtual < requiredMaster) return null;
 
+  // Master balls (real + virtual) available for wild substitution.
+  const masterBudget = heldMaster + virtual;
   let masterUsed = requiredMaster;
   const paid = gemBag(tokens);
 
@@ -113,15 +165,18 @@ function paymentPlan(
 
     let short = net - used;
     if (short > 0) {
-      const wild = Math.min(heldMaster - masterUsed, short);
+      const wild = Math.min(masterBudget - masterUsed, short);
       masterUsed += wild;
       short -= wild;
     }
     if (short > 0) return null;
   }
 
-  paid[MASTER_BALL] = heldMaster - masterUsed;
-  return { tokens: paid, masterBallsPaid: masterUsed };
+  // Spend virtual (free) masters first: they are consumed either way.
+  const virtualMasterUsed = Math.min(virtual, masterUsed);
+  const realMasterUsed = masterUsed - virtualMasterUsed;
+  paid[MASTER_BALL] = heldMaster - realMasterUsed;
+  return { tokens: paid, masterBallsPaid: realMasterUsed, virtualMasterUsed };
 }
 
 /** Market row → the deck that refills it. Rare / legendary rows have their own piles. */
@@ -140,6 +195,54 @@ ROW_SOURCE[SPLENDOR_ZONES.legend] = {
   deckZoneId: SPLENDOR_ZONES.legendDeck,
   marketZoneId: SPLENDOR_ZONES.legend
 };
+// Poké Mart rows refill from their own per-level deck.
+for (const martTier of POKEMART_TIERS) {
+  ROW_SOURCE[SPLENDOR_ZONES.pokemart(martTier)] = {
+    deckZoneId: SPLENDOR_ZONES.pokemartDeckOf(martTier),
+    marketZoneId: SPLENDOR_ZONES.pokemart(martTier)
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Variant helpers                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** The rule set this position was dealt under (persisted by setup). */
+function variantOf(state: GameState): SplendorVariant {
+  const raw = state.globalVars.variant as Partial<SplendorVariant> | undefined;
+  return {
+    mega: raw?.mega === true,
+    pokemart: raw?.pokemart === true
+  };
+}
+
+function megaEnabled(state: GameState): boolean {
+  return variantOf(state).mega;
+}
+
+function pokemartEnabled(state: GameState): boolean {
+  return variantOf(state).pokemart;
+}
+
+/** Is this card a Poké Mart card (as opposed to a Pokémon)? */
+function isMartCard(meta: CardMeta): boolean {
+  return (POKEMART_TIERS as readonly string[]).includes(meta.tier);
+}
+
+/**
+ * The bonus colour a card actually contributes for its owner.
+ *
+ * Poké Mart `copy` / `copy_free` cards carry no printed colour; they borrow the
+ * colour of the card they were associated with at capture time (`assoc`). A card
+ * with neither a printed colour nor an association (POKÉDEX, an unassociated
+ * copy card) contributes nothing at all.
+ */
+function effectiveBonusColor(meta: CardMeta, assoc: Record<string, string> | undefined): string | null {
+  const borrowed = assoc?.[meta.id];
+  const color = borrowed ?? meta.bonus;
+  if (!color || !TOKEN_COLORS.includes(color as never)) return null;
+  return color;
+}
 
 /** Public rows a card may be caught from (plus the player's own reserve). */
 function isPublicRow(zoneId: string): boolean {
@@ -148,7 +251,10 @@ function isPublicRow(zoneId: string): boolean {
 
 /** Rows that accept a reservation — rare / legendary Pokémon cannot be reserved. */
 function isReservableRow(zoneId: string): boolean {
-  return SPLENDOR_TIERS.some(tier => zoneId === SPLENDOR_ZONES.market(tier));
+  return (
+    SPLENDOR_TIERS.some(tier => zoneId === SPLENDOR_ZONES.market(tier)) ||
+    POKEMART_TIERS.some(tier => zoneId === SPLENDOR_ZONES.pokemart(tier))
+  );
 }
 
 /** Zones an evolution target may be taken from (market rows or own reserve). */
@@ -188,6 +294,7 @@ function settleTableau(
 ): { score: number; bonuses: Record<string, number>; cardIds: string[] } {
   const bonuses = emptyGems();
   const cardIds: string[] = [];
+  const assoc = (state.players[playerId]?.customProps.assoc ?? {}) as Record<string, string>;
   let score = 0;
 
   for (const id of zoneIds(state, SPLENDOR_ZONES.tableau(playerId))) {
@@ -196,7 +303,10 @@ function settleTableau(
     const meta = cardMeta(entity);
     score += meta.vp;
     cardIds.push(id);
-    if (meta.bonus) bonuses[meta.bonus] = (bonuses[meta.bonus] ?? 0) + meta.bonusCount;
+    // A `copy` card contributes the colour it borrowed; a colourless card
+    // (POKÉDEX, or an unassociated copy card) contributes nothing.
+    const color = effectiveBonusColor(meta, assoc);
+    if (color) bonuses[color] = (bonuses[color] ?? 0) + meta.bonusCount;
   }
   // Master balls never act as a permanent bonus.
   bonuses[MASTER_BALL] = 0;
@@ -269,6 +379,497 @@ function labelOf(color: string): string {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Poké Mart helpers                                                          */
+/* -------------------------------------------------------------------------- */
+
+/** Zones a Poké Mart `free` / `copy_free` card may take a free card from. */
+function freeTakeTiers(parentMeta: CardMeta): string[] {
+  // The card data names the level below (`pmL2_or_stage2`); fall back to the
+  // level-derived rule when a card omits it.
+  const declared = parentMeta.effectParam?.freeFromTier;
+  if (typeof declared === 'string' && declared) {
+    // `pmL2_or_stage2` names both a Poké Mart level and its base level, and the
+    // card may come from either row — keep both tokens and de-duplicate.
+    const tiers = declared
+      .split('_or_')
+      .map(part => part.trim())
+      .filter((token, index, all) => {
+        const known =
+          token === 'stage1' || token === 'stage2' || token === 'stage3' ||
+          token === 'pmL1' || token === 'pmL2' || token === 'pmL3';
+        return known && all.indexOf(token) === index;
+      });
+    if (tiers.length > 0) return tiers;
+  }
+  if (parentMeta.tier === 'pmL2') return ['stage1', 'pmL1'];
+  if (parentMeta.tier === 'pmL3') return ['stage2', 'pmL2'];
+  return [];
+}
+
+/** Zone ids of every row a given tier tag may appear in (for free takes). */
+function zonesForTierTag(tier: string): string[] {
+  switch (tier) {
+    case 'stage1':
+      return [SPLENDOR_ZONES.market(1)];
+    case 'stage2':
+      return [SPLENDOR_ZONES.market(2)];
+    case 'stage3':
+      return [SPLENDOR_ZONES.market(3)];
+    case 'pmL1':
+      return [SPLENDOR_ZONES.pokemart('pmL1')];
+    case 'pmL2':
+      return [SPLENDOR_ZONES.pokemart('pmL2')];
+    case 'pmL3':
+      return [SPLENDOR_ZONES.pokemart('pmL3')];
+    default:
+      return [];
+  }
+}
+
+/**
+ * A board card that a Poké Mart `copy` / `copy_free` card can borrow a colour
+ * from: it must be on the tableau and must actually contribute a colour.
+ */
+function copyCandidates(state: GameState, playerId: PlayerId): string[] {
+  const assoc = (state.players[playerId]?.customProps.assoc ?? {}) as Record<string, string>;
+  return zoneIds(state, SPLENDOR_ZONES.tableau(playerId)).filter(id => {
+    const entity = state.entities[id];
+    if (!entity) return false;
+    return effectiveBonusColor(cardMeta(entity), assoc) !== null;
+  });
+}
+
+/** Board cards of one colour — what a REPEL (`discard_buy`) may sacrifice. */
+function discardCandidates(state: GameState, playerId: PlayerId, color: string): string[] {
+  const assoc = (state.players[playerId]?.customProps.assoc ?? {}) as Record<string, string>;
+  return zoneIds(state, SPLENDOR_ZONES.tableau(playerId)).filter(id => {
+    const entity = state.entities[id];
+    if (!entity) return false;
+    return effectiveBonusColor(cardMeta(entity), assoc) === color;
+  });
+}
+
+/** Board POKÉDEX cards — each is worth 2 virtual master balls when discarded. */
+function pokedexCandidates(state: GameState, playerId: PlayerId): string[] {
+  return zoneIds(state, SPLENDOR_ZONES.tableau(playerId)).filter(id => {
+    const entity = state.entities[id];
+    if (!entity) return false;
+    const meta = cardMeta(entity);
+    return isMartCard(meta) && meta.effect === 'colorless_master';
+  });
+}
+
+/**
+ * Validated `captureOpts` for one capture.
+ *
+ * `opts` is the wire payload (`payload.captureOpts`) and is untrusted: every
+ * field is re-checked against the position before anything is applied. The
+ * result carries the concrete cards to discard, the assoc colour to record and
+ * the ordered list of free takes (already recursively planned).
+ */
+interface CaptureChoice {
+  /** Board card the new `copy` card borrows its colour from (null when absent). */
+  assocColor: string | null;
+  /** POKÉDEX cards consumed as virtual master balls. */
+  spendPokedex: string[];
+  /** `discard_buy`: owned cards sacrificed instead of paying balls. */
+  discardCards: string[];
+  /** `free` / `copy_free`: the free cards taken, in order, with assoc colours. */
+  freeSteps: { freeId: string; assoc: string | null }[];
+}
+
+function emptyChoice(): CaptureChoice {
+  return { assocColor: null, spendPokedex: [], discardCards: [], freeSteps: [] };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function stringArray(value: unknown): string[] | null {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) return null;
+  return value.every(item => typeof item === 'string') ? (value as string[]) : null;
+}
+
+/**
+ * Validate the free-take chain of a `free` / `copy_free` capture.
+ *
+ * The engine mirrors upstream: the free card comes from the level below, its own
+ * effect resolves as well, and a chain may therefore nest. Recursion is bounded
+ * by `depth` and by `seen` (a card can never be taken twice), so a loop in the
+ * data can never hang a reducer.
+ */
+function planFreeTakes(
+  state: GameState,
+  playerId: PlayerId,
+  parentMeta: CardMeta,
+  opts: Record<string, unknown>,
+  depth = 0,
+  seen: Record<string, true> = {}
+): { ok: true; steps: { freeId: string; assoc: string | null }[] } | { ok: false; error: string } {
+  if (depth > 4) return { ok: false, error: '免费取卡层级过深' };
+  const tiers = freeTakeTiers(parentMeta);
+  if (tiers.length === 0) return { ok: true, steps: [] };
+
+  const rawFreeId = opts.freeTakeId;
+  if (rawFreeId === undefined || rawFreeId === null) {
+    // A free take is mandatory while a legal card exists; otherwise it fizzles.
+    const any = tiers.some(tier =>
+      zonesForTierTag(tier).some(zoneId =>
+        ECSManager.getEntitiesInZone(state, zoneId).some(card => freeTakeable(state, playerId, cardMeta(card)))
+      )
+    );
+    return any ? { ok: false, error: '请选择要免费获得的卡（freeTakeId）' } : { ok: true, steps: [] };
+  }
+  if (typeof rawFreeId !== 'string') return { ok: false, error: '免费取卡参数无效' };
+  const freeId = rawFreeId;
+  if (seen[freeId]) return { ok: false, error: '免费取卡重复' };
+
+  const entity = state.entities[freeId];
+  if (!entity) return { ok: false, error: '免费卡不存在' };
+  const freeMeta = cardMeta(entity);
+  if (tiers.indexOf(freeMeta.tier) < 0) return { ok: false, error: '免费卡必须是可选等级中的面朝上卡' };
+  if (!isPublicRow(entity.zoneId) || !zonesForTierTag(freeMeta.tier).includes(entity.zoneId)) {
+    return { ok: false, error: '免费卡必须是可选等级中的面朝上卡' };
+  }
+  if (!freeTakeable(state, playerId, freeMeta)) return { ok: false, error: `免费卡「${freeMeta.name}」不可获得` };
+
+  const sub = asRecord(opts.freeOpts) ?? {};
+  let assoc: string | null = null;
+  if (freeMeta.effect === 'copy' || freeMeta.effect === 'copy_free') {
+    const resolved = resolveCopyTarget(state, playerId, sub.copyTargetId);
+    if ('error' in resolved) return resolved;
+    assoc = resolved.color;
+  }
+
+  let steps: { freeId: string; assoc: string | null }[] = [{ freeId, assoc }];
+  if (freeMeta.effect === 'free' || freeMeta.effect === 'copy_free') {
+    const nextSeen = { ...seen, [freeId]: true as const };
+    const nested = planFreeTakes(state, playerId, freeMeta, sub, depth + 1, nextSeen);
+    if ('error' in nested) return nested;
+    steps = steps.concat(nested.steps);
+  }
+  return { ok: true, steps };
+}
+
+/**
+ * Can `meta` actually be taken right now as a free card?
+ *
+ * `tiers` is the parent's resolved `freeTakeTiers`. A card is free only when it
+ * actually sits in one of those rows: without the check a stone that takes
+ * level-2 cards could also lift a level-3 one, which the printed cards forbid.
+ */
+function freeTakeable(
+  state: GameState,
+  playerId: PlayerId,
+  meta: CardMeta,
+  tiers?: readonly string[]
+): boolean {
+  if (tiers && tiers.length > 0) {
+    const row = state.entities[meta.id]?.zoneId ?? '';
+    if (!tiers.some(tier => zonesForTierTag(tier).includes(row))) return false;
+  }
+  if (!isMartCard(meta)) return true;
+  // A `copy` card needs an owned colour to borrow; anything else resolves alone.
+  if (meta.effect === 'copy' || meta.effect === 'copy_free') {
+    return copyCandidates(state, playerId).length > 0;
+  }
+  return true;
+}
+
+/** Resolve an explicit (or defaulted) `copy` target into its borrowed colour. */
+function resolveCopyTarget(
+  state: GameState,
+  playerId: PlayerId,
+  rawTarget: unknown
+): { color: string } | { ok: false; error: string } {
+  const candidates = copyCandidates(state, playerId);
+  if (candidates.length === 0) return { ok: false, error: '进化石需要你已有一张带奖励的卡' };
+  const assoc = (state.players[playerId]?.customProps.assoc ?? {}) as Record<string, string>;
+  const colorOf = (id: string): string => {
+    const meta = cardMeta(state.entities[id]);
+    return effectiveBonusColor(meta, assoc) ?? '';
+  };
+  if (rawTarget === undefined || rawTarget === null) return { color: colorOf(candidates[0]) };
+  if (typeof rawTarget !== 'string') return { ok: false, error: '关联目标参数无效' };
+  if (candidates.indexOf(rawTarget) < 0) {
+    return { ok: false, error: '关联目标必须是你已有的带奖励的卡' };
+  }
+  return { color: colorOf(rawTarget) };
+}
+
+/** Validate a REPEL (`discard_buy`) choice: exactly `discardCount` cards of the colour. */
+function resolveDiscardBuy(
+  state: GameState,
+  playerId: PlayerId,
+  meta: CardMeta,
+  rawChosen: unknown
+): { ok: true; discarded: string[] } | { ok: false; error: string } {
+  const param = meta.effectParam ?? {};
+  const color = String(param.discardColor ?? '');
+  const need = Math.max(1, Math.floor(Number(param.discardCount ?? 2)));
+  const owned = color ? discardCandidates(state, playerId, color) : [];
+  if (owned.length < need) {
+    return {
+      ok: false,
+      error: `需要弃掉 ${need} 张${labelOf(color)}卡，但你只有 ${owned.length} 张`
+    };
+  }
+  if (rawChosen === undefined || rawChosen === null) return { ok: true, discarded: owned.slice(0, need) };
+  const chosen = stringArray(rawChosen);
+  if (!chosen) return { ok: false, error: '弃牌选择必须是卡牌数组' };
+  if (chosen.length === 0) return { ok: true, discarded: owned.slice(0, need) };
+  if (chosen.length !== need) return { ok: false, error: `必须弃掉 ${need} 张` };
+  if (new Set(chosen).size !== chosen.length) return { ok: false, error: '弃牌不能重复选择同一张卡' };
+  for (const id of chosen) {
+    if (owned.indexOf(id) < 0) return { ok: false, error: '所选弃牌颜色不符或不属于你' };
+  }
+  return { ok: true, discarded: chosen };
+}
+
+/** Validate `payload.captureOpts` against the position, before any mutation. */
+function resolveCaptureChoice(
+  state: GameState,
+  playerId: PlayerId,
+  meta: CardMeta,
+  rawOpts: unknown
+): { ok: true; choice: CaptureChoice } | { ok: false; error: string } {
+  const provided = rawOpts === undefined || rawOpts === null ? {} : asRecord(rawOpts);
+  if (!provided) return { ok: false, error: '捕捉参数无效' };
+  // A missing choice means "engine picks": every field of `captureOpts` is
+  // optional, so a caller (or a UI form that was submitted empty) still gets a
+  // resolving capture instead of a silent no-op.
+  const opts: Record<string, unknown> = needsCaptureChoice(meta)
+    ? { ...defaultCaptureOpts(state, playerId, meta) }
+    : {};
+  for (const [key, value] of Object.entries(provided)) {
+    if (value === undefined || value === null) continue;
+    opts[key] = value;
+  }
+  const choice = emptyChoice();
+
+  // POKÉDEX: each discarded card is worth 2 virtual master balls for this buy.
+  const spend = stringArray(opts.spendPokedex);
+  if (!spend) return { ok: false, error: '图鉴消耗必须是卡牌数组' };
+  if (new Set(spend).size !== spend.length) return { ok: false, error: '图鉴不能重复消耗同一张卡' };
+  const dex = pokedexCandidates(state, playerId);
+  for (const id of spend) {
+    if (dex.indexOf(id) < 0) return { ok: false, error: '无效的图鉴消耗' };
+  }
+  choice.spendPokedex = spend as string[];
+
+  // copy / copy_free: borrow a colour from an owned card that already has one.
+  if (meta.effect === 'copy' || meta.effect === 'copy_free') {
+    const resolved = resolveCopyTarget(state, playerId, opts.copyTargetId);
+    if ('error' in resolved) return { ok: false, error: resolved.error };
+    choice.assocColor = resolved.color;
+  }
+
+  // discard_buy: pay with cards instead of balls.
+  if (meta.effect === 'discard_buy') {
+    const resolved = resolveDiscardBuy(state, playerId, meta, opts.discardCards);
+    if ('error' in resolved) return { ok: false, error: resolved.error };
+    choice.discardCards = resolved.discarded;
+  }
+
+  // free / copy_free: plan the whole (possibly recursive) free-take chain.
+  if (meta.effect === 'free' || meta.effect === 'copy_free') {
+    const planned = planFreeTakes(state, playerId, meta, opts, 0);
+    if ('error' in planned) return { ok: false, error: planned.error };
+    choice.freeSteps = planned.steps;
+  }
+
+  return { ok: true, choice };
+}
+
+/**
+ * Score a face-up card for "which free card is best" so a bot (and the UI's
+ * default choice) plays something reasonable without a search.
+ */
+function freeCardValue(meta: CardMeta): number {
+  return meta.vp * 3 + meta.bonusCount * 2 + (meta.evolvesTo ? 1 : 0);
+}
+
+/** Every face-up card a `free` / `copy_free` capture may take right now. */
+function freeTakeCandidates(state: GameState, playerId: PlayerId, parentMeta: CardMeta): CardMeta[] {
+  const out: CardMeta[] = [];
+  const seen = new Set<string>();
+  for (const tier of freeTakeTiers(parentMeta)) {
+    for (const zoneId of zonesForTierTag(tier)) {
+      for (const entity of ECSManager.getEntitiesInZone(state, zoneId)) {
+        if (seen.has(entity.id)) continue;
+        const meta = cardMeta(entity);
+        if (!freeTakeable(state, playerId, meta)) continue;
+        seen.add(entity.id);
+        out.push(meta);
+      }
+    }
+  }
+  return out;
+}
+
+/** The best instant free card, or null when the effect must fizzle. */
+function bestFreeCard(state: GameState, playerId: PlayerId, parentMeta: CardMeta): CardMeta | null {
+  const candidates = freeTakeCandidates(state, playerId, parentMeta);
+  if (candidates.length === 0) return null;
+  const assoc = (state.players[playerId]?.customProps.assoc ?? {}) as Record<string, string>;
+  const bonuses = gemBag(state.players[playerId]?.customProps.bonuses);
+  let best = candidates[0];
+  let bestScore = -Infinity;
+  for (const meta of candidates) {
+    // Prefer a colour the player is already deep in, so a `double` or a plain
+    // bonus card compounds instead of scattering.
+    const color = effectiveBonusColor(meta, assoc);
+    const depth = color ? bonuses[color] : 0;
+    const score = freeCardValue(meta) + depth * 0.5;
+    if (score > bestScore) {
+      bestScore = score;
+      best = meta;
+    }
+  }
+  return best;
+}
+
+/**
+ * Default `{freeTakeId, freeOpts}` for one `free` / `copy_free` capture,
+ * recursing through chained free takes (bounded so a cycle cannot spin).
+ */
+function defaultFreeOpts(
+  state: GameState,
+  playerId: PlayerId,
+  parentMeta: CardMeta,
+  depth = 0,
+  seen: Record<string, true> = {}
+): Record<string, unknown> | null {
+  if (depth > 4) return null;
+  const candidates = freeTakeCandidates(state, playerId, parentMeta).filter(meta => !seen[meta.id]);
+  if (candidates.length === 0) return null;
+
+  for (const candidate of candidates) {
+    const opts: Record<string, unknown> = { freeTakeId: candidate.id };
+    if (candidate.effect === 'copy' || candidate.effect === 'copy_free') {
+      const copyTargets = copyCandidates(state, playerId);
+      if (copyTargets.length === 0) continue;
+      opts.copyTargetId = copyTargets[0];
+    }
+    if (candidate.effect === 'free' || candidate.effect === 'copy_free') {
+      const nested = defaultFreeOpts(state, playerId, candidate, depth + 1, { ...seen, [candidate.id]: true });
+      if (nested) opts.freeOpts = nested;
+    }
+    // Validate the whole chain before offering it: a chain that cannot resolve
+    // is not a legal capture, so try the next candidate.
+    const planned = planFreeTakes(state, playerId, parentMeta, opts, 0, seen);
+    if ('error' in planned) continue;
+    return opts;
+  }
+  return null;
+}
+
+/**
+ * The engine's default `captureOpts` for one card: what the game would choose
+ * if the player simply said "capture this".
+ *
+ * Every field is optional, so this is both the value used by legal actions and
+ * the fallback that fills in whatever a caller left out.
+ */
+function defaultCaptureOpts(
+  state: GameState,
+  playerId: PlayerId,
+  meta: CardMeta
+): Record<string, unknown> {
+  const opts: Record<string, unknown> = {};
+  const player = state.players[playerId];
+  if (!player) return opts;
+
+  // POKÉDEX first: it is the only way a player short of master balls can pay.
+  const tokens = gemBag(player.customProps.tokens);
+  const bonuses = gemBag(player.customProps.bonuses);
+  if (!paymentPlan(meta.cost, tokens, bonuses)) {
+    const dex = pokedexCandidates(state, playerId);
+    for (let count = 1; count <= dex.length; count++) {
+      if (paymentPlan(meta.cost, tokens, bonuses, count * 2)) {
+        opts.spendPokedex = dex.slice(0, count);
+        break;
+      }
+    }
+  }
+
+  // copy / copy_free borrow a colour from an owned card that has one.
+  if (meta.effect === 'copy' || meta.effect === 'copy_free') {
+    const candidates = copyCandidates(state, playerId);
+    if (candidates.length > 0) opts.copyTargetId = candidates[0];
+  }
+
+  // free / copy_free take a concrete free card; a chain nests `freeOpts`.
+  if (meta.effect === 'free' || meta.effect === 'copy_free') {
+    const freeOpts = defaultFreeOpts(state, playerId, meta);
+    if (freeOpts) Object.assign(opts, freeOpts);
+  }
+
+  return opts;
+}
+
+/** Does capturing this card require a choice that changes the outcome? */
+function needsCaptureChoice(meta: CardMeta): boolean {
+  return (
+    meta.effect === 'copy' ||
+    meta.effect === 'copy_free' ||
+    meta.effect === 'free' ||
+    meta.effect === 'discard_buy'
+  );
+}
+
+/** Move a board card out of the game (REPEL / POKÉDEX discard). */
+function discardFromTableau(state: GameState, playerId: PlayerId, cardId: string): GameState {
+  const entity = state.entities[cardId];
+  if (!entity) return state;
+  let next = ECSManager.moveEntity(state, cardId, SPLENDOR_ZONES.discarded);
+  next = withVisibility(next, cardId, { type: 'PUBLIC' });
+  const player = next.players[playerId];
+  if (!player) return next;
+  const assoc = { ...((player.customProps.assoc ?? {}) as Record<string, string>) };
+  delete assoc[cardId];
+  return withPlayer(next, playerId, { assoc });
+}
+
+/** Apply the planned free takes: each lands on the tableau and resolves itself. */
+function applyFreeTakes(
+  state: GameState,
+  playerId: PlayerId,
+  steps: { freeId: string; assoc: string | null }[],
+  ctx: ReduceContext,
+  playerName: string
+): GameState {
+  let next = state;
+  for (const step of steps) {
+    const entity = next.entities[step.freeId];
+    if (!entity) continue;
+    const meta = cardMeta(entity);
+    const fromRow = entity.zoneId;
+    next = ECSManager.moveEntity(next, step.freeId, SPLENDOR_ZONES.tableau(playerId));
+    next = withVisibility(next, step.freeId, { type: 'PUBLIC' });
+    if (step.assoc) {
+      const player = next.players[playerId];
+      const assoc = { ...((player?.customProps.assoc ?? {}) as Record<string, string>) };
+      assoc[step.freeId] = step.assoc;
+      next = withPlayer(next, playerId, { assoc });
+    }
+    next = refillRow(next, fromRow);
+    ctx.trace({
+      id: `free_${ctx.id('g')}`,
+      type: 'CARD_DRAW',
+      title:
+        `${playerName} 免费获得 [${meta.name}]` +
+        `${step.assoc ? `（关联${labelOf(step.assoc)}）` : ''}`,
+      durationMs: 400
+    });
+  }
+  return next;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Rules                                                                      */
 /* -------------------------------------------------------------------------- */
 
@@ -315,29 +916,46 @@ export class SplendorRules {
     }
 
     /* 2 · catching cards ------------------------------------------------ */
+    //
+    // Every card that can be paid for is offered once. A Poké Mart card whose
+    // effect needs a choice carries a fully-resolved `payload.captureOpts`, so
+    // the action is directly executable (by the UI or by a bot) without a
+    // second round-trip; `buyCard` re-validates it either way.
     for (const [zoneId] of Object.entries(ROW_SOURCE)) {
       for (const card of ECSManager.getEntitiesInZone(state, zoneId)) {
-        const meta = cardMeta(card);
-        if (!paymentPlan(meta.cost, tokens, bonuses)) continue;
-        actions.push({ type: 'BUY_CARD', playerId, entityId: card.id });
+        const action = SplendorRules.captureAction(state, playerId, card);
+        if (action) actions.push(action);
       }
     }
     for (const card of ECSManager.getEntitiesInZone(state, SPLENDOR_ZONES.hand(playerId))) {
-      const meta = cardMeta(card);
-      if (!paymentPlan(meta.cost, tokens, bonuses)) continue;
-      actions.push({ type: 'BUY_CARD', playerId, entityId: card.id });
+      const action = SplendorRules.captureAction(state, playerId, card);
+      if (action) actions.push(action);
     }
 
     /* 3 · reserving ----------------------------------------------------- */
     if (zoneIds(state, SPLENDOR_ZONES.hand(playerId)).length < MAX_RESERVES) {
-      for (const tier of SPLENDOR_TIERS) {
-        const marketZoneId = SPLENDOR_ZONES.market(tier);
-        for (const card of ECSManager.getEntitiesInZone(state, marketZoneId)) {
+      const rows: { row: string; deck: string | null; fromTier: unknown }[] = SPLENDOR_TIERS.map(tier => ({
+        row: SPLENDOR_ZONES.market(tier),
+        deck: SPLENDOR_ZONES.deck(tier),
+        fromTier: tier
+      }));
+      // Poké Mart rows reserve exactly like their base level (blind draws too).
+      if (pokemartEnabled(state)) {
+        for (const martTier of POKEMART_TIERS) {
+          rows.push({
+            row: SPLENDOR_ZONES.pokemart(martTier),
+            deck: SPLENDOR_ZONES.pokemartDeckOf(martTier),
+            fromTier: martTier
+          });
+        }
+      }
+      for (const entry of rows) {
+        for (const card of ECSManager.getEntitiesInZone(state, entry.row)) {
           actions.push({ type: 'RESERVE_CARD', playerId, entityId: card.id });
         }
-        // Blind draw from the top of the level deck.
-        if (zoneIds(state, SPLENDOR_ZONES.deck(tier)).length > 0) {
-          actions.push({ type: 'RESERVE_CARD', playerId, payload: { fromTier: tier } });
+        // Blind draw from the top of that level's deck.
+        if (entry.deck && zoneIds(state, entry.deck).length > 0) {
+          actions.push({ type: 'RESERVE_CARD', playerId, payload: { fromTier: entry.fromTier } });
         }
       }
     }
@@ -349,7 +967,23 @@ export class SplendorRules {
       }
     }
 
-    /* 5 · deadlock escape ------------------------------------------------- */
+    /* 5 · Mega Evolution (expansion) -------------------------------------- */
+    if (megaEnabled(state)) {
+      // Spending the whole action on a Mega token is a real move — it is the
+      // only way to reach the 20-point goal, so a bot must be able to plan it.
+      const heldMega = Number(player.customProps.megaToken ?? 0);
+      const poolMega = Number(state.globalVars.megaTokens ?? 0);
+      if (heldMega < MAX_MEGA_TOKENS_PER_PLAYER && poolMega > 0) {
+        actions.push({ type: 'TAKE_MEGA_TOKEN', playerId });
+      }
+      if (!state.globalVars.evolvedThisTurn && heldMega >= 1) {
+        for (const option of SplendorRules.megaEvolveOptions(state, playerId)) {
+          actions.push({ type: 'MEGA_EVOLVE', playerId, payload: option });
+        }
+      }
+    }
+
+    /* 6 · deadlock escape ------------------------------------------------- */
     //
     // A player can genuinely run out of options: 10 balls in hand (so nothing
     // may be taken), 3 reserves, and no card they can pay for. Splendor has no
@@ -360,6 +994,110 @@ export class SplendorRules {
     }
 
     return actions;
+  }
+
+  /**
+   * One directly-executable `BUY_CARD` for `card`, or `null` when it is not
+   * affordable / not capturable right now.
+   *
+   * Poké Mart effects that need a choice get their defaults resolved here
+   * (cheapest legal colour to copy, the least valuable cards to sacrifice, the
+   * best free card to take). `payload.captureOpts` is still re-validated in
+   * `buyCard`, so a hand-written action with different choices stays legal too.
+   */
+  public static captureAction(state: GameState, playerId: PlayerId, card: Entity): Action | null {
+    const meta = cardMeta(card);
+    const player = state.players[playerId];
+    if (!player) return null;
+
+    // REPEL pays with cards, never with balls.
+    if (meta.effect === 'discard_buy') {
+      const param = meta.effectParam ?? {};
+      const color = String(param.discardColor ?? '');
+      const need = Math.max(1, Math.floor(Number(param.discardCount ?? 2)));
+      const owned = color ? discardCandidates(state, playerId, color) : [];
+      if (owned.length < need) return null;
+      return {
+        type: 'BUY_CARD',
+        playerId,
+        entityId: card.id,
+        payload: { captureOpts: { discardCards: owned.slice(0, need) } }
+      };
+    }
+
+    const tokens = gemBag(player.customProps.tokens);
+    const bonuses = gemBag(player.customProps.bonuses);
+    const opts = defaultCaptureOpts(state, playerId, meta);
+    const planned = resolveCaptureChoice(state, playerId, meta, opts);
+    if ('error' in planned) return null;
+    // The card must be affordable *including* the POKÉDEX the default plan
+    // spends. Offering an action the reducer would refuse turns a "legal" move
+    // into a silent no-op, so it is filtered out here instead.
+    if (!paymentPlan(meta.cost, tokens, bonuses, planned.choice.spendPokedex.length * 2)) return null;
+
+    const action: Action = { type: 'BUY_CARD', playerId, entityId: card.id };
+    const choice = planned.choice;
+    // Start from the very options that were just validated: they already carry
+    // the nested free chain (`freeTakeId` / `freeOpts` / `copyTargetId`).
+    const captureOpts: Record<string, unknown> = { ...opts };
+    if (choice.spendPokedex.length > 0) captureOpts.spendPokedex = choice.spendPokedex;
+    if (choice.discardCards.length > 0) captureOpts.discardCards = choice.discardCards;
+    // The assoc colour is not a payload field: it is always re-derived from
+    // `copyTargetId`, which is the stable, checkable choice.
+    if (choice.assocColor !== null && captureOpts.copyTargetId === undefined) {
+      captureOpts.copyTargetId = copyCandidates(state, playerId)[0];
+    }
+    if (Object.keys(captureOpts).length > 0) action.payload = { captureOpts };
+    else if (needsCaptureChoice(meta) || pokedexCandidates(state, playerId).length > 0) {
+      // A choice-less capture (a plain Pokémon, or an effect that resolved with
+      // no options) still has to advertise the form: that is what tells the
+      // kernel's strict gate "the reducer validates this payload" instead of
+      // demanding byte-identical canonical equality. An explicit empty object
+      // keeps the direct path working for bots and board clicks.
+      action.payload = { captureOpts: {} };
+    }
+    if (needsCaptureChoice(meta) || pokedexCandidates(state, playerId).length > 0) {
+      // The form is deliberately left empty: every field of `captureOpts` is
+      // optional, and the reducer fills whatever the player omits with the very
+      // defaults enumerated above. Submitting an untouched form therefore plays
+      // the recommended capture.
+      action.fields = [
+        { key: 'captureOpts', label: '效果选择（留空即用推荐选择）', kind: 'json', required: false }
+      ];
+    }
+    return action;
+  }
+
+  /**
+   * Legal Mega super-evolutions for a player: they must hold a Mega token, own
+   * the base Pokémon named by `megaFrom`, and be able to pay the Mega card.
+   */
+  public static megaEvolveOptions(
+    state: GameState,
+    playerId: PlayerId
+  ): { megaId: string; fromId: string }[] {
+    if (!megaEnabled(state)) return [];
+    if (state.globalVars.evolvedThisTurn) return [];
+    const player = state.players[playerId];
+    if (!player) return [];
+    if (Number(player.customProps.megaToken ?? 0) < 1) return [];
+
+    const tokens = gemBag(player.customProps.tokens);
+    const bonuses = gemBag(player.customProps.bonuses);
+    const board = zoneIds(state, SPLENDOR_ZONES.tableau(playerId));
+    const options: { megaId: string; fromId: string }[] = [];
+
+    for (const megaId of zoneIds(state, SPLENDOR_ZONES.megaOffer)) {
+      const mega = state.entities[megaId];
+      if (!mega) continue;
+      const megaMeta = cardMeta(mega);
+      if (!megaMeta.megaFrom) continue;
+      const fromId = board.find(id => cardMeta(state.entities[id]).name === megaMeta.megaFrom);
+      if (!fromId) continue;
+      if (!paymentPlan(megaMeta.cost, tokens, bonuses)) continue;
+      options.push({ megaId, fromId });
+    }
+    return options;
   }
 
   /**
@@ -414,6 +1152,10 @@ export class SplendorRules {
         return SplendorRules.reserveCard(state, action, ctx);
       case 'EVOLVE':
         return SplendorRules.evolve(state, action, ctx);
+      case 'TAKE_MEGA_TOKEN':
+        return SplendorRules.takeMegaToken(state, action, ctx);
+      case 'MEGA_EVOLVE':
+        return SplendorRules.megaEvolve(state, action, ctx);
       case 'END_TURN':
         return SplendorRules.endTurn(state, action, ctx);
       default:
@@ -512,7 +1254,33 @@ export class SplendorRules {
     const meta = cardMeta(card);
     const tokens = gemBag(player.customProps.tokens);
     const bonuses = gemBag(player.customProps.bonuses);
-    const plan = paymentPlan(meta.cost, tokens, bonuses);
+
+    // Poké Mart: validate every player choice before touching the position, so
+    // a rejected capture leaves no partial state behind.
+    const resolved = resolveCaptureChoice(state, pId, meta, action.payload?.captureOpts);
+    if ('error' in resolved) return state;
+    const choice = resolved.choice;
+
+    // REPEL (`discard_buy`) pays no balls at all: it sacrifices owned cards.
+    if (meta.effect === 'discard_buy') {
+      let next = SplendorRules.takeFromSource(state, pId, cardId, fromZone);
+      for (const discardedId of choice.discardCards) {
+        next = discardFromTableau(next, pId, discardedId);
+      }
+      next = applySettlement(next, pId);
+      ctx.trace({
+        id: `buy_${ctx.id('g')}`,
+        type: 'BUILD_OBJECT',
+        title:
+          `${player.name} 用 [${meta.name}] 交换（弃掉 ${choice.discardCards.length} 张` +
+          `${labelOf(String(meta.effectParam?.discardColor ?? ''))}卡 · +${meta.vp} VP）`,
+        durationMs: 500
+      });
+      next = SplendorRules.markLastRound(next, ctx);
+      return SplendorRules.advanceTurn(next, pId, ctx);
+    }
+
+    const plan = paymentPlan(meta.cost, tokens, bonuses, choice.spendPokedex.length * 2);
     if (!plan) return state;
 
     const bank = gemBag(state.globalVars.bank);
@@ -523,23 +1291,48 @@ export class SplendorRules {
 
     let next = withPlayer(state, pId, { tokens: plan.tokens });
     next = withGlobal(next, { bank });
-    next = withVisibility(next, cardId, { type: 'PUBLIC' });
-    next = ECSManager.moveEntity(next, cardId, SPLENDOR_ZONES.tableau(pId));
+    // Discarded POKÉDEX cards leave the game with the virtual masters they paid.
+    for (const dexId of choice.spendPokedex) next = discardFromTableau(next, pId, dexId);
+    next = SplendorRules.takeFromSource(next, pId, cardId, fromZone);
+    if (choice.assocColor) {
+      const assoc = { ...((next.players[pId]?.customProps.assoc ?? {}) as Record<string, string>) };
+      assoc[cardId] = choice.assocColor;
+      next = withPlayer(next, pId, { assoc });
+    }
     next = applySettlement(next, pId);
-    next = refillRow(next, fromZone);
+
+    const extras = [
+      choice.spendPokedex.length > 0 ? `弃 ${choice.spendPokedex.length} 张图鉴抵 ${choice.spendPokedex.length * 2} 大师球` : null,
+      choice.assocColor ? `关联${labelOf(choice.assocColor)}` : null,
+      plan.masterBallsPaid > 0 ? `支付 ${plan.masterBallsPaid} 大师球` : null
+    ].filter(Boolean);
 
     ctx.trace({
       id: `buy_${ctx.id('g')}`,
       type: 'BUILD_OBJECT',
       title:
         `${player.name} 捕捉了 [${meta.name}]（+${meta.vp} VP` +
-        `${meta.bonus ? ` · +${meta.bonusCount} ${labelOf(meta.bonus)}加成` : ''}）` +
-        `${plan.masterBallsPaid > 0 ? ` · 支付 ${plan.masterBallsPaid} 大师球` : ''}`,
+        `${meta.bonus ? ` · +${meta.bonusCount} ${labelOf(meta.bonus)}加成` : ''}` +
+        `${extras.length ? ` · ${extras.join(' · ')}` : ''}）`,
       durationMs: 500
     });
 
+    // Free takes resolve after the capture itself, then settle again: a free
+    // card can move the score and the bonuses.
+    if (choice.freeSteps.length > 0) {
+      next = applyFreeTakes(next, pId, choice.freeSteps, ctx, player.name);
+      next = applySettlement(next, pId);
+    }
+
     next = SplendorRules.markLastRound(next, ctx);
     return SplendorRules.advanceTurn(next, pId, ctx);
+  }
+
+  /** Lift a captured card off its row / reserve and put it on the tableau. */
+  private static takeFromSource(state: GameState, pId: PlayerId, cardId: string, fromZone: string): GameState {
+    let next = ECSManager.moveEntity(state, cardId, SPLENDOR_ZONES.tableau(pId));
+    next = withVisibility(next, cardId, { type: 'PUBLIC' });
+    return refillRow(next, fromZone);
   }
 
   /* ---- reserving ----------------------------------------------------- */
@@ -563,9 +1356,20 @@ export class SplendorRules {
       cardId = card.id;
       fromRow = card.zoneId;
     } else {
-      const tier = Number(action.payload?.fromTier);
-      if (!SPLENDOR_TIERS.includes(tier as SplendorTier)) return state;
-      const deck = state.zones[SPLENDOR_ZONES.deck(tier as SplendorTier)];
+      // Blind draw: `fromTier` is either a base level (1–3) or a Poké Mart level.
+      const rawTier = action.payload?.fromTier;
+      let deckZoneId: string | null = null;
+      if (typeof rawTier === 'number' && SPLENDOR_TIERS.includes(rawTier as SplendorTier)) {
+        deckZoneId = SPLENDOR_ZONES.deck(rawTier as SplendorTier);
+      } else if (
+        typeof rawTier === 'string' &&
+        pokemartEnabled(state) &&
+        (POKEMART_TIERS as readonly string[]).includes(rawTier)
+      ) {
+        deckZoneId = SPLENDOR_ZONES.pokemartDeckOf(rawTier as PokemartTier);
+      }
+      if (!deckZoneId) return state;
+      const deck = state.zones[deckZoneId];
       if (!deck || deck.orderedEntities.length === 0) return state;
       cardId = deck.orderedEntities[0];
       fromRow = null; // blind draw: the market row keeps its card
@@ -616,6 +1420,109 @@ export class SplendorRules {
 
     let next = SplendorRules.resolveEvolution(state, pId, fromId, toId, ctx);
     // Evolution is a free action: the turn and the action budget are untouched.
+    next = SplendorRules.markLastRound(next, ctx);
+    return next;
+  }
+
+  /* ---- Mega Evolution (expansion) ------------------------------------ */
+
+  /**
+   * Take one Mega token from the shared pool.
+   *
+   * This costs the whole turn (unlike a free evolution), and a player may never
+   * hold more than one token at a time, so it is a real main action.
+   */
+  private static takeMegaToken(state: GameState, action: Action, ctx: ReduceContext): GameState {
+    if (!megaEnabled(state)) return state;
+    const pId = action.playerId;
+    const player = state.players[pId];
+    if (!player) return state;
+    if (state.activePlayerId !== pId) return state;
+
+    const held = Number(player.customProps.megaToken ?? 0);
+    if (held >= MAX_MEGA_TOKENS_PER_PLAYER) return state;
+    const pool = Number(state.globalVars.megaTokens ?? 0);
+    if (pool < 1) return state;
+
+    let next = withGlobal(state, { megaTokens: pool - 1 });
+    next = withPlayer(next, pId, { megaToken: held + 1 });
+
+    ctx.trace({
+      id: `mega_token_${ctx.id('g')}`,
+      type: 'TOKEN_TRANSFER',
+      title: `${player.name} 获得了 1 个 Mega 代币（本回合行动结束）`,
+      durationMs: 500
+    });
+
+    return SplendorRules.advanceTurn(next, pId, ctx);
+  }
+
+  /**
+   * Super-evolve a base Pokémon into a Mega.
+   *
+   * Requires the Mega token (which returns to the shared pool), the base Pokémon
+   * on the tableau, and the Mega card's cost paid with balls (bonuses discount,
+   * master balls substitute). It shares `evolvedThisTurn` with the ordinary
+   * evolution, so a turn still holds at most one evolution.
+   */
+  private static megaEvolve(state: GameState, action: Action, ctx: ReduceContext): GameState {
+    if (!megaEnabled(state)) return state;
+    const pId = action.playerId;
+    const player = state.players[pId];
+    if (!player) return state;
+
+    const megaId = action.payload?.megaId;
+    const fromId = action.payload?.fromId;
+    if (typeof megaId !== 'string') return state;
+
+    const candidates = SplendorRules.megaEvolveOptions(state, pId).filter(option => option.megaId === megaId);
+    const option =
+      typeof fromId === 'string' ? candidates.find(candidate => candidate.fromId === fromId) : candidates[0];
+    if (!option) return state;
+
+    const mega = state.entities[option.megaId];
+    const base = state.entities[option.fromId];
+    if (!mega || !base) return state;
+    const megaMeta = cardMeta(mega);
+    const baseMeta = cardMeta(base);
+
+    const tokens = gemBag(player.customProps.tokens);
+    const bonuses = gemBag(player.customProps.bonuses);
+    const plan = paymentPlan(megaMeta.cost, tokens, bonuses);
+    if (!plan) return state;
+
+    const bank = gemBag(state.globalVars.bank);
+    for (const color of POKEBALL_COLORS) {
+      const spent = tokens[color] - plan.tokens[color];
+      if (spent > 0) bank[color] += spent;
+    }
+
+    const buriedIds: string[] = [...(player.customProps.buriedIds ?? []), option.fromId];
+
+    let next = withPlayer(state, pId, { tokens: plan.tokens, megaToken: 0, buriedIds });
+    next = withGlobal(next, {
+      bank,
+      // The token goes back to the shared pool.
+      megaTokens: Number(state.globalVars.megaTokens ?? 0) + 1,
+      evolvedThisTurn: true
+    });
+    // The base Pokémon is buried; the Mega card leaves the offer for good.
+    next = withVisibility(next, option.fromId, { type: 'PUBLIC' });
+    next = ECSManager.moveEntity(next, option.fromId, SPLENDOR_ZONES.buried(pId));
+    next = withVisibility(next, option.megaId, { type: 'PUBLIC' });
+    next = ECSManager.moveEntity(next, option.megaId, SPLENDOR_ZONES.tableau(pId));
+    next = applySettlement(next, pId);
+
+    ctx.trace({
+      id: `mega_evolve_${ctx.id('g')}`,
+      type: 'ANNOUNCEMENT',
+      title:
+        `✨ ${player.name} 将 [${baseMeta.name}] 超级进化为 [${megaMeta.name}]` +
+        `（+${megaMeta.vp} VP · 消耗 Mega 代币` +
+        `${plan.masterBallsPaid > 0 ? ` · 支付 ${plan.masterBallsPaid} 大师球` : ''}）`,
+      durationMs: 800
+    });
+
     next = SplendorRules.markLastRound(next, ctx);
     return next;
   }
@@ -756,17 +1663,44 @@ export class SplendorRules {
     return SplendorRules.resolveEvolution(state, playerId, fromId, toId, ctx);
   }
 
-  /** First player to reach the score goal triggers the final round. */
+  /**
+   * With Mega Evolution the goal is stricter than raw points: 20 VP **and** at
+   * least one bonus of every colour **and** a Mega card in play. A rival with
+   * more points but no Mega does not win.
+   */
+  public static hasMegaWin(state: GameState, playerId: PlayerId): boolean {
+    const player = state.players[playerId];
+    if (!player) return false;
+    if (Number(player.score ?? 0) < MEGA_WIN_SCORE) return false;
+    const bonuses = gemBag(player.customProps.bonuses);
+    for (const color of TOKEN_COLORS) {
+      if (bonuses[color] <= 0) return false;
+    }
+    return zoneIds(state, SPLENDOR_ZONES.tableau(playerId)).some(
+      id => cardMeta(state.entities[id]).tier === 'mega'
+    );
+  }
+
+  /** Has `playerId` met the win condition of this position's rule set? */
+  public static hasReachedGoal(state: GameState, playerId: PlayerId): boolean {
+    if (megaEnabled(state)) return SplendorRules.hasMegaWin(state, playerId);
+    const player = state.players[playerId];
+    if (!player) return false;
+    return Number(player.score ?? 0) >= Number(state.globalVars.scoreToWin ?? WIN_SCORE);
+  }
+
+  /** First player to reach the goal triggers the final round. */
   private static markLastRound(state: GameState, ctx: ReduceContext): GameState {
     if (state.globalVars.lastRound) return state;
-    const target = Number(state.globalVars.scoreToWin ?? WIN_SCORE);
-    const reached = Object.values(state.players).some(player => player.score >= target);
+    const reached = state.playerOrder.some(pid => SplendorRules.hasReachedGoal(state, pid));
     if (!reached) return state;
 
     ctx.trace({
       id: `last_round_${ctx.id('g')}`,
       type: 'ANNOUNCEMENT',
-      title: `🏁 有人达到 ${target} 分 — 本轮结束后结算`,
+      title: megaEnabled(state)
+        ? `🏁 有人达成 ${MEGA_WIN_SCORE} 分 + 六色奖励 + Mega 在場 — 本轮结束后结算`
+        : `🏁 有人达到 ${Number(state.globalVars.scoreToWin ?? WIN_SCORE)} 分 — 本轮结束后结算`,
       durationMs: 900
     });
 
@@ -780,13 +1714,23 @@ export class SplendorRules {
   /**
    * Highest score wins; ties break on buried Pokémon, then on cards in play.
    * The game only ends once the final round has been played out.
+   *
+   * With Mega Evolution only a player who actually satisfies the stricter goal
+   * is eligible; the pool falls back to everyone only in the pathological case
+   * where nobody qualified, so a table can never end without a winner.
    */
   public static checkWinCondition(
     state: GameState
   ): { gameOver: boolean; winner: PlayerId | null; reason?: string } {
     if (!state.globalVars.finalRoundComplete) return { gameOver: false, winner: null };
 
-    const ranking = state.playerOrder.map(pid => {
+    let pool = [...state.playerOrder];
+    if (megaEnabled(state)) {
+      const qualified = pool.filter(pid => SplendorRules.hasMegaWin(state, pid));
+      if (qualified.length > 0) pool = qualified;
+    }
+
+    const ranking = pool.map(pid => {
       const player = state.players[pid];
       return {
         pid,
