@@ -270,10 +270,23 @@ async function run() {
     }
     console.log('✓ UI: admin logged into admin console');
 
+    // 验证「用户 ID」不再显示在表格中
+    const idHeader = await page.$('th:has-text("用户 ID")');
+    if (idHeader) throw new Error('用户 ID 列表头不应显示');
+    const idInCell = await page.$('td:has-text("u_admin_rds")');
+    if (idInCell) throw new Error('用户 ID 不应直接在表格行中显示');
+    console.log('✓ UI: 用户 ID 列已成功移除，不再显示在界面中');
+
+    // 切换至手机视口 (iPhone 390x844)，验证移动端右侧操作按钮可见且不溢出
+    await page.setViewportSize({ width: 390, height: 844 });
+    const mobileRow = await page.waitForSelector(`tr[data-user-id] td:has-text("${uiPlayerName}")`, { timeout: 5000 });
+    const mobilePassBtn = await page.$(`tr:has-text("${uiPlayerName}") button[data-action="reset-pass"]`);
+    const mobileDelBtn = await page.$(`tr:has-text("${uiPlayerName}") button[data-action="delete"]`);
+    if (!mobilePassBtn || !mobileDelBtn) throw new Error('移动端右侧改密与删除按钮应直接可见');
+    console.log('✓ UI (Mobile 390px): 右侧修改密码与删除按钮直接可见');
+
     // 管理员通过表格中的「改密」修改刚才用户的密码（直接设置，无需原密码）
-    const userRow = await page.waitForSelector(`tr[data-user-id] td:has-text("${uiPlayerName}")`, { timeout: 5000 });
-    const rowEl = await page.$(`tr:has-text("${uiPlayerName}")`);
-    const editPassBtn = await rowEl.$('button[data-action="reset-pass"]');
+    const editPassBtn = await page.waitForSelector(`tr:has-text("${uiPlayerName}") button[data-action="reset-pass"]`, { timeout: 5000 });
     await editPassBtn.click();
     await page.waitForSelector('#adm-reset-pass', { timeout: 5000 });
     console.log('✓ UI: admin opened reset password modal for user');
