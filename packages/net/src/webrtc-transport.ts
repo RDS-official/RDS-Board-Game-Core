@@ -102,8 +102,27 @@ export class WebRtcHostTransport {
     private readonly selfId: string,
     /** Test seam: production creates RTCPeerConnection per dialing guest. */
     private readonly attachChannel: (peerId: string, onChannel: (ch: ChannelLike) => void) => void,
-    private readonly log: (...a: unknown[]) => void = () => {}
-  ) {}
+    private readonly log: (...a: unknown[]) => void = () => {},
+    /**
+     * 中期项 A3：座位 → hub userId。有绑定时 guest 只能加入自己的座位；
+     * 缺省（脚本/单机）回退到「先到先得」。peerId 本身已由 hub 签名校验，
+     * 因此可安全地当作座位令牌使用。
+     */
+    private readonly seatOwners?: Partial<Record<string, string>>
+  ) {
+    // 任何权威状态跃迁（房主本地动作 / 房客远程动作 / 自动超时）都推一次
+    // per-viewer delta；房主侧不再需要额外的同步订阅。
+    this.unobserveRoom = this.room.onChange(() => this.pushDeltas());
+  }
+
+  private readonly unobserveRoom: () => void;
+
+  /** 断开与房间的订阅（NetSession.dispose 调用）。 */
+  public dispose(): void {
+    this.unobserveRoom();
+    this.channels.clear();
+    this.viewers.clear();
+  }
 
   public start(): void {
     this.attachChannel('*', () => { /* replaced per-peer by mesh layer */ });
@@ -141,12 +160,30 @@ export class WebRtcHostTransport {
           this.reply(peerId, { t: 'error', message: 'invalid viewer seat' });
           return;
         }
+        // 中期项 A3：hub 座位归属（seatOwners[seat] === peerId）优先于先到先得，
+        // 否则房客可以抢先占下别人的座位并以该身份操作。
+        const boundOwner = this.seatOwners?.[seat];
+        if (boundOwner && boundOwner !== peerId) {
+          this.reply(peerId, { t: 'error', message: 'seat is bound to another user' });
+          return;
+        }
         const owner = [...this.viewers.entries()].find(([, v]) => v === seat);
         if (owner && owner[0] !== peerId) {
           this.reply(peerId, { t: 'error', message: 'viewer seat already claimed by another peer' });
           return;
         }
-        if (!owner) this.room.join(seat);
+        if (!owner) {
+          try {
+            // peerId 作为座位令牌传入房间授权器（房间侧二次校验，防御纵深）。
+            this.room.join(seat, peerId);
+          } catch (err) {
+            this.reply(peerId, {
+              t: 'error',
+              message: String((err as Error)?.message ?? 'unauthorized viewer seat')
+            });
+            return;
+          }
+        }
         this.viewers.set(peerId, seat);
         this.reply(peerId, { t: 'room-update', update: this.room.snapshot(seat) });
         break;
@@ -165,10 +202,16 @@ export class WebRtcHostTransport {
           this.reply(peerId, { t: 'error', message: 'actor does not match viewer' });
           return;
         }
-        const result = this.room.submit(action);
+        // delta 由 GameRoom.onChange 订阅统一推送（构造时挂载），此处不再重复。
+        // 房间层再校验一次 actor 归属（防御纵深：即使上面的检查被绕过，内核也拒绝）。
+        this.room.setCurrentViewer(viewer);
+        let result;
+        try {
+          result = this.room.submit(action);
+        } finally {
+          this.room.setCurrentViewer(undefined);
+        }
         if (!result.ok) this.reply(peerId, { t: 'error', message: result.error ?? 'rejected' });
-        // Every dispatch changes everyone's projection: push per-viewer deltas.
-        this.pushDeltas();
         break;
       }
       case 'snapshot': {

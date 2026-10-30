@@ -23,6 +23,8 @@
 | AI-15 | 房间物品视觉锚点重复计算 | zone_room 与 slot 两套语义；renderer 硬编码偏移 | 模块提供 `PlacementSlot.local/visual`，renderer 只做坐标/布局消费；不再按 `zone_room_*` 猜位置 |
 | AI-16 | 全量重建时相机可能被自动取景重置 | `syncState` 重建与相机 fit 策略绑定 | 相机属于 renderer；仅显式布局变化/用户请求才 fit，丢弃/新实体保持当前 camera/target |
 | AI-17 | 放置房间时相机反复 fit，放置后停在高位 | 相机 fit 与 placement 旋转耦合；缺少 placement 前相机快照 | 相机归 renderer：placement 开始保存 pose 并缓动抬高，旋转不 fit，结束/取消缓动恢复 |
+| AI-28 | 房主侧存在两个引擎：HUD 的 `UniversalSession` 与权威 `GameRoom` 镜像，靠 append-only 日志尾部重放保持同步 | 两个独立状态机 + 微任务尾部同步，任何丢步/重放错位都会造成双端分歧 | 中期项 A2：`GameRoom` 支持注入共享引擎，NetSession host 只创建一个引擎，HUD 与权威房间共用；`revision` 由引擎状态哈希变化推进；删除 `BridgedRoom` / `syncing` / 尾部重放；delta 推送统一由 `GameRoom.onChange` 驱动 |
+| AI-29 | 房客可抢先占据他人座位：`seatOwners` 仅用于 presence 展示，座位分配是先到先得 | 传输层座位与 hub 身份无绑定，抢座后可提交他人 actor 的动作 | 中期项 A3：`WebRtcHostTransport` 接收 `seatOwners`，座位只允许其 hub userId 加入；`GameRoom.setAuthorizer` 做房间侧二次校验；未绑定座位保持先到先得 |
 
 ## 2. 重复相似特性（需要合并）
 
@@ -44,6 +46,7 @@
 | ID | 问题 | 建议 |
 | --- | --- | --- |
 | AI-25 | K8/K9/K12/K14 Wave 3 | 按 KERNEL-EXPRESSION 推进，不混入 fixture 特例，不与表现层同 PR |
+| AI-30 | 服务端权威反作弊（对抗恶意房主） | **确认边界外**（[BACKLOG.md](BACKLOG.md) §0.2：不构建真实服务端）。P2P 下房主是信任对等体；当前缓解=内核结构/合法性校验、隐藏信息只经投影离开房主、座位绑定 + actor 校验 + 非法动作不改状态。若要抗恶意房主，需把 `GameRoom` 跑成独立服务端进程（seam 已就绪），届时另立 RFC。 |
 
 ### 已结案（不再跟踪）
 

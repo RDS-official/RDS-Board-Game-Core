@@ -13,7 +13,7 @@
 
 1. **全量重建保留**：当前实体规模下作为 correctness-first 兜底，只做已完成的生命周期/阴影/预览优化。
 2. **不构建真实 WebSocket/HTTP 服务器**：保留 `RoomTransport` / `RoomHttpAdapter` seam。
-   后续 `src/net/webrtc-transport.ts` 由另一位贡献者引入，属于浏览器 P2P，不属于服务端。
+   后续 `packages/net/src/webrtc-transport.ts` 由另一位贡献者引入，属于浏览器 P2P，不属于服务端。
 3. **i18n 不追求全量**：动作文案已 locale 化；静态 UI/chrome 留待办。
 4. **游戏夹具只需功能完备**：保证 UI/应用层兼容性；官方版图、完整规则细节属于可选项。
 5. **山屋滑梯/坍塌/熔炉保持"进入即触发"**：不新增"从上层主动滑下去"的主动动作
@@ -64,7 +64,7 @@ __boardGameApp.scene.getRenderStats()
 - `RoomTransport` 接口与 `RoomHttpAdapter` 已就绪；
 - 真实 WebSocket/HTTP server、连接管理、重连、背压不在当前范围；
 - 部署时需补：鉴权 token 生命周期、多客户端广播、断线重连的 `revision/delta` 恢复；
-- 浏览器侧 P2P 见 [LOBBY-INTEGRATION.md](LOBBY-INTEGRATION.md)（另一位贡献者的 `src/net/webrtc-transport.ts`）。
+- 浏览器侧 P2P 见 [LOBBY-INTEGRATION.md](LOBBY-INTEGRATION.md)（另一位贡献者的 `packages/net/src/webrtc-transport.ts`）。
 
 ## 5. 游戏夹具可选项（不影响内核/UI 兼容性）
 
@@ -95,10 +95,10 @@ __boardGameApp.scene.getRenderStats()
 
 ```bash
 # 1) 待办声称"某处缺少 X" -> 先在源码里搜是否已存在
-Select-String -Path src/**/*.ts -Pattern "<符号名>"
+Select-String -Path packages/*/src/**/*.ts,apps/*/src/**/*.ts -Pattern "<符号名>"
 
 # 2) 待办号称"未校验/未拒绝" -> 先看有没有对应的回归测试
-Select-String -Path src/core/testing/suite.ts -Pattern "<关键词>"
+Select-String -Path packages/harness/src/suite.ts -Pattern "<关键词>"
 
 # 3) 性能类待办 -> 按 §1 跑一次 getRenderStats 再判断
 

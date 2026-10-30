@@ -3,7 +3,7 @@
 > 目标：把“手测/黑盒/回放发现的问题”从一次性修复变成**持续收集的模拟器质量清单**。
 > 规则夹具（Catan / Betrayal / …）只是触发器；这里记录的是内核、应用层、渲染层、交互层需要长期优化的问题。
 >
-> 基线：`131 passed / 0 failed / 0 boundary violations`（`node scripts/test-core.mjs`）。
+> 基线：`206 passed / 0 failed / 0 boundary violations`（`node scripts/test-core.mjs`）。
 
 ---
 
@@ -42,7 +42,7 @@
 | SA-11 | P1 | 空间查询分散在山屋私有 helper，无法被选择器/UI 复用 | `GameModule` 只有 `topology` 标签 | `TopologySpec` + `SpatialQuery` + `MapGraphManager` 图算法 + 引擎访问器 | `SpatialQuery`/graph 测试 |
 | SA-12 | P1 | 效果/持续修正没有生命周期，模块各自手写 | 没有通用 effect 槽位 | `GameState.effects`、`EffectInstance`、turn/clock/phase 过期、可见性投影、invariants | `effects expire and are projected...` |
 | SA-13 | P1 | 动态长条布局会把房间挤出镜头，或诱导重排逻辑坐标 | 相机固定 preset，不按图包围盒取景 | 保留逻辑坐标；渲染层按节点/预览包围盒自动拉远相机（`fitCameraToBoard`） | 手测长排房间 |
-| SA-14 | P1 | 曾把 camera/layout hints 放进 `GameCapabilities`，污染核心契约 | 表现策略与几何拓扑没有分层 | 移到 `src/app/layout.ts`；renderer 只接收结构化 `LayoutHints`，不再按 gameId 分支 | `tsc`/手测 |
+| SA-14 | P1 | 曾把 camera/layout hints 放进 `GameCapabilities`，污染核心契约 | 表现策略与几何拓扑没有分层 | 移到 `packages/app/src/layout.ts`；renderer 只接收结构化 `LayoutHints`，不再按 gameId 分支 | `tsc`/手测 |
 | SA-41 | P1 | 全量重建棋盘对象时只 remove，不 dispose geometry/material；阴影贴图每帧更新 | Three.js 生命周期与阴影更新策略缺失 | `clearBoardObjects` 释放几何/材质（共享纹理缓存保留）；`shadowMap.autoUpdate=false`，仅棋盘变化时 `needsUpdate` | UI flow / 构建 |
 | SA-44 | P1 | 坐标语义升级后，旧会话里的 world position 被新 grid 投影误读，房间视觉重合 | 节点没有声明坐标空间 | `MapGraphNode.positionSpace` 显式标注；缺省按 legacy world 处理 | `legacy world positions remain world positions` |
 | SA-45 | P1 | 楼层水平间距 9.6 小于楼层底板宽 12.6，一楼/二楼地板与边缘房间发生视觉重叠 | 表现层固定 offset，未考虑楼层实际宽度 | 山屋改为 `layerMode: 'auto'`，按当前楼层包围盒动态计算层偏移；底板/标签/camera 同步重算 | `projection: auto floor layout...`、`shots/betrayal-auto-floors.png` |
@@ -109,7 +109,7 @@
 ### 3.4 分层边界
 - **core**：只处理 `GameMapGraph`、`TopologySpec`、`nodes/edges` 与通用图算法；
   - 不存相机位置、缩放、padding、UI 布局。
-- **app**：`src/app/layout.ts` 维护“游戏 id → 演示取景 hints”的映射；
+- **app**：`packages/app/src/layout.ts` 维护“游戏 id → 演示取景 hints”的映射；
   - 这是产品表现策略，不是游戏语义。
 - **render**：定义自己的 `LayoutHints` 结构，按节点包围盒取景；
   - 不按 `gameId` 分支，不读 `GameCapabilities` 里的相机字段。
@@ -150,7 +150,7 @@
 | SA-32 | ✅ 已修复 | 预览不说明合法朝向 | 面板只显示当前角度 | 显示合法朝向数量与角度列表 |
 | SA-33 | `PLACE_ROOM` 只支持单选旋转，未支持“先看板块再决定抽/弃” | 规则差异 | 若规则要求可弃置，增加 `DISCARD_TILE` 动作 |
 | SA-34 | ✅ 已修复 | UI 流程覆盖不足 | 旧脚本只跑主路径 | 新增全夹具 UI matrix；后续补三次旋转/多物品专项 |
-| SA-35 | `docs/BETRAYAL` 的规则覆盖表与实现细节仍会随内容增加漂移 | 文档可信度 | 每次新增卡牌/剧本同步 `content tables` 测试与矩阵 |
+| SA-35 | `docs/BETRAYAL.md` 的规则覆盖表与实现细节仍会随内容增加漂移 | 文档可信度 | 每次新增卡牌/剧本同步 `content tables` 测试与矩阵 |
 | SA-36 | K3 effect 槽位尚未迁移山屋物品/击晕 | 内核能力空转 | 把 `customProps.effects`、`stunTurns` 迁到 `EffectInstance`，保留兼容读取 |
 | SA-37 | K4 两阶段检定窗口未做 | 幸运石/掷后反应仍自动 | 增加 `RollWindow`：修正声明 → 掷骰 → 掷后响应 |
 | SA-38 | K8 secrets / K9 批量 / K12 DSL / K14 楼层 | RFC 剩余波次 | 按 `KERNEL-EXPRESSION.md` 的 Wave 3 推进 |
@@ -294,7 +294,7 @@ pnpm shots betrayal    # 只跑名称匹配的套件
 | --- | --- | --- |
 | A-12 | payload 跨字段约束/条件字段 | ✅ 已修复 | `validatePayload` + `ActionFieldSpec.dependsOn`；HUD 条件显隐，bot 默认值跳过隐藏字段 |
 | A-13 | 全量渲染对象池化 | ✅ 设计取舍 | 当前实体规模下不做通用对象池；放置预览、dispose、阴影按需更新已优化；完整 scene diff 见 A-16 |
-| A-14 | 房间客户端完整 Presenter | ✅ 已修复 | `src/net/roomPresenter.ts` 复用 `actionText`，暴露 UiAction 并转发 submit |
+| A-14 | 房间客户端完整 Presenter | ✅ 已修复 | `packages/net/src/roomPresenter.ts` 复用 `actionText`，暴露 UiAction 并转发 submit |
 | A-15 | 高维坐标的统一约定 | ✅ 设计取舍 | world/grid/ring 投影都支持；Catan 保留 world，不强制迁移 |
 | A-16 | 通用 scene diff / 对象池 | ⏳ 复杂 backlog | 仅在 profiling 证明全量重建成为瓶颈时再做；需要 diff ownership、dispose、raycast 清理 |
 | A-17 | 可插拔 ProjectionPort | ✅ 已实现 | `ProjectionRegistry` + `ProjectionPort`；默认 world/grid/ring/stack，自定义 space 可注册 |

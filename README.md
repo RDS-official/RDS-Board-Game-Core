@@ -1,7 +1,7 @@
 # 通用桌游内核 · Universal Board Game Kernel
 
 > 产品是**内核框架**，不是某一款桌游。
-> `src/games/*` 下的五款游戏只是**一致性测试夹具**，用来证明内核可以覆盖顺序回合、递归响应、隐藏信息、同步盲提与运行时改规则。
+> `packages/games/src/*` 下的五款游戏只是**一致性测试夹具**，用来证明内核可以覆盖顺序回合、递归响应、隐藏信息、同步盲提与运行时改规则。
 
 ```
 𝒢 = ⟨𝒩, 𝒮, s₀, 𝒜, ℒ, 𝒯, 𝒪, ℛ, 𝒦⟩
@@ -35,26 +35,26 @@ pnpm shots         # 按需生成全部验证截图到 shots/（自动起停 dev
 
 | 能力 | 机制 | 代码 |
 | --- | --- | --- |
-| 确定性状态转移 | `dispatch` 单一管线 + 纯函数 reduce | [engine.ts](src/core/engine.ts) |
-| 隐藏信息与反作弊 | `𝒪(s,i)` 投影、虚拟 ID、区域重映射、模块级 redactor | [observer.ts](src/core/observer.ts) |
-| 递归响应链 | LIFO 中断栈、响应窗口、优先级短路 | [stack.ts](src/core/stack.ts) |
-| 同步/秘密决策 | 决策窗口、秘密提交、原子揭晓 | [decisions.ts](src/core/decisions.ts) |
-| 运行时改规则 | 规则以数据挂载，实现从注册表解析 | [aop.ts](src/core/aop.ts) · [rules.ts](src/core/rules.ts) |
-| 状态可持久化 | 状态内禁止函数；规则实现不在状态里 | [types.ts](src/core/types.ts) |
-| 结构正确性 | 30+ 条不变量，转移后校验 | [invariants.ts](src/core/invariants.ts) |
-| 回溯与时间机器 | 规范化 JSON + FNV-1a 哈希 + 完整动作历史 | [serialize.ts](src/core/serialize.ts) |
-| 扩展契约 | `GameModule` 接口 + 能力矩阵 | [module.ts](src/core/module.ts) |
-| 动作结构校验 | 模块声明 `actionSchemas`，合法性之前校验 | [validation.ts](src/core/validation.ts) |
-| 规则依赖图 | `requires` 声明、环检测、依赖优先执行 | [rules.ts](src/core/rules.ts) |
-| AI 接口 | `BotPolicy` + 随机策略 + 批量对局 | [policy.ts](src/ai/policy.ts) |
-| 网络适配层 | 权威房间 + 投影增量补丁 | [room.ts](src/net/room.ts) · [patch.ts](src/net/patch.ts) |
-| UI 解耦 | Presenter + DTO + PresentationPorts | [contracts.ts](src/app/contracts.ts) · [session.ts](src/app/session.ts) |
-| 决策策略 | ALL_COMMITTED / FIRST_ACCEPT / PRIORITY，首个接受短路 | [decisions.ts](src/core/decisions.ts) |
-| 玩家级超时 | 每个参与者独立 deadline，逐人 PASS | [engine.ts](src/core/engine.ts) |
-| 可重放场景 | module.scenarios + 导出日志携带 scenario | [module.ts](src/core/module.ts) |
-| 参数表单 | Action.fields → UI 表单 → payload，一步完成 | [contracts.ts](src/app/contracts.ts) · [hud.ts](src/ui/hud.ts) |
-| 逻辑时钟与超时 | `__TICK__` 控制动作、decision/response deadline、可重放超时 | [engine.ts](src/core/engine.ts) |
-| 检查点持久化 | 种子 + Action Log 导出、重放式恢复 | [room.ts](src/net/room.ts) |
+| 确定性状态转移 | `dispatch` 单一管线 + 纯函数 reduce | [engine.ts](packages/kernel/src/engine.ts) |
+| 隐藏信息与反作弊 | `𝒪(s,i)` 投影、虚拟 ID、区域重映射、模块级 redactor | [observer.ts](packages/kernel/src/observer.ts) |
+| 递归响应链 | LIFO 中断栈、响应窗口、优先级短路 | [stack.ts](packages/kernel/src/stack.ts) |
+| 同步/秘密决策 | 决策窗口、秘密提交、原子揭晓 | [decisions.ts](packages/kernel/src/decisions.ts) |
+| 运行时改规则 | 规则以数据挂载，实现从注册表解析 | [aop.ts](packages/kernel/src/aop.ts) · [rules.ts](packages/kernel/src/rules.ts) |
+| 状态可持久化 | 状态内禁止函数；规则实现不在状态里 | [types.ts](packages/kernel/src/types.ts) |
+| 结构正确性 | 30+ 条不变量，转移后校验 | [invariants.ts](packages/kernel/src/invariants.ts) |
+| 回溯与时间机器 | 规范化 JSON + FNV-1a 哈希 + 完整动作历史 | [serialize.ts](packages/kernel/src/serialize.ts) |
+| 扩展契约 | `GameModule` 接口 + 能力矩阵 | [module.ts](packages/kernel/src/module.ts) |
+| 动作结构校验 | 模块声明 `actionSchemas`，合法性之前校验 | [validation.ts](packages/kernel/src/validation.ts) |
+| 规则依赖图 | `requires` 声明、环检测、依赖优先执行 | [rules.ts](packages/kernel/src/rules.ts) |
+| AI 接口 | `BotPolicy` + 随机策略 + 批量对局 | [policy.ts](packages/harness/src/policy.ts) |
+| 网络适配层 | 权威房间 + 投影增量补丁 | [room.ts](packages/net/src/room.ts) · [patch.ts](packages/net/src/patch.ts) |
+| UI 解耦 | Presenter + DTO + PresentationPorts | [contracts.ts](packages/app/src/contracts.ts) · [session.ts](packages/app/src/session.ts) |
+| 决策策略 | ALL_COMMITTED / FIRST_ACCEPT / PRIORITY，首个接受短路 | [decisions.ts](packages/kernel/src/decisions.ts) |
+| 玩家级超时 | 每个参与者独立 deadline，逐人 PASS | [engine.ts](packages/kernel/src/engine.ts) |
+| 可重放场景 | module.scenarios + 导出日志携带 scenario | [module.ts](packages/kernel/src/module.ts) |
+| 参数表单 | Action.fields → UI 表单 → payload，一步完成 | [contracts.ts](packages/app/src/contracts.ts) · [hud.ts](apps/web/src/ui/hud.ts) |
+| 逻辑时钟与超时 | `__TICK__` 控制动作、decision/response deadline、可重放超时 | [engine.ts](packages/kernel/src/engine.ts) |
+| 检查点持久化 | 种子 + Action Log 导出、重放式恢复 | [room.ts](packages/net/src/room.ts) |
 
 规则手册级的契约见 **[docs/CORE.md](docs/CORE.md)**；当前分层、模块实现与调用链见 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**；山屋的规则覆盖与模拟器缺陷评估见 **[docs/BETRAYAL.md](docs/BETRAYAL.md)**；内核表达缺陷的改造 RFC 见 **[docs/KERNEL-EXPRESSION.md](docs/KERNEL-EXPRESSION.md)**；持续维护的模拟器质量清单见 **[docs/SIMULATOR-AUDIT.md](docs/SIMULATOR-AUDIT.md)**。
 
@@ -131,19 +131,19 @@ activeHooks: [{ instanceId, hookId: 'haunt_crimson_beast', ownerId, params: { bo
 ## 5. 分层与边界
 
 ```
-main.ts (装配根)
+apps/web/src/main.ts (装配根)
    │
    ▼
-src/app/UniversalSession  ──GamePresenter(DTO)──▶  src/ui/hud.ts, mathInspector.ts
-   │  owns engine                                      │
-   ▼                                                   ▼
-src/core/UniversalGameEngine                   PresentationPorts
-                                                   │ camera / audio / highlight
-                                                   ▼
-                                             src/render (Three.js)
+UniversalSession (packages/app/src)  ──GamePresenter(DTO)──▶  apps/web/src/ui/hud.ts, mathInspector.ts
+   │  owns engine                                                  │
+   ▼                                                              ▼
+UniversalGameEngine (packages/kernel/src)                 PresentationPorts
+                                                                  │ camera / audio / highlight
+                                                                  ▼
+                                                        apps/web/src/render (Three.js)
 ```
 
-- UI **只** import `src/app/contracts`，不 import 引擎、游戏模块、Three.js、音频；
+- UI **只** import `packages/app/src/contracts`，不 import 引擎、游戏模块、Three.js、音频；
 - 应用层负责动作标签、玩家卡片、阶段文案、已脱敏日志与重放结果；
 - 相机 / 音效 / 桌面高亮经 `PresentationPorts` 回传；
 - `pnpm test` 内置静态边界检查：UI 引用 core/games/render/net/ai 即失败。
@@ -159,62 +159,35 @@ pnpm test
 ```
 Universal Board Game Kernel — conformance suite
   ✓ serialize: canonical order + hashing is stable
-  ✓ prng: same seed yields identical streams and shuffles
-  ✓ ecs: moving entities preserves single ownership
   ✓ stack: LIFO order, response collection and priority short-circuit
-  ✓ aop: stage/priority ordering, modify, cancel, after-trigger
   ✓ decisions: secret submissions stay hidden until reveal
-  ✓ decisions: priority policy short-circuits and orders submissions
   ✓ observer: hidden cards are scrubbed, aliased and zone-remapped
-  ✓ invariants: valid state passes, corrupted states are rejected
-  ✓ engine: illegal actions are rejected without mutating state
   ✓ engine: deterministic replay reproduces the exact state hash
-  ✓ engine: time machine rewinds and replays forward
   ✓ validation: schemas reject malformed actions before legality
-  ✓ rule graph: missing dependencies and cycles are rejected
   ✓ fixture */initialises under strict invariants        (×5)
   ✓ fixture */random play + bit-exact replay             (×5)
   ✓ fixture */projections never leak hidden card faces   (×5)
-  ✓ fixture dune_mahjong: secret simultaneous decision resolves atomically
-  ✓ fixture sanguosha: interrupt stack resolves through hidden information
-  ✓ fixture betrayal: haunt hot-injects a data-only rule hook
-  ✓ fixture catan: snake setup, distance rule and phase gating
-  ✓ fixture catan: rolling 7 opens robber flow and replay stays exact
-  ✓ fixture catan: build costs, dev cards and bank conservation
-  ✓ fixture catan: player trade, bank trade, bonuses and victory
-  ✓ fixture catan: black-box random play never stalls or corrupts state
-  ✓ fixture catan: forced seven discards half and resolves through the window
-  ✓ fixture catan: harbours change bank trade ratios
-  ✓ fixture catan: hidden VP cards are redacted from opponents
-  ✓ bots: random policies play every fixture without kernel errors
-  ✓ bots: identical seeds produce identical games
   ✓ room: projection patches round-trip exactly
   ✓ room: hidden information never appears in patches
-  ✓ room: secret decision submissions are collapsed in deltas
-  ✓ decisions: FIRST_ACCEPT resolves on the first acceptance only
-  ✓ decisions: FIRST_ACCEPT resolves after all rejections
-  ✓ engine: named scenarios replay through export/load
-  ✓ engine: per-participant deadlines expire independently
-  ✓ presenter: payload fields collapse multi-step choices into one action
+  ✓ room: an injected engine is the single source of truth (A2)
   ✓ room: checkpoints restore through replay
-  ✓ projection: module redactors hide secret roles and private globals
-  ✓ engine: logical clock times out secret decisions deterministically
-  ✓ engine: response windows time out and resolve the frame payload
-  ✓ presenter: clock control advances the logical clock and expires decisions
-  ✓ presenter: snapshot exposes actions and performs by id
-  ✓ presenter: board picks are resolved to legal actions
   ✓ presenter: viewer switching reprojects without exposing the raw engine
-  ✓ presenter: notices are emitted for kernel visual events
 
-  131 passed, 0 failed · 0 boundary violations
+  Architecture boundary
+
+  ✓ UI / application / kernel imports are separated
+
+  206 passed, 0 failed, 206 cases, 0 boundary violations
 ```
+
+（节选；完整清单见 `node scripts/test-core.mjs` 输出）
 
 ---
 
 ## 7. 目录
 
 ```
-src/core/                 # 内核（与具体游戏无关）
+packages/kernel/src/                 # 内核（与具体游戏无关）
   engine.ts               # 调度、校验、回放、哈希
   module.ts               # GameModule 契约 + 能力矩阵
   types.ts                # 状态/动作/栈帧/决策窗口/规则钩子
@@ -227,25 +200,26 @@ src/core/                 # 内核（与具体游戏无关）
   serialize.ts            # 规范化 JSON + FNV-1a
   validation.ts           # 动作 Schema 校验
   ecs.ts / graph.ts / prng.ts
-  testing/suite.ts        # 一致性测试
-src/app/                  # 应用层：Presenter 契约 + Session + DTO
-src/ai/policy.ts          # Bot 接口与随机策略
-src/net/                  # 权威房间 + RFC6902 投影差分
-src/games/                # 五款夹具（setup + rules + hooks）
-src/render/               # Three.js 可视化调试器
+packages/app/src/                    # 应用层：Presenter 契约 + Session + DTO
+packages/harness/src/                # 一致性测试套件（suite.ts + suites/*）+ Bot 策略
+packages/net/src/                    # 权威房间 + RFC6902 投影差分 + WebRTC transport
+packages/games/src/                  # 五款夹具（setup + rules + hooks）
+apps/web/src/render/                 # Three.js 可视化调试器
   procedural/             # 2.5D 洋馆资产库
     materials.ts          #   共享 PBR 调色板（木/金属/石材/织物/自发光）
     props.ts              #   45+ 件程序化家具与陈设（床/柜/书柜/实验台/石棺/熔炉/烛台…）
     roomLayout.ts         #   门位感知布局引擎（门廊禁区 + AABB 互斥 + 连通性洪水填充）
     roomTile.ts           #   房间壳体：墙纸/护墙板/踢脚/线脚/窗/门套/门槛 + 按材质合并
     cardMesh.ts           #   做旧羊皮纸卡面与皮革烫金卡背
-src/ui/                   # HUD 与数学模型检查器
+apps/web/src/ui/                     # HUD 与数学模型检查器
   theme-gothic.css        # 山屋专用烛光/黄铜主题覆盖层
-docs/CORE.md              # 契约、扩展指南、路线图
-docs/ARCHITECTURE.md      # 分层架构、模块实现与调用链
-docs/BETRAYAL.md          # 山屋 44 房间/三剧本覆盖 + 内核缺陷清单
-docs/KERNEL-EXPRESSION.md # 内核表达缺陷分析与分波次改造 RFC
-scripts/test-core.mjs     # Vite SSR 测试运行器
+apps/web/src/lobby/                  # 大厅 / 房间 / 联机 UI
+apps/server/src/                     # 大厅 + WebRTC 信令 hub（Hono + ws + PM2 部署）
+docs/CORE.md                         # 契约、扩展指南、路线图
+docs/ARCHITECTURE.md                 # 分层架构、模块实现与调用链
+docs/BETRAYAL.md                     # 山屋 44 房间/三剧本覆盖 + 内核缺陷清单
+docs/KERNEL-EXPRESSION.md            # 内核表达缺陷分析与分波次改造 RFC
+scripts/test-core.mjs                # Vite SSR 测试运行器
 ```
 
 ---
@@ -264,7 +238,7 @@ scripts/test-core.mjs     # Vite SSR 测试运行器
 > 目标：让《山屋惊魂》的桌面读起来像一座被剖开的微缩洋馆，而不是一堆贴图方块。
 > 相关契约与回归方式见 **[docs/SIMULATOR-AUDIT.md](docs/SIMULATOR-AUDIT.md)**（§3.3.1 几何硬约束）。
 
-### 9.1 资产库（`src/render/procedural/props.ts`）
+### 9.1 资产库（`apps/web/src/render/procedural/props.ts`）
 
 每件陈设都是一个返回 `THREE.Group` 的构建器，约定「落地在 y=0、正面朝 +Z、背面贴墙」，
 由布局引擎负责旋转与落位。所有部件共享 `materials.ts` 的单例材质，因此房间可以按材质
@@ -282,7 +256,7 @@ scripts/test-core.mjs     # Vite SSR 测试运行器
 | 大门 | 门厅双扇前门（石套+大理石过梁+铁铆钉+门环+锁梁） |
 | 壁面 | 肖像画、壁烛、织锦、蜘蛛网（角部专用） |
 
-### 9.2 布局引擎（`src/render/procedural/roomLayout.ts`）
+### 9.2 布局引擎（`apps/web/src/render/procedural/roomLayout.ts`）
 
 ```
 门廊禁区 → 墙挂优先 → 中心件 → 卫星件（餐椅绕桌）→ 连通性校验

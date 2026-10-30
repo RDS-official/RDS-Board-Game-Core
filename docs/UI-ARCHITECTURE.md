@@ -116,7 +116,7 @@
 | React / Vue | 低 | 需引入虚拟 DOM + 构建链改造，1461 行手写模板要整体重写，风险最大 |
 | 纯手写 vanilla | 中 | 无需新依赖，但要自己造响应式与生命周期，等于重造轮子 |
 
-推荐 **Lit**，理由是可**渐进迁移**：先让 `hud.ts` 里的一个面板变成 Lit 元素，其余保持原样，两者可共存。它也不违反仓库的 `src/ui` 只 import `app/contracts` 的分层约束。
+推荐 **Lit**，理由是可**渐进迁移**：先让 `hud.ts` 里的一个面板变成 Lit 元素，其余保持原样，两者可共存。它也不违反仓库的 `apps/web/src/ui` 只 import `app/contracts` 的分层约束。
 参考：[alien-lit — Lit 的响应式状态方案](https://saman-taghavi.github.io/alien-lit/examples/theming)
 
 ### 2.5 桌游/游戏 HUD 的既有经验

@@ -1,9 +1,10 @@
 /**
  * Networked session (lobby mode) — GamePresenter for rds-room/1 WebRTC play.
  *
- * Host: engine authority stays local (inner UniversalSession + GameRoom mirror
- * kept in lockstep by replaying the append-only action log both ways); guests
- * are served through WebRtcHostTransport + startHostMesh.
+ * Host: engine authority stays local and there is exactly ONE engine — the
+ * UniversalSession (HUD) and the authoritative GameRoom share it, so a local
+ * dispatch is the authoritative transition; guests are served through
+ * WebRtcHostTransport + startHostMesh with per-viewer deltas.
  *
  * Guest: no local engine. Consumes its own projection O(s, i) pushed by the
  * host, renders it with the same pure view builders as UniversalSession, and
@@ -25,7 +26,6 @@ import {
   VisualTraceEvent
 } from '@rds/kernel/types';
 import { applyPatch } from '@rds/net/patch';
-import { DispatchResult } from '@rds/kernel/types';
 import { GameRoom, RoomUpdate } from '@rds/net/room';
 import {
   HubSignaling,
@@ -100,24 +100,6 @@ interface GuestChannel {
   close?(): void;
 }
 
-/** GameRoom subclass that reports accepted actions back to the session mirror. */
-class BridgedRoom extends GameRoom {
-  constructor(
-    module: GameModule,
-    seed: number,
-    scenario: string | undefined,
-    private readonly onAccepted: (action: Action) => void
-  ) {
-    super(module, seed, undefined, scenario);
-  }
-
-  public submit(action: Action): DispatchResult {
-    const result = super.submit(action);
-    if (result.ok) this.onAccepted(action);
-    return result;
-  }
-}
-
 /**
  * Networked GamePresenter. Construct synchronously (getSnapshot works before
  * the signaling connection resolves), then call \`start()\` to connect.
@@ -140,13 +122,10 @@ export class NetSession implements GamePresenter {
   private readonly listeners = new Set<(snapshot: GameSnapshot) => void>();
   private readonly noticeListeners = new Set<(notice: UiNotice) => void>();
   private readonly visualListeners = new Set<(events: VisualTraceEvent[]) => void>();
-  private readonly unsubscribeSession?: () => void;
-
   // --- host state ---
   private readonly session?: UniversalSession;
-  private room?: BridgedRoom;
+  private room?: GameRoom;
   private hostTransport?: WebRtcHostTransport;
-  private syncing = false;
 
   // --- guest state ---
   private state?: ProjectedGameState;
@@ -183,23 +162,27 @@ export class NetSession implements GamePresenter {
 
     if (options.role === 'host') {
       const seed = this.hostSeed;
-      const inner = new UniversalSession(module, seed, options.scenario);
+      // 中期项 A2：房主侧只有唯一一个权威引擎。HUD（UniversalSession）与
+      // 权威房间（GameRoom）共用它，因此本地 dispatch 直接就是权威跃迁，
+      // 不需要「本地引擎 → 重放 action 到镜像房间」的双引擎同步。
+      const engine = new UniversalGameEngine(
+        module,
+        seed,
+        options.scenario ? { scenario: options.scenario } : undefined
+      );
+      engine.setAliasSecret(this.aliasSecret);
+      const room = new GameRoom(module, seed, this.seatAuthorizer(), options.scenario, engine);
+      const inner = new UniversalSession(module, seed, options.scenario, engine);
       inner.setViewer(options.playerId);
-      inner.setAliasSecret(this.aliasSecret);
       // 开局前把 hub 身份写进内核 Player（展示字段），随 snapshot 同步给房客。
       if (options.roster) {
         for (const [pid, ident] of Object.entries(options.roster)) {
           if (ident?.name) inner.renamePlayer(pid as PlayerId, ident.name, ident.avatarUrl);
         }
       }
+      this.room = room;
       this.session = inner;
-      // Every local dispatch (any UI path) tails into the authoritative room,
-      // so guests observe exactly what the host's own HUD observes.
-      // NOTE: the engine notifies state changes BEFORE appending to its action
-      // history (finalizeTransition), so the tail must run a microtask later.
-      this.unsubscribeSession = inner.subscribe(() => {
-        queueMicrotask(() => this.syncRoomFromSession());
-      });
+      // delta 推送由 WebRtcHostTransport 构造时订阅 room.onChange 统一完成。
     } else {
       // Bootstrap a plausible viewer projection without keeping an engine.
       // The placeholder engine uses a FIXED public seed (never the host's real
@@ -242,31 +225,40 @@ export class NetSession implements GamePresenter {
     startHostMesh(signaling, transport);
   }
 
-  /** Create the authoritative room mirror + host transport (signaling-agnostic). */
+  /** Create the host transport over the authoritative room (signaling-agnostic). */
   private buildHostRoom(selfId: string): { transport: WebRtcHostTransport } {
-    // Must match the local mirror engine (this.hostSeed) so the host HUD and
-    // guest snapshots describe the same game, and must NOT be published.
-    const seed = this.hostSeed;
-    const room = new BridgedRoom(this.module, seed, this.options.scenario, action =>
-      this.onGuestAction(action)
+    const room = this.room;
+    if (!room) throw new Error('host room is only available for role=host sessions');
+    // 座位授权器在构造时已注入房间；这里只补上 fellows 的座位归属映射，
+    // 让 guest 无法抢先加入别人的座位（中期项 A3）。
+    const transport = new WebRtcHostTransport(
+      room,
+      selfId,
+      () => {},
+      undefined,
+      this.options.seatOwners
     );
-    room.engine.setAliasSecret(this.aliasSecret);
-    // 开局身份同样写入权威房引擎：rename 不产生 action，不会出现在重放历史里，
-    // 必须直接改 room.engine 的 Player，否则房客全量 snapshot 仍是内核默认名。
-    if (this.options.roster) {
-      for (const [pid, ident] of Object.entries(this.options.roster)) {
-        if (!ident?.name) continue;
-        const player = room.engine.getRawState().players[pid as PlayerId];
-        if (!player) continue;
-        player.name = String(ident.name).slice(0, 24);
-        if (ident.avatarUrl) player.avatarUrl = ident.avatarUrl;
-      }
-    }
-    this.room = room;
-    const transport = new WebRtcHostTransport(room, selfId, () => {});
     this.hostTransport = transport;
-    this.syncRoomFromSession();
     return { transport };
+  }
+
+  /**
+   * 中期项 A3：座位 → hub userId 绑定。
+   * 有绑定信息的座位只允许其 owner 加入（peerId 由 hub 签名校验，可当令牌用）；
+   * 未绑定的座位保持既可以先到先得（兼容无 hub 身份的脚本/单机路径）。
+   */
+  private seatAuthorizer():
+    | ((viewer: PlayerId | 'GOD', token?: string) => boolean)
+    | undefined {
+    const owners = this.options.seatOwners;
+    if (!owners || Object.keys(owners).length === 0) return undefined;
+    return (viewer, token) => {
+      // GOD 能看到所有隐藏信息（手牌/身份），一旦有座位绑定就不许房客以 GOD 进房，
+      // 否则任意人员都能借观众视角作弊。将来的观战模式需要单独下发脱敏投影。
+      if (viewer === 'GOD') return false;
+      const owner = owners[viewer as PlayerId];
+      return !owner || owner === token;
+    };
   }
 
   /** Host session without signaling: tests drive transport.acceptChannel(). */
@@ -373,41 +365,6 @@ export class NetSession implements GamePresenter {
         durationMs: 0
       });
     })();
-  }
-
-  /* ------------------------------------------------------------------ */
-  /* Host bridging (local engine ⇄ authoritative room)                    */
-  /* ------------------------------------------------------------------ */
-
-  /** Mirror actions dispatched by the local HUD into the guest-facing room. */
-  private syncRoomFromSession(): void {
-    if (this.role !== 'host' || !this.room || !this.session) return;
-    const source = this.session.getActionHistory();
-    const mirror = this.room.engine.getHistory();
-    if (source.length > mirror.length) {
-      this.syncing = true;
-      try {
-        for (const action of source.slice(mirror.length)) this.room.submit(action);
-      } finally {
-        this.syncing = false;
-      }
-    }
-    this.hostTransport?.pushDeltas();
-  }
-
-  /** Guest-submitted actions are replayed into the local HUD engine. */
-  private onGuestAction(action: Action): void {
-    if (this.syncing || !this.session) return; // already mirrored locally
-    const result = this.session.dispatchAction(action);
-    if (!result.ok) {
-      this.emitNotice({
-        kind: 'error',
-        icon: '⚠',
-        title: '房主本地镜像拒绝了远端动作（两引擎疑似分歧）',
-        detail: result.error,
-        durationMs: 6000
-      });
-    }
   }
 
   /* ------------------------------------------------------------------ */
@@ -633,8 +590,9 @@ export class NetSession implements GamePresenter {
       try { this.channel?.close?.(); } catch { /* ignore */ }
       try { this.pc?.close(); } catch { /* ignore */ }
     }
-    this.unsubscribeSession?.();
+    this.hostTransport?.dispose();
     this.session?.dispose();
+    this.room?.dispose();
     try { this.signaling?.close(); } catch { /* already closed */ }
     this.listeners.clear();
     this.noticeListeners.clear();

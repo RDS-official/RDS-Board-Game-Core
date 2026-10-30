@@ -1,7 +1,7 @@
 # 《山屋惊魂》机制实现与模拟器缺陷评估
 
-> 本文对应代码：`src/games/betrayal/*`（模块）、`src/core/*`（内核）、`src/app/session.ts`（呈现适配）、`src/render/*`（桌面）。
-> 当前基线：`131 passed / 0 failed / 0 boundary violations`；`tsc --noEmit` 通过。
+> 本文对应代码：`packages/games/src/betrayal/*`（模块）、`packages/kernel/src/*`（内核）、`packages/app/src/session.ts`（呈现适配）、`apps/web/src/render/*`（桌面）。
+> 当前基线：`206 passed / 0 failed / 0 boundary violations`；`tsc --noEmit` 通过。
 > 定位：内核是产品，山屋是**高复杂度一致性夹具**。本文既记录规则覆盖，也记录在实现过程中被证伪的内核假设。
 
 ---
@@ -80,7 +80,7 @@ globalVars: {
 ## 2. 模块结构
 
 ```text
-src/games/betrayal/
+packages/games/src/betrayal/
 ├── cards.ts       44 房间 / 13 预兆 / 25 物品 / 45 事件 + 武器表
 ├── haunts.ts      3 个剧本定义 + 作祟表 + 回退规则
 ├── helpers.ts     属性轨道、0/1/2 骰、伤害、探索、卡牌、怪物、回合
@@ -94,9 +94,9 @@ src/games/betrayal/
 
 | 文件 | 改动 |
 | --- | --- |
-| `src/app/session.ts` | 山屋 DTO：属性 pips、目标条、动作文案、24 条动作上限并钉住 `END_TURN` |
-| `src/render/scene.ts` | 房间名/符号、三层分区、怪物 MEEPLE、物品堆锚点、作祟法阵 |
-| `src/render/procedural/roomTile.ts` | 房间顶面改为无光照贴图，保证远距离可读 |
+| `packages/app/src/session.ts` | 山屋 DTO：属性 pips、目标条、动作文案、24 条动作上限并钉住 `END_TURN` |
+| `apps/web/src/render/scene.ts` | 房间名/符号、三层分区、怪物 MEEPLE、物品堆锚点、作祟法阵 |
+| `apps/web/src/render/procedural/roomTile.ts` | 房间顶面改为无光照贴图，保证远距离可读 |
 
 ### 2.1 动作清单
 
@@ -433,7 +433,7 @@ killPlayer:
 
 ## 7. 测试
 
-`src/core/testing/suite.ts` 新增 23 条山屋专项：
+`packages/harness/src/suite.ts` 新增 23 条山屋专项：
 
 | 用例 | 覆盖 |
 | --- | --- |
@@ -465,7 +465,7 @@ killPlayer:
 运行：
 
 ```bash
-node scripts/test-core.mjs          # 131 passed
+node scripts/test-core.mjs          # 206 passed
 node node_modules/typescript/bin/tsc --noEmit
 node node_modules/vite/bin/vite.js build
 ```
@@ -665,17 +665,17 @@ node node_modules/vite/bin/vite.js build
 
 | 文件 | 职责 |
 | --- | --- |
-| [cards.ts](../src/games/betrayal/cards.ts) | 44 房间、13 预兆、25 物品、45 事件、武器 |
-| [haunts.ts](../src/games/betrayal/haunts.ts) | 剧本定义、作祟表、回退 |
-| [helpers.ts](../src/games/betrayal/helpers.ts) | 轨道/骰/伤害/探索/卡牌/怪物/回合 |
-| [setup.ts](../src/games/betrayal/setup.ts) | 角色、起始局面、洗牌 |
-| [rules.ts](../src/games/betrayal/rules.ts) | 合法动作、reducer、决策、胜负 |
-| [hooks.ts](../src/games/betrayal/hooks.ts) | 三个剧本钩子 |
-| [scenarios.ts](../src/games/betrayal/scenarios.ts) | 5 个命名场景 |
-| [registry.ts](../src/games/registry.ts) | 模块注册、schema、投影、计时 |
-| [session.ts](../src/app/session.ts) | 山屋 DTO/文案/动作上限 |
-| [scene.ts](../src/render/scene.ts) | 房间/怪物/物品堆/楼层标签 |
-| [suite.ts](../src/core/testing/suite.ts) | 23 条山屋专项测试 |
+| [cards.ts](../packages/games/src/betrayal/cards.ts) | 44 房间、13 预兆、25 物品、45 事件、武器 |
+| [haunts.ts](../packages/games/src/betrayal/haunts.ts) | 剧本定义、作祟表、回退 |
+| [helpers.ts](../packages/games/src/betrayal/helpers.ts) | 轨道/骰/伤害/探索/卡牌/怪物/回合 |
+| [setup.ts](../packages/games/src/betrayal/setup.ts) | 角色、起始局面、洗牌 |
+| [rules.ts](../packages/games/src/betrayal/rules.ts) | 合法动作、reducer、决策、胜负 |
+| [hooks.ts](../packages/games/src/betrayal/hooks.ts) | 三个剧本钩子 |
+| [scenarios.ts](../packages/games/src/betrayal/scenarios.ts) | 5 个命名场景 |
+| [registry.ts](../packages/games/src/registry.ts) | 模块注册、schema、投影、计时 |
+| [session.ts](../packages/app/src/session.ts) | 山屋 DTO/文案/动作上限 |
+| [scene.ts](../apps/web/src/render/scene.ts) | 房间/怪物/物品堆/楼层标签 |
+| [suite.ts](../packages/harness/src/suite.ts) | 23 条山屋专项测试 |
 
 ## 附录 B：状态不变量
 

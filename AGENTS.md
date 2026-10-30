@@ -65,24 +65,24 @@
 
 ### 3.1 分层边界硬约束
 ```
-src/ui        只允许 import ../app/contracts（严禁 import core/games/render/net/ai）
-src/app       拥有游戏引擎，向 UI 暴露 DTO（Presenter 契约）
-src/core      纯 JSON 状态 + 纯函数转移（严禁保存不可序列化函数、私有闭包或随机数实例）
-src/games/*   五款夹具，仅实现 setup / legalActions / reduce / outcome
-src/render    Three.js 表现层，负责几何体渲染与物理演算，不直接修改核心逻辑状态
+apps/web/src/ui        只允许 import ../app/contracts（严禁 import core/games/render/net/ai）
+packages/app/src       拥有游戏引擎，向 UI 暴露 DTO（Presenter 契约）
+packages/kernel/src      纯 JSON 状态 + 纯函数转移（严禁保存不可序列化函数、私有闭包或随机数实例）
+packages/games/src/*   五款夹具，仅实现 setup / legalActions / reduce / outcome
+apps/web/src/render    Three.js 表现层，负责几何体渲染与物理演算，不直接修改核心逻辑状态
 ```
 
 ### 3.2 必跑验证矩阵
 在提交代码或提 PR 前，必须在终端执行以下检查确保全绿：
 
 ```bash
-# 1. 必跑：内核 131 项一致性测试与架构边界静态检查
+# 1. 必跑：内核 206 项一致性测试与架构边界静态检查
 pnpm test
 
-# 2. 动了 src/core 或 src/games/* 时必跑：黑盒随机对局与回放哈希一致性测试
+# 2. 动了 packages/kernel/src 或 packages/games/src/* 时必跑：黑盒随机对局与回放哈希一致性测试
 pnpm test:matrix
 
-# 3. 动了 src/render/procedural 时必跑：房间家具连通性与门位冲突（门位冲突数必须为 0）
+# 3. 动了 apps/web/src/render/procedural 时必跑：房间家具连通性与门位冲突（门位冲突数必须为 0）
 pnpm probe:layout
 
 # 4. 动了 roomTile.ts 或新增贴墙贴角构件时必跑：包围盒 z-fighting 几何硬约束检测（≤ ±1.42）
@@ -91,7 +91,10 @@ pnpm probe:overlap
 # 5. 动了 UI、渲染交互时必跑：Playwright UI 矩阵测试
 pnpm test:ui
 
-# 6. 必跑：TypeScript 类型检查与生产编译构建
+# 6. 必跑：文档路径有效性（旧 src/ 布局引用 / 失效链接）
+pnpm docs:check
+
+# 7. 必跑：TypeScript 类型检查与生产编译构建
 node node_modules/typescript/bin/tsc --noEmit && pnpm run build
 ```
 

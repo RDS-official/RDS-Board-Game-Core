@@ -1,7 +1,7 @@
 # 内核契约与扩展指南
 
 > 本项目的产品是**通用桌游内核**：确定性状态转移、信息投影、中断栈、动态规则、回放与不变量校验。
-> `src/games/*` 下的五款游戏只是**一致性测试夹具**，用来证明内核足以覆盖从德式策略到美式剧情、从顺序回合到同步盲提的各种机制。
+> `packages/games/src/*` 下的五款游戏只是**一致性测试夹具**，用来证明内核足以覆盖从德式策略到美式剧情、从顺序回合到同步盲提的各种机制。
 
 ---
 
@@ -217,7 +217,7 @@ actionSchemas: {
 - 语义合法性仍在 `legalActions`；
 - 校验发生在决策/响应路由之前，避免畸形提交进入秘密窗口。
 
-实现：[validation.ts](../src/core/validation.ts)。
+实现：[validation.ts](../packages/kernel/src/validation.ts)。
 
 ---
 
@@ -237,7 +237,7 @@ actionSchemas: {
 
 ## 11. Bot 接口
 
-`src/ai/policy.ts` 提供最小策略接口与 `RandomPolicy`：
+`packages/harness/src/policy.ts` 提供最小策略接口与 `RandomPolicy`：
 
 ```ts
 interface BotPolicy {
@@ -254,7 +254,7 @@ interface BotPolicy {
 
 ## 12. 房间与投影差分（网络适配层）
 
-`src/net/room.ts` 是服务端权威房间的参考实现：
+`packages/net/src/room.ts` 是服务端权威房间的参考实现：
 
 ```ts
 class GameRoom {
@@ -277,20 +277,20 @@ class GameRoom {
 依赖方向是单向的：
 
 ```
-main.ts (composition root)
+apps/web/src/main.ts (composition root)
    │  creates
    ▼
-UniversalSession (src/app)  ──implements──▶  GamePresenter (DTOs)
+UniversalSession (packages/app/src)  ──implements──▶  GamePresenter (DTOs)
    │  owns engine                              ▲
    ▼                                           │ subscribe / perform
-UniversalGameEngine (src/core)            UI (src/ui)
+UniversalGameEngine (packages/kernel/src)      │      UI (apps/web/src/ui)
                                                │
                                                ▼
                                    PresentationPorts (camera / audio / highlight)
 ```
 
-- `src/ui/**` **禁止 import** `core`、`games`、`render`、`net`、`ai`；
-- `src/app/**` **禁止 import** `ui`、`render`；
+- `apps/web/src/ui/**` **禁止 import** `core`、`games`、`render`、`net`、`ai`；
+- `packages/app/src/**` **禁止 import** `ui`、`render`；
 - UI 只消费 `GameSnapshot` / `UiAction` / `UiPlayer` / `UiHook` / `UiLog` 等 DTO；
 - 动作标签、玩家卡片、阶段文案、日志脱敏全部在应用层生成；
 - 动作若带声明式 `fields`，HUD 渲染通用表单，收集值通过 `perform(actionId, payload)` 回传；UI 不理解规则含义；
@@ -381,11 +381,11 @@ pnpm test:core     # 同上
 
 新增一款游戏只需：
 
-1. 新建 `src/games/<id>/setup.ts`，返回带 `seed/seq/pendingDecisions/activeHooks` 的初态；
-2. 新建 `src/games/<id>/rules.ts`，实现 `legalActions` 与纯 `reduce`；
+1. 新建 `packages/games/src/<id>/setup.ts`，返回带 `seed/seq/pendingDecisions/activeHooks` 的初态；
+2. 新建 `packages/games/src/<id>/rules.ts`，实现 `legalActions` 与纯 `reduce`；
 3. 若有动态规则，新建 `hooks.ts` 并导出 `RuleHookImpl[]`（可用 `requires` 声明依赖）；
-4. 在 `src/games/registry.ts` 用 `defineGame()` 注册能力矩阵与可选 `actionSchemas`；
-5. 在 `src/core/testing/suite.ts` 增加一条夹具测试（初始化、随机对局回放、投影安全）；
+4. 在 `packages/games/src/registry.ts` 用 `defineGame()` 注册能力矩阵与可选 `actionSchemas`；
+5. 在 `packages/harness/src/suite.ts` 增加一条夹具测试（初始化、随机对局回放、投影安全）；
 6. `pnpm test` 必须全绿。
 
 ---
