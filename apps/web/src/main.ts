@@ -294,6 +294,56 @@ class BoardGameSimulatorApp {
     if (import.meta.env.DEV) {
       (window as unknown as Record<string, unknown>).__boardGameApp = this;
     }
+    // Available in every build: a small, read-only snapshot summary so diagnostic
+    // exports from production can explain a stuck turn.
+    (window as unknown as Record<string, unknown>).__rdsStateSummary = () => this.diagnosticSummary();
+  }
+
+  /**
+   * Minimal state summary for the diagnostics bundle.
+   *
+   * Deliberately narrow: it must never leak hidden information (hands, deck order)
+   * and must stay cheap enough to call from an error handler.
+   */
+  private diagnosticSummary(): Record<string, unknown> {
+    const snapshot = this.session?.getSnapshot?.() as
+      | {
+          revision?: number;
+          gameId?: string;
+          phaseLabel?: string;
+          actorName?: string;
+          focusActors?: string[];
+          actions?: { type?: string; id?: string }[];
+          lastRoll?: { label?: string; total?: number; stamp?: string };
+        }
+      | undefined;
+    if (!snapshot) return { note: 'session not ready' };
+
+    const raw = (this.session as unknown as { engine?: { getRawState?: () => Record<string, unknown> } })?.engine?.getRawState?.();
+    const globalVars = (raw?.globalVars ?? {}) as Record<string, unknown>;
+    const decisions = (raw?.pendingDecisions ?? []) as { status?: string; participants?: string[]; payload?: unknown }[];
+
+    return {
+      gameId: snapshot.gameId,
+      revision: snapshot.revision,
+      phase: snapshot.phaseLabel,
+      actor: snapshot.actorName,
+      focusActors: snapshot.focusActors ?? [],
+      // If this list is empty the turn is stuck; that is the first thing to look at.
+      actions: (snapshot.actions ?? []).map(action => action.type ?? action.id ?? '?'),
+      lastRoll: snapshot.lastRoll
+        ? { label: snapshot.lastRoll.label, total: snapshot.lastRoll.total }
+        : null,
+      openDecisions: decisions
+        .filter(entry => entry.status === 'OPEN')
+        .map(entry => ({ participants: entry.participants, payload: entry.payload })),
+      pendingDamage: globalVars.pendingDamage ?? null,
+      pendingRoomPlacement: globalVars.pendingRoomPlacement
+        ? { playerId: (globalVars.pendingRoomPlacement as { playerId?: string }).playerId }
+        : null,
+      activePlayerId: raw?.activePlayerId ?? null,
+      activeActorId: raw?.activeActorId ?? null
+    };
   }
 
   // 阶段三：联机状态遮罩（房客单独重连 / 房主暂离等待）。
@@ -715,18 +765,15 @@ function bootApp(): void {
     build: import.meta.env.VITE_BUILD_ID ?? 'dev',
     endpoint: '/api/diagnostics',
     stateSummary: () => {
-      const app = (window as unknown as Record<string, unknown>).__boardGameApp as
-        | { session?: { getSnapshot?: () => { revision?: number; gameId?: string; phaseLabel?: string; actorName?: string; actions?: unknown[] } } }
+      const summarise = (window as unknown as Record<string, unknown>).__rdsStateSummary as
+        | (() => Record<string, unknown>)
         | undefined;
-      const snapshot = app?.session?.getSnapshot?.();
-      if (!snapshot) return { note: 'session not ready' };
-      return {
-        gameId: snapshot.gameId,
-        revision: snapshot.revision,
-        phase: snapshot.phaseLabel,
-        actor: snapshot.actorName,
-        actionCount: snapshot.actions?.length ?? 0
-      };
+      if (!summarise) return { note: 'session not ready' };
+      try {
+        return summarise();
+      } catch (error) {
+        return { note: 'summary failed', error: String(error) };
+      }
     }
   });
   window.addEventListener('beforeunload', () => diagnostics.log.push('info', 'lifecycle', '页面即将卸载'));
