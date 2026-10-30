@@ -334,6 +334,65 @@ test('poker: a busted seat ends the game with the richest stack winning', () => 
   assert(/输光筹码/.test(state.winnerReason ?? ''), `reason names the bust: ${state.winnerReason}`);
 });
 
+test('poker: a raise keeps the street open until every seat has matched it', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 41, { scenario: 'seats_4' });
+  startHand(engine);
+
+  // Under the gun raises to 60; the flop must not appear yet.
+  act(engine, 'RAISE', { amount: 60 });
+  assertEqual(hand(engine.getRawState()).street, 'PREFLOP', 'a raise cannot open the flop');
+
+  // Button calls (50 more) — still pre-flop.
+  callAround(engine, 1);
+  assertEqual(hand(engine.getRawState()).street, 'PREFLOP', 'one caller is not a closed round');
+
+  // Small blind calls (55 more) — the big blind still owes 50, so no deal.
+  callAround(engine, 1);
+  const waiting = engine.getRawState();
+  assertEqual(hand(waiting).street, 'PREFLOP', 'the street stays open while the big blind owes chips');
+  assertEqual(engine.getActiveActorId(), 'p3', 'the big blind still has to act');
+  assertEqual(waiting.zones.zone_board.orderedEntities.length, 0, 'no community cards before the round closes');
+
+  // Big blind matches, and only now does the flop come out.
+  callAround(engine, 1);
+  const dealt = engine.getRawState();
+  assertEqual(hand(dealt).street, 'FLOP', 'the flop arrives once every seat has matched');
+  assertEqual(dealt.zones.zone_board.orderedEntities.length, 3, 'three community cards dealt');
+  assertEqual(hand(dealt).pot, 240, 'four seats put in 60 each');
+  for (const pid of dealt.playerOrder) {
+    assertEqual(hand(dealt).streetBets[pid], 0, `${pid} starts the flop with nothing owed`);
+  }
+});
+
+test('poker: a short all-in still has to be matched before the next street', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 43, { scenario: 'seats_4' });
+  const raw = engine.getRawState();
+  setChips(raw, 'p4', 45);
+  startHand(engine);
+
+  act(engine, 'CALL', { amount: 10 }); // p4 completes the blind
+  act(engine, 'RAISE', { amount: 40 }); // p1 raises, increment 30
+  act(engine, 'FOLD'); // p2
+  act(engine, 'CALL', { amount: 30 }); // p3
+  act(engine, 'ALL_IN'); // p4 shoves 45: only 5 more than the current bet
+
+  // The extra 5 chips are a real bet: the raiser has to call before the flop.
+  assertEqual(hand(engine.getRawState()).street, 'PREFLOP', 'the short all-in keeps the round open');
+  const legal = engine.getLegalActions(engine.getActiveActorId()).map(action => action.type);
+  assert(legal.includes('CALL'), 'the raiser must call the remaining 5');
+  assert(!legal.includes('RAISE'), 'but the incomplete raise does not reopen raising');
+
+  callAround(engine, 1); // p1 calls the last 5
+  const stillOpen = engine.getRawState();
+  assertEqual(hand(stillOpen).street, 'PREFLOP', 'the big blind still owes the same 5');
+  assertEqual(engine.getActiveActorId(), 'p3', 'the big blind is the last seat to match');
+
+  callAround(engine, 1); // p3 calls the last 5
+  const settled = engine.getRawState();
+  assertEqual(hand(settled).street, 'FLOP', 'the flop only comes after everyone has called');
+  assertEqual(hand(settled).pot, 140, '45 + 45 + 45 (all-in) + 5 (small blind folded)');
+});
+
 /* -------------------------------------------------------------------------- */
 /* Hidden information and determinism                                          */
 /* -------------------------------------------------------------------------- */

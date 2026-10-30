@@ -46,6 +46,11 @@ export function mayRaise(hand: BettingState, playerId: string): boolean {
 /**
  * True once the current street has nothing left to decide.
  *
+ * House rule, stated by the table: **a raise never opens the next street by
+ * itself**. The round only closes when every seat that can still act has put in
+ * exactly the current bet (平注) *and* has acted since the last full raise — so
+ * a raise always forces the other seats to call, fold, or re-raise first.
+ *
  * With a single player still able to act there is nobody to bet into, so the
  * street closes as soon as their commitment matches the current bet (they may
  * still need to call or fold first).

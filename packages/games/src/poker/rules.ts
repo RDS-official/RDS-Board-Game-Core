@@ -340,6 +340,10 @@ export class PokerRules {
    * Close the street if the betting round is over, otherwise hand the action
    * to the next seat that can still act. Loops while several streets can be
    * closed in one transition (e.g. everyone all-in before the flop).
+   *
+   * A raise alone never deals the next street: `isRoundComplete` only reports
+   * true once every seat that can still act has matched the current bet (平注)
+   * and has acted since the last full raise.
    */
   private static settle(state: GameState, ctx: ReduceContext): GameState {
     let next = state;

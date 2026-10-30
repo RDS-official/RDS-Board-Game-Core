@@ -215,7 +215,9 @@ export function compareHands(a: HandValue, b: HandValue): number;
 - 短全押（不足最小加注）：**不**更新 `lastRaiseSize`，**不**清空 `actedSinceRaise`（已行动者只能跟/弃，不能再加注）——标准 NLHE 行为。
 - `currentBet = max(currentBet, raiseTo)`；`handBets[p] += delta`，`chips -= delta`。
 
-### 5.3 一圈结束条件
+### 5.3 一圈结束条件（加注必须全桌平注才发牌）
+
+**硬规则：任何一次加注都不会自己把牌发到下一街。** 一圈只有在"所有还能行动的座位都已补齐到 `currentBet`（平注），且自上次完整加注后都行动过"时才结束；在此之前，其他座位必须依次选择**跟注 / 弃牌 / 再加注**。
 
 ```
 live = 未弃牌者
@@ -359,6 +361,8 @@ HAND_OVER ─────────────► PREFLOP ──┬─► FLO
 | 牌型表 | 10 类牌型各一条固定牌面 → `category/label` 正确；A-5 轮子顺；皇家同花顺 |
 | 踢脚比较 | 同牌型不同踢脚的大小关系（一对 A vs 一对 K、两对、葫芦） |
 | 最小加注 | `minRaiseTo` 计算；不足额 `RAISE` 被 `validatePayload` 拒绝 |
+| 加注必须平注 | 加注到 60 后，按钮跟、小盲跟，**大盲还欠 50** → 仍是翻前、无公共牌；大盲补齐才发翻牌（`a raise keeps the street open until every seat has matched it`） |
+| 短全押也必须补齐 | 全押只比当前注多 5 时，其余两个座位都要各补 5 才发翻牌（`a short all-in still has to be matched before the next street`） |
 | 短全押 | 短全押后已行动者不再获得 `RAISE` |
 | 边池 | 3 人不同筹码全押 → 池分层与归属正确 |
 | 平分 | 同牌型 → 均分；奇数筹码归庄家左手 |
