@@ -1995,13 +1995,22 @@ export class BoardGameHUD {
         ? 'over'
         : 'idle';
 
-      // Rebuilding is only correct when the dock changes shape.
-      if (actionsSlot.dataset.mode !== mode) {
+      const onlyEndTurn =
+        snapshot.actions.length === 1 && (snapshot.actions[0]?.actionType ?? '') === 'END_TURN';
+      const dockShape = onlyEndTurn ? `${mode}:only-end` : mode;
+
+      // Rebuilding is only correct when the dock changes shape. The hint text
+      // differs between "actions available" and "only end turn", so that state is
+      // part of the shape key.
+      if (actionsSlot.dataset.shape !== dockShape) {
+        actionsSlot.dataset.shape = dockShape;
         actionsSlot.dataset.mode = mode;
         actionsSlot.removeAttribute('data-sig');
         actionsSlot.innerHTML =
           mode === 'fan'
-            ? `<div class="fan-hint" data-fan-hint><span class="fh-label">悬停查看动作</span><span class="fh-detail">点击牌面执行该动作 · 数字键直接执行</span></div><div class="dock-fan" data-fan></div>`
+            ? onlyEndTurn
+              ? `<div class="fan-hint" data-fan-hint><span class="fh-label">本回合已无剩余移动力</span><span class="fh-detail">探索并抽牌会结束移动 · 点「结束回合」交给下一位</span></div><div class="dock-fan" data-fan></div>`
+              : `<div class="fan-hint" data-fan-hint><span class="fh-label">悬停查看动作</span><span class="fh-detail">点击牌面执行该动作 · 数字键直接执行</span></div><div class="dock-fan" data-fan></div>`
             : '';
       }
 
