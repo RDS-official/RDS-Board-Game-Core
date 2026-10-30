@@ -20,6 +20,11 @@ export interface UserProfile { id: string; name: string; displayName: string; ro
 export const me = () => api<UserProfile>('/api/me');
 export const updateDisplayName = (displayName: string) =>
   api<UserProfile>('/api/me', { method: 'PUT', body: JSON.stringify({ displayName }) });
+export const changeMyPassword = (oldPassword: string, newPassword: string) =>
+  api<{ ok: true }>('/api/me/password', {
+    method: 'PUT',
+    body: JSON.stringify({ oldPassword, newPassword }),
+  });
 /** 头像二进制直传（≤300KB，前端已压缩）；不用 api() 以避开 JSON Content-Type。 */
 export async function uploadAvatar(blob: Blob): Promise<{ avatarUrl: string }> {
   const res = await fetch('/api/me/avatar', {
