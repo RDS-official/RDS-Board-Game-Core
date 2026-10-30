@@ -1344,7 +1344,6 @@ export function resetTurnResources(state: GameState, playerId: PlayerId): void {
   player.customProps.usedItems = [];
   player.customProps.checkBonus = 0;
   player.customProps.forcedRoll = undefined;
-  player.customProps.movesUsed = 0;
   player.customProps.skipActions = false;
   // Rulebook, Die Rolls: "You cannot try to make the same roll more than once per
   // turn." This holds the check reasons already attempted this turn.
@@ -1429,10 +1428,6 @@ export function floorName(state: GameState, roomId: string | undefined): string 
 
 export function allExploredRooms(state: GameState): MapGraphNode[] {
   return Object.values(state.mapGraph.nodes).filter(node => node.type === 'ROOM');
-}
-
-export function actionLogLine(state: GameState, text: string): void {
-  state.globalVars.lastNarration = text;
 }
 
 export interface HauntState {

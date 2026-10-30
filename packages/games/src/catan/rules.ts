@@ -329,7 +329,6 @@ export class CatanRules {
         });
 
         if (roll.sum === 7) {
-          s.globalVars.robberReason = 'SEVEN';
           const victims = s.playerOrder.filter(other => totalResources(s.players[other]) > 7);
           if (victims.length > 0) {
             const opened = openDecision(
@@ -420,7 +419,6 @@ export class CatanRules {
         const player = s.players[pid];
         player.customProps = { ...player.customProps, knightsPlayed: Number(player.customProps.knightsPlayed ?? 0) + 1 };
         normalize(s);
-        s.globalVars.robberReason = 'KNIGHT';
         s.phase = 'MOVE_ROBBER';
         trace({ id: ctx.id('evt'), type: 'CARD_PLAY', title: `${player.name} played a Knight — move the robber`, durationMs: 500 });
         break;

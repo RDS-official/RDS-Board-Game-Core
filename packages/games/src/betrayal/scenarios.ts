@@ -239,7 +239,6 @@ export const BETRAYAL_SCENARIOS: Record<string, GameScenario> = {
         hero: '在地下室找到遗骨，携带神圣徽记在五芒星堂完成 3 次神智 5+ 的安魂咏唱。',
         traitor: '让怨灵杀死所有英雄，把整座洋馆拖入灵界。'
       };
-      state.globalVars.bonesRoomId = 'room_crypt';
       return state;
     }
   },
