@@ -482,3 +482,28 @@ export function splendorStockPouch(state: GameState, playerId: string, amount = 
   for (const color of ['red', 'blue', 'black', 'pink', 'yellow']) tokens[color] = amount;
   tokens.purple = 5;
 }
+
+/**
+ * Resolve any open damage-allocation window.
+ *
+ * Since damage now asks the explorer which trait absorbs it, a test that ends a
+ * turn (or walks into a damaging room) leaves a decision open, and every later
+ * action is blocked until it is answered. Tests that do not care which trait
+ * takes the hit call this to keep the flow moving.
+ */
+export function resolvePendingDamage(engine: UniversalGameEngine): boolean {
+  let acted = false;
+  for (let guard = 0; guard < 8; guard += 1) {
+    const state = engine.getRawState();
+    const pending = state.globalVars.pendingDamage as { playerId?: string } | null | undefined;
+    if (!pending?.playerId) break;
+    const actor = String(pending.playerId);
+    const action = engine.getLegalActions(actor).find(entry => entry.type === 'ALLOCATE_DAMAGE');
+    if (!action) break;
+    const field = action.fields?.find(entry => entry.key === 'trait');
+    const trait = String(field?.options?.[0]?.value ?? 'might');
+    if (!engine.dispatch({ ...action, payload: { trait } }).ok) break;
+    acted = true;
+  }
+  return acted;
+}

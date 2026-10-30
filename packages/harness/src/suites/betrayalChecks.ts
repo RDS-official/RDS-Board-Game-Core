@@ -8,7 +8,8 @@ import { GAME_REGISTRY } from '@rds/games/registry';
 import { addEffect, damagePlayer, effectsOn, movePlayerTo, ongoingEffectKinds, removeEffects } from '@rds/games/betrayal/helpers';
 import { grantItem } from '@rds/games/betrayal/scenarios';
 import { test, assert, assertEqual } from '../testKit';
-import { playRandom, betrayalCardInHand } from '../suiteHelpers';
+import { playRandom, betrayalCardInHand, resolvePendingDamage
+} from '../suiteHelpers';
 
 test('fixture betrayal: a vault check with luck items becomes a two-phase window', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'room_features' });
@@ -218,8 +219,11 @@ test('fixture betrayal: monsters are NPC actors with their own turn', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.betrayal, 42, { scenario: 'haunt_mummy' });
   assertEqual(engine.getFocusPlayers().join(','), 'p2', 'hero starts');
   assert(engine.dispatch({ type: 'END_TURN', playerId: 'p2' }).ok, 'p2 ends');
+  resolvePendingDamage(engine);
   assert(engine.dispatch({ type: 'END_TURN', playerId: 'p3' }).ok, 'p3 ends');
+  resolvePendingDamage(engine);
   assert(engine.dispatch({ type: 'END_TURN', playerId: 'p1' }).ok, 'traitor ends');
+  resolvePendingDamage(engine);
 
   const focusActors = engine.getFocusActors();
   assertEqual(focusActors.length, 1, 'one NPC focus');

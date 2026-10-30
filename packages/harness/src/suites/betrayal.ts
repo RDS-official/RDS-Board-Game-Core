@@ -11,7 +11,8 @@ import { resolveHauntId } from '@rds/games/betrayal/haunts';
 import { connectAdjacentDoors, damagePlayer, hostilesInRoom, moveMonster, movePlayerTo, movementCost, ongoingEffectKinds, ownsDef, traitIndex } from '@rds/games/betrayal/helpers';
 import { addExploredRoom, grantItem, grantOmen } from '@rds/games/betrayal/scenarios';
 import { test, assert, assertEqual } from '../testKit';
-import { findAttackSeed, betrayalCardInHand, stackRoomTiles, roomDiscardIds, placePendingRoom } from '../suiteHelpers';
+import { findAttackSeed, betrayalCardInHand, stackRoomTiles, roomDiscardIds, placePendingRoom, resolvePendingDamage
+} from '../suiteHelpers';
 
 /* Betrayal fixture: 44 rooms, 13 omens, 10 events, three full haunts          */
 /* -------------------------------------------------------------------------- */
@@ -700,6 +701,9 @@ test('fixture betrayal: the all-heroes-out verdict can never fire over a living 
     .find(action => action.type === 'END_TURN');
   assert(!!advance, 'the hero can end their turn');
   assert(engine.dispatch(advance!).ok, 'turn ended');
+  // The Crypt's damage asks which mental trait absorbs it; take Sanity so the
+  // track actually reaches zero.
+  resolvePendingDamage(engine);
 
   const state = engine.getRawState();
   assertEqual(
