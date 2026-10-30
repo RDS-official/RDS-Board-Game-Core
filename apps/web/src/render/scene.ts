@@ -209,39 +209,45 @@ const PKMN_SMALL_CARD_W = 0.78;
 const PKMN_SMALL_CARD_H = PKMN_SMALL_CARD_W / 0.75;
 
 /**
- * Four fixed bands, left to right, each sized from the card footprint so no
- * band can drift into its neighbour:
+ * The table reads in three bands, and every band derives its extent from the
+ * card footprint so nothing can drift into its neighbour:
  *
- *   deck rail | reveal slots | market grid | ball bank
+ *     stage decks │ market grid │ ball bank
+ *            ↑ each pile sits on its own market row
+ *     rare │ legend  ── along the top, pile beside its revealed card
  *
- * The deck rail is a *grid*, not a column: five 1.44-tall cards stacked in one
- * column need 7.2 units of depth and push the rare/legend slots off the table.
- * Two columns of three keeps every pile inside the felt.
+ * A stage deck lives directly left of the row it feeds, so a player reads
+ * "this pile dealt this row" without scanning. The two special decks sit
+ * across the top: their revealed card is the point, and the pile is only the
+ * reminder that four more are queued behind it.
  */
-const PKMN_DECK_RAIL_X = -8.9;
-const PKMN_DECK_COLUMN_STEP = PKMN_DECK_CARD_W + 0.5;
+const PKMN_DECK_RAIL_X = -8.5;
 const PKMN_DECK_ROW_STEP = PKMN_DECK_CARD_H + 0.5;
-const PKMN_DECK_Z_TOP = 1.6;
+const PKMN_DECK_Z_TOP = 2.6;
 
+/** Stage piles: one per market row, at the row's own depth. */
 const PKMN_DECK_RAIL: Record<string, [number, number, number]> = {
-  // Left column: the three stage piles.
   zone_deck_s1: [PKMN_DECK_RAIL_X, 0.06, PKMN_DECK_Z_TOP],
   zone_deck_s2: [PKMN_DECK_RAIL_X, 0.06, PKMN_DECK_Z_TOP - PKMN_DECK_ROW_STEP],
   zone_deck_s3: [PKMN_DECK_RAIL_X, 0.06, PKMN_DECK_Z_TOP - 2 * PKMN_DECK_ROW_STEP],
-  // Right column, top two cells: the special piles.
-  zone_deck_rare: [PKMN_DECK_RAIL_X + PKMN_DECK_COLUMN_STEP, 0.06, PKMN_DECK_Z_TOP],
-  zone_deck_legend: [PKMN_DECK_RAIL_X + PKMN_DECK_COLUMN_STEP, 0.06, PKMN_DECK_Z_TOP - PKMN_DECK_ROW_STEP]
+  // Special piles sit along the top band, each beside its own reveal slot.
+  // The pair stays left of the market's centre line so both groups read as one
+  // row, not as two islands straddling the grid.
+  zone_deck_rare: [-6.4, 0.06, PKMN_DECK_Z_TOP + PKMN_DECK_ROW_STEP],
+  zone_deck_legend: [-3.6, 0.06, PKMN_DECK_Z_TOP + PKMN_DECK_ROW_STEP]
   // Mega Evolution and Poké Mart piles are absent from the base game, so they
   // hold no rail slot here either. Add them back only alongside their rules.
 };
 
 /**
- * Reveal slots: the two face-up special cards, in the right column's third cell
- * — below their own face-down piles, not on top of them.
+ * Reveal slots: the face-up special card, immediately right of its own pile.
+ *
+ * Reading order is left to right — pile, then the card it dealt — so the two
+ * halves make one row each instead of a pile stacked on a card.
  */
 const PKMN_REVEAL_RAIL: Record<string, [number, number, number]> = {
-  zone_rare: [PKMN_DECK_RAIL_X + PKMN_DECK_COLUMN_STEP, 0.1, PKMN_DECK_Z_TOP - 2 * PKMN_DECK_ROW_STEP],
-  zone_legend: [PKMN_DECK_RAIL_X + 2 * PKMN_DECK_COLUMN_STEP, 0.1, PKMN_DECK_Z_TOP - 2 * PKMN_DECK_ROW_STEP]
+  zone_rare: [-5.15, 0.1, PKMN_DECK_Z_TOP + PKMN_DECK_ROW_STEP],
+  zone_legend: [-2.35, 0.1, PKMN_DECK_Z_TOP + PKMN_DECK_ROW_STEP]
 };
 
 /**
@@ -287,8 +293,9 @@ const PKMN_BURIED_OFFSET_X = 2.28;
  * colliding with the row below).
  */
 const PKMN_MARKET_COLUMNS = 4;
-const PKMN_MARKET_X = -1.4;
-const PKMN_MARKET_Z1 = 2.0;
+const PKMN_MARKET_X = 0.4;
+/** Aligned with `PKMN_DECK_Z_TOP` so pile and row read as one line. */
+const PKMN_MARKET_Z1 = PKMN_DECK_Z_TOP;
 const PKMN_MARKET_PITCH_X = PKMN_CARD_W + 0.34;
 const PKMN_MARKET_PITCH_Z = PKMN_CARD_H + 0.52;
 
@@ -2349,7 +2356,13 @@ export class BoardGameScene {
       // Draw a pile per deck from the (masked) card count and its back art;
       // iterate the zones rather than a fixed list so a new deck still shows.
       for (const deckZone of Object.values(state.zones)) {
-        if (deckZone.type === 'DECK') this.renderPokemonDeckPile(state, deckZone.id);
+        if (deckZone.type !== 'DECK') continue;
+        // Only a deck the table actually places is drawn. Expansion piles that
+        // the current edition does not deal (Mega, Poké Mart) have no rail slot,
+        // and falling back to a shared default anchor stacked every one of them
+        // on the same spot — a cairn of blank cards behind the market.
+        if (!PKMN_DECK_RAIL[deckZone.id]) continue;
+        this.renderPokemonDeckPile(state, deckZone.id);
       }
 
       // Rare / legendary reveal slots: one face-up card each, on dedicated mat.
@@ -3094,12 +3107,12 @@ export class BoardGameScene {
     const label = this.createLabelSprite(
       `${PKMN_DECK_LABEL[zoneId] ?? zone.name} · ${count}`,
       '#cbb57a',
-      34
+      72
     );
     // The caption belongs to its own pile: sit it just inside the front edge so
     // the next pile in the rail (one row step away) is never covered.
     label.position.set(anchor[0], topY + 0.05, anchor[2] + PKMN_DECK_CARD_H * 0.5 - 0.16);
-    label.scale.set(PKMN_DECK_CARD_W * 0.95, 0.26, 1);
+    label.scale.set(PKMN_DECK_CARD_W * 1.25, 0.44, 1);
     this.boardObjectsGroup.add(label);
   }
 
@@ -3265,11 +3278,11 @@ export class BoardGameScene {
 
       // `红 ×N` badge above the column.
       const caption = PKMN_BALL_LABEL[column] ?? PKMN_BONUS_LABEL_EXTRA[column] ?? column;
-      const badge = this.createLabelSprite(`${caption} ×${bucket.length}`, PKMN_BALL_TINT[column] ?? '#cbd5e1', 30);
+      const badge = this.createLabelSprite(`${caption} ×${bucket.length}`, PKMN_BALL_TINT[column] ?? '#cbd5e1', 64);
       // Keep the badge near the felt: a sprite that rides too high floats over
       // the market row in the isometric view and reads as part of it.
       badge.position.set(columnX, 0.22, slotZ - PKMN_SMALL_CARD_H * 0.5 - 0.14);
-      badge.scale.set(0.86, 0.2, 1);
+      badge.scale.set(1.24, 0.34, 1);
       this.boardObjectsGroup.add(badge);
     });
 
@@ -3316,7 +3329,7 @@ export class BoardGameScene {
       this.boardObjectsGroup.add(mesh);
     }
 
-    const badge = this.createLabelSprite(`埋没 ×${count}`, '#9aa7b8', 28);
+    const badge = this.createLabelSprite(`埋没 ×${count}`, '#9aa7b8', 56);
     badge.position.set(pileX, 0.58, pileZ - PKMN_SMALL_CARD_H * 0.5 - 0.2);
     badge.scale.set(1.25, 0.28, 1);
     this.boardObjectsGroup.add(badge);
@@ -3685,28 +3698,33 @@ export class BoardGameScene {
       const gridZ = PKMN_MARKET_Z1 - PKMN_MARKET_PITCH_Z;
       this.addTableMat(gridW, gridD, PKMN_MARKET_X, gridZ);
 
-      // Deck rail: two columns of three, so all five piles stay on the felt.
-      const deckTopZ = PKMN_DECK_Z_TOP + PKMN_DECK_CARD_H / 2 + 0.32;
-      const deckBottomZ = PKMN_DECK_Z_TOP - 2 * PKMN_DECK_ROW_STEP - PKMN_DECK_CARD_H / 2 - 0.32;
-      this.addTableMat(
-        PKMN_DECK_COLUMN_STEP + PKMN_DECK_CARD_W + 0.6,
-        deckTopZ - deckBottomZ,
-        PKMN_DECK_RAIL_X + PKMN_DECK_COLUMN_STEP / 2,
-        (deckTopZ + deckBottomZ) / 2
-      );
+      // Stage piles: one narrow mat per row, hugging the row it feeds.
+      for (let row = 0; row < 3; row += 1) {
+        const z = PKMN_DECK_Z_TOP - row * PKMN_DECK_ROW_STEP;
+        this.addTableMat(PKMN_DECK_CARD_W + 0.55, PKMN_DECK_CARD_H + 0.5, PKMN_DECK_RAIL_X, z);
+      }
 
-      const title = this.createLabelSprite('POKÉMON MARKET · 宝可梦市场', '#c9b57a', 34);
+      // Top band: each special pile beside the card it revealed.
+      for (const zoneId of ['zone_rare', 'zone_legend']) {
+        const pile = PKMN_DECK_RAIL[zoneId];
+        const reveal = PKMN_REVEAL_RAIL[zoneId];
+        if (!pile || !reveal) continue;
+        const spanX = reveal[0] - pile[0] + PKMN_CARD_W + 0.55;
+        this.addTableMat(spanX, PKMN_CARD_H + 0.5, (pile[0] + reveal[0]) / 2, pile[2]);
+      }
+
+      const title = this.createLabelSprite('宝可梦市场 · POKÉMON MARKET', '#c9b57a', 64);
       // Low and just clear of the first row: a tall sprite at this depth is
       // projected back across the cards behind it.
       title.position.set(PKMN_MARKET_X, 0.24, PKMN_MARKET_Z1 + PKMN_CARD_H * 0.5 + 0.52);
-      title.scale.set(4.0, 0.44, 1);
+      title.scale.set(4.6, 0.58, 1);
       this.boardObjectsGroup.add(title);
 
       // Poké Ball bank tray — widened to hold all six colours side by side.
       this.addTableMat(1.9, 7.2, 7.55, 0.1);
-      const bankTitle = this.createLabelSprite('POKÉ BALL BANK · 精灵球银行', '#cfd8e6', 26);
+      const bankTitle = this.createLabelSprite('精灵球银行 · BALL BANK', '#cfd8e6', 56);
       bankTitle.position.set(7.4, 0.42, -3.75);
-      bankTitle.scale.set(2.1, 0.32, 1);
+      bankTitle.scale.set(2.8, 0.44, 1);
       this.boardObjectsGroup.add(bankTitle);
 
       // One band per seat along the near edge for the caught-Pokémon tableaus.
@@ -3717,10 +3735,10 @@ export class BoardGameScene {
         const caption = this.createLabelSprite(
           `${state.players[playerId]?.name ?? playerId} · 宝可梦图鉴`,
           state.players[playerId]?.color ?? '#cfd8e6',
-          24
+          54
         );
         caption.position.set(x, 0.42, PKMN_TABLEAU_Z + 1.42);
-        caption.scale.set(2.0, 0.3, 1);
+        caption.scale.set(2.6, 0.4, 1);
         this.boardObjectsGroup.add(caption);
       });
     }
