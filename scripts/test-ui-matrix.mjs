@@ -16,7 +16,8 @@ const GAMES = [
     id: 'betrayal',
     scenarios: ['exploration', 'omen_ready', 'trade_ready', 'haunt_mummy', 'haunt_eye', 'haunt_phantom']
   },
-  { id: 'dune_mahjong', scenarios: [] }
+  { id: 'dune_mahjong', scenarios: [] },
+  { id: 'poker', scenarios: ['seats_2', 'seats_10', 'short_stack'] }
 ];
 
 const browser = await launchChromium();

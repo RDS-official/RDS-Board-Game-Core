@@ -54,7 +54,7 @@ BASE_URL=http://127.0.0.1:6000/ pnpm shots
 | --- | --- | --- |
 | `pnpm test` | 内核一致性 206 例 + 分层边界检查 | 任何改动 |
 | `pnpm docs:check` | 文档路径有效性（旧 `src/` 布局引用、失效链接） | 动任何 `.md` / 目录结构 |
-| `pnpm test:matrix` | 五款夹具 × 多 seed × 全场景黑盒 + 回放哈希 | 动 `packages/kernel/src` 或任一 `packages/games/src/*` |
+| `pnpm test:matrix` | 六款夹具 × 多 seed × 全场景黑盒 + 回放哈希 | 动 `packages/kernel/src` 或任一 `packages/games/src/*` |
 | `pnpm test:ui` | Playwright 流程矩阵（拖拽/旋转/落定/悬停） | 动 `apps/web/src/render`、`apps/web/src/ui`、`packages/app/src` 契约 |
 | `pnpm probe:layout` | 47 个房间的家具布局与**门位冲突**（必须 0） | 动 `props.ts` / `roomLayout.ts` / 房间摆件清单 |
 | `pnpm probe:overlap` | 房间几何是否越过板块 footprint（**z-fighting 回归**） | 动 `roomTile.ts`、新增贴墙构件 |

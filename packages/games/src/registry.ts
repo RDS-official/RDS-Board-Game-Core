@@ -11,6 +11,8 @@ import { setupCatan } from './catan/setup';
 import { CATAN_SCENARIOS } from './catan/scenarios';
 import { DuneMahjongRules } from './dune_mahjong/rules';
 import { setupDuneMahjong } from './dune_mahjong/setup';
+import { PokerRules } from './poker/rules';
+import { pokerScenario, setupPoker } from './poker/setup';
 import { SANGUOSHA_HOOKS } from './sanguosha/hooks';
 import { SanguoshaRules } from './sanguosha/rules';
 import { setupSanguosha } from './sanguosha/setup';
@@ -498,12 +500,70 @@ export const duneMahjongModule: GameModule = defineGame({
   outcome: state => toOutcome(DuneMahjongRules.checkWinCondition(state))
 });
 
+/**
+ * 德州扑克 (Texas Hold'em).
+ *
+ * No-limit single-table poker: 52 cards, 2–10 seats, side pots and split pots.
+ * A seat that loses every chip ends the session (see docs/POKER.md), so the
+ * module needs no tournament ladder. Betting state lives in `globalVars.hand`;
+ * hole cards stay ordinary entities in `zone_hand_*` so the kernel's projection
+ * masks them for every other viewer.
+ */
+export const pokerModule: GameModule = defineGame({
+  meta: {
+    id: 'poker',
+    name: "德州扑克 (Texas Hold'em)",
+    description: '无限注德州扑克 · 52 张牌 · 2–10 人 · 边池 / 平分 · 输光即终局',
+    version: '1.0.0',
+    capabilities: {
+      simultaneousMoves: false,
+      hiddenInformation: true,
+      interruptStack: false,
+      dynamicRules: false,
+      topology: 'ring',
+      topologySpec: { kind: 'ring', adjacency: 'neighbors', geometry: 'ring' }
+    }
+  },
+  hooks: [],
+  actionSchemas: {
+    START_HAND: { type: 'START_HAND', allowPayload: false },
+    FOLD: { type: 'FOLD', allowPayload: false },
+    CHECK: { type: 'CHECK', allowPayload: false },
+    CALL: { type: 'CALL', payload: { amount: { kind: 'integer', min: 0 } } },
+    // The legal range depends on the live stack, so bounds are checked in
+    // PokerRules.validatePayload instead of the static schema.
+    RAISE: { type: 'RAISE', payload: { amount: { kind: 'integer', min: 0 } } },
+    ALL_IN: { type: 'ALL_IN', allowPayload: false }
+  },
+  scenarios: {
+    seats_2: { description: '单挑（2 人）', setup: pokerScenario(2) },
+    seats_3: { description: '3 人桌', setup: pokerScenario(3) },
+    seats_4: { description: '4 人桌', setup: pokerScenario(4) },
+    seats_5: { description: '5 人桌', setup: pokerScenario(5) },
+    seats_6: { description: '6 人桌', setup: pokerScenario(6) },
+    seats_7: { description: '7 人桌', setup: pokerScenario(7) },
+    seats_8: { description: '8 人桌', setup: pokerScenario(8) },
+    seats_9: { description: '9 人桌', setup: pokerScenario(9) },
+    seats_10: { description: '10 人满桌', setup: pokerScenario(10) },
+    short_stack: {
+      description: '短码演示（玩家 4 只有 60 筹码，数手内触发终局）',
+      setup: pokerScenario(4, { stacks: [1000, 1000, 1000, 60] })
+    }
+  },
+  setup: seed => setupPoker(seed, { seats: 4 }),
+  legalActions: (state, playerId) => PokerRules.getLegalActions(state, playerId),
+  validatePayload: (state, action, payload) => PokerRules.validatePayload(state, action, payload),
+  reduce: (state, action, ctx) => PokerRules.applyAction(state, action, ctx),
+  outcome: state => toOutcome(PokerRules.checkWinCondition(state))
+});
+
 export const GAME_REGISTRY: Record<string, GameModule> = {
   catan: catanModule,
   sanguosha: sanguoshaModule,
   splendor: splendorModule,
   betrayal: betrayalModule,
-  dune_mahjong: duneMahjongModule
+  dune_mahjong: duneMahjongModule,
+  poker: pokerModule
 };
 
 export const GAME_MODULES: GameModule[] = Object.values(GAME_REGISTRY);

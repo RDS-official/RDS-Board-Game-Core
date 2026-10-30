@@ -20,6 +20,7 @@ import './suites/sessionRoom';
 import './suites/rules';
 import './suites/splendor';
 import './suites/splendorExpansions';
+import './suites/poker';
 import './suites/rulesBetrayal';
 import './suites/diagnostics';
 

@@ -33,7 +33,7 @@
 产品是**通用桌游内核**，不是某一款桌游：
 
 - `packages/kernel/src/` 提供与游戏无关的调度、隐藏信息、中断栈、动态规则、回放、校验；
-- `packages/games/src/` 下的五款游戏是**一致性夹具**，证明内核能覆盖不同机制组合；
+- `packages/games/src/` 下的六款游戏是**一致性夹具**，证明内核能覆盖不同机制组合；
 - `packages/app/src/` 把内核翻译成 UI 可消费的 DTO；
 - `apps/web/src/ui/`、`apps/web/src/render/` 是可替换的调试器前端；
 - `packages/net/src/`、`packages/harness/src/` 是内核之上的适配层。
@@ -83,7 +83,7 @@ packages/app/src  (contracts.ts DTO 契约 / session.ts Presenter 实现)
 packages/kernel/src  (UniversalGameEngine：engine / decisions / stack / aop / rules /
                       observer / invariants / serialize / validation / ecs / graph / prng / module)
         │
-        ├──────────────▶ packages/games/src    (五款夹具：setup / legalActions / reduce / outcome)
+        ├──────────────▶ packages/games/src    (六款夹具：setup / legalActions / reduce / outcome)
         ├──────────────▶ packages/net/src      (room / patch / roomPresenter / webrtc-transport)
         ├──────────────▶ packages/harness/src  (一致性套件 + bot policy)
         └──────────────▶ apps/web/src/render   (Three.js 表现层，只消费投影状态)
@@ -789,7 +789,7 @@ new UniversalSession(module, seed = 1, scenario?)
 
 骨架：
 
-- 顶部品牌 + 五款游戏切换；
+- 顶部品牌 + 六款游戏切换；
 - `𝒪 滤镜` 视角选择；
 - 相机（等轴/俯视/座位）、音效、数学检查器开关；
 - 左侧玩家卡片栏；
@@ -1143,6 +1143,20 @@ SETUP_SETTLEMENT → SETUP_ROAD → ... → ROLL → ACTION
 - 25 分胜利；
 - 演示模式切换动作 `SWITCH_TO_DUNE_DEMO` / `SWITCH_TO_MAHJONG_DEMO`。
 
+### 10.7 德州扑克实现
+
+文件：[cards.ts](../packages/games/src/poker/cards.ts) · [handEval.ts](../packages/games/src/poker/handEval.ts) · [betting.ts](../packages/games/src/poker/betting.ts) · [setup.ts](../packages/games/src/poker/setup.ts) · [rules.ts](../packages/games/src/poker/rules.ts) · 设计说明见 [POKER.md](POKER.md)
+
+- 52 张牌是 `card_<suit><rank>` 实体（`card_s14` = A♠），一手结束时全部回到 `zone_deck`，用 `DeterministicPRNG.shuffle(state.prngState, …)` 重洗并把 `nextSeed` 写回状态；
+- 底牌是 `zone_hand_pN` 里的普通 CARD 实体（`OWNER_ONLY`），因此投影自动打码，夹具不需要 `project` 钩子；摊牌时把可见性改成 `PUBLIC`，弃牌进 `HIDDEN` 的 `zone_muck`；
+- 下注状态放在 `globalVars.hand`（街、底池、`streetBets`/`handBets`、`currentBet`、`lastRaiseSize`、`actedSinceRaise`、弃牌/全押名单），只含公开信息；
+- 动作：`START_HAND` / `FOLD` / `CHECK` / `CALL` / `RAISE`（声明式 `fields.amount` 数字输入）/ `ALL_IN`；
+- 一次 `reduce` 内可以连续收注、发街、摊牌（全押后自动跑完剩余公共牌），状态机保持单调且可逐位回放；
+- 边池由 `betting.buildPots` 按 `handBets` 分层计算，最高层只有一名贡献者时即为未跟注部分自动退回；平分余数按庄家左手顺位发放；
+- 短全押（不足最小加注）不更新 `lastRaiseSize`、不清空 `actedSinceRaise`，已行动者不再获得加注权；
+- 座位是 `SEAT` 节点 + 显式世界坐标（`spatialProjection` 的 `ring` 只支持 4 个 90° 步长座位），2–10 人按椭圆半径计算；
+- 终局：一手结算后任一玩家 `chips === 0` 即 `gameOver`，筹码最多者胜（并列并列胜）。
+
 ---
 
 ## 11. 组合根与启动流程
@@ -1392,12 +1406,13 @@ scenarios: {
 
 | 文件 | 作用 |
 | --- | --- |
-| [games/registry.ts](../packages/games/src/registry.ts) | 五个模块注册与能力矩阵 |
+| [games/registry.ts](../packages/games/src/registry.ts) | 六个模块注册与能力矩阵 |
 | [games/catan](../packages/games/src/catan) | 卡坦岛 setup/helpers/rules/scenarios |
 | [games/sanguosha](../packages/games/src/sanguosha) | 三国杀 setup/rules/hooks |
 | [games/splendor](../packages/games/src/splendor) | 璀璨宝石 setup/rules |
 | [games/betrayal](../packages/games/src/betrayal) | 山屋 cards/haunts/helpers/rules/setup/scenarios/hooks |
 | [games/dune_mahjong](../packages/games/src/dune_mahjong) | 沙丘/麻将 setup/rules |
+| [games/poker](../packages/games/src/poker) | 德州扑克 cards/handEval/betting/setup/rules |
 | [main.ts](../apps/web/src/main.ts) | 组合根 |
 | [scripts/test-core.mjs](../scripts/test-core.mjs) | 测试运行器与边界检查 |
 

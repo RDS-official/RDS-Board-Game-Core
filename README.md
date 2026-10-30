@@ -1,7 +1,7 @@
 # 通用桌游内核 · Universal Board Game Kernel
 
 > 产品是**内核框架**，不是某一款桌游。
-> `packages/games/src/*` 下的五款游戏只是**一致性测试夹具**，用来证明内核可以覆盖顺序回合、递归响应、隐藏信息、同步盲提与运行时改规则。
+> `packages/games/src/*` 下的六款游戏只是**一致性测试夹具**，用来证明内核可以覆盖顺序回合、递归响应、隐藏信息、同步盲提与运行时改规则。
 
 ```
 𝒢 = ⟨𝒩, 𝒮, s₀, 𝒜, ℒ, 𝒯, 𝒪, ℛ, 𝒦⟩
@@ -91,7 +91,7 @@ activeHooks: [{ instanceId, hookId: 'haunt_crimson_beast', ownerId, params: { bo
 
 ---
 
-## 4. 五款夹具验证的能力
+## 4. 六款夹具验证的能力
 
 | 夹具 | 验证点 |
 | --- | --- |
@@ -100,6 +100,7 @@ activeHooks: [{ instanceId, hookId: 'haunt_crimson_beast', ownerId, params: { bo
 | Splendor | 近似完全信息、永久费用修饰器、自动结算 |
 | Betrayal | 44 房间、四维轨道、13 预兆/25 物品/45 事件、NPC 怪物与三剧本 |
 | Dune / Mahjong | 秘密同步决策 `|P(s)|>1`、优先级仲裁与短路 |
+| Poker | 无限注下注轮、2–10 人、52 张牌的确定性洗牌与暗底牌、边池分层、平分余数、短全押不重开叫注 |
 
 | 三国杀响应栈 | 山屋三剧本 | 沙丘秘密决策 |
 | --- | --- | --- |
@@ -203,7 +204,7 @@ packages/kernel/src/                 # 内核（与具体游戏无关）
 packages/app/src/                    # 应用层：Presenter 契约 + Session + DTO
 packages/harness/src/                # 一致性测试套件（suite.ts + suites/*）+ Bot 策略
 packages/net/src/                    # 权威房间 + RFC6902 投影差分 + WebRTC transport
-packages/games/src/                  # 五款夹具（setup + rules + hooks）
+packages/games/src/                  # 六款夹具（setup + rules + hooks）
 apps/web/src/render/                 # Three.js 可视化调试器
   procedural/             # 2.5D 洋馆资产库
     materials.ts          #   共享 PBR 调色板（木/金属/石材/织物/自发光）
@@ -452,7 +453,7 @@ server {
 ### 11.3 仓库规模概览 (Repository Overview)
 
 - **总提交次数**：140+ 次提交
-- **工程结构**：Monorepo 多包架构（`packages/kernel` 核心内核、`packages/games` 五款游戏夹具、`packages/app` 应用状态桥接、`packages/net` 联机信令、`apps/web` Three.js 3D 渲染与 Web 调试器、`apps/server` 独立服务大厅）
+- **工程结构**：Monorepo 多包架构（`packages/kernel` 核心内核、`packages/games` 六款游戏夹具、`packages/app` 应用状态桥接、`packages/net` 联机信令、`apps/web` Three.js 3D 渲染与 Web 调试器、`apps/server` 独立服务大厅）
 - **语言与规范**：100% 严格类型 TypeScript + ESM 模块规范，无外部框架依赖的纯函数内核与严格状态隔离
 - **实时图表**：可前往 [GitHub 官方贡献图表页面](https://github.com/RDS-official/RDS-Board-Game-Core/graphs/contributors) 查看更多维度的代码增删行数与周期统计。
 

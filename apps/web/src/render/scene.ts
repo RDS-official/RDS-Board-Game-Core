@@ -3457,7 +3457,15 @@ export class BoardGameScene {
     const ids: string[] = [];
     for (const entity of items) {
       const face = entity.components?.cardFace || { title: 'Card' };
-      const mesh = CardMeshBuilder.createCardMesh(face, HAND_CARD_MESH_WIDTH, 1.68, !!entity.isMasked);
+      const mesh = CardMeshBuilder.createCardMesh(
+        face,
+        HAND_CARD_MESH_WIDTH,
+        1.68,
+        !!entity.isMasked,
+        null,
+        null,
+        this.lastState?.gameId === 'poker' ? 'playing' : 'plate'
+      );
       mesh.rotation.y = frame.facing;
       this.boardObjectsGroup.add(mesh);
       this.entityMeshes.set(entity.id, mesh);
@@ -3775,6 +3783,10 @@ export class BoardGameScene {
       this.renderDuneDecor(state);
     }
 
+    if (state.gameId === 'poker') {
+      this.renderPokerDecor(state);
+    }
+
     if (state.gameId === 'betrayal') {
       const anchors = this.floorAnchorsFor(state, this.lastPlacement);
       const labels: [string, string][] = [
@@ -3817,6 +3829,172 @@ export class BoardGameScene {
         this.boardObjectsGroup.add(sigil);
       }
     }
+  }
+
+  private static pokerCloth: THREE.Texture | null = null;
+
+  /**
+   * Matte green poker cloth.
+   *
+   * A flat green disc reads as plastic under the key light, so the cloth is
+   * baked once into a canvas: a deep green base, thousands of short fibre
+   * strokes at slightly random angles (the weave), soft mottling for depth and
+   * a darkened rim where the cloth tucks under the rail. Everything is
+   * deterministic — no `Math.random()` — so reloads look identical.
+   */
+  private static pokerClothTexture(): THREE.Texture {
+    if (BoardGameScene.pokerCloth) return BoardGameScene.pokerCloth;
+
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('2D canvas context unavailable for the poker cloth');
+
+    ctx.fillStyle = '#17603a';
+    ctx.fillRect(0, 0, size, size);
+
+    // Deterministic LCG so the weave never changes between reloads.
+    let seed = 0x9e3779b9;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+
+    // Fibre weave: short strokes in both directions plus stray threads.
+    for (let i = 0; i < 12000; i++) {
+      const x = rnd() * size;
+      const y = rnd() * size;
+      const length = 2 + rnd() * 5;
+      const angle = rnd() > 0.55 ? 0 : Math.PI / 2 + (rnd() - 0.5) * 0.9;
+      ctx.strokeStyle = rnd() > 0.5 ? 'rgba(232,255,240,0.05)' : 'rgba(0,0,0,0.055)';
+      ctx.lineWidth = 0.7 + rnd() * 0.8;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(angle) * length, y + Math.sin(angle) * length);
+      ctx.stroke();
+    }
+
+    // One soft light pool so the cloth is lit unevenly like a real table, but
+    // without any distinct patches.
+    const sheen = ctx.createRadialGradient(size * 0.42, size * 0.38, size * 0.08, size * 0.5, size * 0.5, size * 0.58);
+    sheen.addColorStop(0, 'rgba(255,255,255,0.07)');
+    sheen.addColorStop(0.6, 'rgba(255,255,255,0.02)');
+    sheen.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = sheen;
+    ctx.fillRect(0, 0, size, size);
+
+    // Darkened rim where the cloth meets the rail.
+    const vignette = ctx.createRadialGradient(size / 2, size / 2, size * 0.3, size / 2, size / 2, size * 0.5);
+    vignette.addColorStop(0, 'rgba(0,0,0,0)');
+    vignette.addColorStop(1, 'rgba(0,0,0,0.42)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, size, size);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    BoardGameScene.pokerCloth = texture;
+    return texture;
+  }
+
+  /**
+   * Poker table dressing: felt oval, brass rim, pot readout, one stack label per
+   * seat and the table title. Presentation only — it reads the projected state
+   * and never participates in the rules.
+   */
+  private renderPokerDecor(state: ProjectedGameState): void {
+    const hand = state.globalVars.hand as
+      | {
+          pot?: number;
+          streetBets?: Record<string, number>;
+          buttonSeat?: number;
+          folded?: string[];
+          allIn?: string[];
+        }
+      | undefined;
+
+    const seats = Object.values(state.mapGraph.nodes).filter(node => node.type === 'SEAT');
+    const rx = Math.max(3.6, ...seats.map(node => Math.abs(node.position[0]))) + 1.1;
+    const rz = Math.max(2.6, ...seats.map(node => Math.abs(node.position[2]))) + 1.1;
+
+    // Padded rail under the cloth: a darker, slightly larger oval so the felt
+    // reads as inset rather than painted on the floor.
+    const rail = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 96),
+      new THREE.MeshStandardMaterial({ color: 0x241a14, roughness: 0.92, metalness: 0.04 })
+    );
+    rail.rotation.x = -Math.PI / 2;
+    rail.scale.set(rx + 0.32, rz + 0.32, 1);
+    rail.position.set(0, 0.008, 0);
+    rail.receiveShadow = true;
+    this.boardObjectsGroup.add(rail);
+
+    // Matte green cloth with a woven fibre texture (built once, reused).
+    // One texture per table: the light pool and the rim shading are baked into
+    // it, so it must not tile.
+    const clothTexture = BoardGameScene.pokerClothTexture();
+    const felt = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 96),
+      new THREE.MeshStandardMaterial({
+        map: clothTexture,
+        color: 0xffffff,
+        roughness: 1,
+        metalness: 0
+      })
+    );
+    felt.rotation.x = -Math.PI / 2;
+    felt.scale.set(rx, rz, 1);
+    felt.position.set(0, 0.02, 0);
+    felt.receiveShadow = true;
+    this.boardObjectsGroup.add(felt);
+
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(1, 0.02, 8, 72),
+      new THREE.MeshStandardMaterial({
+        color: 0xc9a24a,
+        emissive: 0x6b4d12,
+        emissiveIntensity: 0.35,
+        roughness: 0.5
+      })
+    );
+    rim.rotation.x = -Math.PI / 2;
+    rim.scale.set(rx, rz, 1);
+    rim.position.set(0, 0.05, 0);
+    this.boardObjectsGroup.add(rim);
+
+    const street = Object.values(hand?.streetBets ?? {}).reduce(
+      (sum, amount) => sum + Number(amount ?? 0),
+      0
+    );
+    const pot = Number(hand?.pot ?? 0) + street;
+    const potLabel = this.createLabelSprite(`POT · 底池 ${pot}`, '#f6dc9c', 46);
+    potLabel.position.set(0, 0.62, rz * 0.24);
+    potLabel.scale.set(3.4, 0.6, 1);
+    this.boardObjectsGroup.add(potLabel);
+
+    state.playerOrder.forEach((pid, seatIndex) => {
+      const seatNode = seats.find(node => node.props?.playerId === pid);
+      if (!seatNode) return;
+      const [x, , z] = seatNode.position;
+      const length = Math.max(0.0001, Math.hypot(x, z));
+      const chips = Number(state.players[pid]?.customProps?.chips ?? 0);
+      const marks: string[] = [];
+      if (hand?.buttonSeat === seatIndex) marks.push('D');
+      if (hand?.folded?.includes(pid)) marks.push('弃牌');
+      else if (hand?.allIn?.includes(pid)) marks.push('全押');
+      const text = `${state.players[pid]?.name ?? pid} · ${chips}${marks.length > 0 ? ` · ${marks.join('/')}` : ''}`;
+      const label = this.createLabelSprite(text, chips > 0 ? '#e8eef5' : '#8b93a1', 36);
+      label.position.set(x - (x / length) * 2.2, 0.55, z - (z / length) * 2.2);
+      label.scale.set(2.6, 0.42, 1);
+      this.boardObjectsGroup.add(label);
+    });
+
+    const title = this.createLabelSprite("TEXAS HOLD'EM · 德州扑克", '#c9b57a', 38);
+    title.position.set(0, 0.5, -rz - 0.9);
+    title.scale.set(4.4, 0.62, 1);
+    this.boardObjectsGroup.add(title);
   }
 
   private floorAnchorsFor(
@@ -4157,13 +4335,17 @@ export class BoardGameScene {
     const isMasked = !!entity.isMasked;
     const custom = entity.components?.custom as Record<string, unknown> | undefined;
     const isPkmn = this.lastState?.gameId === 'splendor';
+    // Poker draws real playing cards (ivory stock, pips, court figures) instead
+    // of the house occult plate.
+    const cardStyle = this.lastState?.gameId === 'poker' ? 'playing' : 'plate';
     const mesh = CardMeshBuilder.createCardMesh(
       face,
       isPkmn ? PKMN_CARD_W : 1.35,
       isPkmn ? PKMN_CARD_H : 2.0,
       isMasked,
       isPkmn ? pokemonCardTexture(custom) : null,
-      isPkmn ? pokemonCardBackTexture(custom) : null
+      isPkmn ? pokemonCardBackTexture(custom) : null,
+      cardStyle
     );
 
     if (isPkmn && (zone.id === 'zone_market_t1' || zone.id === 'zone_market_t2' || zone.id === 'zone_market_t3')) {
@@ -4224,8 +4406,11 @@ export class BoardGameScene {
           mesh.rotation.y = 0;
         }
       } else {
-        const shown = Math.min(totalInZone, 4);
-        mesh.scale.set(0.34, 0.34, 0.34);
+        // Plain board area (poker community cards, demo displays): centre the
+        // whole row and allow five cards instead of clamping at four, which
+        // used to push the fifth card off to one side.
+        const shown = Math.min(totalInZone, 5);
+        mesh.scale.set(0.46, 0.46, 0.46);
         mesh.position.set(anchor[0] + (index - (shown - 1) / 2) * 0.62, anchor[1], anchor[2] + 0.85);
         mesh.rotation.y = 0;
       }

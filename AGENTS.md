@@ -68,7 +68,7 @@
 apps/web/src/ui        只允许 import ../app/contracts（严禁 import core/games/render/net/ai）
 packages/app/src       拥有游戏引擎，向 UI 暴露 DTO（Presenter 契约）
 packages/kernel/src      纯 JSON 状态 + 纯函数转移（严禁保存不可序列化函数、私有闭包或随机数实例）
-packages/games/src/*   五款夹具，仅实现 setup / legalActions / reduce / outcome
+packages/games/src/*   六款夹具，仅实现 setup / legalActions / reduce / outcome
 apps/web/src/render    Three.js 表现层，负责几何体渲染与物理演算，不直接修改核心逻辑状态
 ```
 

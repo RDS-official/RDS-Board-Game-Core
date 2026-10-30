@@ -345,6 +345,12 @@ export interface GameSnapshot {
    * between rolls; consumers must diff it rather than assume it is fresh.
    */
   lastRoll?: UiRoll;
+  /**
+   * Why the acting explorer has no move/explore actions right now, in the player's
+   * words. Empty when they can act normally. The dock uses it so "I cannot move"
+   * always comes with a reason instead of a single silent END_TURN card.
+   */
+  blockedReason?: string;
 }
 
 /** One resolved dice roll, in the shape the UI needs to draw it. */
@@ -497,7 +503,8 @@ export const GAME_TABS: GameTab[] = [
   { id: 'sanguosha', icon: '⚔️', name: '三国杀' },
   { id: 'splendor', icon: '💎', name: '璀璨宝石' },
   { id: 'betrayal', icon: '🕯️', name: '山屋惊魂' },
-  { id: 'dune_mahjong', icon: '🀄', name: '沙丘 & 麻将' }
+  { id: 'dune_mahjong', icon: '🀄', name: '沙丘 & 麻将' },
+  { id: 'poker', icon: '♠️', name: '德州扑克' }
 ];
 
 /** One selectable starting position of the current game. */

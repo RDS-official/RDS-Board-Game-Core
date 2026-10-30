@@ -35,6 +35,24 @@ const ballIcon = (gem: unknown): string => BALL_ICON[String(gem ?? '')] ?? '⚪'
 const ballList = (raw: unknown): string[] =>
   Array.isArray(raw) ? raw.filter((gem): gem is string => typeof gem === 'string') : [];
 
+/**
+ * 德州扑克底池摘要。
+ *
+ * 夹具把已归集的筹码放在 `pot`，本街还没归集的注在 `streetBets` 里；玩家看到
+ * 的"底池"必须是两者之和，否则翻牌前会显示 0。
+ */
+function pokerPotHint(state: ProjectedGameState): string {
+  const hand = state.globalVars.hand as
+    | { pot?: number; streetBets?: Record<string, number>; currentBet?: number }
+    | undefined;
+  if (!hand) return '底池 0';
+  const street = Object.values(hand.streetBets ?? {}).reduce(
+    (sum, amount) => sum + Number(amount ?? 0),
+    0
+  );
+  return `底池 ${Number(hand.pot ?? 0) + street} · 注额 ${Number(hand.currentBet ?? 0)}`;
+}
+
 function describeActionZh(
   state: ProjectedGameState,
   action: Action
@@ -350,6 +368,31 @@ function describeActionZh(
           hint: '超过 7 张时强制弃牌',
           tone: 'danger'
         };
+      /* ---- 德州扑克 (Texas Hold'em) ------------------------------------- */
+      case 'START_HAND':
+        return { icon: '🃏', label: '发下一手', hint: '庄家顺时针移动 · 重新洗牌发底牌', tone: 'primary' };
+      case 'FOLD':
+        return { icon: '🏳️', label: '弃牌', hint: '放弃本手底牌 · 已下的注留在底池', tone: 'danger' };
+      case 'CHECK':
+        return { icon: '✋', label: '过牌', hint: '不下注，把行动交给下一位', tone: 'normal' };
+      case 'CALL': {
+        const amount = Number(action.payload?.amount ?? 0);
+        return { icon: '🟰', label: `跟注 ${amount}`, hint: `匹配当前注额 · ${pokerPotHint(state)}`, tone: 'primary' };
+      }
+      case 'RAISE': {
+        const currentBet = Number(
+          (state.globalVars.hand as { currentBet?: number } | undefined)?.currentBet ?? 0
+        );
+        return {
+          icon: '⬆️',
+          label: currentBet > 0 ? '加注' : '下注',
+          hint: `输入总额，上限为全部筹码 · ${pokerPotHint(state)}`,
+          tone: 'primary',
+          fields: action.fields
+        };
+      }
+      case 'ALL_IN':
+        return { icon: '💥', label: '全押', hint: '推入全部筹码 · 超出部分自动形成边池', tone: 'danger' };
       default:
         return { icon: '•', label: action.type, hint: '合法动作', tone: 'normal' };
     }

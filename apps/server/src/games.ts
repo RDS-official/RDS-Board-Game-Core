@@ -40,5 +40,25 @@ export const GAMES: HubGameInfo[] = [
     accent: '#ff8b82',
     variants: [{ id: 'exploration', label: '预铺探索（半开局）' }],
   },
+  {
+    // Seat counts live in the fixture scenarios; `rooms.ts` derives the room
+    // cap from the selected scenario so a table can never be dealt more players
+    // than it has seats (REVIEW.md S9).
+    id: 'poker',
+    name: '德州扑克',
+    minPlayers: 2,
+    maxPlayers: 10,
+    clientUrl: '/games/rds-board-core/',
+    protocol: 'rds-room/1',
+    durationMin: 30,
+    accent: '#4ec9b0',
+    variants: [
+      { id: 'seats_2', label: '单挑（2 人）' },
+      { id: 'seats_4', label: '4 人桌' },
+      { id: 'seats_6', label: '6 人桌' },
+      { id: 'seats_10', label: '10 人满桌' },
+      { id: 'short_stack', label: '短码演示（4 人）' },
+    ],
+  },
 ];
 export const gameById = (id: string) => GAMES.find(g => g.id === id);
