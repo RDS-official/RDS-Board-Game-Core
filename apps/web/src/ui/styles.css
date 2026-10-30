@@ -4573,3 +4573,71 @@ select.pf-control {
   font-size: var(--type-2xs, 11px);
   line-height: 1.35;
 }
+
+/* --------------------------------------------------------------------------
+   Edition picker (right column, above the activity feed)
+
+   A game with several rule sets needs more room than a one-line select gives:
+   four editions in a dropdown say nothing about what changes between them.
+   The panel only renders when the game ships two or more variants, so the
+   column is unchanged for every single-variant fixture.
+   -------------------------------------------------------------------------- */
+.variant-panel {
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(214, 178, 108, 0.24);
+  background: rgba(16, 12, 9, 0.86);
+  backdrop-filter: blur(6px);
+  color: #f0e2c2;
+}
+
+.variant-panel .vp-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.variant-panel .vp-title {
+  font-family: var(--font-display);
+  font-size: var(--type-sm);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.variant-panel .vp-count {
+  font-size: var(--type-2xs, 11px);
+  color: rgba(240, 226, 194, 0.55);
+}
+
+.variant-panel .vp-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.variant-panel .vp-option {
+  padding: 7px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(214, 178, 108, 0.22);
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(240, 226, 194, 0.78);
+  font-size: var(--type-2xs, 11px);
+  line-height: 1.25;
+  text-align: center;
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.variant-panel .vp-option:hover {
+  border-color: rgba(255, 194, 71, 0.55);
+  color: #ffe9bd;
+}
+
+.variant-panel .vp-option.active {
+  border-color: rgba(255, 194, 71, 0.85);
+  background: rgba(255, 194, 71, 0.16);
+  color: #ffe9bd;
+  font-weight: 600;
+}
