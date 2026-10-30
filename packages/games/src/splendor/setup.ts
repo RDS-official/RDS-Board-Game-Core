@@ -300,13 +300,39 @@ function toCardEntity(
 }
 
 /**
+ * Rule variant ("edition") this position is dealt under.
+ *
+ * The imported deck carries two expansions — Mega Evolution and the Poké Mart —
+ * whose rules are not implemented yet. A variant names which rule sets a table
+ * actually plays with, so the base game stays the default and an unimplemented
+ * expansion can never leak a pile onto the table by accident.
+ */
+export interface SplendorVariant {
+  /** Mega Evolution: Mega tokens, super-evolution, the 20-point goal. */
+  mega: boolean;
+  /** Poké Mart: the shop row and its six capture effects. */
+  pokemart: boolean;
+}
+
+/** The variant every unreferenced caller gets: the plain base game. */
+export const BASE_VARIANT: SplendorVariant = { mega: false, pokemart: false };
+
+/**
  * Build the initial position.
  *
  * `playerCount` is persisted into `globalVars.playerCount`; every rule reads the
  * seat count from there instead of hardcoding it. The exported signature stays
  * `setupSplendor(seed)` (2 seats) so existing callers keep working.
+ *
+ * `variant` selects the rule set. An expansion whose rules are not implemented
+ * is never dealt: its deck and its cards are simply absent, so nothing inert is
+ * left on the table for a player to click.
  */
-export function setupSplendor(seed: number = 42, playerCount: number = MIN_PLAYERS): GameState {
+export function setupSplendor(
+  seed: number = 42,
+  playerCount: number = MIN_PLAYERS,
+  variant: SplendorVariant = BASE_VARIANT
+): GameState {
   const seats = Math.max(MIN_PLAYERS, Math.min(MAX_PLAYERS, Math.floor(playerCount) || MIN_PLAYERS));
   let prngSeed = (seed >>> 0) || 1;
 
@@ -363,7 +389,9 @@ export function setupSplendor(seed: number = 42, playerCount: number = MIN_PLAYE
       finalRoundComplete: false,
       scoreToWin: WIN_SCORE,
       maxTokens: MAX_TOKENS,
-      maxReserves: MAX_RESERVES
+      maxReserves: MAX_RESERVES,
+      /** Rule set this table was dealt under; persist it so replays agree. */
+      variant: { ...variant }
     },
     interruptStack: [],
     pendingDecisions: [],
@@ -388,10 +416,15 @@ export function setupSplendor(seed: number = 42, playerCount: number = MIN_PLAYE
   }
   state = ECSManager.createZone(state, SPLENDOR_ZONES.rareDeck, 'Rare Deck', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-8.4, 0.06, 0.0]);
   state = ECSManager.createZone(state, SPLENDOR_ZONES.legendDeck, 'Legendary Deck', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-8.4, 0.06, -2.0]);
-  // Mega Evolution / Poké Mart are part of the imported deck but their rules
-  // land in a later pass; they are stored as inert face-down piles.
-  state = ECSManager.createZone(state, SPLENDOR_ZONES.megaDeck, 'Mega Evolution Deck', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-6.0, 0.06, -3.4]);
-  state = ECSManager.createZone(state, SPLENDOR_ZONES.pokemartDeck, 'Poké Mart Deck', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-8.4, 0.06, -3.4]);
+  // Expansion piles are created only for a variant that actually plays them.
+  // Their rules land in a later pass; until then the piles must not exist, or a
+  // player is left staring at two decks that can never be opened.
+  if (variant.mega) {
+    state = ECSManager.createZone(state, SPLENDOR_ZONES.megaDeck, 'Mega Evolution Deck', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-6.0, 0.06, -3.4]);
+  }
+  if (variant.pokemart) {
+    state = ECSManager.createZone(state, SPLENDOR_ZONES.pokemartDeck, 'Poké Mart Deck', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-8.4, 0.06, -3.4]);
+  }
 
   playerOrder.forEach(pId => {
     state = ECSManager.createZone(state, SPLENDOR_ZONES.hand(pId), `${players[pId].name} Reserve`, 'HAND', {
@@ -408,15 +441,21 @@ export function setupSplendor(seed: number = 42, playerCount: number = MIN_PLAYE
 
   /* ---- decks -------------------------------------------------------- */
 
+  // A deck plan exists only when its zone does: an expansion that is not being
+  // played contributes no zone and, therefore, no cards.
   const deckPlans: { tag: CardTierTag; deck: string; cards: (PkmnCard | PkmnMegaCard | PkmnMartCard)[] }[] = [
     { tag: 'stage1', deck: SPLENDOR_ZONES.deck(1), cards: PKMN_DECK.stage1 },
     { tag: 'stage2', deck: SPLENDOR_ZONES.deck(2), cards: PKMN_DECK.stage2 },
     { tag: 'stage3', deck: SPLENDOR_ZONES.deck(3), cards: PKMN_DECK.stage3 },
     { tag: 'rare', deck: SPLENDOR_ZONES.rareDeck, cards: PKMN_DECK.rare },
-    { tag: 'legend', deck: SPLENDOR_ZONES.legendDeck, cards: PKMN_DECK.legend },
-    { tag: 'mega', deck: SPLENDOR_ZONES.megaDeck, cards: PKMN_DECK.mega },
-    { tag: 'pokemart', deck: SPLENDOR_ZONES.pokemartDeck, cards: PKMN_DECK.pokemart }
+    { tag: 'legend', deck: SPLENDOR_ZONES.legendDeck, cards: PKMN_DECK.legend }
   ];
+  if (variant.mega) {
+    deckPlans.push({ tag: 'mega', deck: SPLENDOR_ZONES.megaDeck, cards: PKMN_DECK.mega });
+  }
+  if (variant.pokemart) {
+    deckPlans.push({ tag: 'pokemart', deck: SPLENDOR_ZONES.pokemartDeck, cards: PKMN_DECK.pokemart });
+  }
 
   for (const plan of deckPlans) {
     const ordered = shuffled(plan.cards);
