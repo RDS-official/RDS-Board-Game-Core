@@ -989,7 +989,12 @@ export class UniversalSession implements GamePresenter {
         ...state.playerOrder.map(pid => ({ id: pid, name: state.players[pid]?.name ?? pid }))
       ],
 
-      players: buildPlayersView(state, focus, raw.effects),
+      players: buildPlayersView(
+        state,
+        focus,
+        raw.effects,
+        module.statModifiers ? (actorId: string) => module.statModifiers!(raw, actorId) : undefined
+      ),
       npcs: buildNpcsView(state, focusActors, id => this.engine.getActorName(id)),
       actions: this.bound.map(entry => entry.ui),
       legalCount: legal.length,
@@ -1239,7 +1244,8 @@ export function missionLineOf(state: ProjectedGameState): string | undefined {
 export function buildPlayersView(
   state: ProjectedGameState,
   focus: string[],
-  effectsOverride?: EffectInstance[]
+  effectsOverride?: EffectInstance[],
+  statModifiers?: (actorId: string) => Record<string, number>
 ): UiPlayer[] {
     const focusSet = new Set(focus);
 
@@ -1352,6 +1358,7 @@ export function buildPlayersView(
         const items = hand.length - omens;
         const floorNames: Record<string, string> = { BASEMENT: '地下室', GROUND: '一楼', UPPER: '二楼' };
         const start = player.customProps.startIndex ?? {};
+        const bonuses = statModifiers?.(pid) ?? {};
         base.score = omens;
         base.scoreLabel = '预兆';
         base.stats = [
@@ -1371,7 +1378,8 @@ export function buildPlayersView(
             short: '速',
             value: String(traits.speed ?? '-'),
             max: 8,
-            start: Number(start.speed ?? 0)
+            start: Number(start.speed ?? 0),
+            modifier: Number(bonuses.speed ?? 0)
           },
           {
             color: '#e0604e',
@@ -1379,7 +1387,8 @@ export function buildPlayersView(
             short: '力',
             value: String(traits.might ?? '-'),
             max: 8,
-            start: Number(start.might ?? 0)
+            start: Number(start.might ?? 0),
+            modifier: Number(bonuses.might ?? 0)
           },
           {
             color: '#57c08b',
@@ -1387,7 +1396,8 @@ export function buildPlayersView(
             short: '智',
             value: String(traits.sanity ?? '-'),
             max: 8,
-            start: Number(start.sanity ?? 0)
+            start: Number(start.sanity ?? 0),
+            modifier: Number(bonuses.sanity ?? 0)
           },
           {
             color: '#b07bf0',
@@ -1395,7 +1405,8 @@ export function buildPlayersView(
             short: '识',
             value: String(traits.knowledge ?? '-'),
             max: 8,
-            start: Number(start.knowledge ?? 0)
+            start: Number(start.knowledge ?? 0),
+            modifier: Number(bonuses.knowledge ?? 0)
           }
         ];
       } else if (state.gameId === 'dune_mahjong') {

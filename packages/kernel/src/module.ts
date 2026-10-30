@@ -119,6 +119,17 @@ export interface GameModule {
   resolveSelection?: (state: GameState, actorId: ActorId, spec: SelectionSpec) => SelectionCandidate[];
   /** Semantic validation for submitted targets (after schema checks). */
   validateSelection?: (state: GameState, candidate: Action, targets: string[], actorId: ActorId) => string[];
+  /**
+   * Optional derived stat modifiers for the presentation layer.
+   *
+   * A game that grants standing bonuses ("+1 Might while carried") exposes them
+   * here so any UI can show base + modifier without knowing the game's stat
+   * names. Must be a pure function of state: it is called per snapshot and the
+   * result is never stored back into the state.
+   *
+   * See docs/ENGINE-PASSIVE-MODIFIERS.md for the rationale.
+   */
+  statModifiers?: (state: GameState, actorId: ActorId) => Record<string, number>;
   /** Optional spatial semantics (walls, doors, LOS, floors). */
   spatial?: SpatialQuery;
   /** Logical-clock TTLs (in ticks) applied to decisions / response windows. */

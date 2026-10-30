@@ -126,6 +126,8 @@ export interface UiPlayer {
     max?: number;
     /** Printed starting position, rendered as a hollow marker. */
     start?: number;
+    /** Standing bonus from carried cards, shown next to the value. */
+    modifier?: number;
   }[];
   hp?: { current: number; max: number };
 }

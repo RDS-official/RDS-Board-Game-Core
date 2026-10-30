@@ -1706,10 +1706,15 @@ export class BoardGameHUD {
                     return `<span class="trait-seg ${on} ${mark}"></span>`;
                   })
                   .join('');
+                const bonus = Number(pip.modifier ?? 0);
+                const bonusChip =
+                  bonus === 0
+                    ? ''
+                    : `<span class="trait-mod ${bonus > 0 ? 'up' : 'down'}" title="携带物品加成">${bonus > 0 ? '+' : ''}${bonus}</span>`;
                 return `<div class="trait-row ${player.alive ? '' : 'dead'}" style="--trait-color:${pip.color}" title="${pip.label}">
                   <span class="trait-key">${pip.short ?? ''}</span>
                   <span class="trait-track">${segs}</span>
-                  <span class="trait-val">${pip.value}</span>
+                  <span class="trait-val">${pip.value}</span>${bonusChip}
                 </div>`;
               })
               .join('')}</div>`

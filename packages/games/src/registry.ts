@@ -5,6 +5,7 @@ import { BetrayalRules } from './betrayal/rules';
 import { BETRAYAL_SCENARIOS } from './betrayal/scenarios';
 import { BETRAYAL_SPATIAL } from './betrayal/spatial';
 import { setupBetrayal } from './betrayal/setup';
+import { traitModifiers } from './betrayal/helpers';
 import { CatanRules } from './catan/rules';
 import { setupCatan } from './catan/setup';
 import { CATAN_SCENARIOS } from './catan/scenarios';
@@ -424,6 +425,7 @@ export const betrayalModule: GameModule = defineGame({
     }
   },
   legalActions: (state, playerId) => BetrayalRules.getLegalActions(state, playerId),
+  statModifiers: (state, playerId) => traitModifiers(state, playerId),
   spatial: BETRAYAL_SPATIAL,
   resolveSelection: (state, _actorId, spec) => {
     if (spec.source !== 'node') return [];

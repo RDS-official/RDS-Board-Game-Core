@@ -4660,3 +4660,21 @@ select.pf-control {
   border: 1px solid rgba(214, 178, 108, 0.28);
   background: rgba(0, 0, 0, 0.4);
 }
+
+/* Standing bonus from carried cards, shown beside the printed trait value. */
+.trait-mod {
+  font-family: var(--font-ui);
+  font-size: var(--type-xs);
+  padding: 0 3px;
+  border-radius: var(--radius-pill);
+  border: 1px solid currentColor;
+  line-height: 1.2;
+}
+
+.trait-mod.up {
+  color: #7fd6a4;
+}
+
+.trait-mod.down {
+  color: #e0857a;
+}

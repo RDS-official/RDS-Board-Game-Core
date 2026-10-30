@@ -216,3 +216,17 @@ export interface UiStatModifier {
 - `lucky_stone` / `rabbits_foot` 的重掷机制是**有意的房规偏离**（用户确认保留），
   不属于本设计的迁移范围。
 - `rope` 属 Widow's Walk 扩展，非 2E 基础牌，保留并单独标注。
+
+## 修复记录（第七批：UI 显示携带修正）
+
+板甲改成「携带期间力量 +1」后，人物卡仍只显示基础值「力量 5」，玩家会疑惑为什么掷了 6 颗。
+
+### 通用做法（不绑定《山屋惊魂》）
+
+1. **内核新增纯钩子** `GameModule.statModifiers?: (state, actorId) => Record<string, number>`
+   —— 任何桌游只要实现它，UI 就能显示「基础值 + 修正」，内核仍然不需要知道任何属性名。
+2. **`UiPlayer.pips[].modifier`** —— 跨游戏的展示契约。
+3. **背叛模块**用 `traitModifiers()` 实现该钩子。
+4. **人物卡**在属性值旁显示 `+1` / `-1` 徽章。
+
+浏览器实测：持板甲时显示「力 5 **+1**」，其余属性无徽章，`pageErrors: 0`。
