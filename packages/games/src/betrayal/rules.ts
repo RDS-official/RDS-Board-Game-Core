@@ -3224,11 +3224,11 @@ export class BetrayalRules {
           this.dealDamage(state, pid, 'MENTAL', 1, ctx, '滴血之声');
         }
       } else if (effect === 'POSSESSION') {
+        // This used to set skipActions, which is re-evaluated every turn start: an
+        // explorer with low Sanity could fail the roll turn after turn and never act
+        // again. It now costs a Sanity step, like the other lingering curses.
         const check = rollTraitCheck(state, pid, 'sanity', { threshold: 4, reason: '恶灵附体' });
-        if (!check.success) {
-          player.customProps.skipActions = true;
-          trace(ctx, 'ANNOUNCEMENT', `${player.name} 被恶灵夺走身体，本回合无法行动`, 700);
-        }
+        if (!check.success) applyTraitSteps(state, pid, 'sanity', -1, { force: true });
       } else if (effect === 'CHILL') {
         const check = rollTraitCheck(state, pid, 'sanity', { threshold: 5, reason: '刺骨寒意' });
         this.dealDamage(state, pid, 'MENTAL', 1, ctx, '刺骨寒意');
