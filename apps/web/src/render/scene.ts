@@ -305,6 +305,22 @@ const PKMN_MARKET_PITCH_Z = PKMN_CARD_H + 0.52;
  * FNV-1a 32-bit hash. Used for stable per-seat jitter: the standees are rebuilt
  * on every sync, so a `Math.random()` tilt would flicker.
  */
+/**
+ * 这个座位是否已经「准备好参与牌局」。
+ *
+ * 两个来源：开局前看 `globalVars.seating.ready`，每手结束后看 `hand.readyForNext`。
+ * 只有准备好了，底座半圆环才点亮（白）；否则保持磨砂白。
+ */
+function seatReadyForPlay(
+  state: ProjectedGameState,
+  hand: { street?: string; readyForNext?: string[] } | undefined,
+  seatId: string
+): boolean {
+  const seating = state.globalVars.seating as { started?: boolean; ready?: Record<string, boolean> } | undefined;
+  if (seating && !seating.started) return seating.ready?.[seatId] === true;
+  if (hand?.street === 'COMPLETE') return (hand.readyForNext ?? []).includes(seatId);
+  return true;
+}
 function fnv1a(text: string): number {
   let hash = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) {
@@ -354,7 +370,8 @@ export class BoardGameScene {
    * frame — with a per-seat random offset, so the table does not look like a row
    * of signs snapping to attention.
    */
-  private seatStandees: { group: THREE.Group; jitter: number; lamp?: THREE.Mesh }[] = [];
+  private seatStandees: { group: THREE.Group; jitter: number; lamp?: THREE.Mesh; seatId: string }[] = [];
+
   /** Previous poker snapshot, used to detect what to animate. */
   private pokerFxPrev: {
     handNo: number;
@@ -2232,6 +2249,8 @@ export class BoardGameScene {
               bbSeat?: number;
               lastActions?: Record<string, string>;
               folded?: string[];
+              street?: string;
+              readyForNext?: string[];
             }
           | undefined;
         const seatIndex = Number(node.props?.seatIndex ?? -1);
@@ -2253,6 +2272,8 @@ export class BoardGameScene {
             active: seatId === activeActor,
             muted: seatPlayer ? !seatPlayer.alive : false,
             marker,
+            // 底座半圆环的三态：轮到 = 红，已准备待命 = 白，未准备 = 磨砂白。
+            lamp: seatId === activeActor ? 'turn' : seatReadyForPlay(state, handState, seatId) ? 'idle' : 'off',
             // What this seat did on the current street, painted on the board.
             // A fold outlives its street: once a seat is out of the hand the board
             // keeps saying so until the next hand starts.
@@ -2270,7 +2291,7 @@ export class BoardGameScene {
         // hashed from the seat id, so a rebuilt sync keeps the same pose.
         const jitter = (((fnv1a(seatId) % 1000) / 1000) - 0.5) * (Math.PI / 2);
         group.rotation.y = Math.atan2(-outward.x, -outward.y) + jitter;
-        this.seatStandees.push({ group, jitter, lamp });
+        this.seatStandees.push({ group, jitter, lamp, seatId });
         this.boardObjectsGroup.add(group);
         this.raycaster.registerInteractive(plate, {
           type: 'NODE',
@@ -3992,6 +4013,8 @@ export class BoardGameScene {
             sbSeat?: number;
             bbSeat?: number;
             folded?: string[];
+              street?: string;
+              readyForNext?: string[];
             allIn?: string[];
           }
         | undefined;
@@ -4031,6 +4054,8 @@ export class BoardGameScene {
           streetBets?: Record<string, number>;
           buttonSeat?: number;
           folded?: string[];
+              street?: string;
+              readyForNext?: string[];
           allIn?: string[];
         }
       | undefined;
@@ -4762,25 +4787,30 @@ export class BoardGameScene {
    *
    * Dead-on aiming looked wrong: every board snapped into the same plane, which
    * hides the table's structure. Each seat therefore carries a hashed ±45° offset
-   * and the whole board still swings with the orbit, so the face stays legible
-   * without the row looking mechanical.
    */
   private updateSeatStandees(): void {
     if (this.seatStandees.length === 0) return;
     const cam = this.camera.position;
-    // 呼吸式红灯：0.56~1 的缩放循环，比常亮更容易被余光注意到。
-    const pulse = 0.78 + Math.sin(performance.now() / 280) * 0.22;
-    for (const { group, jitter, lamp } of this.seatStandees) {
-      // 行动灯随呼吸缩放，转向逻辑不变。
+    const pulse = 0.55 + Math.sin(performance.now() / 320) * 0.25;
+    // 半圆环灯每帧按**当前**牌局刷新：节点是增量复用的，建牌那一刻的状态不可靠。
+    const live = this.lastState;
+    const actor = live ? (live.activeActorId ?? live.activePlayerId) : undefined;
+    const hand = live?.globalVars.hand as
+      | { street?: string; readyForNext?: string[] }
+      | undefined;
+    for (const { group, jitter, lamp, seatId } of this.seatStandees) {
       const dx = cam.x - group.position.x;
       const dz = cam.z - group.position.z;
       if (Math.abs(dx) < 1e-4 && Math.abs(dz) < 1e-4) continue;
       group.rotation.y = Math.atan2(dx, dz) + jitter;
-      // 灯是嵌进底座的圆片：只让直径呼吸，别让它前后窜出边缘。
-      if (lamp) lamp.scale.set(pulse, 1, pulse);
+      if (!lamp) continue;
+      const material = lamp.material as THREE.MeshBasicMaterial;
+      const turn = !!live && seatId === actor;
+      const ready = !!live && seatReadyForPlay(live, hand, seatId);
+      material.color.setHex(turn ? 0xff3b2a : ready ? 0xf4f7fb : 0xd6d9de);
+      material.opacity = turn ? pulse : ready ? 0.42 : 0.14;
     }
   }
-
   private renderLoop(): void {
     if (this.isDestroyed) return;
     requestAnimationFrame(this.renderLoop.bind(this));
