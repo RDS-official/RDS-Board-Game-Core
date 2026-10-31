@@ -357,19 +357,24 @@ export class SeatPlateBuilder {
       const tone = 0xd6d9de;
       const opacity = 0.22;
       lamp = new THREE.Mesh(
-        new THREE.RingGeometry(SEAT_BASE.radius * 0.88, SEAT_BASE.radius * 0.99, 48, 1, 0, Math.PI),
+        new THREE.RingGeometry(SEAT_BASE.radius * 0.868, SEAT_BASE.radius * 0.914, 64, 1, 0, Math.PI),
         new THREE.MeshBasicMaterial({
           color: tone,
           transparent: true,
           opacity,
           // 灯是贴在底座顶面上的平面：不开 polygonOffset 会与圆盘顶面共面打架
           // （深度值几乎相同，画面上时有时无）。让它永远压过底座。
+          // RingGeometry 是单面平面，绕 X 转 90° 后法线朝下；从上往下看就是背面，
+          // 会被默认的 FrontSide 剔除——这是它一直看不见的根本原因。
+          side: THREE.DoubleSide,
           depthWrite: false,
           polygonOffset: true,
           polygonOffsetFactor: -2,
           polygonOffsetUnits: -2
         })
       );
+      // 半径对齐底座贴图里的黄铜装饰槽：贴图 256px、槽在 114px（= 0.8906 半径），
+      // 所以灯环取 0.868~0.914 R，点亮的正是那道装饰条本身。
       // RingGeometry 画在 XY 平面；抬平后 +Y 指向 +Z。板身挡住的是 +Z 那半，
       // 所以取 PI..2PI 这半圈——正好落在相机看得见的那一侧（后缘）。
       lamp.rotation.x = Math.PI / 2;
