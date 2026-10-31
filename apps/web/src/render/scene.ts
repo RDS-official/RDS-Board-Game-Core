@@ -301,6 +301,19 @@ const PKMN_MARKET_Z1 = PKMN_DECK_Z_TOP;
 const PKMN_MARKET_PITCH_X = PKMN_CARD_W + 0.34;
 const PKMN_MARKET_PITCH_Z = PKMN_CARD_H + 0.52;
 
+/**
+ * FNV-1a 32-bit hash. Used for stable per-seat jitter: the standees are rebuilt
+ * on every sync, so a `Math.random()` tilt would flicker.
+ */
+function fnv1a(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
 export class BoardGameScene {
   private static readonly _scratchNdc = new THREE.Vector2();
   private static readonly _scratchRaycaster = new THREE.Raycaster();
@@ -336,12 +349,6 @@ export class BoardGameScene {
    * poker sync.
    */
   private pokerFxGroup = new THREE.Group();
-  /**
-   * Seat standees rebuilt on every sync. Their yaw is re-aimed at the camera
-   * each frame, so the boards always present their face to whoever is looking
-   * (a fixed yaw would show the back from half the orbit).
-   */
-  private seatStandees: THREE.Group[] = [];
   /** Previous poker snapshot, used to detect what to animate. */
   private pokerFxPrev: {
     handNo: number;
@@ -1945,10 +1952,6 @@ export class BoardGameScene {
   private renderMapGraph(state: ProjectedGameState): void {
     const graph = state.mapGraph;
 
-    // The board group is rebuilt from scratch every sync, so the standee list is
-    // rebuilt with it.
-    this.seatStandees = [];
-
     // Render Nodes
     Object.values(graph.nodes).forEach(node => {
       if (node.type === 'HEX') {
@@ -2213,7 +2216,9 @@ export class BoardGameScene {
 
         // Blinds get their own timber: pine for the big blind, red pine for the
         // small blind, walnut for the rest of the table.
-        const handState = state.globalVars.hand as { sbSeat?: number; bbSeat?: number } | undefined;
+        const handState = state.globalVars.hand as
+          | { sbSeat?: number; bbSeat?: number; lastActions?: Record<string, string> }
+          | undefined;
         const seatIndex = Number(node.props?.seatIndex ?? -1);
         const wood: WoodKind =
           state.gameId === 'poker' && handState
@@ -2233,13 +2238,21 @@ export class BoardGameScene {
             active: seatId === activeActor,
             muted: seatPlayer ? !seatPlayer.alive : false,
             marker,
+            // What this seat did on the current street, painted on the board.
+            action: handState?.lastActions?.[seatId],
             wood
           },
           outward
         );
         group.position.set(seatX, 0.055, seatZ);
+        // Face the seat's own view direction (toward the pot) with a per-seat
+        // jitter of ±45°: perfectly parallel boards hide the structure of the
+        // table. The jitter is hashed from the seat id, so a rebuilt sync keeps
+        // the same pose.
+        const viewYaw = Math.atan2(-outward.x, -outward.y);
+        const jitter = (((fnv1a(seatId) % 1000) / 1000) - 0.5) * (Math.PI / 2);
+        group.rotation.y = viewYaw + jitter;
         this.boardObjectsGroup.add(group);
-        this.seatStandees.push(group);
         this.raycaster.registerInteractive(plate, {
           type: 'NODE',
           id: node.id,
@@ -4098,11 +4111,6 @@ export class BoardGameScene {
       }
     });
 
-    const title = this.createLabelSprite("TEXAS HOLD'EM · 德州扑克", '#c9b57a', 38);
-    title.position.set(0, 0.5, -rz - 0.9);
-    title.scale.set(4.4, 0.62, 1);
-    this.boardObjectsGroup.add(title);
-
     this.animatePokerDeltas(state);
   }
 
@@ -4729,24 +4737,6 @@ export class BoardGameScene {
     this.renderer.setSize(w, h);
   }
 
-  /**
-   * Aim every seat board at the camera (yaw only).
-   *
-   * The board keeps its lean, so it always tilts its face up toward the viewer —
-   * a fixed yaw would show the back of half the table from any orbit, and the
-   * lettering would read upside down from the default seat.
-   */
-  private updateSeatStandees(): void {
-    if (this.seatStandees.length === 0) return;
-    const cam = this.camera.position;
-    for (const group of this.seatStandees) {
-      const dx = cam.x - group.position.x;
-      const dz = cam.z - group.position.z;
-      if (Math.abs(dx) < 1e-4 && Math.abs(dz) < 1e-4) continue;
-      group.rotation.y = Math.atan2(dx, dz);
-    }
-  }
-
   private renderLoop(): void {
     if (this.isDestroyed) return;
     requestAnimationFrame(this.renderLoop.bind(this));
@@ -4763,7 +4753,6 @@ export class BoardGameScene {
     this.updateCardSettles(now);
     this.updateRoomSettles(now);
     this.updateNavArrows(now);
-    this.updateSeatStandees();
     this.renderer.render(this.scene, this.camera);
     this.labels.render(
       this.camera,
