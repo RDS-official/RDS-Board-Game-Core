@@ -371,6 +371,48 @@
   width: 100%;
 }
 
+/* ---- player rail: fisheye stack ---------------------------------------
+   Ten players do not fit the rail column, so the cards behave like a hand:
+   the rail becomes a positioned box, the cards are absolutely placed by
+   `Hud.layoutPlayerRail` (same `handLayout` fisheye as the action dock, just
+   running down the screen) and the card under the pointer opens up while the
+   rest compress into slivers. These rules must stay *after* the panel-children
+   reset above, which forces every rail child back to `position: static`. */
+
+.app-shell > .player-rail {
+  position: relative;
+  overflow: hidden;
+}
+
+.app-shell > .player-rail > .pc {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  width: 100%;
+  transform-origin: top center;
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1), border-color 0.2s ease,
+    box-shadow 0.2s ease;
+  will-change: transform;
+}
+
+/* A compressed card is only a sliver tall: the header row must stay readable,
+   and the cut edge gets a soft shadow so the stack reads as layered cards. */
+.app-shell > .player-rail > .pc .pc-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.app-shell > .player-rail > .pc::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 12px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.45));
+  pointer-events: none;
+}
+
 /* ---- closed slide-overs -----------------------------------------------
    A closed drawer must not be reachable by tab, and must not be measured as an
    on-screen panel. */

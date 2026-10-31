@@ -26,6 +26,12 @@ const escHtml = (v: unknown) =>
   String(v ?? '').replace(/[&<>"']/g, ch =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
 
+/**
+ * Base height of one player card in the rail, in px. The rail's fisheye uses it
+ * as its "card width" so the compression matches the action dock's.
+ */
+const PLAYER_CARD_HEIGHT = 104;
+
 /** Short trait key → character-sheet abbreviation used by the pip ladder. */
 const HUD_TRAIT_SHORT: Record<string, string> = {
   speed: '速',
@@ -75,6 +81,8 @@ export class BoardGameHUD {
   /** Set of room ids already seen, for the "new room discovered" reveal. */
   private knownRooms?: Set<string>;
   private sheetTimer: number | null = null;
+  /** Card under the pointer in the player rail (fisheye focus), or null. */
+  private railHoverIndex: number | null = null;
   /** Haunt id whose overture has already played. */
   private lastHauntId?: string;
   /** False until the first snapshot has been observed. */
@@ -1749,6 +1757,52 @@ export class BoardGameHUD {
     // Reconcile instead of rebuilding: a player card holds focus and hover, and
     // the rail holds the scroll position.
     reconcileKeyed(rail, [...playerCards, ...npcCards]);
+    this.layoutPlayerRail(rail);
+  }
+
+  /**
+   * Lay the player rail out like a hand of cards.
+   *
+   * Ten players do not fit a fixed column, so the rail reuses the dock's fisheye
+   * (`handLayout`, unit-agnostic — here the "row" runs down the screen): every
+   * card keeps its full height and the pitch compresses around the pointer, so
+   * the rail reads as an overlapping stack and the card under the cursor opens
+   * up. Falls back to a plain stack when there are only a few players.
+   */
+  private layoutPlayerRail(rail: HTMLElement): void {
+    const cards = Array.from(rail.querySelectorAll<HTMLElement>('.pc'));
+    const count = cards.length;
+    if (count === 0) return;
+    const height = rail.clientHeight;
+    if (height <= 0) return;
+
+    const cardHeight = Math.max(72, Math.min(PLAYER_CARD_HEIGHT, Math.round(height / 2)));
+    const focusIndex =
+      this.railHoverIndex ??
+      Math.max(
+        0,
+        cards.findIndex(card => card.classList.contains('active'))
+      );
+    const layout = handLayout({
+      count,
+      containerWidth: height,
+      cardWidth: cardHeight,
+      focusX: count > 1 ? focusIndex / (count - 1) : 0.5,
+      // Three players do not need a fisheye; the compression only earns its keep
+      // once the rail would otherwise overflow.
+      focusStrength: count > 3 ? 1 : 0.3,
+      hoverIndex: focusIndex,
+      lockCardWidth: true,
+      maxPitchRatio: 1
+    });
+
+    for (const entry of layout.cards) {
+      const card = cards[entry.index];
+      if (!card) continue;
+      card.style.height = `${cardHeight}px`;
+      card.style.transform = `translateY(${(entry.x - cardHeight / 2).toFixed(2)}px)`;
+      card.style.zIndex = String(10 + Math.round(entry.z));
+    }
   }
 
   private renderDock(snapshot: GameSnapshot): void {
@@ -2138,6 +2192,22 @@ export class BoardGameHUD {
       const player = this.lastSnapshot?.players.find(entry => entry.id === playerId);
       if (!player) return;
       if (player.effects && player.effects.length > 0) this.openEffectsWindow(player);
+    });
+
+    // Fisheye focus follows the pointer: whichever card it is over opens up and
+    // the rest compress into slivers (the dock behaves the same way).
+    rail.addEventListener('mousemove', event => {
+      const card = (event.target as HTMLElement | null)?.closest('.pc') as HTMLElement | null;
+      if (!card) return;
+      const index = Array.from(rail.querySelectorAll('.pc')).indexOf(card);
+      if (index < 0 || index === this.railHoverIndex) return;
+      this.railHoverIndex = index;
+      this.layoutPlayerRail(rail);
+    });
+    rail.addEventListener('mouseleave', () => {
+      if (this.railHoverIndex === null) return;
+      this.railHoverIndex = null;
+      this.layoutPlayerRail(rail);
     });
   }
 
