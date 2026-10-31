@@ -48,6 +48,8 @@ export interface GameRoomOptions {
   humans?: number;
   /** How many built-in AI seats to add on top of `humans`. */
   aiSeats?: number;
+  /** 交给房间按游戏声明的节奏驱动 AI（配合 `presentation.aiActionDelayMs`）。 */
+  autoAi?: boolean;
 }
 
 export type RoomAuthorizer = (viewer: PlayerId | 'GOD', token?: string) => boolean;
@@ -94,7 +96,8 @@ export class GameRoom implements RoomTransport {
       ...(scenario ? { scenario } : {}),
       ...(options.seats === undefined ? {} : { seats: options.seats }),
       ...(options.humans === undefined ? {} : { humans: options.humans }),
-      ...(options.aiSeats === undefined ? {} : { aiSeats: options.aiSeats })
+      ...(options.aiSeats === undefined ? {} : { aiSeats: options.aiSeats }),
+      ...(options.autoAi === undefined ? {} : { autoAi: options.autoAi })
     };
     this.engine =
       engine ??

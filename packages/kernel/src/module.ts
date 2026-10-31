@@ -65,6 +65,11 @@ export interface GameSetupOptions {
   /** How many seats the table should have. */
   seats?: number;
   /**
+   * false 时由驱动方逐步派发内置 AI 的动作（配合 `aiActionDelayMs`），
+   * 内核不再在一次 reduce 里替 AI 把整个回合走完。
+   */
+  autoAi?: boolean;
+  /**
    * How many of those seats are humans; the rest may be filled by the
    * fixture's built-in AI. Fixtures without AI ignore it.
    */
@@ -250,6 +255,20 @@ export interface GamePresentationHints {
    * the view layer never maps a role itself. Must be pure.
    */
   roleLabel?: (role: string) => string | null;
+  /**
+   * How long the driver should let a built-in AI think before its next action,
+   * in milliseconds. A fixture that resolves its AI inline (inside one reduce)
+   * leaves the table no time to follow what happened; declaring this makes the
+   * app/server drive the AI one step at a time, at a watchable pace.
+   */
+  aiActionDelayMs?: number;
+  /**
+   * Minimum delay (ms) before an action type may be taken again, measured from
+   * the moment it first became available. Used for settle pauses: a hand has just
+   * finished and the table needs a beat before the next one is dealt. The driver
+   * enforces it; the kernel itself stays clock-free.
+   */
+  actionCooldownMs?: Record<string, number>;
 }
 
 /**
@@ -332,6 +351,23 @@ export function definePresentation(hints: GamePresentationHints): GamePresentati
   for (const [key, value] of Object.entries(hints)) {
     if (key === 'cardPreviewOnHover') {
       if (typeof value !== 'boolean') throw new TypeError('presentation.cardPreviewOnHover must be a boolean');
+      continue;
+    }
+    if (key === 'aiActionDelayMs') {
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+        throw new TypeError('presentation.aiActionDelayMs must be a non-negative number');
+      }
+      continue;
+    }
+    if (key === 'actionCooldownMs') {
+      if (!value || typeof value !== "object") {
+        throw new TypeError('presentation.actionCooldownMs must be a record of milliseconds');
+      }
+      for (const ms of Object.values(value as Record<string, unknown>)) {
+        if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) {
+          throw new TypeError('presentation.actionCooldownMs values must be non-negative numbers');
+        }
+      }
       continue;
     }
     if (typeof value !== 'function') throw new TypeError(`presentation.${key} must be a pure function`);

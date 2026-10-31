@@ -97,6 +97,13 @@ function startHand(engine: UniversalGameEngine): void {
     }
   }
   const actor = engine.getActiveActorId();
+  // 一手结束后要先各自「准备」才能开下一手（结算画面 + 20s 冷却由驱动方负责）。
+  const finished = engine.getRawState().globalVars.hand as { street?: string } | undefined;
+  if (finished?.street === 'COMPLETE') {
+    for (const pid of engine.getRawState().playerOrder) {
+      engine.dispatch({ type: 'READY', playerId: pid });
+    }
+  }
   const result = engine.dispatch({ type: 'START_HAND', playerId: actor });
   assert(result.ok, `START_HAND accepted: ${result.error ?? ''}`);
 }

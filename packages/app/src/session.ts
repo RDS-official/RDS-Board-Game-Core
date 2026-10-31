@@ -152,6 +152,10 @@ export class UniversalSession implements GamePresenter {
   private revision = 0;
   private snapshot!: GameSnapshot;
   private bound: BoundAction[] = [];
+  /** 内置 AI 的下一步定时器：按游戏声明的节奏逐步派发 AI_ACT。 */
+  private aiTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 各动作类型第一次变得可用的时刻，用于动作冷却（结算后 20 秒才能开下一手）。 */
+  private readonly actionSeenAt = new Map<string, number>();
   private activeBoardGroup?: ActiveBoardGroup;
   private armedPlacement?: { entityId: string };
   private placementRotation?: number;
@@ -187,7 +191,9 @@ export class UniversalSession implements GamePresenter {
     this.scenario = scenario;
     const engineOptions = {
       ...(scenario ? { scenario } : {}),
-      ...(seats === undefined ? {} : { seats })
+      ...(seats === undefined ? {} : { seats }),
+      // 声明了 AI 节奏的游戏交给本会话逐步驱动 AI，否则内核内联推进。
+      ...(module.presentation?.aiActionDelayMs ? { autoAi: false } : {})
     };
     this.engine =
       engine ??
@@ -203,6 +209,7 @@ export class UniversalSession implements GamePresenter {
         this.lastReplay = undefined;
         this.rebuild();
         this.publish();
+        this.scheduleAiTurn();
       })
     );
 
@@ -217,6 +224,8 @@ export class UniversalSession implements GamePresenter {
     );
 
     this.rebuild();
+    // 开局若先轮到 AI（例如房间补位），也从这里启动节奏。
+    this.scheduleAiTurn();
   }
 
   /* ------------------------------------------------------------------ */
@@ -266,6 +275,11 @@ export class UniversalSession implements GamePresenter {
   ): { ok: boolean; error?: string } {
     const bound = this.bound.find(entry => entry.ui.id === actionId);
     if (!bound) return { ok: false, error: `unknown action: ${actionId}` };
+
+    // 冷却未走完就拒绝：结算是给人读的，不是点一下就跳过。
+    if (bound.ui.cooldownMs && bound.ui.cooldownMs > 0) {
+      return { ok: false, error: `还需 ${Math.ceil(bound.ui.cooldownMs / 1000)} 秒才能开下一手` };
+    }
 
     if (bound.highlight && !bound.action) {
       if (bound.type && bound.idKey) {
@@ -750,7 +764,36 @@ export class UniversalSession implements GamePresenter {
     }
   }
 
+  /**
+   * 让内置 AI 按游戏声明的节奏出手。
+   *
+   * 内核在 `autoAi: false` 下只暴露 `AI_ACT`，一次派发只走一步；这里每次状态变化
+   * 后重排一个定时器，于是 AI 与 AI 之间的间隔正好是 `aiActionDelayMs`，真人看得清
+   * 每一步：谁跟注、谁加注都不再是一瞬间跳过去的结果。
+   */
+  private scheduleAiTurn(): void {
+    if (this.aiTimer !== null) {
+      clearTimeout(this.aiTimer);
+      this.aiTimer = null;
+    }
+    const delay = this.module.presentation?.aiActionDelayMs;
+    if (!delay) return;
+    const actor = this.engine.getActiveActorId();
+    if (!actor) return;
+    const pending = this.engine.getLegalActions(actor).find(action => action.type === 'AI_ACT');
+    if (!pending) return;
+    this.aiTimer = setTimeout(() => {
+      this.aiTimer = null;
+      this.engine.dispatch(pending);
+      this.scheduleAiTurn();
+    }, delay);
+  }
+
   public dispose(): void {
+    if (this.aiTimer !== null) {
+      clearTimeout(this.aiTimer);
+      this.aiTimer = null;
+    }
     this.unsubscribers.forEach(unsubscribe => {
       unsubscribe();
     });
@@ -925,6 +968,25 @@ export class UniversalSession implements GamePresenter {
     this.bound = buildActionsView(state, legal, (actorId, spec) =>
       this.engine.getSelectionCandidates(actorId, spec)
     );
+
+    // 动作冷却（游戏声明 `actionCooldownMs`）：一手刚结束先留出阅读时间，再允许
+    // 开下一手。时钟只存在于驱动层，内核保持无时钟、可回放。
+    const cooldowns = module.presentation?.actionCooldownMs;
+    if (cooldowns) {
+      const now = Date.now();
+      const live = new Set<string>();
+      for (const entry of this.bound) {
+        const type = entry.ui.actionType;
+        if (!type || cooldowns[type] === undefined) continue;
+        live.add(type);
+        if (!this.actionSeenAt.has(type)) this.actionSeenAt.set(type, now);
+        const remaining = (this.actionSeenAt.get(type) as number) + cooldowns[type] - now;
+        if (remaining > 0) entry.ui.cooldownMs = remaining;
+      }
+      for (const type of [...this.actionSeenAt.keys()]) {
+        if (!live.has(type)) this.actionSeenAt.delete(type);
+      }
+    }
 
     const actorName =
       acting.length > 1 ? `${acting.length} 个行动者待提交` : this.engine.getActorName(acting[0] ?? actor);

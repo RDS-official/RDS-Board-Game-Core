@@ -34,10 +34,20 @@ export interface PokerConfig {
   aiTiers?: PokerAiTier[];
   /** 是否开启「入座 → 准备 → 开局」流程（缺省 false，保持旧测试行为）。 */
   seatingFlow?: boolean;
+  /**
+   * false 时内核不再内联推进 AI，改由驱动方按节奏派发 `AI_ACT`（app/server 用）。
+   * 缺省 true，测试与回放保持「一次 reduce 走完 AI 回合」的旧行为。
+   */
+  autoAi?: boolean;
 }
 
 export const POKER_LIMITS = { minSeats: 2, maxSeats: 10 } as const;
-export const POKER_DEFAULTS = { startingStack: 1000, smallBlind: 5, bigBlind: 10 } as const;
+export const POKER_DEFAULTS = {
+  startingStack: 1000,
+  smallBlind: 5,
+  bigBlind: 10,
+  autoAi: true
+} as const;
 
 const SEAT_COLORS = [
   '#e0604e',
@@ -170,7 +180,7 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
       }
     },
     globalVars: {
-      config: { startingStack, smallBlind, bigBlind },
+      config: { startingStack, smallBlind, bigBlind, autoAi: config.autoAi ?? true },
       /**
        * 座位编制（真人 / 内置 AI 与等级）。固定进 globalVars，随序列化与
        * replay 一起走，因此 AI 座位在回放里也是确定的。
@@ -210,6 +220,8 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
         actedSinceRaise: [],
         shortRaiseAccum: 0,
         lastActions: {},
+        revealed: [],
+        readyForNext: [],
         folded: [],
         allIn: [],
         community: [],

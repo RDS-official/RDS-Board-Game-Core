@@ -325,7 +325,7 @@ export class SeatPlateBuilder {
   public static createStandee(
     info: SeatPlateInfo,
     outward: THREE.Vector2
-  ): { group: THREE.Group; plate: THREE.Mesh } {
+  ): { group: THREE.Group; plate: THREE.Mesh; lamp?: THREE.Mesh } {
     const group = new THREE.Group();
     group.rotation.y = Math.atan2(outward.x, outward.y);
 
@@ -342,6 +342,19 @@ export class SeatPlateBuilder {
     base.castShadow = true;
     base.receiveShadow = true;
     group.add(base);
+
+    // 行动指示灯：底座正面圆边缘正中一颗红灯。谁在操作，一眼就能看出来；
+    // 立在牌桌对面时也能从底座边缘读到，不会被立牌本身挡住。
+    let lamp: THREE.Mesh | undefined;
+    if (info.active) {
+      lamp = new THREE.Mesh(
+        new THREE.SphereGeometry(0.055, 16, 12),
+        new THREE.MeshBasicMaterial({ color: 0xff3b2a, transparent: true, opacity: 0.95 })
+      );
+      lamp.position.set(0, SEAT_BASE.height * 0.55, SEAT_BASE.radius * 0.97);
+      lamp.scale.set(1, 0.75, 1);
+      group.add(lamp);
+    }
 
     const face = this.faceTexture(info);
     const side = new THREE.MeshStandardMaterial({ color: 0x1b120c, roughness: 0.78, metalness: 0.05 });
