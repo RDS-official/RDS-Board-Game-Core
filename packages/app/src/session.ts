@@ -273,6 +273,12 @@ export class UniversalSession implements GamePresenter {
     payload?: Record<string, unknown>,
     targets?: string[]
   ): { ok: boolean; error?: string } {
+    // 玩家（含上帝视角替 AI 出手）一旦自己动手，就取消排好的 AI 自动步，
+    // 否则 5 秒后 AI 会替同一座位再走一步。
+    if (this.aiTimer !== null) {
+      clearTimeout(this.aiTimer);
+      this.aiTimer = null;
+    }
     const bound = this.bound.find(entry => entry.ui.id === actionId);
     if (!bound) return { ok: false, error: `unknown action: ${actionId}` };
 

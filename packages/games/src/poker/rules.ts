@@ -203,11 +203,12 @@ export class PokerRules {
 
     // 外部驱动模式（app/server）：AI 座位每步只走一个动作，由驱动方按节奏派发
     // `AI_ACT`。内核内联推进会让一桌 AI 在一个 reduce 里瞬间打完，真人根本看不清。
+    // 外部驱动模式下，AI 座位额外提供一个「走一步」给驱动方；但不独占，否则
+    // 调试用的上帝视角会看到一份空动作表，没法替 AI 出牌。
+    const aiStep: Action[] = [];
     if (!configOf(state).autoAi) {
       const actor = state.activeActorId ?? state.activePlayerId;
-      if (isAiSeat(state, playerId) && playerId === actor) {
-        return [{ type: 'AI_ACT', playerId }];
-      }
+      if (isAiSeat(state, playerId) && playerId === actor) aiStep.push({ type: 'AI_ACT', playerId });
     }
 
     // 「入座 → 准备 → 开局」：真人座位需要先后完成入座与准备。
@@ -260,7 +261,7 @@ export class PokerRules {
       actions.push({ type: 'ALL_IN', playerId });
     }
 
-    return actions;
+    return [...aiStep, ...actions];
   }
 
   /**

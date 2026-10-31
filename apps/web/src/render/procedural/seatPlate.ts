@@ -348,19 +348,19 @@ export class SeatPlateBuilder {
     let lamp: THREE.Mesh | undefined;
     if (info.active) {
       lamp = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.042, 0.042, 0.016, 20),
+        new THREE.CylinderGeometry(0.07, 0.07, 0.014, 24),
         new THREE.MeshBasicMaterial({ color: 0xff3b2a })
       );
       lamp.rotation.x = Math.PI / 2;
-      lamp.position.set(0, SEAT_BASE.height * 0.5, SEAT_BASE.radius - 0.006);
+      lamp.position.set(0, SEAT_BASE.height * 0.62, SEAT_BASE.radius + 0.001);
       group.add(lamp);
 
       // 一层极淡的光晕，让这颗灯在俯视角也能被注意到（不参与拾取）。
       const halo = new THREE.Mesh(
-        new THREE.CircleGeometry(0.07, 20),
+        new THREE.CircleGeometry(0.115, 24),
         new THREE.MeshBasicMaterial({ color: 0xff6a4a, transparent: true, opacity: 0.2 })
       );
-      halo.position.set(0, SEAT_BASE.height * 0.5, SEAT_BASE.radius + 0.001);
+      halo.position.set(0, SEAT_BASE.height * 0.62, SEAT_BASE.radius + 0.006);
       group.add(halo);
     }
 
