@@ -1,5 +1,6 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { describeActionView } from './actionText';
+import { buildEntityInspectNotice } from './inspect';
 import { GameModule } from '@rds/kernel/module';
 import { Action, ActorId, GameState, PlayerId, ProjectedGameState, SelectionCandidate, SelectionSpec, VisualTraceEvent,
   type EffectInstance
@@ -197,11 +198,29 @@ export class UniversalSession implements GamePresenter {
    * @param engine 可选注入已有引擎（中期项 A2）：房主联机时 UniversalSession
    *               与权威 GameRoom 共用同一个实例，HUD 的 dispatch 直接就是
    *               权威状态跃迁，无需二次重放同步。
+   * @param seats  可选座位数：本地/单机演示时按 URL 的 `?seats=` 指定人数，
+   *               避免"2 人房间摆了 4 个座位"这类空座位死局。
    */
-  constructor(module: GameModule, seed = 1, scenario?: string, engine?: UniversalGameEngine) {
+  constructor(
+    module: GameModule,
+    seed = 1,
+    scenario?: string,
+    engine?: UniversalGameEngine,
+    seats?: number
+  ) {
     this.module = module;
     this.scenario = scenario;
-    this.engine = engine ?? new UniversalGameEngine(module, seed, { scenario });
+    const engineOptions = {
+      ...(scenario ? { scenario } : {}),
+      ...(seats === undefined ? {} : { seats })
+    };
+    this.engine =
+      engine ??
+      new UniversalGameEngine(
+        module,
+        seed,
+        Object.keys(engineOptions).length > 0 ? engineOptions : undefined
+      );
 
     this.unsubscribers.push(
       this.engine.onStateChange(() => {
@@ -464,53 +483,12 @@ export class UniversalSession implements GamePresenter {
     // Entity clicks are inspection first unless the action dock explicitly
     // selected a board-targeting action (e.g. pick up from the room pile).
     if (pick.kind === 'entity' && !this.activeBoardGroup) {
-      const entity = this.snapshot.board.entities[pick.id];
-      const face = entity?.components?.cardFace;
-      if (face) {
-        const custom = (entity?.components?.custom ?? {}) as Record<string, unknown>;
-        const kind = String(face.type ?? custom.cardType ?? 'ITEM');
-        const KIND_LABELS: Record<string, string> = {
-          weapon: '武器',
-          armor: '护甲',
-          relic: '圣物',
-          consumable: '消耗品',
-          tool: '工具'
-        };
-        const facts: { label: string; value: string }[] = [];
-        if (custom.kind) facts.push({ label: '类别', value: KIND_LABELS[String(custom.kind)] ?? String(custom.kind) });
-        if (typeof custom.charges === 'number' && custom.charges > 0) {
-          facts.push({ label: '剩余次数', value: String(custom.charges) });
-        }
-        if (custom.tradeable === false) facts.push({ label: '交易', value: '不可交易' });
-        if (custom.companion) facts.push({ label: '随从', value: '不可丢弃' });
-        if (custom.stealable === false) facts.push({ label: '夺取', value: '不可被抢' });
-        this.emit({
-          kind: 'event',
-          icon: entity.isMasked ? '🂠' : '🃏',
-          title: entity.isMasked ? '未揭示的卡牌' : face.title,
-          detail: entity.isMasked ? '需要先揭示这张牌。' : face.desc,
-          durationMs: 6500,
-          // Games with hover previews do not need a click-sheet as well: the
-          // tooltip already shows the face, and two previews for one card read
-          // as two different cards. The notice above still fires.
-          card: entity.isMasked || this.module.meta.id === 'splendor'
-            ? undefined
-            : {
-                title: face.title,
-                en: String(custom.en ?? ''),
-                kind,
-                desc: String(face.desc ?? ''),
-                color: String(face.color ?? ''),
-                // Imported decks carry their own face; the sheet shows it
-                // rather than inventing a plate drawing for it.
-                art: typeof face.imageUrl === 'string' && face.imageUrl ? face.imageUrl : undefined,
-                facts,
-                actions: this.snapshot.actions
-                  .filter(action => action.entityId === entity.id || action.placementEntityId === entity.id)
-                  .map(action => ({ id: action.id, icon: action.icon, label: action.label }))
-                  .slice(0, 6)
-              }
-        });
+      const notice = buildEntityInspectNotice(this.snapshot.board.entities[pick.id], {
+        snapshot: this.snapshot,
+        module: this.module
+      });
+      if (notice) {
+        this.emit(notice);
         return { handled: true };
       }
     }

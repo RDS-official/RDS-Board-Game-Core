@@ -49,7 +49,21 @@ export interface GameMeta {
 /** A named, deterministic initial position used by tests, demos and replays. */
 export interface GameScenario {
   description?: string;
-  setup: (seed: number) => GameState;
+  setup: (seed: number, options?: GameSetupOptions) => GameState;
+}
+
+/**
+ * Optional setup arguments.
+ *
+ * The kernel owns only the *shape* of the request; whether a fixture honours it
+ * is the fixture's business. Fixtures with a fixed roster ignore `seats`, and
+ * the caller can tell by comparing `playerOrder.length` with what it asked for
+ * (see `apps/server/src/match.ts`) — that is how a room refuses to deal more
+ * seats than it has players, or fewer seats than the game needs.
+ */
+export interface GameSetupOptions {
+  /** How many seats the table should have. */
+  seats?: number;
 }
 
 /**
@@ -93,6 +107,40 @@ export interface SpatialQuery {
 }
 
 /**
+ * Optional presentation hints a game may declare.
+ *
+ * The kernel never reads these — they exist so a shared view layer (packages/app,
+ * apps/web) can describe and render *every* game without a single game-id branch.
+ * Whatever is specific to one game's cards (vocabulary, preview policy) is
+ * declared here, inside that game's own package, instead of inside the generic
+ * inspection code.
+ */
+export interface GamePresentationHints {
+  /**
+   * The board already previews card faces on hover, so a click on a card must
+   * not open a second, differently-styled detail sheet for the same card.
+   */
+  cardPreviewOnHover?: boolean;
+  /**
+   * Player-facing fact rows for a card's `components.custom` bag
+   * ("类别: 武器", "剩余次数: 2", ...). Games supply their own vocabulary; the
+   * view layer has no built-in card taxonomy. Must be pure: called per notice.
+   */
+  cardFacts?: (custom: Record<string, unknown>) => { label: string; value: string }[];
+  /**
+   * How this game wants a card presented: the localised category band ("预兆 ·
+   * OMEN"), an opaque visual tone token the HUD maps onto one of its neutral
+   * plates, and an optional decorative glyph. Everything the view layer needs in
+   * order not to guess a taxonomy from a game's identity. Must be pure.
+   */
+  cardStyle?: (custom: Record<string, unknown>) => {
+    badge?: string;
+    tone?: string;
+    seal?: string;
+  };
+}
+
+/**
  * The framework contract a game plugin must satisfy.
  * Games are fixtures: they exercise the kernel, not the other way round.
  */
@@ -130,11 +178,17 @@ export interface GameModule {
    * See docs/ENGINE-PASSIVE-MODIFIERS.md for the rationale.
    */
   statModifiers?: (state: GameState, actorId: ActorId) => Record<string, number>;
+  /**
+   * Optional presentation hints: capability declarations for the shared view
+   * layer. Rules never read this; a UI consults it so one generic renderer can
+   * serve every game without branching on the game id.
+   */
+  presentation?: GamePresentationHints;
   /** Optional spatial semantics (walls, doors, LOS, floors). */
   spatial?: SpatialQuery;
   /** Logical-clock TTLs (in ticks) applied to decisions / response windows. */
   timing?: { decision?: number; response?: number };
-  setup: (seed: number) => GameState;
+  setup: (seed: number, options?: GameSetupOptions) => GameState;
   legalActions: (state: GameState, actorId: ActorId) => Action[];
   reduce: (state: GameState, action: Action, ctx: ReduceContext) => GameState;
   outcome: (state: GameState) => GameOutcome;

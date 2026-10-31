@@ -1,6 +1,7 @@
 import { defineGame, GameModule } from '@rds/kernel/module';
 import { GameOutcome } from '@rds/kernel/types';
 import { BETRAYAL_HOOKS } from './betrayal/hooks';
+import { betrayalCardFacts, betrayalCardStyle } from './betrayal/presentation';
 import { BetrayalRules } from './betrayal/rules';
 import { BETRAYAL_SCENARIOS } from './betrayal/scenarios';
 import { BETRAYAL_SPATIAL } from './betrayal/spatial';
@@ -13,6 +14,7 @@ import { DuneMahjongRules } from './dune_mahjong/rules';
 import { setupDuneMahjong } from './dune_mahjong/setup';
 import { PokerRules } from './poker/rules';
 import { pokerScenario, setupPoker } from './poker/setup';
+import { POKER_TABLE } from './poker/seating';
 import { SANGUOSHA_HOOKS } from './sanguosha/hooks';
 import { SanguoshaRules } from './sanguosha/rules';
 import { setupSanguosha } from './sanguosha/setup';
@@ -188,6 +190,9 @@ export const splendorModule: GameModule = defineGame({
       topologySpec: { kind: 'none', adjacency: 'none', geometry: 'none' }
     }
   },
+  // The market row already previews faces on hover; a click must not open a
+  // second card view for the same card.
+  presentation: { cardPreviewOnHover: true },
   hooks: [],
   actionSchemas: {
     TAKE_3_DIFF_GEMS: {
@@ -247,12 +252,24 @@ export const splendorModule: GameModule = defineGame({
    * so the variant is baked into each closure.
    */
   scenarios: {
-    base: { description: '基础版', setup: seed => setupSplendor(seed, 2, { mega: false, pokemart: false }) },
-    mega: { description: '超级进化', setup: seed => setupSplendor(seed, 2, { mega: true, pokemart: false }) },
-    pokemart: { description: '宝可梦商店', setup: seed => setupSplendor(seed, 2, { mega: false, pokemart: true }) },
-    full: { description: '全扩展', setup: seed => setupSplendor(seed, 2, { mega: true, pokemart: true }) }
+    base: {
+      description: '基础版',
+      setup: (seed, options) => setupSplendor(seed, options?.seats ?? 2, { mega: false, pokemart: false })
+    },
+    mega: {
+      description: '超级进化',
+      setup: (seed, options) => setupSplendor(seed, options?.seats ?? 2, { mega: true, pokemart: false })
+    },
+    pokemart: {
+      description: '宝可梦商店',
+      setup: (seed, options) => setupSplendor(seed, options?.seats ?? 2, { mega: false, pokemart: true })
+    },
+    full: {
+      description: '全扩展',
+      setup: (seed, options) => setupSplendor(seed, options?.seats ?? 2, { mega: true, pokemart: true })
+    }
   },
-  setup: seed => setupSplendor(seed),
+  setup: (seed, options) => setupSplendor(seed, options?.seats),
   legalActions: (state, playerId) => SplendorRules.getLegalActions(state, playerId),
   reduce: (state, action, ctx) => SplendorRules.applyAction(state, action, ctx),
   outcome: state => toOutcome(SplendorRules.checkWinCondition(state))
@@ -287,6 +304,8 @@ export const betrayalModule: GameModule = defineGame({
       },
     }
   },
+  // 山屋的卡牌词汇（武器/护甲/预兆…）与派生的详情行由本包声明。
+  presentation: { cardFacts: betrayalCardFacts, cardStyle: betrayalCardStyle },
   hooks: BETRAYAL_HOOKS,
   timing: { decision: 6, response: 4 },
   scenarios: BETRAYAL_SCENARIOS,
@@ -567,7 +586,18 @@ export const pokerModule: GameModule = defineGame({
         setupPoker(seed, { seats: 10, humans: 1, seatingFlow: true })
     }
   },
-  setup: seed => setupPoker(seed, { seats: 6, humans: 1, seatingFlow: true }),
+  /**
+   * 座位规则：
+   *  - 调用方显式给出座位数（联机房间按真人数量）时，这些座位全是真人；
+   *  - 未指定时用默认桌：1 名真人 + 内置 AI 补齐到 6 人（单人也能开一桌）。
+   * 两种情况都走「入座 → 准备 → 开局」流程。
+   */
+  setup: (seed, options) =>
+    setupPoker(seed, {
+      seats: options?.seats ?? POKER_TABLE.minPlayers,
+      humans: options?.seats ?? 1,
+      seatingFlow: true
+    }),
   legalActions: (state, playerId) => PokerRules.getLegalActions(state, playerId),
   validatePayload: (state, action, payload) => PokerRules.validatePayload(state, action, payload),
   reduce: (state, action, ctx) => PokerRules.applyAction(state, action, ctx),

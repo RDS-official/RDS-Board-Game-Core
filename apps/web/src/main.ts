@@ -10,9 +10,17 @@ import { ensureCanvasFontsReady } from './render/fonts';
 import { checkWebGLSupport, renderWebGLErrorModal } from './render/webglSupport';
 import { hideGameLoading } from './gameLoading';
 import { BoardGameHUD } from './ui/hud';
+import { peekView } from './ui/detailView';
 import { installDiagnostics } from './diagnostics/install';
 import { MathematicalInspectorUI } from './ui/mathInspector';
-import { CameraView, GameSnapshot, PresentationPorts } from '@rds/app/contracts';
+import {
+  CameraView,
+  GameSnapshot,
+  PresentationPorts,
+  entityDetailKey,
+  fixedDetailKey,
+  nodeDetailKey
+} from '@rds/app/contracts';
 import { layoutForGame } from '@rds/app/layout';
 import { NetSession, NetSessionOptions } from '@rds/app/netSession';
 import { UniversalSession } from '@rds/app/session';
@@ -28,6 +36,8 @@ class BoardGameSimulatorApp {
   private session: UniversalSession | NetSession;
   /** Set when URL params request a hub-backed lobby session. */
   private readonly netOptions?: NetSessionOptions;
+  /** `?seats=`：单机/演示时显式指定桌面人数（联机时由房间人数决定）。 */
+  private initialSeats?: number;
   private readonly hud: BoardGameHUD;
   private readonly inspector: MathematicalInspectorUI;
   private readonly ports: PresentationPorts;
@@ -56,6 +66,7 @@ class BoardGameSimulatorApp {
     const params = new URLSearchParams(window.location.search);
     this.initialScenario = params.get('scenario') ?? undefined;
     this.activeScenario = this.initialScenario;
+    this.initialSeats = parseSeats(params.get('seats'));
     this.currentGameId = params.get('game') ?? 'catan';
     this.netOptions = parseNetSessionOptions(params);
 
@@ -154,24 +165,33 @@ class BoardGameSimulatorApp {
       if (data.type === 'NODE') {
         if (meta?.type === 'ROOM_NAV') {
           const targetName = String(meta.targetName ?? meta.name ?? '相邻房间');
-          this.hud.showHoverHint({
-            title: `→ 进入【${targetName}】`,
-            detail: '点击地上高亮箭头直接走入该房间（消耗 1 步）'
-          });
+          this.hud.showHoverHint(
+            peekView({
+              key: nodeDetailKey(data.id),
+              title: `→ 进入【${targetName}】`,
+              desc: '点击地上高亮箭头直接走入该房间（消耗 1 步）'
+            })
+          );
           return;
         }
         if (meta?.type === 'DOOR') {
-          this.hud.showHoverHint({
-            title: `${String(meta.name ?? '门位')} · 探索未开启的门`,
-            detail: '点击地上高亮箭头开启并抽取新房间'
-          });
+          this.hud.showHoverHint(
+            peekView({
+              key: nodeDetailKey(data.id),
+              title: `${String(meta.name ?? '门位')} · 探索未开启的门`,
+              desc: '点击地上高亮箭头开启并抽取新房间'
+            })
+          );
           return;
         }
         if (typeof meta.name === 'string') {
-          this.hud.showHoverHint({
-            title: String(meta.name),
-            detail: '点击查看房间档案与陈设'
-          });
+          this.hud.showHoverHint(
+            peekView({
+              key: nodeDetailKey(data.id),
+              title: String(meta.name),
+              desc: '点击查看房间档案与陈设'
+            })
+          );
           return;
         }
       }
@@ -179,18 +199,24 @@ class BoardGameSimulatorApp {
         const cardFace = meta as { title?: string; imageUrl?: string };
         if (cardFace.title) {
           // The imported card artwork travels with the raycast metadata, so the
-          // hover preview can show the real face instead of a text stub.
+          // hover preview can show the real face instead of a text stub. The key
+          // matches the one the sheet will use, so the two can never stack.
           const art = typeof cardFace.imageUrl === 'string' ? cardFace.imageUrl : undefined;
-          this.hud.showHoverHint({
-            title: String(cardFace.title),
-            detail: '点击查看卡牌详情',
-            art
-          });
+          this.hud.showHoverHint(
+            peekView({
+              key: entityDetailKey(data.id),
+              title: String(cardFace.title),
+              desc: '点击查看卡牌详情',
+              art
+            })
+          );
           return;
         }
       }
       if (data.type === 'DICE') {
-        this.hud.showHoverHint({ title: '骰子', detail: '点击掷骰' });
+        this.hud.showHoverHint(
+          peekView({ key: fixedDetailKey('dice'), title: '骰子', desc: '点击掷骰' })
+        );
         return;
       }
       this.hud.showHoverHint(null);
@@ -453,7 +479,7 @@ class BoardGameSimulatorApp {
       void net.start();
       return net;
     }
-    return new UniversalSession(module, 42, scenario);
+    return new UniversalSession(module, 42, scenario, undefined, this.initialSeats);
   }
 
   private bindSession(session: UniversalSession | NetSession): void {
@@ -699,6 +725,17 @@ class BoardGameSimulatorApp {
   }
 
   private handleBoardPick(data: InteractiveObjectData): void {
+    // Clicking a seat nameplate opens that player's sheet: the plaque is the
+    // board's stand-in for the player card, and seats are not action targets.
+    const seatMeta = data.metadata as { type?: string; playerId?: string } | undefined;
+    if (data.type === 'NODE' && seatMeta?.type === 'SEAT' && seatMeta.playerId) {
+      const player = this.session.getSnapshot().players.find(entry => entry.id === seatMeta.playerId);
+      if (player) {
+        this.hud.openPlayerSheet(player);
+        return;
+      }
+    }
+
     const kind =
       data.type === 'NODE'
         ? 'node'
@@ -855,9 +892,17 @@ function parseNetSessionOptions(params: URLSearchParams): NetSessionOptions | un
     playerId: player,
     hostId,
     scenario: params.get('scenario') ?? undefined,
+    // P2P 房主权威模式按房间人数发牌；中心模式由服务器决定，这里仅作兜底。
+    seats: parseSeats(params.get('seats') ?? String(Object.keys(roster ?? {}).length || '')),
     roster,
     seatOwners
   };
+}
+
+/** `?seats=` → 正整数，非法值当作"未指定"。 */
+function parseSeats(raw: string | null | undefined): number | undefined {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 /**

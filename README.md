@@ -20,7 +20,7 @@
 pnpm install
 pnpm run dev       # http://127.0.0.1:5173/  （可视化调试器）
 # 场景直达：http://127.0.0.1:5173/?scenario=rich_action
-pnpm test          # 内核一致性 131 例（116 个 test 展开参数化）+ 分层边界检查
+pnpm test          # 内核一致性 244 例 + 分层边界检查
 pnpm run build     # 生产构建
 pnpm shots         # 按需生成全部验证截图到 shots/（自动起停 dev server）
 ```
@@ -178,7 +178,7 @@ Universal Board Game Kernel — conformance suite
 
   ✓ UI / application / kernel imports are separated
 
-  206 passed, 0 failed, 206 cases, 0 boundary violations
+  244 passed, 0 failed, 244 cases, 0 boundary violations
 ```
 
 （节选；完整清单见 `node scripts/test-core.mjs` 输出）
@@ -215,7 +215,7 @@ apps/web/src/render/                 # Three.js 可视化调试器
 apps/web/src/ui/                     # HUD 与数学模型检查器
   theme-gothic.css        # 山屋专用烛光/黄铜主题覆盖层
 apps/web/src/lobby/                  # 大厅 / 房间 / 联机 UI
-apps/server/src/                     # 大厅 + WebRTC 信令 hub（Hono + ws + PM2 部署）
+apps/server/src/                     # 大厅 + 服务器权威对局（MatchBroker）+ WebRTC 信令（Hono + ws + PM2 部署）
 docs/CORE.md                         # 契约、扩展指南、路线图
 docs/ARCHITECTURE.md                 # 分层架构、模块实现与调用链
 docs/BETRAYAL.md                     # 山屋 44 房间/三剧本覆盖 + 内核缺陷清单
@@ -230,7 +230,7 @@ scripts/test-core.mjs                # Vite SSR 测试运行器
 - **不做“万能规则 DSL”**：规则仍是 TypeScript 纯函数，但所有横切能力（调度/隐藏/栈/热注入/回放）被内核收口，避免每款游戏重复实现。
 - **规则实现与状态分离**：这是可序列化、可回放、可联网的前提。
 - **严格模式**：非法动作与不变量违例默认拒绝并保持状态不变，便于夹具开发时立刻暴露问题。
-- **夹具优先**：先让五种极端机制跑通，再抽象；不为单一游戏做特例。
+- **夹具优先**：先让多种极端机制跑通，再抽象；不为单一游戏做特例。
 
 ---
 

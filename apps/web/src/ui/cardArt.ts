@@ -1,4 +1,4 @@
-import { UiCardDetail } from '@rds/app/contracts';
+import type { UiDetailView } from '@rds/app/contracts';
 
 /**
  * Dark occult plate for the card detail sheet.
@@ -20,8 +20,14 @@ import { UiCardDetail } from '@rds/app/contracts';
  * no external asset is ever fetched.
  */
 
-/** Category vocabulary; anything unknown (Splendor, Sanguosha…) uses RELIC. */
-type PlateKind = 'OMEN' | 'ITEM' | 'EVENT' | 'ROOM';
+/**
+ * Visual tone vocabulary.
+ *
+ * These are style tokens, not game categories: the game states which tone it
+ * wants (`UiDetailView.tone`) and the plate only knows how a tone looks. Anything
+ * unset or unknown gets the neutral 'treasure' plate.
+ */
+type PlateTone = 'danger' | 'treasure' | 'event' | 'place';
 
 type Motif =
   | 'skull'
@@ -49,26 +55,26 @@ interface PlatePalette {
   wash: string;
 }
 
-const PALETTES: Record<PlateKind, PlatePalette> = {
-  OMEN: {
+const PALETTES: Record<PlateTone, PlatePalette> = {
+  danger: {
     ground: ['#2b0d18', '#190710', '#080307'],
     line: '#e3c07a',
     accent: '#c9455f',
     wash: 'rgba(201,69,95,0.16)'
   },
-  ITEM: {
+  treasure: {
     ground: ['#2a1c0d', '#180f07', '#070403'],
     line: '#e6c07a',
     accent: '#d9a45b',
     wash: 'rgba(217,164,91,0.13)'
   },
-  EVENT: {
+  event: {
     ground: ['#16202c', '#0c121a', '#04070b'],
     line: '#b9c6d6',
     accent: '#8fa4bd',
     wash: 'rgba(143,164,189,0.13)'
   },
-  ROOM: {
+  place: {
     ground: ['#231a10', '#150f09', '#060403'],
     line: '#d9c39a',
     accent: '#a8865a',
@@ -78,7 +84,7 @@ const PALETTES: Record<PlateKind, PlatePalette> = {
 
 /** Stable per-card numbers, all derived from the name hash. */
 interface PlateSpec {
-  kind: PlateKind;
+  tone: PlateTone;
   palette: PlatePalette;
   motif: Motif;
   /** 0–23: rotation step of the astrolabe ring, in 15° units. */
@@ -138,15 +144,15 @@ const MOTIF_KEYWORDS: [Motif, RegExp][] = [
  * rune cartouche. The title/facts live in the sheet body, so this stays purely
  * graphic and never competes with the type.
  */
-export function cardArtSvg(card: UiCardDetail): string {
-  const spec = plateSpec(card);
+export function cardArtSvg(view: Pick<UiDetailView, 'title' | 'subtitle' | 'tone'>): string {
+  const spec = plateSpec(view);
   const { palette, uid } = spec;
   const cx = 130;
   const cy = 58;
 
   return `
     <svg viewBox="0 0 260 120" preserveAspectRatio="xMidYMid slice" role="img"
-         aria-label="${escapeXml(card.title)}" color="${palette.line}"
+         aria-label="${escapeXml(view.title)}" color="${palette.line}"
          style="display:block;width:100%;height:100%">
       <defs>
         <radialGradient id="cg${uid}" cx="50%" cy="42%" r="78%">
@@ -184,13 +190,13 @@ export function cardArtSvg(card: UiCardDetail): string {
 /* Spec derivation                                                             */
 /* -------------------------------------------------------------------------- */
 
-function plateSpec(card: UiCardDetail): PlateSpec {
-  const kind = plateKind(card.kind);
-  const seed = fnv1a(`${card.kind}|${card.title}|${card.en ?? ''}`);
-  const nameText = `${card.title} ${card.en ?? ''}`.toLowerCase();
+function plateSpec(view: Pick<UiDetailView, 'title' | 'subtitle' | 'tone'>): PlateSpec {
+  const tone = plateTone(view.tone);
+  const seed = fnv1a(`${tone}|${view.title}|${view.subtitle ?? ''}`);
+  const nameText = `${view.title} ${view.subtitle ?? ''}`.toLowerCase();
   return {
-    kind,
-    palette: PALETTES[kind],
+    tone,
+    palette: PALETTES[tone],
     motif: motifFor(nameText, seed),
     ringStep: seed % 24,
     rays: 12 + (seed % 4) * 4,
@@ -201,9 +207,10 @@ function plateSpec(card: UiCardDetail): PlateSpec {
   };
 }
 
-function plateKind(kind: string): PlateKind {
-  if (kind === 'OMEN' || kind === 'ITEM' || kind === 'EVENT' || kind === 'ROOM') return kind;
-  return 'ITEM';
+function plateTone(tone: string | undefined): PlateTone {
+  if (tone === 'danger' || tone === 'treasure' || tone === 'event' || tone === 'place') return tone;
+  // Neutral default: warm parchment, never a game-specific palette.
+  return 'treasure';
 }
 
 function motifFor(text: string, seed: number): Motif {
@@ -273,8 +280,8 @@ function grain(spec: PlateSpec): string {
 /* -------------------------------------------------------------------------- */
 
 function categoryBackdrop(spec: PlateSpec, cx: number, cy: number): string {
-  if (spec.kind === 'EVENT') return eventFracture(spec, cx, cy);
-  if (spec.kind === 'OMEN') return omenAstrolabe(spec, cx, cy);
+  if (spec.tone === 'event') return eventFracture(spec, cx, cy);
+  if (spec.tone === 'danger') return omenAstrolabe(spec, cx, cy);
   return relicStillLife(spec, cx, cy);
 }
 
@@ -393,8 +400,8 @@ function omenAstrolabe(spec: PlateSpec, cx: number, cy: number): string {
 
 function frame(spec: PlateSpec): string {
   const accent = spec.palette.accent;
-  const corners = cornerOrnament(spec.kind, spec.palette.line, accent);
-  const dash = spec.kind === 'EVENT' ? ' stroke-dasharray="22 7"' : '';
+  const corners = cornerOrnament(spec.tone, spec.palette.line, accent);
+  const dash = spec.tone === 'event' ? ' stroke-dasharray="22 7"' : '';
 
   return `
     <g fill="none" stroke-linecap="round" stroke-linejoin="round">
@@ -406,15 +413,15 @@ function frame(spec: PlateSpec): string {
   `;
 }
 
-function cornerOrnament(kind: PlateKind, line: string, accent: string): string {
+function cornerOrnament(kind: PlateTone, line: string, accent: string): string {
   const at = (x: number, y: number, rotate: number): string => {
-    if (kind === 'EVENT') {
+    if (kind === 'event') {
       // Sharp chevrons — nothing soft survives the fracture.
       return `<g transform="translate(${x} ${y}) rotate(${rotate})" fill="none" stroke="${line}" stroke-width="1.1" opacity="0.6">
         <path d="M0 12L9 9L12 0" /><path d="M4 15L12 12L15 4" opacity="0.5" />
       </g>`;
     }
-    if (kind === 'OMEN') {
+    if (kind === 'danger') {
       // Rosette: a watching dot inside a ring of petals.
       return `<g transform="translate(${x} ${y}) rotate(${rotate})" fill="none" stroke="${line}" stroke-width="0.9" opacity="0.55">
         <circle cx="9" cy="9" r="6.4" /><circle cx="9" cy="9" r="2" fill="${accent}" stroke="none" />

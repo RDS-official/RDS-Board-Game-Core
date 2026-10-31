@@ -4611,6 +4611,115 @@ select.pf-control {
   color: #e0857a;
 }
 
+/* ---------------------------------------------------------------------------
+   Player sheet (opened by clicking a seat nameplate on the board)
+   --------------------------------------------------------------------------- */
+.player-sheet {
+  width: min(420px, 92vw);
+  border-color: color-mix(in srgb, var(--pc-color, #c9a24a) 55%, transparent);
+}
+
+.ps-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.ps-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--pc-color, #c9a24a) 30%, rgba(0, 0, 0, 0.45));
+  border: 2px solid var(--pc-color, #c9a24a);
+  object-fit: cover;
+  flex: 0 0 auto;
+}
+
+.ps-emoji {
+  font-size: 26px;
+  line-height: 1;
+}
+
+.ps-id {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.ps-name {
+  font-size: var(--type-lg);
+  font-weight: 700;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ps-sub {
+  margin-top: 2px;
+  font-size: var(--type-xs);
+  color: var(--text-tertiary);
+}
+
+.ps-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-3);
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.ps-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 5px 8px;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ps-k {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-tertiary);
+  font-size: var(--type-sm);
+}
+
+.ps-v {
+  color: var(--text-primary);
+  font-size: var(--type-sm);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ps-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--dot, #8b93a1);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+
+.ps-mod {
+  font-style: normal;
+  font-size: var(--type-xs);
+  color: #7fd6a4;
+}
+
+.ps-fx {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: var(--space-2);
+  list-style: none;
+}
+
 /* ============================================================
    Chip ranking (Texas Hold'em)
    Placed above the activity feed in the side column.

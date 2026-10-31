@@ -395,25 +395,65 @@ export interface UiRoll {
 
 export type NoticeKind = 'announce' | 'event' | 'error';
 
-/** Optional card payload so the HUD can render a full framed card, not a toast. */
-export interface UiCardDetail {
+/**
+ * Overlay keys. The HUD keeps at most one overlay per key, so a hover preview and
+ * a pinned sheet that share a key can never show two pictures of one subject.
+ */
+export function entityDetailKey(id: string): string {
+  return `entity:${id}`;
+}
+
+export function nodeDetailKey(id: string): string {
+  return `node:${id}`;
+}
+
+/** Key for a subject that has no board id (e.g. the dice cup). */
+export function fixedDetailKey(name: string): string {
+  return `fixed:${name}`;
+}
+
+/** One key/value row of a detail view. */
+export interface UiDetailSection {
+  label: string;
+  value: string;
+}
+
+/** A shortcut rendered on the detail view (entity-centric actions). */
+export interface UiDetailAction {
+  id: string;
+  icon: string;
+  label: string;
+}
+
+/**
+ * Game-agnostic description of one thing the player is inspecting.
+ *
+ * This used to be `UiCardDetail`, which carried 山屋's own card taxonomy
+ * (OMEN / ITEM / EVENT / ROOM) in a DTO shared by every fixture. The taxonomy now
+ * travels as data: `badge` is the already-localised band the game wants printed,
+ * `tone` is an opaque visual token the HUD maps onto one of its neutral plates,
+ * and `seal` is an optional decorative glyph.
+ *
+ * `key` identifies the subject (e.g. `entity:<id>`). The HUD keeps at most one
+ * overlay per key, so a hover preview and a pinned sheet can never show two
+ * different pictures of the same thing.
+ */
+export interface UiDetailView {
+  key: string;
   title: string;
-  en?: string;
-  kind: 'OMEN' | 'ITEM' | 'EVENT' | 'ROOM' | string;
-  desc: string;
-  color?: string;
-  /**
-   * The card's own artwork, when the game ships one.
-   *
-   * Imported decks (Pokémon Splendor) have a real face, so the detail sheet
-   * shows that instead of inventing a plate drawing. Games without artwork
-   * leave this unset and keep the procedural illustration.
-   */
+  /** Secondary line, typically the card's printed English name. */
+  subtitle?: string;
+  /** Category band text, localised by the game. */
+  badge?: string;
+  /** Opaque style token; unknown tokens fall back to the neutral plate. */
+  tone?: string;
+  /** Optional decorative glyph drawn beside the plate. */
+  seal?: string;
+  desc?: string;
+  /** The subject's own artwork when the game ships one. */
   art?: string;
-  /** Extra key/value rows (e.g. "使用方式", "剩余次数"). */
-  facts?: { label: string; value: string }[];
-  /** Entity-centric shortcuts rendered on the card sheet. */
-  actions?: { id: string; icon: string; label: string }[];
+  sections: UiDetailSection[];
+  actions: UiDetailAction[];
 }
 
 /** Structured trait movement attached to notices so the UI can animate it. */
@@ -439,8 +479,8 @@ export interface UiNotice {
   durationMs?: number;
   /** Optional tab to focus when this notice arrives. */
   tabHint?: 'G' | 'STACK' | 'FACTIONS' | 'HOOKS' | 'TIME';
-  /** When present the HUD shows a framed card detail sheet. */
-  card?: UiCardDetail;
+  /** When present the HUD opens a detail overlay for this subject. */
+  view?: UiDetailView;
   /** Board inspection target: the HUD pins the room dossier to this node. */
   roomId?: string;
   /** Trait movement to emphasise with a burst + banner. */

@@ -5,6 +5,7 @@ import { TransactionalAnimationQueue } from './animationQueue';
 import { BoardRaycaster, InteractiveObjectData } from './raycaster';
 import { CardMeshBuilder } from './procedural/cardMesh';
 import { ChipMeshBuilder } from './procedural/chipMesh';
+import { SeatPlateBuilder, type WoodKind } from './procedural/seatPlate';
 import { pokemonCardBackTexture, pokemonCardTexture } from './procedural/pokemonAssets';
 import { DiceMeshBuilder } from './procedural/diceMesh';
 import { HexTileBuilder } from './procedural/hexTile';
@@ -335,6 +336,12 @@ export class BoardGameScene {
    * poker sync.
    */
   private pokerFxGroup = new THREE.Group();
+  /**
+   * Seat standees rebuilt on every sync. Their yaw is re-aimed at the camera
+   * each frame, so the boards always present their face to whoever is looking
+   * (a fixed yaw would show the back from half the orbit).
+   */
+  private seatStandees: THREE.Group[] = [];
   /** Previous poker snapshot, used to detect what to animate. */
   private pokerFxPrev: {
     handNo: number;
@@ -1320,6 +1327,9 @@ export class BoardGameScene {
       const seat = Object.values(state.mapGraph.nodes).find(
         node => node.type === 'SEAT' && node.props?.playerId === player.id
       );
+      // A seat-based table draws its own wooden nameplate, which already carries
+      // the nickname and the turn marker — a DOM label on top would double it.
+      if (seat) continue;
       const node = room ?? seat;
       if (!node) continue;
       const floor = String(room?.props?.floor ?? '');
@@ -1935,6 +1945,10 @@ export class BoardGameScene {
   private renderMapGraph(state: ProjectedGameState): void {
     const graph = state.mapGraph;
 
+    // The board group is rebuilt from scratch every sync, so the standee list is
+    // rebuilt with it.
+    this.seatStandees = [];
+
     // Render Nodes
     Object.values(graph.nodes).forEach(node => {
       if (node.type === 'HEX') {
@@ -2186,38 +2200,52 @@ export class BoardGameScene {
           metadata: node.props
         });
       } else if (node.type === 'SEAT') {
-        // Sanguosha seat: brass ring + tinted disc + floating nameplate
-        const seatPlayer = state.players[node.props.playerId];
-        const seatColor = seatPlayer ? new THREE.Color(seatPlayer.color) : new THREE.Color(0x455a64);
+        // Seat standee: a black metal disc on the felt with a card-sized walnut
+        // board leaning back on it (avatar coin, nickname, key numbers). It is
+        // also the click target that opens the player sheet.
+        const seatId = String(node.props?.playerId ?? '');
+        const seatPlayer = state.players[seatId];
+        const activeActor = state.activeActorId ?? state.activePlayerId;
+        const [seatX, , seatZ] = node.position;
+        const seatLength = Math.max(0.0001, Math.hypot(seatX, seatZ));
+        const outward = new THREE.Vector2(seatX / seatLength, seatZ / seatLength);
+        const marker = state.gameId === 'poker' ? '♠' : state.gameId === 'sanguosha' ? '⚔' : undefined;
 
-        const ring = new THREE.Mesh(
-          new THREE.TorusGeometry(1.45, 0.05, 8, 48),
-          new THREE.MeshStandardMaterial({
-            color: seatColor,
-            emissive: seatColor,
-            emissiveIntensity: 0.35,
-            metalness: 0.7,
-            roughness: 0.3
-          })
+        // Blinds get their own timber: pine for the big blind, red pine for the
+        // small blind, walnut for the rest of the table.
+        const handState = state.globalVars.hand as { sbSeat?: number; bbSeat?: number } | undefined;
+        const seatIndex = Number(node.props?.seatIndex ?? -1);
+        const wood: WoodKind =
+          state.gameId === 'poker' && handState
+            ? handState.bbSeat === seatIndex
+              ? 'pine'
+              : handState.sbSeat === seatIndex
+                ? 'redPine'
+                : 'walnut'
+            : 'walnut';
+
+        const { group, plate } = SeatPlateBuilder.createStandee(
+          {
+            name: seatPlayer?.name ?? seatId,
+            avatar: seatPlayer?.avatar ?? '👤',
+            color: seatPlayer?.color ?? '#455a64',
+            detail: this.seatPlateDetail(state, seatId),
+            active: seatId === activeActor,
+            muted: seatPlayer ? !seatPlayer.alive : false,
+            marker,
+            wood
+          },
+          outward
         );
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.set(node.position[0], 0.06, node.position[2]);
-        this.boardObjectsGroup.add(ring);
-
-        const disc = new THREE.Mesh(
-          new THREE.CircleGeometry(1.42, 48),
-          new THREE.MeshStandardMaterial({
-            color: seatColor,
-            transparent: true,
-            opacity: 0.12,
-            roughness: 0.8
-          })
-        );
-        disc.rotation.x = -Math.PI / 2;
-        disc.position.set(node.position[0], 0.05, node.position[2]);
-        this.boardObjectsGroup.add(disc);
-
-        this.nodeMeshes.set(node.id, ring);
+        group.position.set(seatX, 0.055, seatZ);
+        this.boardObjectsGroup.add(group);
+        this.seatStandees.push(group);
+        this.raycaster.registerInteractive(plate, {
+          type: 'NODE',
+          id: node.id,
+          metadata: { type: 'SEAT', playerId: seatId }
+        });
+        this.nodeMeshes.set(node.id, plate);
       }
     });
 
@@ -3917,6 +3945,47 @@ export class BoardGameScene {
   }
 
   /**
+   * Second line of a seat plate: the numbers that matter for the current game.
+   * Poker shows the stack plus the position/status markers, Sanguosha the health
+   * and hand size; anything else leaves the plate with just the nickname.
+   */
+  private seatPlateDetail(state: ProjectedGameState, playerId: string): string | undefined {
+    const player = state.players[playerId];
+    if (!player) return undefined;
+
+    if (state.gameId === 'poker') {
+      const hand = state.globalVars.hand as
+        | {
+            buttonSeat?: number;
+            sbSeat?: number;
+            bbSeat?: number;
+            folded?: string[];
+            allIn?: string[];
+          }
+        | undefined;
+      const seatIndex = Number(player.customProps?.seat ?? -1);
+      const chips = Number(player.customProps?.chips ?? 0);
+      const marks: string[] = [];
+      if (hand?.buttonSeat === seatIndex) marks.push('庄家');
+      if (hand?.sbSeat === seatIndex) marks.push('小盲');
+      if (hand?.bbSeat === seatIndex) marks.push('大盲');
+      if (hand?.folded?.includes(playerId)) marks.push('弃牌');
+      else if (hand?.allIn?.includes(playerId)) marks.push('全押');
+      else if (chips <= 0) marks.push('出局');
+      return [`筹码 ${chips}`, ...marks].join(' · ');
+    }
+
+    if (state.gameId === 'sanguosha') {
+      const hp = Number(player.customProps?.hp ?? 0);
+      const maxHp = Number(player.customProps?.maxHp ?? 4);
+      const cards = state.zones[`zone_hand_${playerId}`]?.orderedEntities.length ?? 0;
+      return `体力 ${hp}/${maxHp} · 手牌 ${cards}`;
+    }
+
+    return undefined;
+  }
+
+  /**
    * Poker table dressing: felt oval, brass rim, pot readout, one stack label per
    * seat and the table title. Presentation only — it reads the projected state
    * and never participates in the rules.
@@ -4000,7 +4069,7 @@ export class BoardGameScene {
       this.boardObjectsGroup.add(potChips);
     }
 
-    state.playerOrder.forEach((pid, seatIndex) => {
+    state.playerOrder.forEach(pid => {
       const seatNode = seats.find(node => node.props?.playerId === pid);
       if (!seatNode) return;
       const [x, , z] = seatNode.position;
@@ -4008,17 +4077,6 @@ export class BoardGameScene {
       const inwardX = x / length;
       const inwardZ = z / length;
       const chips = Number(state.players[pid]?.customProps?.chips ?? 0);
-      const marks: string[] = [];
-      if (hand?.buttonSeat === seatIndex) marks.push('D');
-      if (hand?.folded?.includes(pid)) marks.push('弃牌');
-      else if (hand?.allIn?.includes(pid)) marks.push('全押');
-      const text = `${state.players[pid]?.name ?? pid} · ${chips}${marks.length > 0 ? ` · ${marks.join('/')}` : ''}`;
-      const label = this.createLabelSprite(text, chips > 0 ? '#e8eef5' : '#8b93a1', 36);
-      label.position.set(x - inwardX * 2.2, 0.55, z - inwardZ * 2.2);
-      label.scale.set(2.6, 0.42, 1);
-      this.boardObjectsGroup.add(label);
-
-      // The seat's stack sits beside the nameplate, along the table tangent.
       const tangentX = -inwardZ;
       const tangentZ = inwardX;
       if (chips > 0) {
@@ -4671,6 +4729,24 @@ export class BoardGameScene {
     this.renderer.setSize(w, h);
   }
 
+  /**
+   * Aim every seat board at the camera (yaw only).
+   *
+   * The board keeps its lean, so it always tilts its face up toward the viewer —
+   * a fixed yaw would show the back of half the table from any orbit, and the
+   * lettering would read upside down from the default seat.
+   */
+  private updateSeatStandees(): void {
+    if (this.seatStandees.length === 0) return;
+    const cam = this.camera.position;
+    for (const group of this.seatStandees) {
+      const dx = cam.x - group.position.x;
+      const dz = cam.z - group.position.z;
+      if (Math.abs(dx) < 1e-4 && Math.abs(dz) < 1e-4) continue;
+      group.rotation.y = Math.atan2(dx, dz);
+    }
+  }
+
   private renderLoop(): void {
     if (this.isDestroyed) return;
     requestAnimationFrame(this.renderLoop.bind(this));
@@ -4687,6 +4763,7 @@ export class BoardGameScene {
     this.updateCardSettles(now);
     this.updateRoomSettles(now);
     this.updateNavArrows(now);
+    this.updateSeatStandees();
     this.renderer.render(this.scene, this.camera);
     this.labels.render(
       this.camera,

@@ -23,8 +23,9 @@
 | AI-15 | 房间物品视觉锚点重复计算 | zone_room 与 slot 两套语义；renderer 硬编码偏移 | 模块提供 `PlacementSlot.local/visual`，renderer 只做坐标/布局消费；不再按 `zone_room_*` 猜位置 |
 | AI-16 | 全量重建时相机可能被自动取景重置 | `syncState` 重建与相机 fit 策略绑定 | 相机属于 renderer；仅显式布局变化/用户请求才 fit，丢弃/新实体保持当前 camera/target |
 | AI-17 | 放置房间时相机反复 fit，放置后停在高位 | 相机 fit 与 placement 旋转耦合；缺少 placement 前相机快照 | 相机归 renderer：placement 开始保存 pose 并缓动抬高，旋转不 fit，结束/取消缓动恢复 |
-| AI-28 | 房主侧存在两个引擎：HUD 的 `UniversalSession` 与权威 `GameRoom` 镜像，靠 append-only 日志尾部重放保持同步 | 两个独立状态机 + 微任务尾部同步，任何丢步/重放错位都会造成双端分歧 | 中期项 A2：`GameRoom` 支持注入共享引擎，NetSession host 只创建一个引擎，HUD 与权威房间共用；`revision` 由引擎状态哈希变化推进；删除 `BridgedRoom` / `syncing` / 尾部重放；delta 推送统一由 `GameRoom.onChange` 驱动 |
-| AI-29 | 房客可抢先占据他人座位：`seatOwners` 仅用于 presence 展示，座位分配是先到先得 | 传输层座位与 hub 身份无绑定，抢座后可提交他人 actor 的动作 | 中期项 A3：`WebRtcHostTransport` 接收 `seatOwners`，座位只允许其 hub userId 加入；`GameRoom.setAuthorizer` 做房间侧二次校验；未绑定座位保持先到先得 |
+| AI-28 | 房主侧存在两个引擎：HUD 的 `UniversalSession` 与权威 `GameRoom` 镜像，靠 append-only 日志尾部重放保持同步 | 两个独立状态机 + 微任务尾部同步，任何丢步/重放错位都会造成双端分歧 | **已实现（中期项 A2，PR #67）**：`GameRoom` 构造器接受可注入引擎（`net/room.ts:86`），房主侧只创建一个 `UniversalGameEngine` 交给 `GameRoom` 与 `UniversalSession` 共用（`app/netSession.ts:204-211`）；`revision` 只在引擎状态哈希变化时推进，delta 推送统一由 `GameRoom.onChange` 驱动；`BridgedRoom` / `syncing` / 尾部重放已全部删除（全仓 grep 无残留） |
+| AI-29 | 房客可抢先占据他人座位：`seatOwners` 仅用于 presence 展示，座位分配是先到先得 | 传输层座位与 hub 身份无绑定，抢座后可提交他人 actor 的动作 | **已实现（中期项 A3，PR #67）**：`WebRtcHostTransport` 接收 `seatOwners`，已绑定座位只允许其 hub userId 加入、同一 peer 只能持一个座位且 `submit` 的 actor 必须等于自身座位（`net/webrtc-transport.ts:163`）；房间侧再用 `GameRoom.setAuthorizer` 二次校验（`net/room.ts:106`）；未绑定座位保持先到先得。大厅（Hub）路径为服务器权威：座位由服务端分配、actor 绑定本人座位 |
+| AI-31 | 「查看卡牌详情」有两份实现（`app/session.ts` 与 `app/netSession.ts`），且用 `meta.id === 'splendor'` 这种游戏名字决定要不要再开一张详情卡；悬浮预览与点击详情两个通道互不知情、谁后到谁赢 | 同一张卡在单机与联机下表现不同（联机必弹第二张大山屋风格大卡），每加一款游戏都要改通用层 | **Step 0 已实现**：`packages/kernel/src/module.ts` 新增 `GamePresentationHints`（`cardPreviewOnHover` / `cardFacts`），`packages/app/src/inspect.ts` 收敛为唯一实现并被两个 session 共用，游戏词汇与预览策略由 `games/src/registry.ts` 中各游戏自己的 `presentation` 声明（山屋 facts 在 `betrayal/presentation.ts`）；回归见 `suites/presentation.ts`。**Step 1 已实现**：`UiCardDetail` 换成中性 `UiDetailView`（`badge` / `tone` / `seal` / `sections`，见 `packages/app/src/contracts.ts`），`GamePresentationHints` 增 `cardStyle`（山屋的牌型带文本落在 `betrayal/presentation.ts`）；`apps/web/src/ui/overlay.ts` 的 `OverlayArbiter` 用 `peek < pinned < modal` 仲裁悬浮芯片与详情大卡，同一 `key` 只有一个视图、指针漂移不再灭口玩家点开的卡；`apps/web/src/ui/cardArt.ts` 改由 `tone` 驱动配色（不再认识 OMEN/ITEM 等游戏词）。剩余：Step 2 `definePresentation` 注册表迁走山屋/宝石专有表现（`hud.ts` 的 `maybeRevealRoom` 仍写着预兆/遗物/洋馆布局等山屋词汇）；Step 3 结构性 lint + 跨游戏隔离测试 |
 
 ## 2. 重复相似特性（需要合并）
 
@@ -65,7 +66,7 @@
 
 ```bash
 pnpm test           # 内核一致性 + 分层边界
-pnpm test:matrix    # 五夹具 × 多 seed × 全场景黑盒
+pnpm test:matrix    # 六夹具 × 多 seed × 全场景黑盒
 pnpm test:ui        # Playwright UI 流程矩阵
 pnpm probe:layout   # 家具布局与门位冲突
 pnpm probe:overlap  # 房间几何 z-fighting 回归
