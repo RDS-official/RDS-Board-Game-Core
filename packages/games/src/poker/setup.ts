@@ -3,6 +3,7 @@ import { DeterministicPRNG } from '@rds/kernel/prng';
 import type { GameState, Player } from '@rds/kernel/types';
 import { deckEntity, fullDeck } from './cards';
 import { AI_PROFILE, planSeats, type PokerAiTier, type SeatAssignment } from './seating';
+import { POKER_OBSERVER } from './observers';
 
 /**
  * Texas Hold'em table setup.
@@ -39,6 +40,11 @@ export interface PokerConfig {
    * 缺省 true，测试与回放保持「一次 reduce 走完 AI 回合」的旧行为。
    */
   autoAi?: boolean;
+  /**
+   * 是否打乱开局座位次序（缺省 true）。真人房间要的是「谁坐哪儿」每局随机；
+   * 精确座位号的测试剧本显式关掉，保证断言稳定。
+   */
+  shuffleSeats?: boolean;
 }
 
 export const POKER_LIMITS = { minSeats: 2, maxSeats: 10 } as const;
@@ -87,13 +93,27 @@ export function seatPosition(seatIndex: number, seats: number): [number, number,
   return [Math.cos(angle) * rx, 0.1, Math.sin(angle) * rz];
 }
 
-function createPlayer(seatIndex: number, stack: number, assignment?: SeatAssignment): Player {
-  const id = `p${seatIndex + 1}`;
+/**
+ * 造一名坐进 `seatIndex` 的玩家。
+ *
+ * `playerId` 与座位解耦：开局座位打乱后 p1 可能坐 3 号位，输光后补位的 AI 也
+ * 是新的 id（`p1a1`），所以身份不能从座位号推。
+ */
+export function createSeatPlayer(
+  playerId: string,
+  seatIndex: number,
+  stack: number,
+  assignment?: SeatAssignment,
+  name?: string
+): Player {
+  const id = playerId;
   const isAi = !!assignment?.isAi;
   const tierLabel = assignment?.aiTier ? AI_PROFILE[assignment.aiTier].label : '';
+  // 名字跟着身份（p3 = 「玩家 3」），不跟座位：开局洗座之后座位号会变，名字不能变。
+  const ordinal = Number((playerId.match(/\d+/) ?? ['1'])[0]) || seatIndex + 1;
   return {
     id,
-    name: isAi ? `${tierLabel} AI ${seatIndex + 1}` : `玩家 ${seatIndex + 1}`,
+    name: name ?? (isAi ? `${tierLabel} AI ${ordinal}` : `玩家 ${ordinal}`),
     color: SEAT_COLORS[seatIndex % SEAT_COLORS.length],
     avatar: SEAT_AVATARS[seatIndex % SEAT_AVATARS.length],
     score: stack,
@@ -135,10 +155,30 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
         )
       : plan.seats;
 
-  const playerOrder = Array.from({ length: seats }, (_, index) => `p${index + 1}`);
+  /**
+   * 开局打乱座位次序。
+   *
+   * 打乱的是「谁坐几号位」，不是等级：`roster` 按编制顺序（p1、p2…）持有身份
+   * 与筹码，洗牌后依次落到 0..N-1 号座位。庄家/盲注/行动顺序全部由
+   * `playerOrder`（= 座位环）推出，所以只洗这一处，整局都跟着随机。
+   *
+   * 固定种子保证同一剧本的回放一致；`shuffleSeats: false` 留给需要精确座位号的
+   * 测试剧本与探针。
+   */
+  const roster = assignments.slice(0, seats).map((assignment, index) => ({
+    playerId: assignment.playerId,
+    assignment,
+    stack: config.stacks?.[index] ?? startingStack
+  }));
+  const dealt =
+    config.shuffleSeats === false
+      ? { result: roster, nextSeed: seed }
+      : DeterministicPRNG.shuffle(seed, roster);
+
+  const playerOrder = dealt.result.map(entry => entry.playerId);
   const players: Record<string, Player> = {};
-  playerOrder.forEach((pid, index) => {
-    players[pid] = createPlayer(index, config.stacks?.[index] ?? startingStack, assignments[index]);
+  dealt.result.forEach((entry, seat) => {
+    players[entry.playerId] = createSeatPlayer(entry.playerId, seat, entry.stack, entry.assignment);
   });
 
   const nodes: GameState['mapGraph']['nodes'] = {};
@@ -229,12 +269,22 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
         lastAggressor: null
       },
       lastHand: null,
+      /** 观察者席位（输光后留在房间里的原玩家），由 observers.ts 维护。 */
+      observers: {
+        list: [],
+        aiSerial: 0,
+        stipend: {
+          periodSeconds: POKER_OBSERVER.stipendPeriodSeconds,
+          amount: POKER_OBSERVER.stipendAmount,
+          threshold: POKER_OBSERVER.stipendThreshold
+        }
+      },
       log: [`牌局开始 · 盲注 ${smallBlind} / ${bigBlind} · 每人 ${startingStack} 筹码`]
     },
     interruptStack: [],
     pendingDecisions: [],
     activeHooks: [],
-    prngState: seed,
+    prngState: dealt.nextSeed,
     actionLog: [],
     winner: null,
     gameOver: false
@@ -288,5 +338,6 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
  * scenario), which honours `GameSetupOptions.seats`.
  */
 export function pokerScenario(seats: number, overrides: Partial<PokerConfig> = {}) {
-  return (seed: number): GameState => setupPoker(seed, { ...overrides, seats });
+  // 剧本是测试与探针的固定座次夹具：默认关掉开局洗座，断言才能精确到号位。
+  return (seed: number): GameState => setupPoker(seed, { shuffleSeats: false, ...overrides, seats });
 }

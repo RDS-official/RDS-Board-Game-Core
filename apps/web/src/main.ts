@@ -75,7 +75,13 @@ class BoardGameSimulatorApp {
     this.session = this.createSession(this.currentGameId, this.initialScenario);
 
     this.ports = {
-      setCamera: (view: CameraView) => this.scene.setCameraPreset(this.cameraPreset(view)),
+      setCamera: (view: CameraView) => {
+        if (view === 'seat') {
+          this.applySeatView();
+          return;
+        }
+        this.scene.setCameraPreset(this.cameraPreset(view));
+      },
       setSound: (enabled: boolean) => {
         BoardGameAudio.toggleSound(enabled);
       },
@@ -319,6 +325,8 @@ class BoardGameSimulatorApp {
         ? `${snapshot.placement.defId}:${snapshot.placement.rotation}`
         : '';
       this.scene.syncState(snapshot.board, snapshot.placement, layoutForGame(this.currentGameId));
+      // 每名玩家的默认机位：站在自己的立牌后面看牌桌。上帝视角保持等轴俯视。
+      this.applyDefaultView();
       // 首帧桌面已可绘制：撤掉开局加载遮罩（若存在）
       hideGameLoading();
     });
@@ -513,6 +521,13 @@ class BoardGameSimulatorApp {
         this.scene.syncState(snapshot.board, snapshot.placement, layoutForGame(this.currentGameId));
       }
 
+      // 切到某名玩家的认知滤镜时，镜头也跟着坐到他那一侧：这就是「每个玩家自己
+      // 的默认视角」。切回上帝视角不动镜头（保留玩家自己选的角度）。
+      if (snapshot.viewer !== this.lastViewer) {
+        this.lastViewer = snapshot.viewer;
+        if (snapshot.viewer !== 'GOD' && this.fontsReady) this.applySeatView(snapshot.viewer);
+      }
+
       // Dynamic situational ambient soundscape & music update
       if (this.currentGameId === 'betrayal') {
         const floor = snapshot.spatial?.activeFloor || 'GROUND';
@@ -661,6 +676,7 @@ class BoardGameSimulatorApp {
     this.lastRevision = snapshot.revision;
     this.lastPlacementKey = snapshot.placement ? `${snapshot.placement.defId}:${snapshot.placement.rotation}` : '';
     this.hud.syncCamera('iso');
+    this.applyDefaultView();
 
     try {
       const url = new URL(window.location.href);
@@ -704,6 +720,7 @@ class BoardGameSimulatorApp {
     this.lastRevision = snapshot.revision;
     this.lastPlacementKey = snapshot.placement ? `${snapshot.placement.defId}:${snapshot.placement.rotation}` : '';
     this.hud.syncCamera('iso');
+    this.applyDefaultView();
 
     try {
       const url = new URL(window.location.href);
@@ -729,11 +746,60 @@ class BoardGameSimulatorApp {
       case 'top':
         return 'TOP_DOWN';
       case 'seat':
-        return 'PLAYER_1';
+        return 'SEAT';
       default:
         return 'ISOMETRIC';
     }
   }
+
+  /**
+   * 每个玩家自己的默认机位。
+   *
+   * 座位视角沿「桌心 → 立牌」的延长线往后、往上取景，正对这名玩家的立牌；
+   * 上帝视角（单人调试桌）保持等轴，只有真人座位才自动切过去。
+   */
+  private applyDefaultView(): void {
+    const viewer = this.session.getSnapshot().viewer;
+    if (!viewer || viewer === 'GOD') return;
+    this.applySeatView(viewer);
+  }
+
+  /**
+   * 「座位」按钮：自己在桌上就看自己的座位，上帝视角则逐个座位轮着看，
+   * 方便检查每名玩家看到的牌桌。换座、补位 AI 之后座位节点会跟着变，这里
+   * 每次重新查，不缓存座位号。
+   */
+  private applySeatView(preferred?: string): void {
+    const snapshot = this.session.getSnapshot();
+    const seats = Object.values(snapshot.board.mapGraph.nodes).filter(
+      node => node.type === 'SEAT' && node.props?.playerId
+    );
+    if (seats.length === 0) return;
+    const viewer = preferred ?? snapshot.viewer;
+    const own = seats.find(node => String(node.props.playerId) === viewer);
+    if (own) {
+      if (!this.scene.setSeatView({ playerId: String(own.props.playerId) })) return;
+      this.hud.syncCamera('seat');
+      this.hud.pushToast('🎥', `座位视角 · ${String(own.props.name ?? own.props.playerId)}`, 1600);
+      return;
+    }
+    // 观察者看自己原来的座位：输了也还在牌桌的同一侧看牌。
+    const watching = snapshot.observers?.find(entry => entry.playerId === viewer);
+    if (watching?.seatIndex !== undefined) {
+      if (!this.scene.setSeatView({ seatIndex: watching.seatIndex })) return;
+      this.hud.syncCamera('seat');
+      this.hud.pushToast('🎥', `观察视角 · ${watching.name}`, 1600);
+      return;
+    }
+    const node = seats[this.seatViewCursor++ % seats.length];
+    if (!this.scene.setSeatView({ playerId: String(node.props.playerId) })) return;
+    this.hud.syncCamera('seat');
+    this.hud.pushToast('🎥', `座位视角 · ${String(node.props.name ?? node.props.playerId)}`, 1600);
+  }
+
+  private seatViewCursor = 0;
+  /** 上一次的认知滤镜视角：切换玩家时把镜头一起挪过去。 */
+  private lastViewer = '';
 
   private handleBoardPick(data: InteractiveObjectData): void {
     // Clicking a seat nameplate opens that player's sheet: the plaque is the

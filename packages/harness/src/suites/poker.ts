@@ -10,6 +10,7 @@ import { buildPots, splitAmount } from '@rds/games/poker/betting';
 import type { Card, Suit } from '@rds/games/poker/cards';
 import { evaluateSeven } from '@rds/games/poker/handEval';
 import { chipShares } from '@rds/games/poker/ai';
+import { setupPoker } from '@rds/games/poker/setup';
 import type { PokerHandState } from '@rds/games/poker/rules';
 import { assert, assertEqual, test } from '../testKit';
 
@@ -363,7 +364,7 @@ test('poker: the button moves clockwise and the blinds follow it', () => {
   assertEqual(second.handNo, 2, 'the hand counter advanced');
 });
 
-test('poker: a busted seat ends the game with the richest stack winning', () => {
+test('poker: a busted seat becomes an observer and the AI refills the chair', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 23, { scenario: 'short_stack' });
   const raw = engine.getRawState();
   assertEqual(raw.players.p4.customProps.chips, 60, 'the short stack starts at 60');
@@ -381,9 +382,91 @@ test('poker: a busted seat ends the game with the richest stack winning', () => 
 
   const state = engine.getRawState();
   assertEqual(state.players.p4.customProps.chips, 0, 'the short stack is felted');
-  assert(state.gameOver, 'the session ends as soon as a seat busts');
-  assertEqual(state.winner, 'p1', 'the biggest remaining stack wins');
-  assert(/输光筹码/.test(state.winnerReason ?? ''), `reason names the bust: ${state.winnerReason}`);
+  assert(!state.gameOver, 'a bust no longer ends the session');
+  const bench = state.globalVars.observers as { list: { playerId: string }[] };
+  assertEqual(bench.list.length, 1, 'the felted player takes an observer seat');
+  assertEqual(bench.list[0].playerId, 'p4', 'p4 is the observer');
+  assertEqual(state.players.p4.status, 'SPECTATOR', 'the observer is no longer a seated player');
+  const refill = state.playerOrder[3];
+  assertEqual(refill, 'p4a1', 'a replacement AI takes the empty chair');
+  assertEqual(state.players[refill].customProps.chips, 1000, 'the replacement buys in with a stack');
+  assertEqual(
+    Object.values(state.mapGraph.nodes).find(node => Number(node.props?.seatIndex) === 3)?.props
+      .playerId,
+    refill,
+    'the standee on that seat shows the AI'
+  );
+});
+
+test('poker: the opening seat order is shuffled but stable per seed', () => {
+  const order = (seed: number) =>
+    setupPoker(seed, { seats: 6, humans: 1 }).playerOrder.join(',');
+  assert(order(5) !== 'p1,p2,p3,p4,p5,p6', 'the default table shuffles who sits where');
+  assertEqual(order(5), order(5), 'the same seed seats the same players');
+  assert(order(5) !== order(6), 'a different seed seats a different order');
+
+  const state = setupPoker(5, { seats: 6, humans: 1 });
+  state.playerOrder.forEach((pid, seat) => {
+    const node = Object.values(state.mapGraph.nodes).find(
+      entry => Number(entry.props?.seatIndex) === seat
+    );
+    assertEqual(node?.props.playerId, pid, `seat ${seat} belongs to ${pid}`);
+    assertEqual(state.players[pid].customProps.seat, seat, `${pid} knows its seat`);
+  });
+  // 固定座次的剧本不受影响。
+  assertEqual(
+    setupPoker(5, { seats: 4, shuffleSeats: false }).playerOrder.join(','),
+    'p1,p2,p3,p4',
+    'a pinned fixture keeps the natural order'
+  );
+});
+
+test('poker: an observer draws a stipend and takes a random AI seat back', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 23, { scenario: 'short_stack' });
+  const raw = engine.getRawState();
+  startHand(engine);
+  giveHoleCards(raw, 'p4', ['7c', '2d']);
+  giveHoleCards(raw, 'p1', ['Ah', 'Ad']);
+  stackDeck(raw, ['2c', 'Ac', '9h', '5s', '3d', 'Kd', '4h', '8h']);
+  act(engine, 'ALL_IN');
+  act(engine, 'CALL', { amount: 60 });
+  act(engine, 'FOLD');
+  act(engine, 'FOLD');
+
+  assertEqual(engine.getLegalActions('p4').length, 0, 'a broke observer cannot sit back down');
+
+  // 三拍心跳 = 一分钟 → 低保 +10。
+  const tick = engine.dispatch({
+    type: 'OBSERVER_TICK',
+    playerId: 'p4',
+    payload: { seconds: 60 }
+  });
+  assert(tick.ok, `the stipend tick is accepted: ${tick.error ?? ''}`);
+  assertEqual(
+    engine.getRawState().players.p4.customProps.chips,
+    10,
+    'one minute of welfare pays ten chips'
+  );
+  assert(
+    engine.getLegalActions('p4').some(action => action.type === 'OBSERVER_REJOIN'),
+    'the funded observer may ask for a seat'
+  );
+
+  const rejoin = engine.dispatch({ type: 'OBSERVER_REJOIN', playerId: 'p4' });
+  assert(rejoin.ok, `the rejoin is accepted: ${rejoin.error ?? ''}`);
+  const state = engine.getRawState();
+  assert(state.playerOrder.includes('p4'), 'the observer is back on the table');
+  assertEqual(
+    state.playerOrder.filter(pid => pid === 'p4').length,
+    1,
+    'the observer holds exactly one seat'
+  );
+  assertEqual(
+    (state.globalVars.observers as { list: unknown[] }).list.length,
+    0,
+    'the observer bench is empty again'
+  );
+  assertEqual(state.players.p4.customProps.chips, 10, 'the returning player keeps the bankroll');
 });
 
 test('poker: a raise keeps the street open until every seat has matched it', () => {
@@ -685,7 +768,16 @@ test('poker: there is no seating step — the first hand is ready to deal', () =
   // 不再有「入座 → 准备」：开局即全员就绪，一手牌直接可开。
   assert(types().includes('START_HAND'), 'the opening action is dealing a hand');
   assert(!types().includes('TAKE_SEAT') && !types().includes('READY_UP'), 'no seating actions exist');
-  assertEqual(engine.getLegalActions('p2').length, 0, 'AI seats expose no actions to the player');
+  // 开局洗座之后谁坐 0 号位不确定，所以只断言「不在行动位上的 AI 没有动作」。
+  const aiSeats = (
+    engine.getRawState().globalVars.seats as { playerId: string; isAi: boolean }[]
+  )
+    .filter(seat => seat.isAi)
+    .map(seat => seat.playerId);
+  const active = engine.getActiveActorId();
+  for (const aiId of aiSeats.filter(pid => pid !== active)) {
+    assertEqual(engine.getLegalActions(aiId).length, 0, `${aiId} exposes no actions`);
+  }
 
   const started = engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
   assert(started.ok, 'the game starts');

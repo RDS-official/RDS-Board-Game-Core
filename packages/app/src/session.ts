@@ -1,6 +1,7 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { describeActionView } from './actionText';
 import { buildEntityInspectNotice, buildMoment, buildNodeDiscoveryView } from './inspect';
+import { buildObserverRoster } from './observers';
 import { GameModule } from '@rds/kernel/module';
 import { Action, ActorId, GameState, PlayerId, ProjectedGameState, SelectionCandidate, SelectionSpec, VisualTraceEvent,
   type EffectInstance
@@ -154,6 +155,8 @@ export class UniversalSession implements GamePresenter {
   private bound: BoundAction[] = [];
   /** 内置 AI 的下一步定时器：按游戏声明的节奏逐步派发 AI_ACT。 */
   private aiTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 周期性规则（观察者低保）的驱动定时器；内核本身无时钟。 */
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   /** 各动作类型第一次变得可用的时刻，用于动作冷却（结算后 20 秒才能开下一手）。 */
   private readonly actionSeenAt = new Map<string, number>();
   private activeBoardGroup?: ActiveBoardGroup;
@@ -226,6 +229,7 @@ export class UniversalSession implements GamePresenter {
     this.rebuild();
     // 开局若先轮到 AI（例如房间补位），也从这里启动节奏。
     this.scheduleAiTurn();
+    this.startHeartbeat();
   }
 
   /* ------------------------------------------------------------------ */
@@ -309,6 +313,19 @@ export class UniversalSession implements GamePresenter {
   public onVisualEvent(listener: (events: VisualTraceEvent[]) => void): () => void {
     this.visualListeners.add(listener);
     return () => this.visualListeners.delete(listener);
+  }
+
+  /**
+   * 观察席「重新上桌」：向引擎申请换桌，座位由游戏随机挑一个 AI，本轮结束后
+   * 才真正落座。这里只负责把申请发出去，扣筹码、换座位都在 reduce 里。
+   */
+  public rejoinTable(playerId: string): { ok: boolean; error?: string } {
+    const action = this.engine
+      .getLegalActions(playerId)
+      .find(entry => entry.type === 'OBSERVER_REJOIN');
+    if (!action) return { ok: false, error: '还不能上桌：等低保攒够买入，或已在本轮排队' };
+    const result = this.engine.dispatch(action);
+    return result.ok ? { ok: true } : { ok: false, error: result.error ?? '重新上桌失败' };
   }
 
   public perform(
@@ -838,10 +855,34 @@ export class UniversalSession implements GamePresenter {
     }, delay);
   }
 
+  /**
+   * 驱动游戏声明的周期性规则（观察者低保等）。
+   *
+   * 内核不做时钟：这里是唯一按真实时间推进的地方，派发的动作照常进 actionLog，
+   * 所以「第几拍发了多少低保」在回放里仍是确定的。
+   */
+  private startHeartbeat(): void {
+    const heartbeat = this.module.heartbeat;
+    if (!heartbeat || this.heartbeatTimer !== null) return;
+    this.heartbeatTimer = setInterval(() => {
+      const state = this.engine.getRawState();
+      if (state.gameOver) return;
+      const action = heartbeat.action(state);
+      if (!action) return;
+      this.engine.dispatch(action);
+    }, heartbeat.intervalMs);
+    // Node 里（测试/无头导出）不要因为这个定时器阻止进程退出。
+    this.heartbeatTimer.unref?.();
+  }
+
   public dispose(): void {
     if (this.aiTimer !== null) {
       clearTimeout(this.aiTimer);
       this.aiTimer = null;
+    }
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
     }
     this.unsubscribers.forEach(unsubscribe => {
       unsubscribe();
@@ -1087,6 +1128,9 @@ export class UniversalSession implements GamePresenter {
         module.presentation
       ),
       npcs: buildNpcsView(state, focusActors, id => this.engine.getActorName(id)),
+      observers: buildObserverRoster(state, pid =>
+        this.engine.getLegalActions(pid).some(action => action.type === 'OBSERVER_REJOIN')
+      ),
       actions: this.bound.map(entry => entry.ui),
       legalCount: legal.length,
 

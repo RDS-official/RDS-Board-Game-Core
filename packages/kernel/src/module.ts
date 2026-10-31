@@ -353,6 +353,21 @@ export interface GameModule {
   spatial?: SpatialQuery;
   /** Logical-clock TTLs (in ticks) applied to decisions / response windows. */
   timing?: { decision?: number; response?: number };
+  /**
+   * 驱动方心跳：内核自己没有时钟，凡是「每 N 毫秒发生一次」的规则（观察者的
+   * 低保、定期补给等）都由 app / server 的定时器按这里声明的节奏派发一个动作。
+   * `action(state)` 返回 null 表示这一拍不需要派发（例如桌上没有观察者），
+   * 驱动方跳过即可。动作本身仍走正常的 reduce 路径，因此回放完全确定。
+   */
+  heartbeat?: {
+    intervalMs: number;
+    action: (state: GameState) => Action | null;
+  };
+  /**
+   * 只允许驱动方派发的动作类型（心跳等）。它们不进入 `legalActions`，因此
+   * 严格模式下的合法性校验按声明放行；面向客户端的入口必须拒绝这些类型。
+   */
+  driverActions?: readonly string[];
   setup: (seed: number, options?: GameSetupOptions) => GameState;
   legalActions: (state: GameState, actorId: ActorId) => Action[];
   reduce: (state: GameState, action: Action, ctx: ReduceContext) => GameState;

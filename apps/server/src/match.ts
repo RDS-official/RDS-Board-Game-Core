@@ -75,6 +75,8 @@ export class ServerMatch {
   private lastAiAt = 0;
   /** 结算开始的时刻：等满冷却就自动替全桌发下一手。 */
   private settleAt = 0;
+  /** 上一次派发周期规则（观察者低保）的时刻。 */
+  private lastHeartbeatAt = 0;
   private disposed = false;
 
   constructor(options: MatchOptions) {
@@ -220,6 +222,8 @@ export class ServerMatch {
       return this.reject('malformed action');
     }
     if (action.type.startsWith('__')) return this.reject('invalid action');
+    // 驱动方动作（低保心跳）只能由服务器定时器派发，客户端不得伪造。
+    if (this.module.driverActions?.includes(action.type)) return this.reject('invalid action');
     const actor = String(action.actorId ?? action.playerId ?? '');
     if (actor !== seat) return this.reject(`actor does not match viewer: ${actor || '(missing)'}`);
     this.room.setCurrentViewer(seat);
@@ -275,11 +279,26 @@ export class ServerMatch {
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
     this.tickTimer = setInterval(() => {
       if (this.disposed) return;
+      this.pulseHeartbeat(Date.now());
       if (!this.needsClock()) return;
       this.room.submitUnchecked({ type: '__TICK__', playerId: 'SYSTEM', payload: { ticks: 1 } });
     }, intervalMs);
     this.tickTimer.unref?.();
     this.startAiPump();
+  }
+
+  /**
+   * 周期规则（观察者低保）：由游戏模块声明节奏，服务器负责按真实时间派发。
+   * 内核保持无时钟，动作照常进 actionLog，因此回放仍可复现。
+   */
+  private pulseHeartbeat(now: number): void {
+    const heartbeat = this.module.heartbeat;
+    if (!heartbeat) return;
+    if (now - this.lastHeartbeatAt < heartbeat.intervalMs) return;
+    const action = heartbeat.action(this.room.engine.getRawState());
+    if (!action) return;
+    this.lastHeartbeatAt = now;
+    this.room.submitUnchecked(action);
   }
 
   /**
@@ -323,7 +342,9 @@ export class ServerMatch {
         return;
       }
       if (now - this.settleAt < settleGateMs) return;
-      const seat = state.playerOrder.find(pid => Number(state.players[pid]?.customProps?.stack ?? 0) > 0);
+      const seat = state.playerOrder.find(
+        pid => Number(state.players[pid]?.customProps?.chips ?? 0) > 0
+      );
       if (!seat) return;
       this.settleAt = 0;
       engine.dispatch({ type: 'FORCE_START', playerId: seat });

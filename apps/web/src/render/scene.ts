@@ -22,7 +22,9 @@ import { BoardGameAudio } from './audio';
 import { CANVAS_FONT_STACK } from './fonts';
 import { handLayout, handRowSpan } from '../ui/handLayout';
 
-export type CameraPreset = 'ISOMETRIC' | 'TOP_DOWN' | 'PLAYER_1' | 'PLAYER_2';
+export type CameraPreset = 'ISOMETRIC' | 'TOP_DOWN' | 'PLAYER_1' | 'PLAYER_2' | 'SEAT';
+
+
 
 /* ---------------------------------------------------------------------- */
 /* Hand row geometry                                                       */
@@ -1119,8 +1121,54 @@ export class BoardGameScene {
         this.camera.position.set(0, 7.5, -13);
         if (this.controls) this.controls.target.set(0, 0, -1.2);
         break;
+      case 'SEAT':
+        // 座位机位需要具体座位，由 `setSeatView` 计算；这里只兜底到等轴。
+        break;
     }
     this.controls?.update();
+  }
+
+  /**
+   * 把镜头放到某个座位自己的视角。
+   *
+   * 立牌位置取投影后的座位节点（`props.seatIndex` / `props.playerId`），所以补位
+   * AI、换座之后的观察者都自动落在正确的座位上。
+   */
+  public setSeatView(seat: { playerId?: string; seatIndex?: number }): boolean {
+    const state = this.lastState;
+    if (!state) return false;
+    const seats = Object.values(state.mapGraph.nodes).filter(entry => entry.type === 'SEAT');
+    const node = seats.find(entry => {
+      if (seat.playerId !== undefined) {
+        return String(entry.props?.playerId ?? '') === seat.playerId;
+      }
+      return Number(entry.props?.seatIndex ?? -1) === seat.seatIndex;
+    });
+    if (!node) return false;
+
+    const [x, , z] = node.position;
+    const radius = Math.max(0.001, Math.hypot(x, z));
+    const outward = new THREE.Vector2(x / radius, z / radius);
+    // 牌桌宽度取座位环的包围盒，只用来定「退多远」的尺度。
+    const rx = Math.max(...seats.map(entry => Math.abs(entry.position[0])), 4);
+    // 退到立牌外侧多远：跟桌面尺寸走，跟具体哪一座无关。椭圆桌的长短轴座位到
+    // 桌心的距离差很多，用「相对立牌」的固定量取景，每个座位看到的立牌大小才一致。
+    const back = Math.max(7, rx * 1.05);
+    // 视线落在自己立牌顶沿稍往里一点：立牌占画面中下部，牌桌在它上方展开。
+    const target = new THREE.Vector3(
+      x - outward.x * 2.6,
+      0.7,
+      z - outward.y * 2.6
+    );
+    const position = new THREE.Vector3(
+      x + outward.x * back,
+      2 + back * 0.29,
+      z + outward.y * back
+    );
+
+    this.skipFitUntil = performance.now() + 900;
+    this.startCameraTween(position, target, 520);
+    return true;
   }
 
   /** Pull the camera back on narrower windows so the board still fits. */
@@ -2312,10 +2360,10 @@ export class BoardGameScene {
         );
         group.position.set(seatX, 0.055, seatZ);
         // The board tracks the camera (see `updateSeatStandees`) but keeps a
-        // per-seat random offset of ±45°: perfectly aligned boards hide the
+        // per-seat random offset of ±30°: perfectly aligned boards hide the
         // structure of the table and read as a HUD, not as objects. The offset is
         // hashed from the seat id, so a rebuilt sync keeps the same pose.
-        const jitter = (((fnv1a(seatId) % 1000) / 1000) - 0.5) * (Math.PI / 2);
+        const jitter = (((fnv1a(seatId) % 1000) / 1000) - 0.5) * (Math.PI / 3);
         group.rotation.y = Math.atan2(-outward.x, -outward.y) + jitter;
         this.seatStandees.push({ group, jitter, lamp, seatId });
         this.boardObjectsGroup.add(group);
@@ -4812,7 +4860,7 @@ export class BoardGameScene {
    * offset.
    *
    * Dead-on aiming looked wrong: every board snapped into the same plane, which
-   * hides the table's structure. Each seat therefore carries a hashed ±45° offset
+   * hides the table's structure. Each seat therefore carries a hashed ±30° offset
    */
   private updateSeatStandees(): void {
     if (this.seatStandees.length === 0) return;
