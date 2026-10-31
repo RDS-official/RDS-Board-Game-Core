@@ -35,6 +35,9 @@ const escHtml = (v: unknown) =>
  */
 const PLAYER_CARD_HEIGHT = 104;
 
+/** Arbiter owner id for the enlarged seat plaque window. */
+const SEAT_PEEK_OWNER = 'hud.seat';
+
 /** Short trait key → character-sheet abbreviation used by the pip ladder. */
 const HUD_TRAIT_SHORT: Record<string, string> = {
   speed: '速',
@@ -84,6 +87,8 @@ export class BoardGameHUD {
   /** Set of room ids already seen, for the "new room discovered" reveal. */
   private knownRooms?: Set<string>;
   private sheetTimer: number | null = null;
+  /** Last pointer position, used to place the seat peek window. */
+  private pointerAt = { x: 0, y: 0 };
   /**
    * Pointer position along the player rail (0 = top, 1 = bottom), or null when
    * it is outside. The fisheye focus is derived from this, never from which card
@@ -351,7 +356,26 @@ export class BoardGameHUD {
     this.paintSheet(state.modal ?? state.pinned);
   }
 
+  /**
+   * Enlarged preview of a seat plaque, shown while the pointer rests on it.
+   *
+   * It is the arbiter's `peek` slot (so a deliberate sheet always wins) but it
+   * paints into its own window rather than the one-line chip: a plaque carries
+   * four rows, and the whole point is to read it from across the table.
+   */
+  public showSeatPeek(view: UiDetailView | null): void {
+    if (!view) {
+      if (this.overlays.current().peek?.owner === SEAT_PEEK_OWNER) this.overlays.close('peek');
+      return;
+    }
+    this.overlays.open({ owner: SEAT_PEEK_OWNER, mode: 'peek', view });
+  }
+
   private paintHover(entry?: OverlayEntry): void {
+    // One peek at a time: the seat plaque window and the one-line chip are two
+    // surfaces of the same slot, so each hides the other.
+    this.paintSeatPeek(entry?.owner === SEAT_PEEK_OWNER ? entry : undefined);
+
     let el = this.container.querySelector('#hover-hint') as HTMLElement | null;
     if (!el) {
       el = document.createElement('div');
@@ -359,7 +383,7 @@ export class BoardGameHUD {
       el.className = 'hover-hint';
       this.container.appendChild(el);
     }
-    if (!entry) {
+    if (!entry || entry.owner === SEAT_PEEK_OWNER) {
       el.classList.remove('on');
       el.classList.remove('with-art');
       return;
@@ -377,6 +401,57 @@ export class BoardGameHUD {
     el.innerHTML =
       (hint.art ? `<img class="hh-art" src="${escapeAttr(hint.art)}" alt="${escapeAttr(hint.title)}" />` : '') +
       `<span class="hh-body"><b>${escHtml(hint.title)}</b>${hint.desc ? `<span>${escHtml(hint.desc)}</span>` : ''}</span>`;
+    el.classList.add('on');
+  }
+
+  /**
+   * The enlarged seat window.
+   *
+   * Positioned beside the pointer (never under it — a window that covers the
+   * cursor would end the board hover that opened it, and the pair would
+   * flicker). Height is capped at a third of the viewport, as asked, and the
+   * board's own 0.86 : 1.24 aspect decides the width.
+   */
+  private paintSeatPeek(entry?: OverlayEntry): void {
+    let el = this.container.querySelector('#seat-peek') as HTMLElement | null;
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'seat-peek';
+      el.className = 'seat-peek';
+      this.container.appendChild(el);
+    }
+    if (!entry) {
+      el.classList.remove('on');
+      el.dataset.key = '';
+      return;
+    }
+
+    const view = entry.view;
+    if (el.dataset.key !== view.key) {
+      el.dataset.key = view.key;
+      const rows = view.sections
+        .map(row => `<div class="sp-row"><span class="sp-k">${escHtml(row.label)}</span><span class="sp-v">${escHtml(row.value)}</span></div>`)
+        .join('');
+      el.innerHTML = `
+        <div class="sp-coin">${escHtml(view.seal ?? '👤')}</div>
+        <div class="sp-name">${escHtml(view.title)}</div>
+        ${view.badge ? `<div class="sp-badge">${escHtml(view.badge)}</div>` : ''}
+        ${view.subtitle ? `<div class="sp-sub">${escHtml(view.subtitle)}</div>` : ''}
+        <div class="sp-rows">${rows}</div>
+      `;
+    }
+
+    const rect = el.getBoundingClientRect();
+    const height = rect.height || Math.round(window.innerHeight / 3);
+    const gap = 26;
+    const fitsRight = this.pointerAt.x + gap + rect.width <= window.innerWidth - 8;
+    const left = fitsRight ? this.pointerAt.x + gap : this.pointerAt.x - gap - rect.width;
+    const top = Math.min(
+      Math.max(8, this.pointerAt.y - height / 2),
+      window.innerHeight - height - 8
+    );
+    el.style.left = `${Math.max(8, left)}px`;
+    el.style.top = `${top}px`;
     el.classList.add('on');
   }
 
@@ -2040,6 +2115,15 @@ export class BoardGameHUD {
       `;
       this.bindDockEvents(dock);
       this.bindPlayerRail();
+      // The seat peek window is placed beside the pointer, so its position has to
+      // be tracked globally: the board hover callback carries no coordinates.
+      window.addEventListener(
+        'pointermove',
+        event => {
+          this.pointerAt = { x: event.clientX, y: event.clientY };
+        },
+        { passive: true }
+      );
     }
 
     const slot = (name: string) => dock.querySelector(`[data-slot="${name}"]`) as HTMLElement | null;

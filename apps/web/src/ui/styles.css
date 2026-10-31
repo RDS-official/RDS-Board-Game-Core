@@ -4719,3 +4719,100 @@ select.pf-control {
   margin-top: var(--space-2);
   list-style: none;
 }
+
+/* ---------------------------------------------------------------------------
+   Seat plaque peek — the enlarged standee card shown on board hover.
+   Height is capped at a third of the viewport; the board's own 0.86 : 1.24
+   aspect decides the width. It never sits under the pointer (a window covering
+   the cursor would end the hover that opened it).
+   --------------------------------------------------------------------------- */
+.seat-peek {
+  position: fixed;
+  z-index: 60;
+  height: min(33vh, 340px);
+  aspect-ratio: 0.86 / 1.24;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.7em 0.7em 0.6em;
+  border-radius: 10px;
+  background: linear-gradient(160deg, #4a3320 0%, #2a1b0e 55%, #3a2716 100%);
+  border: 2px solid rgba(201, 162, 74, 0.55);
+  box-shadow: 0 26px 60px -22px rgba(0, 0, 0, 0.85), inset 0 0 0 1px rgba(0, 0, 0, 0.55);
+  color: #f2e8d2;
+  font-size: clamp(10px, 1.35vh, 15px);
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.94);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.seat-peek.on {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.seat-peek .sp-coin {
+  width: 30%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 1.9em;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid rgba(242, 232, 210, 0.5);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.5);
+}
+
+.seat-peek .sp-name {
+  font-weight: 700;
+  font-size: 1.15em;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.seat-peek .sp-badge {
+  padding: 0.15em 0.7em;
+  border-radius: 999px;
+  background: rgba(201, 162, 74, 0.92);
+  color: #241708;
+  font-weight: 700;
+  font-size: 0.8em;
+  white-space: nowrap;
+}
+
+.seat-peek .sp-sub {
+  font-size: 0.75em;
+  opacity: 0.75;
+}
+
+.seat-peek .sp-rows {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 0.3em;
+  overflow: hidden;
+}
+
+.seat-peek .sp-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.28);
+  font-size: 0.74em;
+  line-height: 1.35;
+}
+
+.seat-peek .sp-k {
+  opacity: 0.72;
+  white-space: nowrap;
+}
+
+.seat-peek .sp-v {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
