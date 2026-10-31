@@ -20,7 +20,11 @@ const SCALE = Math.max(0.1, Number(process.env.GATE_SCALE ?? 1) || 1);
 export const DEFAULT_BUDGETS = {
   core: { ms: 90_000, mb: 900 },
   matrix: { ms: 180_000, mb: 900 },
-  ui: { ms: 360_000, mb: 1_400 }
+  // The UI matrix is 356s solo but 477s when `verify:all` runs all eight gates
+  // at once — the browser pool and the CPU-parallel core shards compete for the
+  // same cores. Budget must cover the contended case, or every full sweep fails
+  // on wall-clock alone while every assertion passes.
+  ui: { ms: 720_000, mb: 1_400 }
 };
 
 /**
