@@ -3,9 +3,31 @@
  *
  * Runs every registered game over multiple seeds and every named scenario,
  * then verifies projection generation and deterministic replay.
+ *
+ * Parallel run: `scripts/test-matrix-parallel.mjs` spawns one process per module
+ * (`MATRIX_MODULES=<id>`). `MATRIX_FAST=1` keeps a single seed per table for the
+ * inner dev loop; the time / memory gates still apply either way.
  */
 
 import { createServer } from 'vite';
+import { gate, startMemoryWatch } from './lib/gates.mjs';
+
+const startedAt = Date.now();
+const memory = startMemoryWatch();
+
+const parseSeeds = (value, fallback) =>
+  value
+    ? value
+        .split(',')
+        .map(entry => Number(entry.trim()))
+        .filter(entry => Number.isFinite(entry))
+    : fallback;
+const FAST = process.env.MATRIX_FAST === '1';
+const SEEDS = FAST ? [7] : parseSeeds(process.env.MATRIX_SEEDS, [7, 2025, 91021]);
+const SCENARIO_SEEDS = FAST ? [11] : parseSeeds(process.env.MATRIX_SCENARIO_SEEDS, [11, 4242]);
+const MODULE_FILTER = process.env.MATRIX_MODULES
+  ? new Set(process.env.MATRIX_MODULES.split(',').map(entry => entry.trim()))
+  : null;
 
 const server = await createServer({
   server: { middlewareMode: true },
@@ -72,16 +94,19 @@ function run(label, module, seed, scenario, maxSteps) {
 }
 
 console.log('\n=== fixture matrix ===\n');
-for (const module of GAME_MODULES) {
+const modules = MODULE_FILTER
+  ? GAME_MODULES.filter(module => MODULE_FILTER.has(module.meta.id))
+  : GAME_MODULES;
+for (const module of modules) {
   const id = module.meta.id;
   console.log(`\n[${id}]`);
-  for (const seed of [7, 2025, 91021]) {
+  for (const seed of SEEDS) {
     seeds++;
     run(`${id}:seed-${seed}`, module, seed, undefined, 120);
   }
-  for (const [scenario, definition] of Object.entries(module.scenarios ?? {})) {
+  for (const [scenario] of Object.entries(module.scenarios ?? {})) {
     scenarios++;
-    for (const seed of [11, 4242]) {
+    for (const seed of SCENARIO_SEEDS) {
       seeds++;
       run(`${id}:${scenario}:seed-${seed}`, module, seed, scenario, 100);
     }
@@ -90,7 +115,11 @@ for (const module of GAME_MODULES) {
 
 await server.close();
 
-console.log(`\nmatrix: ${GAME_MODULES.length} modules, ${seeds} seed-runs, ${scenarios} scenarios, ${steps} applied actions`);
+console.log(
+  `\nmatrix: ${modules.length} modules, ${seeds} seed-runs, ${scenarios} scenarios, ${steps} applied actions`
+);
+const gateFailures = gate('matrix', { startedAt, memory });
+failures.push(...gateFailures);
 if (failures.length > 0) {
   console.log(`\nFAILURES (${failures.length}):`);
   for (const failure of failures) console.log(`  ✗ ${failure}`);

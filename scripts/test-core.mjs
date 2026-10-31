@@ -1,12 +1,19 @@
 import { createServer } from 'vite';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { gate, startMemoryWatch } from './lib/gates.mjs';
 
 /**
  * Core conformance runner.
  * 1. runs the kernel suite through Vite SSR;
- * 2. enforces the UI/application architecture boundary at the source level.
+ * 2. enforces the UI/application architecture boundary at the source level;
+ * 3. checks the run against the time / memory gates (`scripts/lib/gates.mjs`).
+ *
+ * `SUITE_SHARDS=<n> SUITE_SHARD=<i>` runs one slice; `scripts/test-core-parallel.mjs`
+ * drives that for the parallel run.
  */
+const startedAt = Date.now();
+const memory = startMemoryWatch();
 const server = await createServer({
   server: { middlewareMode: true },
   appType: 'custom',
@@ -64,7 +71,11 @@ try {
   const { runCoreSuite } = await server.ssrLoadModule('/packages/harness/src/suite.ts');
   const result = await runCoreSuite();
 
-  console.log('\nUniversal Board Game Kernel — conformance suite\n');
+  const shardTotal = Number(process.env.SUITE_SHARDS ?? 1) || 1;
+  const shardIndex = Number(process.env.SUITE_SHARD ?? 0) || 0;
+  const shardLabel = shardTotal > 1 ? ` [shard ${shardIndex + 1}/${shardTotal}]` : '';
+
+  console.log(`\nUniversal Board Game Kernel — conformance suite${shardLabel}\n`);
 
   for (const testCase of result.cases) {
     const mark = testCase.ok ? '\u2713' : '\u2717';
@@ -87,9 +98,13 @@ try {
       `${boundaryFailures.length ? `, ${boundaryFailures.length} boundary violations` : ', 0 boundary violations'}\n`
   );
 
-  exitCode = failed === 0 ? 0 : 1;
+  const gateFailures = gate('core', { startedAt, memory });
+  for (const failure of gateFailures) console.log(`  ✗ ${failure}`);
+
+  exitCode = failed === 0 && gateFailures.length === 0 ? 0 : 1;
 } catch (err) {
   console.error('Suite crashed:', err);
+  memory.stop();
 } finally {
   await server.close();
 }

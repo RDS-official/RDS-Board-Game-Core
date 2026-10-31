@@ -81,14 +81,28 @@ apps/web/src/render    Three.js 表现层，负责几何体渲染与物理演算
 **发现时刻由游戏声明**：地图上新出现一个节点时，通用层只能判断「有新的 `node.id`」这一件事（`apps/web/src/ui/hud.ts` 的 `maybeRevealNode`：首帧只登记布局，之后把新 id 交给 `presenter.nodeDetail(nodeId)`）。给玩家看什么——房间档案的标题、副标题、事实行、脚注、是否全屏揭示——全部来自游戏的 `GamePresentationHints.describeNode`，经 `packages/app/src/inspect.ts` 的 `buildNodeDiscoveryView` 变成中性 `UiDetailView`。没声明 `describeNode` 的游戏不会弹任何过场，也不会因为没有房间概念而报错。
 
 ### 3.2 必跑验证矩阵
-在提交代码或提 PR 前，必须在终端执行以下检查确保全绿：
+
+**日常内循环**（改完就测，~50 秒）：
 
 ```bash
-# 1. 必跑：内核 247 项一致性测试与架构边界静态检查
-pnpm test
+pnpm verify:changed   # 只跑本次 diff 可能影响的闸门（映射见下表），并发执行
+pnpm test:ui          # 动了 UI/渲染时另跑（21 屏 worker 池，~2.5 分钟）
+```
 
-# 2. 动了 packages/kernel/src 或 packages/games/src/* 时必跑：黑盒随机对局与回放哈希一致性测试
-pnpm test:matrix
+**提交前 / 提 PR 前**（全绿）：
+
+```bash
+pnpm verify:all       # core + matrix + overlap + lint + tsc/build + docs + UI，全部并发，~3.5 分钟
+```
+
+单条闸门（需要单独定位时）：
+
+```bash
+# 1. 必跑：内核 247 项一致性测试与架构边界静态检查（分片并行：CORE_SHARDS，默认 3）
+pnpm test:core:parallel
+
+# 2. 动了 packages/kernel/src 或 packages/games/src/* 时必跑：黑盒随机对局与回放哈希（按模块并行）
+pnpm test:matrix:parallel
 
 # 3. 动了 apps/web/src/render/procedural 时必跑：房间家具连通性与门位冲突（门位冲突数必须为 0）
 pnpm probe:layout
@@ -96,7 +110,7 @@ pnpm probe:layout
 # 4. 动了 roomTile.ts 或新增贴墙贴角构件时必跑：包围盒 z-fighting 几何硬约束检测（≤ ±1.42）
 pnpm probe:overlap
 
-# 5. 动了 UI、渲染交互时必跑：Playwright UI 矩阵测试
+# 5. 动了 UI、渲染交互时必跑：Playwright UI 矩阵（UI_WORKERS 控制并发，UI_SMOKE=1 只跑每游戏首屏）
 pnpm test:ui
 
 # 6. 必跑：文档路径有效性（旧 src/ 布局引用 / 失效链接）
