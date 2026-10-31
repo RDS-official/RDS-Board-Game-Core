@@ -1004,10 +1004,9 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'revolver',
         name: '老式左轮手枪',
         en: 'Revolver',
-        desc: '远程武器：携带期间力量 +2，可射击同楼层直线上的任意房间。',
+        desc: '远程武器：速度攻击 +1 骰，可射击同楼层直线上的任意房间。',
         kind: 'weapon',
-        tradeable: true,
-        modifiers: [{ trait: 'might', delta: 2 }]
+        tradeable: true
       },
       {
         id: 'rope',
@@ -1021,11 +1020,10 @@ export const ITEM_DEFS: Record<string, ItemDef> = Object.fromEntries(
         id: 'sacrificial_dagger',
         name: '献祭匕首',
         en: 'Sacrificial Dagger',
-        desc: '携带期间力量 +2；获得时失去 1 点神智。',
+        desc: '力量攻击 +2 骰；每次攻击须通过神智 3+ 检定，失败失去 1 点神智。',
         kind: 'weapon',
         tradeable: true,
-        modifiers: [{ trait: 'might', delta: 2 }],
-        onGain: [{ trait: 'sanity', amount: -1 }]
+        modifiers: [{ trait: 'might', delta: 2 }]
       },
 
       {
@@ -1858,7 +1856,8 @@ export const WEAPON_SPECS: Record<string, WeaponSpec> = {
   axe: { id: 'axe', name: '锋利手斧', trait: 'might', dice: 1 },
   pickaxe: { id: 'pickaxe', name: '铁镐', trait: 'might', dice: 1 },
   spear: { id: 'spear', name: '神圣之矛', trait: 'might', dice: 2 },
-  sacrificial_dagger: { id: 'sacrificial_dagger', name: '献祭匕首', trait: 'might', dice: 2 },
+  // 献祭匕首：攻击后神智 3+ 检定，失败 -1 神智（docs/BETRAYAL.md 武器表）
+  sacrificial_dagger: { id: 'sacrificial_dagger', name: '献祭匕首', trait: 'might', dice: 2, requiresSanityCheck: 3 },
   blood_dagger: {
     id: 'blood_dagger',
     name: '饮血匕首',

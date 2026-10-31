@@ -54,8 +54,12 @@ export class MatchBroker {
       if (!joinedRoomId) return;
       this.matches.get(joinedRoomId)?.detach(userId);
       const peers = this.roomSockets.get(joinedRoomId);
-      peers?.delete(userId);
-      if (peers && peers.size === 0) this.roomSockets.delete(joinedRoomId);
+      // 同一用户重连后旧 ws 的 close 回调可能晚到：只有映射仍指向本 ws 时才删除，
+      // 否则会误删新连接在 roomSockets 里的条目，导致新连接收不到 delta 推送。
+      if (peers?.get(userId) === ws) {
+        peers.delete(userId);
+        if (peers.size === 0) this.roomSockets.delete(joinedRoomId);
+      }
       joinedRoomId = undefined;
     };
 
