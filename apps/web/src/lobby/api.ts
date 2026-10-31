@@ -47,3 +47,6 @@ export const kickPlayer = (id: string, target: string) =>
   api<HubRoomInfo>('/api/rooms/' + id + '/kick', { method: 'POST', body: JSON.stringify({ target }) });
 export const transferHost = (id: string, target: string) =>
   api<HubRoomInfo>('/api/rooms/' + id + '/host', { method: 'POST', body: JSON.stringify({ target }) });
+/** 房主增删内置 AI 补位座位（德州扑克等支持 AI 的玩法）。 */
+export const setAiSeats = (id: string, aiSeats: number) =>
+  api<HubRoomInfo>('/api/rooms/' + id + '/ai', { method: 'POST', body: JSON.stringify({ aiSeats }) });

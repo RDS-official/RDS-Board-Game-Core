@@ -21,6 +21,8 @@ export interface RoomRecord {
   readyPlayers?: string[]; isPrivate?: boolean; code?: string; scenarioId?: string;
   /** 阶段三：房间回收（旧数据可能缺省，清扫按 createdAt 兜底） */
   lastActivity?: number; firstEmptyAt?: number;
+  /** 房主添加的内置 AI 座位数（旧数据缺省 = 0）。 */
+  aiSeats?: number;
 }
 
 interface DbShape { users: UserRecord[]; rooms: RoomRecord[]; }

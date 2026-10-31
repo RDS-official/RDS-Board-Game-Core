@@ -64,6 +64,16 @@ export interface GameScenario {
 export interface GameSetupOptions {
   /** How many seats the table should have. */
   seats?: number;
+  /**
+   * How many of those seats are humans; the rest may be filled by the
+   * fixture's built-in AI. Fixtures without AI ignore it.
+   */
+  humans?: number;
+  /**
+   * How many built-in AI seats to add on top of the human seats. Fixtures
+   * without AI ignore it.
+   */
+  aiSeats?: number;
 }
 
 /**

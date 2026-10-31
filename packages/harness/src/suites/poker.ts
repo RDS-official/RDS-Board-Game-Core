@@ -745,3 +745,26 @@ test('poker: chip shares are sorted by stack and sum to one', () => {
     'AI rows carry their tier label for the ranking panel'
   );
 });
+
+test('poker: lobby AI seats are added on top of the human seats', () => {
+  // 大厅把「真人座位数」和「房主添加的 AI 数」分开传：1 真人 + 5 AI = 6 座。
+  const one = new UniversalGameEngine(GAME_REGISTRY.poker, 3, {
+    seats: 6,
+    humans: 1,
+    aiSeats: 5
+  } as never);
+  const oneSeats = one.getRawState().globalVars.seats as { isAi: boolean }[];
+  assertEqual(one.getRawState().playerOrder.length, 6, 'one human plus five AI seats six');
+  assertEqual(oneSeats.filter(seat => !seat.isAi).length, 1, 'exactly one human seat');
+
+  // 两个真人 + 四个 AI 同样是 6 座，但真人座位保持在前。
+  const two = new UniversalGameEngine(GAME_REGISTRY.poker, 3, {
+    seats: 6,
+    humans: 2,
+    aiSeats: 4
+  } as never);
+  const twoSeats = two.getRawState().globalVars.seats as { isAi: boolean }[];
+  assertEqual(two.getRawState().playerOrder.length, 6, 'two humans plus four AI seats six');
+  assertEqual(twoSeats.filter(seat => !seat.isAi).length, 2, 'two human seats');
+  assertEqual(twoSeats.slice(0, 2).every(seat => !seat.isAi), true, 'humans take the first seats');
+});

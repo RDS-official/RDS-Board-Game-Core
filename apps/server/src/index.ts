@@ -15,7 +15,7 @@ import {
   login, userFromAuthHeader, profileOf, updateDisplayName, changeOwnPassword,
   createUser, isAdminUser, adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
 } from './auth.ts';
-import { listRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoomInfo, setReady, kickPlayer, transferHost, setRoomChangedHook, sweepRooms } from './rooms.ts';
+import { listRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoomInfo, setReady, kickPlayer, transferHost, setRoomChangedHook, sweepRooms, setAiSeats } from './rooms.ts';
 import { GAMES } from './games.ts';
 import { SignalHub } from './signal.ts';
 import { MatchBroker } from './matchBroker.ts';
@@ -296,6 +296,14 @@ app.post('/api/rooms/:id/host', async c => {
   if (!u) return c.json({ error: 'unauthorized' }, 401);
   const body = await c.req.json().catch(() => ({}));
   const r = transferHost(u.sub, c.req.param('id'), String(body.target ?? ''));
+  return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
+});
+// 房主增删内置 AI 补位座位（目前仅德州扑克支持）。
+app.post('/api/rooms/:id/ai', async c => {
+  const u = userFromAuthHeader(c.req.header('authorization'));
+  if (!u) return c.json({ error: 'unauthorized' }, 401);
+  const body = await c.req.json().catch(() => ({}));
+  const r = setAiSeats(u.sub, c.req.param('id'), Number(body.aiSeats ?? 0));
   return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
 });
 app.get('/healthz', c => c.json({ ok: true }));

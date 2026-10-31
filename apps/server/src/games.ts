@@ -52,6 +52,8 @@ export const GAMES: HubGameInfo[] = [
     protocol: 'rds-room/1',
     durationMin: 30,
     accent: '#4ec9b0',
+    /** 支持房主在大厅直接添加内置 AI 补位。 */
+    aiSeats: true,
     variants: [
       { id: 'ai_table_6', label: '1 真人 + 5 AI（入门桌）' },
       { id: 'ai_table_10', label: '1 真人 + 9 AI（满桌）' },

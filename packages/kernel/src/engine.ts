@@ -44,6 +44,10 @@ export interface EngineOptions {
    * a fixture with a fixed roster ignores it (see `GameSetupOptions`).
    */
   seats?: number;
+  /** How many of those seats are humans (the rest may be built-in AI). */
+  humans?: number;
+  /** How many built-in AI seats to add on top of the human seats. */
+  aiSeats?: number;
 }
 
 export interface ReplayReport {
@@ -60,6 +64,10 @@ export interface ExportedLog {
   scenario?: string;
   /** Requested seat count; part of the initial position, so replay needs it. */
   seats?: number;
+  /** How many of those seats are humans (the rest may be built-in AI). */
+  humans?: number;
+  /** How many built-in AI seats were added on top of the human seats. */
+  aiSeats?: number;
   actions: Action[];
   stateHash: string;
   /** Absent on legacy logs; current logs always write both. */
@@ -87,6 +95,8 @@ export class UniversalGameEngine {
   private scenario?: string;
   /** Requested seat count, kept for `exportLog` / replay. */
   private seats?: number;
+  private humans?: number;
+  private aiSeats?: number;
   /** Full accepted action history (survives time-machine rewinds). */
   private history: Action[] = [];
   private currentViewer: PlayerId | 'GOD' = 'GOD';
@@ -105,8 +115,16 @@ export class UniversalGameEngine {
     this.projectRedactor = module.project ?? {};
     this.scenario = options.scenario;
     this.seats = options.seats;
+    this.humans = options.humans;
+    this.aiSeats = options.aiSeats;
 
-    const initial = this.initialState(seed, options.scenario, options.seats);
+    const initial = this.initialState(
+      seed,
+      options.scenario,
+      options.seats,
+      options.humans,
+      options.aiSeats
+    );
     this.state = { ...initial, seed, seq: 0, clock: initial.clock ?? 0, gameId: module.meta.id };
 
     const dependencyErrors = this.rules.dependencyErrors();
@@ -116,8 +134,17 @@ export class UniversalGameEngine {
 
     if (this.strict) this.validateInitialState();
   }
-  private initialState(seed: number, scenario?: string, seats?: number): GameState {
-    const setupOptions = seats === undefined ? undefined : { seats };
+  private initialState(
+    seed: number,
+    scenario?: string,
+    seats?: number,
+    humans?: number,
+    aiSeats?: number
+  ): GameState {
+    const setupOptions =
+      seats === undefined && humans === undefined && aiSeats === undefined
+        ? undefined
+        : { seats, humans, aiSeats };
     if (!scenario) return this.module.setup(seed, setupOptions);
     const factory = this.module.scenarios?.[scenario];
     if (!factory) {
@@ -959,6 +986,8 @@ export class UniversalGameEngine {
       seed: this.state.seed,
       scenario: this.scenario,
       ...(this.seats === undefined ? {} : { seats: this.seats }),
+      ...(this.humans === undefined ? {} : { humans: this.humans }),
+      ...(this.aiSeats === undefined ? {} : { aiSeats: this.aiSeats }),
       actions: [...this.history],
       stateHash: hashState(head),
       schemaVersion: this.module.meta.schemaVersion ?? 1,
@@ -970,12 +999,16 @@ export class UniversalGameEngine {
     actions: Action[],
     seed = this.state.seed,
     scenario = this.scenario,
-    seats = this.seats
+    seats = this.seats,
+    humans = this.humans,
+    aiSeats = this.aiSeats
   ): { state: GameState; errors: string[] } {
     const shadow = new UniversalGameEngine(this.module, seed, {
       strict: false,
       scenario,
-      ...(seats === undefined ? {} : { seats })
+      ...(seats === undefined ? {} : { seats }),
+      ...(humans === undefined ? {} : { humans }),
+      ...(aiSeats === undefined ? {} : { aiSeats })
     });
     shadow.silent = true;
     const errors: string[] = [];
@@ -1063,7 +1096,16 @@ export class UniversalGameEngine {
 
     this.scenario = payload.scenario;
     this.seats = payload.seats;
-    const { state, errors } = this.replayState(payload.actions, payload.seed, payload.scenario, payload.seats);
+    this.humans = payload.humans;
+    this.aiSeats = payload.aiSeats;
+    const { state, errors } = this.replayState(
+      payload.actions,
+      payload.seed,
+      payload.scenario,
+      payload.seats,
+      payload.humans,
+      payload.aiSeats
+    );
     this.state = state;
     this.history = [...payload.actions];
     this.notifyStateChange();
