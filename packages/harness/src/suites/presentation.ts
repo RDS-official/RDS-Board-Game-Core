@@ -3,6 +3,36 @@
 /* -------------------------------------------------------------------------- */
 
 import { OccupancyIndex } from '@rds/kernel/occupancy';
+
+// ---- Step 2b-2 regression: presentation hints drive map layers ----------
+test('betrayal: presentation hints expose map title, player node, cast, loot, tokens', () => {
+  const session = new UniversalSession(GAME_REGISTRY.betrayal, 5, 'exploration');
+  const snap = session.getSnapshot();
+  assertEqual(snap.spatial?.title, '洋馆总览', 'map title flows into spatial snapshot');
+  const tags = (snap.spatial?.floors ?? []).map(f => f.tag);
+  assert(tags.includes('2F'), 'floor tags flow into spatial snapshot: ' + tags.join(','));
+  assertEqual(typeof session.playerNodeId?.('p1'), 'string', 'playerNodeId returns current room');
+  const roomId = session.playerNodeId?.('p1') ?? 'unknown-room';
+  assertEqual(session.traitLabel?.('speed'), '速度', 'traitLabel resolves localized trait name');
+  assertEqual(session.castMembers?.().length ?? 0, 0, 'no monster on board at game start');
+  assertEqual(session.roomLoot?.(String(roomId)) ?? null, null, 'no loot in an empty room');
+  session.dispose();
+});
+
+test('hud: minimap renders purely from snapshot.spatial and presenter ports', () => {
+  const hud = readFileSync(new URL('../../../../apps/web/src/ui/hud.ts', import.meta.url), 'utf8');
+  const banned = ['BASEMENT', '洋馆总览', 'zone_room_', 'traitZh', 'currentRoomId', '怪物'];
+  for (const token of banned) assert(!hud.includes(token), 'hud.ts must not hardcode ' + token);
+  const required = ['playerNodeId', 'castMembers', 'roomLoot', 'tokenBadge', 'traitLabel', 'snapshot.spatial'];
+  for (const token of required) assert(hud.includes(token), 'hud.ts must use ' + token);
+});
+
+test('betrayal: presentation.ts owns the betrayal-specific label vocabulary', () => {
+  const pres = readFileSync(new URL('../../../games/src/betrayal/presentation.ts', import.meta.url), 'utf8');
+  const required = ['betrayalPlayerNode', 'betrayalCastMember', 'betrayalRoomLoot', 'betrayalTokenBadge', '洋馆总览'];
+  for (const token of required) assert(pres.includes(token), 'betrayal presentation must define ' + token);
+});
+
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { UniversalSession } from '@rds/app/session';

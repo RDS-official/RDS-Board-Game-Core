@@ -88,19 +88,19 @@ apps/web/src/render    Three.js 表现层，负责几何体渲染与物理演算
 
 ```bash
 pnpm verify:changed   # 只跑本次 diff 可能影响的闸门（映射见下表），并发执行
-pnpm test:ui          # 动了 UI/渲染时另跑（21 屏 worker 池，~2.5 分钟）
+pnpm test:ui          # 动了 UI/渲染时另跑（21 屏 worker 池 + 卡面 overlay 探针，~3 分钟）
 ```
 
 **提交前 / 提 PR 前**（全绿）：
 
 ```bash
-pnpm verify:all       # core + matrix + overlap + lint + tsc/build + docs + UI，全部并发，~3.5 分钟
+pnpm verify:all       # core + matrix + overlap + lint/structure + tsc/build + docs + UI + card-overlay，全部并发，~3.5 分钟
 ```
 
 单条闸门（需要单独定位时）：
 
 ```bash
-# 1. 必跑：内核 257 项一致性测试与架构边界静态检查（分片并行：CORE_SHARDS，默认 3）
+# 1. 必跑：内核 263 项一致性测试与架构边界静态检查（分片并行：CORE_SHARDS，默认 3）
 pnpm test:core:parallel
 
 # 2. 动了 packages/kernel/src 或 packages/games/src/* 时必跑：黑盒随机对局与回放哈希（按模块并行）

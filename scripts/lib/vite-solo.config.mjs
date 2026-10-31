@@ -81,6 +81,11 @@ const gitInfo = (() => {
 
 export default defineConfig({
   root,
+  // One cache dir per SOLO_PORT: verify runs several solo servers at the same
+  // time (ui 5180 / overlap 5182 / card-overlay 5183), and a shared
+  // node_modules/.vite makes their dep-optimizer startups race on rmdir of
+  // deps/ — one server dies with ENOTEMPTY before it ever listens.
+  cacheDir: `node_modules/.vite-solo-${process.env.SOLO_PORT ?? '5180'}`,
   define: {
     __COMMIT_HASH__: JSON.stringify(gitInfo.hash),
     __COMMIT_FULL_HASH__: JSON.stringify(gitInfo.fullHash),
