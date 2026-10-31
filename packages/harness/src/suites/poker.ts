@@ -292,6 +292,29 @@ test('poker: everyone folding hands the pot to the last seat standing', () => {
   assertEqual(result.endedBy, 'FOLD', 'the hand ended without a showdown');
 });
 
+test('poker: folded and end-of-hand cards go to the muck face-down', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 19, { scenario: 'seats_4' });
+  startHand(engine);
+
+  act(engine, 'FOLD'); // p4
+  const mid = engine.getRawState();
+  assertEqual(mid.zones.zone_hand_p4.orderedEntities.length, 0, 'the folder keeps no hole cards in hand');
+  for (const id of mid.zones.zone_muck.orderedEntities) {
+    assertEqual(mid.entities[id].visibility.type, 'HIDDEN', `mucked card ${id} stays hidden`);
+  }
+  assertEqual(mid.zones.zone_muck.orderedEntities.length, 2, 'the folded hand went to the muck');
+
+  act(engine, 'FOLD'); // p1
+  act(engine, 'FOLD'); // p2 — hand over, p3 takes it blinds-fold
+  const state = engine.getRawState();
+  assertEqual(hand(state).street, 'COMPLETE', 'the hand is over');
+  assertEqual(state.zones.zone_muck.orderedEntities.length, 8, 'every hole card ends in the muck');
+  assertEqual(state.zones.zone_board.orderedEntities.length, 0, 'community cards return to the deck');
+  for (const pid of state.playerOrder) {
+    assertEqual(state.zones[`zone_hand_${pid}`].orderedEntities.length, 0, `${pid} hand zone is empty`);
+  }
+});
+
 test('poker: the button moves clockwise and the blinds follow it', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 17, { scenario: 'seats_4' });
   startHand(engine);
