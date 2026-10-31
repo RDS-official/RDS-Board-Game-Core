@@ -533,7 +533,10 @@ export const pokerModule: GameModule = defineGame({
     // The legal range depends on the live stack, so bounds are checked in
     // PokerRules.validatePayload instead of the static schema.
     RAISE: { type: 'RAISE', payload: { amount: { kind: 'integer', min: 0 } } },
-    ALL_IN: { type: 'ALL_IN', allowPayload: false }
+    ALL_IN: { type: 'ALL_IN', allowPayload: false },
+    // 座位流程：入座 → 准备（全员准备后 START_HAND 才放行）。
+    TAKE_SEAT: { type: 'TAKE_SEAT', allowPayload: false },
+    READY_UP: { type: 'READY_UP', allowPayload: false }
   },
   scenarios: {
     seats_2: { description: '单挑（2 人）', setup: pokerScenario(2) },
@@ -548,9 +551,23 @@ export const pokerModule: GameModule = defineGame({
     short_stack: {
       description: '短码演示（玩家 4 只有 60 筹码，数手内触发终局）',
       setup: pokerScenario(4, { stacks: [1000, 1000, 1000, 60] })
+    },
+    /**
+     * 默认桌：1 名真人 + 5 个内置 AI（1 初级 / 2 中级 / 2 高级），
+     * 走完整的「入座 → 准备 → 开局」流程。
+     */
+    ai_table_6: {
+      description: '1 真人 + 5 AI（入门桌）',
+      setup: (seed: number) =>
+        setupPoker(seed, { seats: 6, humans: 1, seatingFlow: true })
+    },
+    ai_table_10: {
+      description: '1 真人 + 9 AI（满桌）',
+      setup: (seed: number) =>
+        setupPoker(seed, { seats: 10, humans: 1, seatingFlow: true })
     }
   },
-  setup: seed => setupPoker(seed, { seats: 4 }),
+  setup: seed => setupPoker(seed, { seats: 6, humans: 1, seatingFlow: true }),
   legalActions: (state, playerId) => PokerRules.getLegalActions(state, playerId),
   validatePayload: (state, action, payload) => PokerRules.validatePayload(state, action, payload),
   reduce: (state, action, ctx) => PokerRules.applyAction(state, action, ctx),

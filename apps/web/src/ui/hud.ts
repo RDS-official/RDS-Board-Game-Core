@@ -975,6 +975,8 @@ export class BoardGameHUD {
              so a single-variant fixture keeps the column unchanged. -->
         <aside class="room-card" id="room-card" style="display:none"></aside>
         <aside class="mansion-minimap" id="mansion-minimap" style="display:none"></aside>
+        <!-- 筹码排行（德州扑克）：放在「近期动态」上方 -->
+        <aside class="chip-ranking" id="chip-ranking" style="display:none"></aside>
         <aside class="activity-feed" id="activity-feed"></aside>
       </div>
       <div class="action-dock" id="action-dock"></div>
@@ -1094,6 +1096,7 @@ export class BoardGameHUD {
     this.renderPlayers(snapshot);
     this.renderRoomCard(snapshot);
     this.renderMinimap(snapshot);
+    this.renderChipRanking(snapshot);
     this.renderHistory(snapshot);
     this.renderDock(snapshot);
     this.maybeRevealRoom(snapshot);
@@ -1281,6 +1284,54 @@ export class BoardGameHUD {
     if (source && trait) return `${source} · ${trait}检定`;
     if (source) return source;
     return trait ? `${trait}检定` : '检定';
+  }
+
+  /**
+   * 筹码排行面板（德州扑克）。按筹码占全桌比例排序，展示玩家/等级/筹码/占比条。
+   * 其他游戏 `chipRanking` 为 undefined，面板整体隐藏。
+   */
+  private renderChipRanking(snapshot: GameSnapshot): void {
+    const panel = this.container.querySelector('#chip-ranking') as HTMLElement | null;
+    if (!panel) return;
+    const rows = snapshot.chipRanking;
+    if (!rows || rows.length === 0) {
+      panel.style.display = 'none';
+      panel.dataset.signature = '';
+      return;
+    }
+    panel.style.display = '';
+
+    const signature = rows.map(row => `${row.playerId}:${row.chips}`).join('|');
+    if (panel.dataset.signature === signature) return;
+    panel.dataset.signature = signature;
+
+    const total = rows.reduce((sum, row) => sum + row.chips, 0);
+    const body = rows
+      .map((row, index) => {
+        const percent = (row.share * 100).toFixed(1);
+        const isSelf = row.playerId === snapshot.viewer;
+        const tag = row.isAi
+          ? `<span class="cr-tag ai">${escHtml(row.tierLabel ?? 'AI')}</span>`
+          : `<span class="cr-tag human">真人</span>`;
+        return `
+          <div class="cr-row${isSelf ? ' self' : ''}" title="${escHtml(row.name)} · ${row.chips} 筹码">
+            <span class="cr-rank">${index + 1}</span>
+            <span class="cr-name">${escHtml(row.name)}${tag}</span>
+            <span class="cr-chips">${row.chips}</span>
+            <span class="cr-pct">${percent}%</span>
+            <span class="cr-bar"><i style="width:${Math.max(2, row.share * 100).toFixed(1)}%"></i></span>
+          </div>`;
+      })
+      .join('');
+
+    panel.innerHTML = `
+      <div class="cr-head">
+        <span class="cr-title">筹码排行</span>
+        <span class="cr-total">${total}</span>
+      </div>
+      <div class="cr-body">${body}</div>
+      <div class="cr-foot">占比 = 该玩家筹码 / 全桌总筹码</div>
+    `;
   }
 
   private renderHistory(snapshot: GameSnapshot): void {

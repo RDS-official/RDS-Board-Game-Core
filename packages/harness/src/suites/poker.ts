@@ -9,6 +9,7 @@ import { GAME_REGISTRY } from '@rds/games/registry';
 import { buildPots, splitAmount } from '@rds/games/poker/betting';
 import type { Card, Suit } from '@rds/games/poker/cards';
 import { evaluateSeven } from '@rds/games/poker/handEval';
+import { chipShares } from '@rds/games/poker/ai';
 import type { PokerHandState } from '@rds/games/poker/rules';
 import { assert, assertEqual, test } from '../testKit';
 
@@ -534,4 +535,119 @@ test('poker: the same seed replays to the same state hash', () => {
   assertEqual(a.hash, b.hash, 'identical seeds produce identical states');
   assert(a.replay.ok, `replay verified: ${a.replay.errors.slice(0, 2).join(' | ')}`);
   assert(play(100, 'seats_4').hash !== a.hash, 'a different seed diverges');
+});
+
+/* -------------------------------------------------------------------------- */
+/* Centre: seating flow, built-in AI, chip ranking                            */
+/* -------------------------------------------------------------------------- */
+
+test('poker: the default table is a human plus enough AI to fill six seats', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 5);
+  const state = engine.getRawState();
+  const seats = state.globalVars.seats as { playerId: string; isAi: boolean; aiTier?: string }[];
+
+  assertEqual(state.playerOrder.length, 6, 'default table seats six');
+  assertEqual(seats.filter(seat => !seat.isAi).length, 1, 'exactly one human seat');
+  assertEqual(seats.filter(seat => seat.isAi).length, 5, 'five AI seats fill the rest');
+  assert(state.npcs === undefined, 'AI seats are players, not kernel NPCs');
+  // 编制从弱到强：人少时先坐初级与中级，不会一上来全是高级。
+  assertEqual(seats[1].aiTier, 'beginner', 'the first AI seat is the beginner');
+  assert(
+    seats.some(seat => seat.aiTier === 'intermediate'),
+    'intermediate AI are present'
+  );
+});
+
+test('poker: ten-seat tables keep the 1 beginner / 4 intermediate / 5 advanced mix', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 9, { scenario: 'ai_table_10' });
+  const seats = engine.getRawState().globalVars.seats as { isAi: boolean; aiTier?: string }[];
+  const ai = seats.filter(seat => seat.isAi);
+  assertEqual(ai.length, 9, 'nine AI seats around one human');
+  const mix = ai.reduce<Record<string, number>>((acc, seat) => {
+    const tier = seat.aiTier ?? '?';
+    acc[tier] = (acc[tier] ?? 0) + 1;
+    return acc;
+  }, {});
+  assertEqual(mix.beginner, 1, 'one beginner');
+  assertEqual(mix.intermediate, 4, 'four intermediate');
+  assertEqual(mix.advanced, 4, 'advanced fill what remains of the nine');
+});
+
+test('poker: a human takes a seat, readies up, and only then can start', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 17, { scenario: 'ai_table_6' });
+  const types = () => engine.getLegalActions('p1').map(action => action.type);
+
+  assertEqual(types().join(','), 'TAKE_SEAT', 'the first action is taking a seat');
+  assertEqual(engine.getLegalActions('p2').length, 0, 'AI seats expose no actions to the player');
+
+  assert(engine.dispatch({ type: 'TAKE_SEAT', playerId: 'p1' }).ok, 'taking the seat is accepted');
+  assertEqual(types().join(','), 'READY_UP', 'the seat then offers ready-up');
+
+  assert(engine.dispatch({ type: 'READY_UP', playerId: 'p1' }).ok, 'readiness is accepted');
+  assertEqual(types().join(','), 'START_HAND', 'everyone ready unlocks the start action');
+
+  const started = engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
+  assert(started.ok, 'the game starts');
+  const state = engine.getRawState();
+  assertEqual(state.phase, 'PREFLOP', 'the first hand deals straight away');
+  const seating = state.globalVars.seating as { started: boolean } | undefined;
+  assertEqual(seating?.started, true, 'the seating flow closes once play begins');
+  assert(
+    engine.getLegalActions('p1').every(action => action.type !== 'TAKE_SEAT' && action.type !== 'READY_UP'),
+    'seat actions are gone during play'
+  );
+});
+
+test('poker: ready-up cannot be reached before taking the seat', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 23, { scenario: 'ai_table_6' });
+  const result = engine.dispatch({ type: 'READY_UP', playerId: 'p1' });
+  assertEqual(result.ok, false, 'ready without a seat is rejected');
+  assertEqual(
+    engine.getLegalActions('p1').map(action => action.type).join(','),
+    'TAKE_SEAT',
+    'the seat action is still the only option'
+  );
+});
+
+test('poker: AI seats act on their own and never hand the turn back mid-street', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 31, { scenario: 'ai_table_6' });
+  engine.dispatch({ type: 'TAKE_SEAT', playerId: 'p1' });
+  engine.dispatch({ type: 'READY_UP', playerId: 'p1' });
+  engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
+
+  // 真人只做「跟注」，之后 AI 必须把行动推进回真人或结算本手。
+  let humanTurns = 0;
+  for (let guard = 0; guard < 30 && !engine.getRawState().gameOver; guard++) {
+    const state = engine.getRawState();
+    if (state.activePlayerId !== 'p1') break;
+    const legal = engine.getLegalActions('p1');
+    if (legal.length === 0) break;
+    const pick = legal.find(action => action.type === 'CALL') ?? legal[0];
+    const result = engine.dispatch(withDefaultPayload(pick));
+    assert(result.ok, `human action ${pick.type} is legal`);
+    humanTurns++;
+    // 动作落地后，行动权不应停在一个 AI 座位上。
+    const after = engine.getRawState();
+    if (!after.gameOver && (after.globalVars.hand as { street: string }).street !== 'COMPLETE') {
+      assertEqual(after.activePlayerId, 'p1', 'the action comes back to the human, not an AI');
+    }
+  }
+  assert(humanTurns > 0, 'the human acted at least once');
+});
+
+test('poker: chip shares are sorted by stack and sum to one', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 41, { scenario: 'ai_table_6' });
+  const shares = chipShares(engine.getRawState());
+
+  assertEqual(shares.length, 6, 'one row per seat');
+  const total = shares.reduce((sum, row) => sum + row.share, 0);
+  assert(Math.abs(total - 1) < 1e-9, `shares sum to 1 (got ${total})`);
+  for (let index = 1; index < shares.length; index++) {
+    assert(shares[index - 1].chips >= shares[index].chips, 'sorted by chips descending');
+  }
+  assertEqual(shares.filter(row => !row.isAi).length, 1, 'one human row');
+  assert(
+    shares.some(row => row.tierLabel),
+    'AI rows carry their tier label for the ranking panel'
+  );
 });

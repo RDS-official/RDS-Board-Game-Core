@@ -127,9 +127,10 @@ const scen: any = createRoom(reg.user.id, '变体房', 'betrayal', { scenarioId:
 ok(scen.scenarioId === 'exploration', 'scenario variant stored');
 ok((createRoom(reg.user.id, 'x', 'betrayal', { scenarioId: 'nope' }) as any).error, 'unknown variant rejected');
 
-// 德州扑克：房间座位数跟着所选场景走（默认 4 人，6 人桌变体给 6 个座位）
+// 德州扑克：默认桌是「1 真人 + 5 AI」的 6 人桌（不足 6 人由 AI 补齐），
+// 房间座位数跟着所选场景走。
 const pokerDefault: any = createRoom(reg.user.id, '扑克默认房', 'poker');
-ok(pokerDefault.maxPlayers === 4, 'poker room defaults to the 4-seat fixture');
+ok(pokerDefault.maxPlayers === 6, 'poker room defaults to the 6-seat AI table');
 const pokerSix: any = createRoom(reg.user.id, '扑克六人房', 'poker', { scenarioId: 'seats_6' });
 ok(pokerSix.maxPlayers === 6, 'poker 6-seat variant widens the room cap');
 const pokerTwo: any = createRoom(reg.user.id, '扑克单挑房', 'poker', { scenarioId: 'seats_2', maxPlayers: 9 });

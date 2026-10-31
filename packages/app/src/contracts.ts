@@ -351,6 +351,23 @@ export interface GameSnapshot {
    * always comes with a reason instead of a single silent END_TURN card.
    */
   blockedReason?: string;
+  /**
+   * 筹码排行（仅筹码类游戏，目前是德州扑克）：按筹码占全桌总量的比例排序。
+   * 服务端权威模式下就是「全服」视角；离线单机时降级为本桌数据。
+   */
+  chipRanking?: UiChipRank[];
+}
+
+/** 排行榜的一行：一名玩家的筹码与占比。 */
+export interface UiChipRank {
+  playerId: string;
+  name: string;
+  chips: number;
+  /** 0..1；渲染时格式化成百分比。 */
+  share: number;
+  isAi: boolean;
+  /** AI 等级标签（初级 / 中级 / 高级），真人座位为空。 */
+  tierLabel?: string;
 }
 
 /** One resolved dice roll, in the shape the UI needs to draw it. */
