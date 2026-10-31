@@ -294,8 +294,10 @@ export class PokerRules {
       pid => chipsOf(state, pid) > 0 && !hand.readyForNext.includes(pid)
     );
     if (waiting.length === 0) actions.push({ type: 'START_HAND', playerId });
-    // 上帝视角/调试：一键让所有存活座位就位，省去逐个点「准备」。
-    actions.push({ type: 'DEBUG_READY_ALL', playerId });
+    // 一键全员准备只属于单人调试桌：多真人房间里它等于替别人按准备，不给。
+    const seatPlan = state.globalVars.seats as { isAi: boolean }[] | undefined;
+    const humans = seatPlan ? seatPlan.filter(seat => !seat.isAi).length : 0;
+    if (humans <= 1) actions.push({ type: 'DEBUG_READY_ALL', playerId });
     return actions;
   }
 
@@ -406,10 +408,14 @@ export class PokerRules {
       if (chipsOf(state, playerId) <= 0) return state;
       if (action.type === 'READY') {
         if (hand.readyForNext.includes(playerId)) return state;
-        return {
-          ...withHand(state, { ...hand, readyForNext: [...hand.readyForNext, playerId] }),
-          turn: state.turn + 1
-        };
+        const nextReady = [...hand.readyForNext, playerId];
+        const nextHandState = { ...hand, readyForNext: nextReady };
+        // 全员准备即自动发牌：不依赖某个座位再点一次「发下一手」，也不必赌
+        // AI 恰好抓到 START_HAND。
+        if (this.everyoneReady(state, nextHandState)) {
+          return { ...this.startHand(withHand(state, nextHandState), ctx), turn: state.turn + 1 };
+        }
+        return { ...withHand(state, nextHandState), turn: state.turn + 1 };
       }
       const lastHand = state.globalVars.lastHand as PokerHandResult | undefined;
       const winner = lastHand?.endedBy === 'FOLD' ? lastHand.pots[0]?.winners[0] : undefined;
