@@ -348,7 +348,7 @@ export class SeatPlateBuilder {
     base.receiveShadow = true;
     group.add(base);
     // 半圆环呼吸灯：贴在底座上表面、沿前缘的一段弧。`lamp` 三态由调用方按牌**局**
-    // 语义给出——轮到此人 = 红，已准备但没轮到 = 白，未准备 = 磨砂白（不发光）。
+    // 语义给出——轮到此人 = 红，已准备 / 本轮已动作 = 淡绿，未就位 = 磨砂白。
     // 灯是贴在底座上的，不做成贴片或宝石，近看也只是一道细弧。
     let lamp: THREE.Mesh | undefined;
     {

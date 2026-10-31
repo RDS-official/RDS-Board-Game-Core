@@ -4796,7 +4796,7 @@ export class BoardGameScene {
     const live = this.lastState;
     const actor = live ? (live.activeActorId ?? live.activePlayerId) : undefined;
     const hand = live?.globalVars.hand as
-      | { street?: string; readyForNext?: string[] }
+      | { street?: string; readyForNext?: string[]; lastActions?: Record<string, string>; folded?: string[] }
       | undefined;
     for (const { group, jitter, lamp, seatId } of this.seatStandees) {
       const dx = cam.x - group.position.x;
@@ -4807,8 +4807,11 @@ export class BoardGameScene {
       const material = lamp.material as THREE.MeshBasicMaterial;
       const turn = !!live && seatId === actor;
       const ready = !!live && seatReadyForPlay(live, hand, seatId);
-      material.color.setHex(turn ? 0xff3b2a : ready ? 0xf4f7fb : 0xd6d9de);
-      material.opacity = turn ? pulse : ready ? 0.5 : 0.22;
+      // 「已准备」或「这一轮已经动作过」都算就位：亮淡绿灯。
+      const acted = !!hand?.lastActions?.[seatId] && !hand?.folded?.includes(seatId);
+      const settled = ready || acted;
+      material.color.setHex(turn ? 0xff3b2a : settled ? 0xa8e6a0 : 0xd6d9de);
+      material.opacity = turn ? pulse : settled ? 0.62 : 0.22;
     }
   }
   private renderLoop(): void {
