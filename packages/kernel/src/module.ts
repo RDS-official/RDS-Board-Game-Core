@@ -193,6 +193,11 @@ export interface MomentPresentationHints {
   objective?: string;
   /** How long the curtain stays up. */
   durationMs?: number;
+  /**
+   * 幕布不自动消失：由游戏在状态变化时撤下（例如结算画面要等所有人准备）。
+   * 点击仍然可以手动关闭。
+   */
+  hold?: boolean;
 }
 
 /**

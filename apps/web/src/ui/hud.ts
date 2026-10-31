@@ -966,6 +966,13 @@ export class BoardGameHUD {
   private maybeShowMoment(): void {
     const moment = this.presenter.moment?.() ?? null;
     if (!moment) {
+      // 游戏撤下了幕布（例如结算结束）：正在挂起的幕布要一起收起。
+      const open = this.container.querySelector('#moment-cine');
+      if (open?.classList.contains('open')) {
+        open.classList.remove('open');
+        open.innerHTML = '';
+      }
+      this.lastMomentKey = undefined;
       this.momentArmed = true;
       return;
     }
@@ -1010,7 +1017,8 @@ export class BoardGameHUD {
     };
     layer.addEventListener('click', close);
     if (this.momentTimer) window.clearTimeout(this.momentTimer);
-    this.momentTimer = window.setTimeout(close, moment.durationMs ?? 9000);
+    // hold 的幕布不自动消失：等游戏自己撤下，或玩家点一下。
+    if (!moment.hold) this.momentTimer = window.setTimeout(close, moment.durationMs ?? 9000);
   }
 
   private syncSoundButton(): void {
