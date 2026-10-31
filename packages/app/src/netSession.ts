@@ -48,11 +48,12 @@ import {
   UiChipRank,
   UiDiscoveryView,
   UiHistoryEntry,
+  UiMoment,
   UiNotice,
   UiSpatialInfo,
   ViewerId
 } from './contracts';
-import { buildEntityInspectNotice, buildNodeDiscoveryView } from './inspect';
+import { buildEntityInspectNotice, buildMoment, buildNodeDiscoveryView } from './inspect';
 import {
   UniversalSession,
   BoundAction,
@@ -495,6 +496,18 @@ export class NetSession implements GamePresenter {
     if (this.isLocalAuthority) return this.session?.nodeDetail(nodeId) ?? null;
     const state = this.state;
     return state ? buildNodeDiscoveryView(state.mapGraph.nodes[nodeId], { module: this.module }) : null;
+  }
+
+  /** Full-screen beat declared by the game (a haunt starting), or null. */
+  public moment(): UiMoment | null {
+    if (this.isLocalAuthority) return this.session?.moment() ?? null;
+    const state = this.state;
+    return state ? buildMoment(state, missionLineOf(state), { module: this.module }) : null;
+  }
+
+  /** Localised role name from the game, or null when it has no such role. */
+  public roleLabel(role: string): string | null {
+    return this.module.presentation?.roleLabel?.(role) ?? null;
   }
 
   public subscribe(listener: (snapshot: GameSnapshot) => void): () => void {
@@ -1037,7 +1050,7 @@ export class NetSession implements GamePresenter {
         ...state.playerOrder.map(pid => ({ id: pid, name: state.players[pid]?.name ?? pid }))
       ],
 
-      players: buildPlayersView(state, focus),
+      players: buildPlayersView(state, focus, undefined, undefined, this.module.presentation),
       npcs: buildNpcsView(state, focusActors, actorName),
       actions: this.bound.map(entry => entry.ui),
       legalCount: this.legal.length,

@@ -1,7 +1,7 @@
 # 内核表达缺陷分析与改造方案（RFC）
 
 > 触发来源：山屋惊魂完整实现。实现过程中反复出现的“只能绕过、无法自然表达”集中在五类：**行动者、参数选择、效果生命周期、随机检定、空间几何**。
-> 本文最初只做分析；**Wave 0 与 Wave 1 已按确认的四项取舍落地**，当前基线 `247 passed / 0 failed / 0 boundary violations`。
+> 本文最初只做分析；**Wave 0 与 Wave 1 已按确认的四项取舍落地**，当前基线 `257 passed / 0 failed / 0 boundary violations`。
 > 关联文档：[BETRAYAL.md](BETRAYAL.md) 第 8 节（具体缺陷现象）、[ARCHITECTURE.md](ARCHITECTURE.md)（现有分层）。
 
 ---

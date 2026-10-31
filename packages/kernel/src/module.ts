@@ -143,6 +143,53 @@ export interface NodePresentationHints {
   reveal?: boolean;
 }
 
+/** Display metadata for one trait ladder (betrayal's speed/might/sanity/knowledge). */
+export interface TraitPresentationHints {
+  /** Localised trait name, e.g. “速度”. */
+  label: string;
+  /** One-character glyph for the compact ladder (“速”). */
+  short?: string;
+  /** Ladder colour; the view layer paints whatever it is given. */
+  color?: string;
+  /** Printed track length (pips 0..max). */
+  max?: number;
+  /** Which damage flavour a loss reads as; the HUD only has two vignettes. */
+  damageKind?: 'PHYSICAL' | 'MENTAL';
+}
+
+/**
+ * The slice of a projection a moment declaration may read.
+ *
+ * Moments are the game's own beats — a haunt starting, a finale, a vote. The
+ * generic layer can only observe that the projection changed; what the beat is
+ * called and what it says is declared here.
+ */
+export interface MomentPresentationState {
+  globalVars: Record<string, unknown>;
+  /** The persistent objective line currently shown to the player. */
+  mission?: string;
+  players: Record<string, { name: string; role?: string; alive?: boolean }>;
+}
+
+/** A full-screen beat the game wants announced once. */
+export interface MomentPresentationHints {
+  /** Identity used for de-duplication: a new key plays a new curtain. */
+  key: string;
+  /** Small kicker above the title. */
+  kicker?: string;
+  /** Serial line under the kicker (“HAUNT No.05”). */
+  caption?: string;
+  title: string;
+  /** Story paragraph. */
+  story?: string;
+  /** Named cast lines, e.g. the traitor reveal. */
+  cast?: { label: string; name: string }[];
+  /** Objective line shown at the bottom. */
+  objective?: string;
+  /** How long the curtain stays up. */
+  durationMs?: number;
+}
+
 /**
  * Optional presentation hints a game may declare.
  *
@@ -182,6 +229,27 @@ export interface GamePresentationHints {
    * `node.props` belong to the game. Must be pure.
    */
   describeNode?: (node: MapGraphNode) => NodePresentationHints | null;
+  /**
+   * Display metadata for one trait ladder key. Return null for keys this game
+   * does not treat as a trait; the app layer then keeps the raw key. Must be pure.
+   */
+  describeTrait?: (traitKey: string) => TraitPresentationHints | null;
+  /**
+   * Current trait values for one player, read out of `components.custom`
+   * (betrayal keeps a `traitIndex`). Null means “this player has no ladders”.
+   * The app layer diffs successive projections to animate damage. Must be pure.
+   */
+  traits?: (custom: Record<string, unknown>) => Record<string, number> | null;
+  /**
+   * A full-screen beat to announce once, or null when nothing is happening.
+   * Must be pure.
+   */
+  describeMoment?: (state: MomentPresentationState) => MomentPresentationHints | null;
+  /**
+   * Localised name for a role token. Return null when the game has no such role;
+   * the view layer never maps a role itself. Must be pure.
+   */
+  roleLabel?: (role: string) => string | null;
 }
 
 /**

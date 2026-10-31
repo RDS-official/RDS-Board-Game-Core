@@ -2,7 +2,7 @@
 
 > 触发来源：中期项 14「接入 lint」。
 > 当前状态：**Phase 0（docs:check）与 Phase 1（Biome lint）已落地**；Phase 2（CI 阻断）与 Phase 3（结构性规则 / 全仓格式化）待做。
-> 基线快照：2026-10-31 / `main 83dd12d` —— `pnpm test` 247 passed、`pnpm lint` 0 error / 231 warn / 130 info（228 files）。改动门禁后请同步更新本文与 AGENTS.md / README.md / CONTRIBUTING.md 里的数字。
+> 基线快照：2026-10-31 / `main 6cb7f11` —— `pnpm test` 257 passed、`pnpm lint` 0 error / 231 warn / 131 info（231 files）。改动门禁后请同步更新本文与 AGENTS.md / README.md / CONTRIBUTING.md 里的数字。
 > 结论一句话：用 **Biome 2.6.4** 做 lint + format（解析器独立、兼容 TS7、全仓 <1s），Phase 1 只接 lint 且只要求 **0 error**，
 > 全仓格式化留作独立的纯格式 PR，避免巨型 diff 淹没 review。
 
@@ -12,9 +12,9 @@
 
 | 门禁 | 命令 | 覆盖 | CI 中执行 |
 | --- | --- | --- | --- |
-| 内核一致性 + 分层边界 | `pnpm test` | 247 例 + UI/app/kernel 静态 import 边界 | ✅ `deploy.yml` |
+| 内核一致性 + 分层边界 | `pnpm test` | 257 例 + UI/app/kernel 静态 import 边界 | ✅ `deploy.yml` |
 | Biome lint | `pnpm lint` | 全仓静态检查，0 error 为门槛（231 warn / 130 info 基线不阻断） | 本地必跑；CI 阻断待 Phase 2 |
-| 黑盒矩阵 | `pnpm test:matrix` | 六夹具 × 多 seed × 回放哈希（当前 68 seed 对局 / 25 场景 / 4200 动作） | 手工（改动 kernel/games 时） |
+| 黑盒矩阵 | `pnpm test:matrix` | 六夹具 × 多 seed × 回放哈希（当前 72 seed 对局 / 27 场景 / 4726 动作） | 手工（改动 kernel/games 时） |
 | 大厅自测 | `pnpm test:server` | Hub 房间/账号/私密房/座位 clamp | ✅ `deploy.yml` |
 | 类型检查 | `tsc --noEmit` | 全仓类型 | CI 构建链路内 |
 | 生产构建 | `pnpm build` | Vite 打包 | ✅ `deploy.yml` |
@@ -122,7 +122,7 @@
 
 1. `pnpm lint` 0 error —— ✅（231 warn / 130 info，退出码 0）；
 2. `tsc --noEmit` 0 error —— ✅；
-3. `pnpm test` 247/247 全绿 —— ✅；
+3. `pnpm test` 257/257 全绿 —— ✅；
 4. `pnpm test:server`、`pnpm docs:check`、`pnpm build` 全绿 —— ✅；
 5. 未改动任何游戏逻辑/内核语义：全部修复为括号/等价改写 —— ✅。
 

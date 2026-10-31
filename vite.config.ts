@@ -26,9 +26,6 @@ const gitInfo = (() => {
   if (scpLike) repo = `https://${scpLike[1]}/${scpLike[2]}`;
   else if (rawUrl) repo = rawUrl.replace(/\.git$/, '');
 
-  const slugMatch = repo.match(/github\.com\/([^/]+\/[^/]+)/);
-  const repoSlug = slugMatch ? slugMatch[1] : 'RDS-official/RDS-Board-Game-Core';
-
   // 贡献者 ID 归一化：将 xhopo/Xhopo 的历史提交与记录统一归入 Xhopo-hk。
   const normalizeAuthor = (raw: string): string => {
     const s = String(raw || '').toLowerCase().trim();

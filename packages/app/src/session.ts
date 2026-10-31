@@ -1,6 +1,6 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { describeActionView } from './actionText';
-import { buildEntityInspectNotice, buildNodeDiscoveryView } from './inspect';
+import { buildEntityInspectNotice, buildMoment, buildNodeDiscoveryView } from './inspect';
 import { GameModule } from '@rds/kernel/module';
 import { Action, ActorId, GameState, PlayerId, ProjectedGameState, SelectionCandidate, SelectionSpec, VisualTraceEvent,
   type EffectInstance
@@ -18,6 +18,7 @@ import {
   UiHistoryEntry,
   UiHistoryKind,
   UiHook,
+  UiMoment,
   UiNotice,
   UiNpc,
   UiPlacement,
@@ -73,21 +74,6 @@ const EVENT_ICON: Record<string, string> = {
   ANNOUNCEMENT: '❖'
 };
 
-/** Betrayal trait key → display label used by the damage banner. */
-const TRAIT_LABEL: Record<string, string> = {
-  speed: '速度',
-  might: '力量',
-  sanity: '神智',
-  knowledge: '知识'
-};
-
-const TRAIT_COLOR: Record<string, string> = {
-  speed: '#6aa6f5',
-  might: '#e0604e',
-  sanity: '#57c08b',
-  knowledge: '#b07bf0'
-};
-
 /** How many feed lines the presenter keeps before dropping the oldest. */
 const HISTORY_LIMIT = 60;
 
@@ -104,18 +90,6 @@ interface ActiveBoardGroup {
   idKey: 'targetEdgeId' | 'targetNodeId' | 'entityId';
   targets: string[];
 }
-
-const ROLE_LABELS: Record<string, string> = {
-  LORD: '主公',
-  LOYALIST: '忠臣',
-  REBEL: '反贼',
-  SPY: '内奸',
-  TRAITOR: '叛徒',
-  HERO: '英雄',
-  EXPLORER: '探索者',
-  LANDLORD: '地主',
-  PEASANT: '农民'
-};
 
 const RESOURCES: Record<string, { icon: string; label: string; color: string }> = {
   wood: { icon: '🌲', label: '木材', color: '#3f9d5a' },
@@ -256,6 +230,16 @@ export class UniversalSession implements GamePresenter {
   /** Discovery view for a map node, resolved by the game presentation hints. */
   public nodeDetail(nodeId: string): UiDiscoveryView | null {
     return buildNodeDiscoveryView(this.snapshot.board.mapGraph.nodes[nodeId], { module: this.module });
+  }
+
+  /** Full-screen beat declared by the game (a haunt starting), or null. */
+  public moment(): UiMoment | null {
+    return buildMoment(this.snapshot.board, this.snapshot.mission, { module: this.module });
+  }
+
+  /** Localised role name from the game, or null when it has no such role. */
+  public roleLabel(role: string): string | null {
+    return this.module.presentation?.roleLabel?.(role) ?? null;
   }
 
   public subscribe(listener: (snapshot: GameSnapshot) => void): () => void {
@@ -825,9 +809,12 @@ export class UniversalSession implements GamePresenter {
    * character (combat, events, haunts, manual effects) reports consistently.
    */
   private collectTraitChanges(raw: ReturnType<UniversalGameEngine['getRawState']>): void {
-    if (raw.gameId !== 'betrayal') return;
+    const traitsOf = this.module.presentation?.traits;
+    if (!traitsOf) return;
+    const describeTrait = this.module.presentation?.describeTrait;
     for (const player of Object.values(raw.players ?? {})) {
-      const indexes = (player.customProps?.traitIndex ?? {}) as Record<string, number>;
+      const indexes = traitsOf((player.customProps ?? {}) as Record<string, unknown>);
+      if (!indexes) continue;
       const previous = this.lastTraitIndex.get(player.id);
       this.lastTraitIndex.set(player.id, { ...indexes });
       if (!previous) continue;
@@ -836,7 +823,9 @@ export class UniversalSession implements GamePresenter {
         const from = previous[trait];
         if (from === undefined || from === to) continue;
         const delta = to - from;
-        const label = TRAIT_LABEL[trait] ?? trait;
+        const meta = describeTrait?.(trait);
+        const label = meta?.label ?? trait;
+        const mental = (meta?.damageKind ?? 'PHYSICAL') === 'MENTAL';
         const change: UiTraitChange = {
           playerId: player.id,
           playerName: player.name,
@@ -845,7 +834,7 @@ export class UniversalSession implements GamePresenter {
           from,
           to,
           delta,
-          damageKind: delta < 0 ? (trait === 'sanity' || trait === 'knowledge' ? 'MENTAL' : 'PHYSICAL') : undefined,
+          damageKind: delta < 0 ? (mental ? 'MENTAL' : 'PHYSICAL') : undefined,
           lethal: !player.alive || to === 0
         };
         const sign = delta > 0 ? '+' : '';
@@ -978,7 +967,8 @@ export class UniversalSession implements GamePresenter {
         state,
         focus,
         raw.effects,
-        module.statModifiers ? (actorId: string) => module.statModifiers!(raw, actorId) : undefined
+        module.statModifiers ? (actorId: string) => module.statModifiers!(raw, actorId) : undefined,
+        module.presentation
       ),
       npcs: buildNpcsView(state, focusActors, id => this.engine.getActorName(id)),
       actions: this.bound.map(entry => entry.ui),
@@ -1336,7 +1326,8 @@ export function buildPlayersView(
   state: ProjectedGameState,
   focus: string[],
   effectsOverride?: EffectInstance[],
-  statModifiers?: (actorId: string) => Record<string, number>
+  statModifiers?: (actorId: string) => Record<string, number>,
+  presentation?: GameModule['presentation']
 ): UiPlayer[] {
     const focusSet = new Set(focus);
 
@@ -1381,7 +1372,7 @@ export function buildPlayersView(
         score: player?.score ?? 0,
         scoreLabel: state.gameId === 'sanguosha' ? 'HP' : 'VP',
         alive: player?.alive ?? true,
-        roleLabel: player?.role ? ROLE_LABELS[player.role] ?? player.role : undefined,
+        roleLabel: player?.role ? presentation?.roleLabel?.(player.role) ?? player.role : undefined,
         roleClass: player?.role?.toLowerCase(),
         isFocus: focusSet.has(pid) && (player?.alive ?? true),
         stats: [],
@@ -1465,44 +1456,22 @@ export function buildPlayersView(
           ...(player.customProps.banished ? [{ label: '状态', value: '🛸 已被母舰接引' }] : []),
           ...(player.alive ? [] : [{ label: '状态', value: '💀 已死亡' }])
         ];
-        base.pips = [
-          {
-            color: '#6aa6f5',
-            label: `速度（初始 ${Number(start.speed ?? traits.speed ?? 0)}）`,
-            short: '速',
-            value: String(traits.speed ?? '-'),
-            max: 8,
-            start: Number(start.speed ?? 0),
-            modifier: Number(bonuses.speed ?? 0)
-          },
-          {
-            color: '#e0604e',
-            label: `力量（初始 ${Number(start.might ?? traits.might ?? 0)}）`,
-            short: '力',
-            value: String(traits.might ?? '-'),
-            max: 8,
-            start: Number(start.might ?? 0),
-            modifier: Number(bonuses.might ?? 0)
-          },
-          {
-            color: '#57c08b',
-            label: `神智（初始 ${Number(start.sanity ?? traits.sanity ?? 0)}）`,
-            short: '智',
-            value: String(traits.sanity ?? '-'),
-            max: 8,
-            start: Number(start.sanity ?? 0),
-            modifier: Number(bonuses.sanity ?? 0)
-          },
-          {
-            color: '#b07bf0',
-            label: `知识（初始 ${Number(start.knowledge ?? traits.knowledge ?? 0)}）`,
-            short: '识',
-            value: String(traits.knowledge ?? '-'),
-            max: 8,
-            start: Number(start.knowledge ?? 0),
-            modifier: Number(bonuses.knowledge ?? 0)
-          }
-        ];
+        // Names, glyphs, colours and track length are the game's; this branch
+        // (still game-scoped until the player-fact rewrite) only lays them out.
+        const ladderKeys = Object.keys(traits).length > 0 ? Object.keys(traits) : Object.keys(start);
+        base.pips = ladderKeys.map(key => {
+          const meta = presentation?.describeTrait?.(key);
+          return {
+            color: meta?.color ?? '#8b93a1',
+            label: `${meta?.label ?? key}（初始 ${Number(start[key] ?? traits[key] ?? 0)}）`,
+            short: meta?.short,
+            key,
+            value: String(traits[key] ?? '-'),
+            max: meta?.max ?? 8,
+            start: Number(start[key] ?? 0),
+            modifier: Number(bonuses[key] ?? 0)
+          };
+        });
       } else if (state.gameId === 'dune_mahjong') {
         const openWindow = state.pendingDecisions.find(w => w.status === 'OPEN');
         const submitted = openWindow
