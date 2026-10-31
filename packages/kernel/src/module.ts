@@ -269,6 +269,35 @@ export interface GamePresentationHints {
    * enforces it; the kernel itself stays clock-free.
    */
   actionCooldownMs?: Record<string, number>;
+  /**
+   * Title of the map overview panel in the game's own vocabulary.
+   * A plain string, not a function — see definePresentation.
+   */
+  mapTitle?: string;
+  /**
+   * The map node a player stands on, from that player's custom bag, or null
+   * when the player is off the map (banished, eliminated). The view layer
+   * never reads game-specific keys itself. Must be pure.
+   */
+  playerNode?: (custom: Record<string, unknown>) => string | null;
+  /**
+   * A non-player figure on the map (a monster, a neutral), or null when the
+   * entity is no cast member. Must be pure.
+   */
+  castMember?: (custom: Record<string, unknown>) => { nodeId: string; label: string } | null;
+  /**
+   * Loot summary for a room, from the entity list, or null when the room
+   * holds nothing worth a chip. Must be pure.
+   */
+  roomLoot?: (
+    entities: { zoneId?: string; custom?: Record<string, unknown> }[],
+    roomId: string
+  ) => { label: string; count: number } | null;
+  /**
+   * Badge (label + optional glyph) for a game token like a room symbol, or
+   * null when the token is unknown. Must be pure.
+   */
+  tokenBadge?: (token: string) => { label: string; glyph?: string } | null;
 }
 
 /**
@@ -349,6 +378,10 @@ export function defineGame(module: GameModule): GameModule {
  */
 export function definePresentation(hints: GamePresentationHints): GamePresentationHints {
   for (const [key, value] of Object.entries(hints)) {
+    if (key === 'mapTitle') {
+      if (typeof value !== 'string') throw new TypeError('presentation.mapTitle must be a string');
+      continue;
+    }
     if (key === 'cardPreviewOnHover') {
       if (typeof value !== 'boolean') throw new TypeError('presentation.cardPreviewOnHover must be a boolean');
       continue;

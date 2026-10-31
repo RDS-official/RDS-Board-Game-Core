@@ -532,6 +532,14 @@ export class BoardGameHUD {
         actions.insertBefore(el, anchor);
       }
     }
+
+    // 顶栏可能因换行而变高：把真实高度写回 --topbar-h，侧栏/角色栏据此定位。
+    // 不占用额外的 ResizeObserver：布局变更本来就要过一次这里。
+    const bar = this.container.querySelector('.topbar') as HTMLElement | null;
+    if (bar) {
+      const h = Math.round(bar.getBoundingClientRect().height);
+      if (h > 0) this.container.style.setProperty('--topbar-h', h + 'px');
+    }
   }
 
   private openPayloadForm(action: UiAction): void {
@@ -1216,44 +1224,43 @@ export class BoardGameHUD {
   private renderMinimap(snapshot: GameSnapshot): void {
     const el = this.container.querySelector('#mansion-minimap') as HTMLElement | null;
     if (!el) return;
-    if (snapshot.gameId !== 'betrayal') {
+    // The overview exists for any game that declares map floors; which floors
+    // there are, their names and tab tags are all game declarations.
+    const spatial = snapshot.spatial;
+    if (!spatial || spatial.floors.length === 0) {
       el.style.display = 'none';
       return;
     }
     el.style.display = '';
     el.classList.toggle('collapsed', this.minimapCollapsed);
 
-    const floors = [
-      { id: 'UPPER', level: '2F', name: '二楼' },
-      { id: 'GROUND', level: '1F', name: '一楼' },
-      { id: 'BASEMENT', level: 'B', name: '地下室' }
-    ];
+    // Ordered top-down like an elevation drawing; the level tag is the game's
+    // short label, falling back to the full floor name.
+    const floors = [...spatial.floors]
+      .sort((a, b) => b.index - a.index)
+      .map(f => ({ id: f.id, level: f.tag ?? f.name, name: f.name }));
 
     const isAll = this.selectedFloor === 'ALL';
-    const activeActorId = snapshot.focus[0] ?? snapshot.viewer;
-    const actorPlayer = snapshot.board.players[activeActorId];
-    const actorRoomId = String(actorPlayer?.customProps?.currentRoomId ?? '');
+    const actorRoomId = spatial.activeNodeId ?? '';
     const actorRoom = snapshot.board.mapGraph.nodes[actorRoomId];
-    const actorFloor = String(actorRoom?.props?.floor ?? '');
+    const actorFloor = String(actorRoom?.layer ?? actorRoom?.props?.floor ?? '');
 
     const floorItems = floors.map(floor => {
       const rooms = Object.values(snapshot.board.mapGraph.nodes).filter(
-        n => n.type === 'ROOM' && String(n.props?.floor ?? '') === floor.id
+        n => n.type === 'ROOM' && String(n.layer ?? n.props?.floor ?? '') === floor.id
       );
 
-      // Find players on this floor
+      // Players on this floor: the game says which node each one stands on.
       const playersOnFloor = Object.values(snapshot.board.players).filter(p => {
-        if (!p.alive || p.customProps?.banished) return false;
-        const r = snapshot.board.mapGraph.nodes[String(p.customProps?.currentRoomId ?? '')];
-        return String(r?.props?.floor ?? '') === floor.id;
+        if (!p.alive) return false;
+        const r = snapshot.board.mapGraph.nodes[this.presenter.playerNodeId?.(p.id) ?? ''];
+        return String(r?.layer ?? r?.props?.floor ?? '') === floor.id;
       });
 
-      // Find monsters on this floor
-      const monstersOnFloor = Object.values(snapshot.board.entities ?? {}).filter(e => {
-        const custom = e?.components?.custom as Record<string, unknown> | undefined;
-        if (e.type !== 'MEEPLE' || !custom?.monster || custom?.destroyed) return false;
-        const r = snapshot.board.mapGraph.nodes[String(custom.roomId ?? '')];
-        return String(r?.props?.floor ?? '') === floor.id;
+      // Non-player cast members (monsters) on this floor, game-declared.
+      const monstersOnFloor = (this.presenter.castMembers?.() ?? []).filter(cast => {
+        const r = snapshot.board.mapGraph.nodes[cast.nodeId];
+        return String(r?.layer ?? r?.props?.floor ?? '') === floor.id;
       });
 
       let svgHtml = '';
@@ -1281,8 +1288,8 @@ export class BoardGameHUD {
           const isActorHere = actorRoomId === r.id;
           const isPinned = this.pinnedNodeId === r.id;
 
-          const herePlayers = playersOnFloor.filter(p => p.customProps?.currentRoomId === r.id);
-          const hereMonsters = monstersOnFloor.filter(m => (m.components?.custom as any)?.roomId === r.id);
+          const herePlayers = playersOnFloor.filter(p => (this.presenter.playerNodeId?.(p.id) ?? '') === r.id);
+          const hereMonsters = monstersOnFloor.filter(cast => cast.nodeId === r.id);
 
           const dots = [
             ...herePlayers.map((p, idx) => `<circle cx="${rx + 3.5 + idx * 5}" cy="${ry + roomSize / 2}" r="2.8" fill="${p.color}" stroke="#000" stroke-width="0.8"/>`),
@@ -1333,10 +1340,10 @@ export class BoardGameHUD {
       <div class="mm-head">
         <div class="mm-title">
           <span class="mm-ico">🧭</span>
-          <span class="mm-label">洋馆总览</span>
+          <span class="mm-label">${escHtml(spatial.title ?? '地图总览')}</span>
         </div>
         <div class="mm-controls">
-          <button class="mm-btn-all ${isAll ? 'active' : ''}" data-floor="ALL" type="button" title="查看全宅三层">全部</button>
+          <button class="mm-btn-all ${isAll ? 'active' : ''}" data-floor="ALL" type="button" title="查看全部楼层">全部</button>
           <button class="mm-btn-toggle" id="mm-toggle" type="button" title="折叠/展开小地图">${this.minimapCollapsed ? '▸' : '▾'}</button>
         </div>
       </div>
@@ -1377,14 +1384,22 @@ export class BoardGameHUD {
     this.diceOverlay.show({ roll, label: this.rollLabel(roll) });
   }
 
+  /** Floor display name from the game-declared topology layers. */
+  private floorNameOf(floorId: string, snapshot: GameSnapshot): string {
+    const floors = snapshot.spatial?.floors ?? [];
+    return floors.find(f => f.id === floorId)?.name ?? floorId;
+  }
+
+  /** Badge text for a game token (room symbol); unknown tokens print as-is. */
+  private tokenBadgeOf(token: unknown): string {
+    const key = String(token ?? '');
+    if (!key) return '';
+    const badge = this.presenter.tokenBadge?.(key);
+    return badge ? (badge.glyph ? badge.glyph + ' ' : '') + badge.label : key;
+  }
+
   private rollLabel(roll: NonNullable<GameSnapshot['lastRoll']>): string {
-    const traitZh: Record<string, string> = {
-      speed: '速度',
-      might: '力量',
-      sanity: '神智',
-      knowledge: '知识'
-    };
-    const trait = roll.trait ? traitZh[roll.trait] ?? roll.trait : '';
+    const trait = roll.trait ? this.presenter.traitLabel?.(roll.trait) ?? roll.trait : '';
     const source = roll.label?.trim();
     if (source && trait) return `${source} · ${trait}检定`;
     if (source) return source;
@@ -1525,16 +1540,8 @@ export class BoardGameHUD {
     // During room placement, the Room Dossier immediately pins to the preview room,
     // displaying its flavour text, symbol, floor, and dynamic rotating door compass!
     if (placement) {
-      const floorId = String(placement.floor ?? '');
-      const floorLabel = floorId === 'BASEMENT' ? '地下室' : floorId === 'UPPER' ? '二楼' : '一楼';
-      const symbolBadge =
-        placement.symbol === 'OMEN'
-          ? '👁 预兆'
-          : placement.symbol === 'ITEM'
-          ? '◆ 遗物'
-          : placement.symbol === 'EVENT'
-          ? '✦ 事件'
-          : '· 无符号';
+      const floorLabel = this.floorNameOf(String(placement.floor ?? ''), snapshot);
+      const symbolBadge = this.tokenBadgeOf(placement.symbol) || '· 无符号';
 
       const connMap = new Map((placement.connections ?? []).map(c => [c.dir, c]));
       const compass = ['N', 'E', 'S', 'W']
@@ -1589,8 +1596,7 @@ export class BoardGameHUD {
     }
 
     const focusId = snapshot.focus[0] ?? snapshot.viewer;
-    const actor = board.players[focusId];
-    const actorRoomId = String(actor?.customProps?.currentRoomId ?? '');
+    const actorRoomId = this.presenter.playerNodeId?.(focusId) ?? '';
 
     // Following the active actor is the default; a explicit room click pins the
     // dossier until the actor moves somewhere else.
@@ -1610,21 +1616,14 @@ export class BoardGameHUD {
 
     const props = (node.props ?? {}) as Record<string, unknown>;
     const doors = Array.isArray(props.doors) ? (props.doors as string[]) : [];
-    const floorId = String(props.floor ?? '');
-    const floorLabel = floorId === 'BASEMENT' ? '地下室' : floorId === 'UPPER' ? '二楼' : '一楼';
+    const floorLabel = this.floorNameOf(String(node.layer ?? props.floor ?? ''), snapshot);
     const occupants = Object.values(board.players).filter(
-      p => p.alive && !p.customProps?.banished && p.customProps?.currentRoomId === roomId
+      p => p.alive && (this.presenter.playerNodeId?.(p.id) ?? '') === roomId
     );
-    const monsters = Object.values(board.entities ?? {}).filter(entity => {
-      const custom = entity?.components?.custom as Record<string, unknown> | undefined;
-      return entity.type === 'MEEPLE' && !!custom?.monster && custom?.roomId === roomId && !custom?.destroyed;
-    });
-    const loot = Object.values(board.entities ?? {}).filter(entity => {
-      const custom = entity?.components?.custom as Record<string, unknown> | undefined;
-      return entity.zoneId === `zone_room_${roomId}` && custom?.cardType === 'ITEM';
-    });
+    const monsters = (this.presenter.castMembers?.() ?? []).filter(cast => cast.nodeId === roomId);
+    const loot = this.presenter.roomLoot?.(roomId) ?? null;
 
-    const signature = `${roomId}|${doors.join('')}|${occupants.map(p => p.id).join(',')}|${monsters.length}|${loot.length}`;
+    const signature = `${roomId}|${doors.join('')}|${occupants.map(p => p.id).join(',')}|${monsters.length}|${loot?.count ?? 0}`;
     if (card.dataset.signature === signature) return;
     card.dataset.signature = signature;
 
@@ -1640,9 +1639,9 @@ export class BoardGameHUD {
       })
       .join('');
     const mobs = monsters
-      .map(m => `<span class="rc-chip monster"><i></i>${String((m.components?.custom as Record<string, unknown>)?.name ?? '怪物')}</span>`)
+      .map(m => `<span class="rc-chip monster"><i></i>${escHtml(m.label)}</span>`)
       .join('');
-    const items = loot.length ? `<span class="rc-chip loot"><i></i>遗物 ×${loot.length}</span>` : '';
+    const items = loot ? `<span class="rc-chip loot"><i></i>${escHtml(loot.label)} ×${loot.count}</span>` : '';
 
     card.style.display = '';
     const dossierHtml = `
@@ -1654,7 +1653,7 @@ export class BoardGameHUD {
       <div class="rc-en">${String(props.en ?? '')}</div>
       <div class="rc-meta">
         <div class="rc-compass">${compass}</div>
-        <div class="rc-symbol">${props.symbol === 'OMEN' ? '👁 预兆' : props.symbol === 'ITEM' ? '◆ 遗物' : props.symbol === 'EVENT' ? '✦ 事件' : '· 无事'}</div>
+        <div class="rc-symbol">${escHtml(this.tokenBadgeOf(props.symbol) || '· 无事')}</div>
       </div>
       <p class="rc-text">${String(props.text ?? '')}</p>
       <div class="rc-occupants">${
@@ -1690,28 +1689,23 @@ export class BoardGameHUD {
     const props = (node.props ?? {}) as Record<string, unknown>;
     const doors = Array.isArray(props.doors) ? (props.doors as string[]) : [];
 
-    const floorLabel = String(props.floor ?? '') === 'BASEMENT' ? '地下室' : String(props.floor ?? '') === 'UPPER' ? '二楼' : '一楼';
+    const floorLabel = this.floorNameOf(String(node.layer ?? props.floor ?? ''), snapshot);
     const compass = ['N', 'E', 'S', 'W']
       .map(dir => `<span class="rc-door ${doors.includes(dir) ? 'on' : ''}">${dir}</span>`)
       .join('');
 
     const occupants = Object.values(snapshot.board.players).filter(
-      p => p.alive && !p.customProps?.banished && p.customProps?.currentRoomId === roomId
+      p => p.alive && (this.presenter.playerNodeId?.(p.id) ?? '') === roomId
     );
-    const monsters = Object.values(snapshot.board.entities ?? {}).filter(entity => {
-      const custom = entity?.components?.custom as Record<string, unknown> | undefined;
-      return entity.type === 'MEEPLE' && !!custom?.monster && custom?.roomId === roomId && !custom?.destroyed;
-    });
-    const loot = Object.values(snapshot.board.entities ?? {}).filter(entity => {
-      return entity.zoneId === `zone_room_${roomId}` && entity.components?.custom?.cardType === 'ITEM';
-    });
+    const monsters = (this.presenter.castMembers?.() ?? []).filter(cast => cast.nodeId === roomId);
+    const loot = this.presenter.roomLoot?.(roomId) ?? null;
 
     const chips =
-      occupants.map(p => `<span class="rc-chip" style="--chip:${p.color}"><i></i>${p.name}</span>`).join('') +
+      occupants.map(p => `<span class="rc-chip" style="--chip:${escHtml(p.color)}"><i></i>${escHtml(p.name)}</span>`).join('') +
       monsters
-        .map(m => `<span class="rc-chip monster"><i></i>${String((m.components?.custom as Record<string, unknown>)?.name ?? '怪物')}</span>`)
+        .map(m => `<span class="rc-chip monster"><i></i>${escHtml(m.label)}</span>`)
         .join('') +
-      (loot.length ? `<span class="rc-chip loot"><i></i>遗物 ×${loot.length}</span>` : '');
+      (loot ? `<span class="rc-chip loot"><i></i>${escHtml(loot.label)} ×${loot.count}</span>` : '');
 
     layer.innerHTML = `
       <div class="payload-backdrop"></div>
@@ -1724,7 +1718,7 @@ export class BoardGameHUD {
         <div class="rc-en">${String(props.en ?? '')}</div>
         <div class="rc-meta">
           <div class="rc-compass">${compass}</div>
-          <div class="rc-symbol">${props.symbol === 'OMEN' ? '👁 预兆' : props.symbol === 'ITEM' ? '◆ 遗物' : props.symbol === 'EVENT' ? '✦ 事件' : '· 无符号'}</div>
+          <div class="rc-symbol">${escHtml(this.tokenBadgeOf(props.symbol) || '· 无符号')}</div>
         </div>
         <p class="rc-text">${String(props.text ?? '')}</p>
         <div class="rc-occupants">${chips || '<span class="rc-empty">空无一人</span>'}</div>
@@ -2055,14 +2049,10 @@ export class BoardGameHUD {
           const openDoors = (placement.connections ?? []).filter(c => c.status === 'open');
           const blockedDoors = (placement.connections ?? []).filter(c => c.status === 'blocked');
 
-          const symbolBadge =
-            placement.symbol === 'OMEN'
-              ? '<span class="pp-sym omen">👁 预兆</span>'
-              : placement.symbol === 'ITEM'
-              ? '<span class="pp-sym item">◆ 遗物</span>'
-              : placement.symbol === 'EVENT'
-              ? '<span class="pp-sym event">✦ 事件</span>'
-              : '';
+          const symBadge = placement.symbol ? this.presenter.tokenBadge?.(String(placement.symbol)) : null;
+          const symbolBadge = symBadge
+            ? `<span class="pp-sym ${escHtml(String(placement.symbol).toLowerCase())}">${symBadge.glyph ? symBadge.glyph + ' ' : ''}${escHtml(symBadge.label)}</span>`
+            : '';
 
           const connHtml =
             connectedList.length > 0

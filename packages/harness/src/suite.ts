@@ -13,6 +13,7 @@ import './suites/kernelRollWindow';
 import './suites/betrayalChecks';
 import './suites/bots';
 import './suites/presentation';
+import './suites/isolation';
 import './suites/room';
 import './suites/clock';
 import './suites/catan';

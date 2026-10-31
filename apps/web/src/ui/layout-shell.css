@@ -32,7 +32,10 @@
 .ui-layer.app-shell {
   display: grid;
   grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--side-w);
-  grid-template-rows: var(--topbar-h) minmax(0, 1fr);
+  /* 顶栏行高用 auto：动作区在窄屏换行时行高必须跟着长高，否则第二行
+     会溢出到内容区（实测 1610px 换行后溢出）。实际高度由 hud.ts 的
+     applyShellLayout 写回 --topbar-h，供侧栏/角色栏定位使用。 */
+  grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
     'topbar topbar topbar'
     'rail   board  side';
@@ -147,6 +150,8 @@
   }
 
   .app-shell > .side-column {
+    /* slide-over：脱离网格，避免占用 track。 */
+    grid-area: auto;
     position: fixed;
     top: var(--topbar-h);
     right: 0;
@@ -194,6 +199,9 @@
   }
 
   .app-shell > .player-rail {
+    /* 移出网格流：否则 grid-area:rail 会在单列网格里生成隐式轨道，
+       把顶栏挤成 94px（390px 视口的实测值）。 */
+    grid-area: auto;
     position: fixed;
     top: var(--topbar-h);
     left: 0;
@@ -215,6 +223,8 @@
   }
 
   .app-shell > .side-column {
+    /* 同上：slide-over 面板不属于任何网格单元格。 */
+    grid-area: auto;
     top: var(--topbar-h);
   }
 
@@ -558,4 +568,201 @@
    topbar past the viewport edge once another icon button was added. */
 [hidden] {
   display: none !important;
+}
+
+/* ============================================================
+   顶栏按可用宽度自适应（不重叠、不挤压、不溢出）
+   ------------------------------------------------------------
+   实测旧布局：1610px 溢出 139px，1440/1280 溢出近 300px，
+   390px 顶栏被压到 94px 宽。
+
+   动作区各件的实测宽度预算（含 gap）：
+     品牌 250 · 游戏页签 610 · 局内场景 250 · 滤镜 190 · 相机 190
+     · 6 个图标按钮 6×44 · 信息/角色开关 90
+   1200px 以上必须开始做减法，否则一定换行或溢出。
+   ============================================================ */
+
+.app-shell > .topbar {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  min-width: 0;
+  /* 顶栏可能换行，高度交给内容决定（grid 行已是 auto）。 */
+  min-height: var(--topbar-h);
+}
+
+.app-shell > .topbar > * {
+  min-width: 0;
+}
+
+.app-shell > .topbar .topbar-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* 游戏页签过多时横向滚动，而不是把顶栏撑爆。 */
+.app-shell > .topbar .game-switch {
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.app-shell > .topbar .game-switch::-webkit-scrollbar {
+  display: none;
+}
+
+/* --- 1799px 以下：中等桌面开始一级压缩 ---------------------------------
+   实测单行预算（全展开）：品牌 266 + 页签 647 + 场景 260 + 滤镜 168
+   + 相机 184 + 6×36 图标 + 开关 90 + 间距 ≈ 1880px。
+   所以 1800px 起就要做减法，否则必然换行。
+
+   压缩顺序（越靠后越激进）：① 隐藏「局内场景 / 滤镜」两个文字标签（省 112px）
+   ② 收窄两个下拉 ③ 收窄页签内边距 ④ 缩图标按钮。
+   所有被隐藏的文字都有 title 提示与 select 自身内容兜底。 */
+@media (max-width: 1799px) {
+  .app-shell > .topbar {
+    gap: 12px;
+    padding: 0 14px;
+  }
+
+  .app-shell > .topbar .scenario-switch .vs-label,
+  .app-shell > .topbar .viewer-switch .vs-label {
+    display: none;
+  }
+
+  .app-shell > .topbar .scenario-switch,
+  .app-shell > .topbar .viewer-switch {
+    padding: 0 4px 0 6px;
+  }
+
+  .app-shell > .topbar .scenario-switch select {
+    max-width: 150px;
+  }
+
+  .app-shell > .topbar .viewer-switch select {
+    max-width: 120px;
+  }
+
+  .app-shell > .topbar .game-pill {
+    padding: 0 9px;
+    gap: 5px;
+  }
+
+  .app-shell > .topbar .cam-btn {
+    padding: 0 8px;
+  }
+
+  .app-shell > .topbar .icon-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .app-shell > .topbar .topbar-actions {
+    gap: 6px;
+  }
+}
+
+/* --- 1459px 以下：再压一档（页签只留图标） ----------------------------- */
+@media (max-width: 1459px) {
+  .app-shell > .topbar {
+    gap: 14px;
+  }
+
+  .app-shell > .topbar .game-pill {
+    padding: 0 9px;
+    gap: 5px;
+  }
+
+  .app-shell > .topbar .cam-btn {
+    padding: 0 8px;
+  }
+
+  .app-shell > .topbar .icon-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* 再省一档：品牌副标题与页签文字在窄桌面不再必需。 */
+  .app-shell > .topbar {
+    gap: 10px;
+  }
+
+  .app-shell > .topbar .topbar-actions {
+    gap: 6px;
+  }
+
+  .app-shell > .topbar .game-pill span:not(.gp-ico) {
+    display: none;
+  }
+
+  .app-shell > .topbar .game-pill {
+    padding: 0 8px;
+  }
+}
+
+/* --- 1280px 以下：隐藏相机按钮文字，只留图标字形 ------------------------ */
+@media (max-width: 1319px) {
+  .app-shell > .topbar .game-pill span:not(.gp-ico) {
+    display: none;
+  }
+
+  .app-shell > .topbar .game-pill {
+    padding: 0 8px;
+  }
+
+  .app-shell > .topbar .cam-btn {
+    padding: 0 9px;
+    font-size: 11px;
+    letter-spacing: 0;
+  }
+
+  .app-shell > .topbar .brand {
+    padding-right: 12px;
+  }
+}
+
+/* --- 1100px 以下：动作区整体换到第二行（此时已放不下一行） --------------
+   同时让游戏页签独占一行并可横向滚动：否则它会被动作区挤成 0 宽，
+   用户就再也切不了游戏了（900px 实测）。 */
+@media (max-width: 1099px) {
+  .app-shell > .topbar {
+    padding-top: 6px;
+    padding-bottom: 6px;
+    gap: 8px;
+  }
+
+  .app-shell > .topbar .game-switch {
+    order: 3;
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .app-shell > .topbar .topbar-actions {
+    order: 2;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .app-shell > .topbar .brand {
+    order: 1;
+  }
+
+  /* 品牌副标题在窄屏没有信息量，省下 150px 给页签。 */
+  .app-shell > .topbar .brand-sub {
+    display: none;
+  }
+}
+
+/* --- 767px 以下：手机，交给 slide-over -------------------------------- */
+@media (max-width: 767px) {
+  .app-shell > .topbar .topbar-actions {
+    gap: 6px;
+  }
+
+  .app-shell > .topbar .brand {
+    border-right: 0;
+    padding-right: 0;
+  }
 }

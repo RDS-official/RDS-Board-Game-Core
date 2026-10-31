@@ -6,6 +6,50 @@ import type {
 } from '@rds/kernel/module';
 import type { MapGraphNode } from '@rds/kernel/types';
 
+/** Title of the map overview panel: this game is a house on the hill. */
+export const BETRAYAL_MAP_TITLE = '洋馆总览';
+
+/** The node a player stands on; a banished explorer is off the map. */
+export function betrayalPlayerNode(custom: Record<string, unknown>): string | null {
+  if (custom.banished) return null;
+  const roomId = custom.currentRoomId;
+  return typeof roomId === 'string' && roomId ? roomId : null;
+}
+
+/** Monsters are meeple entities flagged in their custom bag. */
+export function betrayalCastMember(
+  custom: Record<string, unknown>
+): { nodeId: string; label: string } | null {
+  if (!custom.monster || custom.destroyed) return null;
+  const roomId = custom.roomId;
+  if (typeof roomId !== 'string' || !roomId) return null;
+  return { nodeId: roomId, label: typeof custom.name === 'string' && custom.name ? custom.name : '怪物' };
+}
+
+/** Items dropped in a room zone are the room's loot. */
+export function betrayalRoomLoot(
+  entities: { zoneId?: string; custom?: Record<string, unknown> }[],
+  roomId: string
+): { label: string; count: number } | null {
+  const zoneId = 'zone_room_' + roomId;
+  let count = 0;
+  for (const entity of entities) {
+    if (entity.zoneId === zoneId && entity.custom?.cardType === 'ITEM') count += 1;
+  }
+  return count > 0 ? { label: '遗物', count } : null;
+}
+
+const TOKEN_BADGES: Record<string, { label: string; glyph?: string }> = {
+  OMEN: { label: '预兆', glyph: '👁' },
+  ITEM: { label: '遗物', glyph: '◆' },
+  EVENT: { label: '事件', glyph: '✦' }
+};
+
+/** Room symbol chips, in this game's printed vocabulary. */
+export function betrayalTokenBadge(token: string): { label: string; glyph?: string } | null {
+  return TOKEN_BADGES[token] ?? null;
+}
+
 /**
  * Presentation hints for 山屋惊魂 (Betrayal at House on the Hill).
  *
