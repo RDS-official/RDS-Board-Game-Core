@@ -748,10 +748,16 @@ export class BoardGameScene {
     const mesh = this.entityMeshes.get(entityId);
     const point = this.screenToTable(clientX, clientY);
     if (!mesh || !point) return;
-    // 拿起时把牌转向自己的视角：拖动过程中牌面始终朝着相机，字才读得清。
-    const toViewer = new THREE.Vector3().subVectors(this.camera.position, mesh.position);
-    if (toViewer.lengthSq() > 1e-6) {
-      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), toViewer.normalize());
+    // 拖动时牌心法线对准视锥原点（= 相机位置）：法线指向相机，牌面正对读牌的人。
+    // 用基向量构造而不是 setFromUnitVectors —— 后者只约束法线方向，绕视线的自转是
+    // 任意的，牌上的字会歪；这里把牌面的「上」（局部 -Z）对齐相机的 up，文字正立。
+    const normal = new THREE.Vector3().subVectors(this.camera.position, mesh.position);
+    if (normal.lengthSq() > 1e-6) {
+      normal.normalize();
+      const localZ = this.camera.up.clone().normalize().negate();
+      const localX = new THREE.Vector3().crossVectors(normal, localZ).normalize();
+      const fixedZ = new THREE.Vector3().crossVectors(localX, normal).normalize();
+      mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(localX, normal, fixedZ));
     }
     this.cardSettles.delete(entityId);
     mesh.position.x = point[0];
