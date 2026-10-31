@@ -97,7 +97,11 @@ export function createRoom(userId: string, name: string, gameId: string, opts: C
   if (!game) return { error: '未知游戏：' + gameId };
   const variantOk = !opts.scenarioId || game.variants?.some(v => v.id === opts.scenarioId);
   if (!variantOk) return { error: '未知开局变体' };
-  const ceiling = fixtureSeats(gameId, opts.scenarioId) ?? game.maxPlayers;
+  // 房间上限：夹具支持 game.maxPlayers 这种人数（可变人数玩法）就用它，
+  // 否则退回夹具固定座位数（卡坦岛 3、璀璨宝石 2、山屋 3）。
+  const ceiling = seatsSupport(gameId, opts.scenarioId, game.maxPlayers).ok
+    ? game.maxPlayers
+    : (fixtureSeats(gameId, opts.scenarioId) ?? game.maxPlayers);
   const maxPlayers = Math.min(Math.max(opts.maxPlayers ?? ceiling, game.minPlayers), ceiling);
   const id = randomId('r_');
   const rec: RoomRec = {

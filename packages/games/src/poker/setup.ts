@@ -209,11 +209,11 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
 /**
  * Named seat-count scenarios.
  *
- * `seats` is the scenario's default; a caller that asks for a different count
- * through `GameSetupOptions.seats` (a two-player lobby room, say) wins, so a
- * room never deals seats nobody is sitting in.
+ * A `seats_N` scenario **pins** its table size — that is what the variant label
+ * promises, and it is how the lobby caps the room. A caller that wants the table
+ * to follow the room's headcount uses the module's default `setup` (no
+ * scenario), which honours `GameSetupOptions.seats`.
  */
 export function pokerScenario(seats: number, overrides: Partial<PokerConfig> = {}) {
-  return (seed: number, options?: { seats?: number }): GameState =>
-    setupPoker(seed, { ...overrides, seats: options?.seats ?? seats });
+  return (seed: number): GameState => setupPoker(seed, { ...overrides, seats });
 }

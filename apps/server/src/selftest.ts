@@ -110,7 +110,7 @@ ok((createRoom(reg.user.id, 'x', 'betrayal', { scenarioId: 'nope' }) as any).err
 
 // 德州扑克：房间座位数跟着所选场景走（默认 4 人，6 人桌变体给 6 个座位）
 const pokerDefault: any = createRoom(reg.user.id, '扑克默认房', 'poker');
-ok(pokerDefault.maxPlayers === 4, 'poker room defaults to the 4-seat fixture');
+ok(pokerDefault.maxPlayers === 10, 'poker room allows the full 2-10 range by default');
 const pokerSix: any = createRoom(reg.user.id, '扑克六人房', 'poker', { scenarioId: 'seats_6' });
 ok(pokerSix.maxPlayers === 6, 'poker 6-seat variant widens the room cap');
 const pokerTwo: any = createRoom(reg.user.id, '扑克单挑房', 'poker', { scenarioId: 'seats_2', maxPlayers: 9 });
