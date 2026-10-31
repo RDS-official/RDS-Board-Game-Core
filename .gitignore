@@ -23,3 +23,10 @@ apps/server/data/
 
 # git worktrees used for parallel agent work
 .worktrees/
+
+# environment variables & credentials
+.env
+.env.*
+!.env.example
+secrets.json
+
