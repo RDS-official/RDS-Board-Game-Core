@@ -26,7 +26,7 @@ export function signJwt(payload: Record<string, unknown>): string {
   const sig = crypto.createHmac('sha256', JWT_SECRET).update(header + '.' + body).digest('base64url');
   return header + '.' + body + '.' + sig;
 }
-export function verifyJwt(token: string): { sub: string; name: string; role?: 'admin' | 'user' } | null {
+export function verifyJwt(token: string): { sub: string; name: string; role?: 'admin' | 'user'; ep?: number } | null {
   const parts = token.split('.');
   if (parts.length !== 3) return null;
   const expect = crypto.createHmac('sha256', JWT_SECRET).update(parts[0] + '.' + parts[1]).digest('base64url');
@@ -41,7 +41,21 @@ export function verifyJwt(token: string): { sub: string; name: string; role?: 'a
   } catch { return null; }
 }
 
-// ---- 默认管理员初始化（仅在首次部署且不存在时自举初始管理员，绝不覆写生产中已修改的密码） ----
+/**
+ * JWT 校验 + 回查用户记录：账号被删除/禁用、或改密后 tokenEpoch 不匹配的旧令牌一律拒绝。
+ * verifyJwt 只验签名与过期；吊销语义全部由本函数承担（REST 与 /ws 共用）。
+ */
+export function authUserFromToken(token: string | null | undefined): { sub: string; name: string; role: 'admin' | 'user' } | null {
+  if (!token) return null;
+  const payload = verifyJwt(token);
+  if (!payload) return null;
+  const rec = users.byId(payload.sub);
+  if (!rec || rec.disabled) return null;
+  if ((payload.ep ?? 0) !== (rec.tokenEpoch ?? 0)) return null;
+  return { sub: rec.id, name: rec.name, role: rec.role === 'admin' ? 'admin' : 'user' };
+}
+
+// ---- 默认管理员初始化（仅在首次部署且不存在时自举初始管理员，绝不覆写生产中已修改的密码/角色） ----
 export function ensureDefaultAdmin(): void {
   const existing = users.byName(DEFAULT_ADMIN_USER);
   if (!existing) {
@@ -56,12 +70,8 @@ export function ensureDefaultAdmin(): void {
       createdAt: Date.now(),
       disabled: false,
     });
-  } else {
-    // 仅确保其角色具有管理员权限，绝不覆盖已有密码
-    if (existing.role !== 'admin') {
-      users.update(existing.id, { role: 'admin' });
-    }
   }
+  // 已存在则不做任何事：不提权、不改密码（启动时按用户名强制提权会成为提权后门）
 }
 
 // 模块加载时自举默认管理员账号
@@ -100,7 +110,7 @@ export function createUser(
   };
   users.add(rec);
   return {
-    token: signJwt({ sub: id, name, role }),
+    token: signJwt({ sub: id, name, role, ep: 0 }),
     user: { id, name, displayName, role, createdAt: rec.createdAt },
   };
 }
@@ -115,24 +125,24 @@ export function login(name: string, password: string) {
   const u = users.byName(name);
   if (!u || !verify(password, u.salt, u.passHash)) return { error: '用户名或密码错误' };
   if (u.disabled) return { error: '账号已被禁用，请联系管理员' };
-  const role: 'admin' | 'user' = u.role ?? (u.name === 'rds' ? 'admin' : 'user');
+  const role: 'admin' | 'user' = u.role === 'admin' ? 'admin' : 'user';
   return issue(u.id, u.name, role);
 }
 
 function issue(id: string, name: string, role: 'admin' | 'user' = 'user') {
-  return { token: signJwt({ sub: id, name, role }), user: { id, name, role } };
+  const ep = users.byId(id)?.tokenEpoch ?? 0;
+  return { token: signJwt({ sub: id, name, role, ep }), user: { id, name, role } };
 }
 
 export function userFromAuthHeader(header?: string): { sub: string; name: string; role?: 'admin' | 'user' } | null {
   if (!header?.startsWith('Bearer ')) return null;
-  return verifyJwt(header.slice(7));
+  return authUserFromToken(header.slice(7));
 }
 
+/** 管理员判定只认用户记录中的 role 字段（用户名兜底是提权后门，已移除）。 */
 export function isAdminUser(user: { sub: string; name: string; role?: string } | null): boolean {
   if (!user) return false;
-  if (user.role === 'admin' || user.name === 'rds') return true;
-  const rec = users.byId(user.sub);
-  return rec?.role === 'admin' || rec?.name === 'rds';
+  return users.byId(user.sub)?.role === 'admin';
 }
 
 // ---- 阶段一：用户资料（昵称/头像） ----
@@ -147,7 +157,7 @@ export function profileOf(id: string): UserProfile | null {
     id: u.id,
     name: u.name,
     displayName: u.displayName || u.name,
-    role: u.role ?? (u.name === 'rds' ? 'admin' : 'user'),
+    role: u.role === 'admin' ? 'admin' : 'user',
     disabled: !!u.disabled,
     avatarUrl: u.avatarExt ? '/avatars/' + u.id + '.' + u.avatarExt + '?v=' + (u.avatarRev ?? 1) : undefined,
   };
@@ -181,7 +191,8 @@ export function changeOwnPassword(userId: string, oldPass: string, newPass: stri
     return { error: '新密码不能与原密码相同' };
   }
   const { salt, passHash } = hashPassword(newPass);
-  users.update(userId, { salt, passHash });
+  // 递增 tokenEpoch：改密后该用户所有已签发 JWT 立即失效
+  users.update(userId, { salt, passHash, tokenEpoch: (u.tokenEpoch ?? 0) + 1 });
   return { ok: true };
 }
 
@@ -191,7 +202,7 @@ export function adminListUsers() {
     id: u.id,
     name: u.name,
     displayName: u.displayName || u.name,
-    role: u.role ?? (u.name === 'rds' ? 'admin' : 'user'),
+    role: u.role === 'admin' ? 'admin' : 'user',
     disabled: !!u.disabled,
     createdAt: u.createdAt,
     avatarUrl: u.avatarExt ? '/avatars/' + u.id + '.' + u.avatarExt + '?v=' + (u.avatarRev ?? 1) : undefined,
@@ -206,13 +217,14 @@ export function adminUpdateUser(
   const u = users.byId(id);
   if (!u) return { error: '用户不存在' };
 
-  if (u.name === 'rds') {
-    if (patch.role && patch.role !== 'admin') return { error: '不能修改系统管理员 rds 的角色' };
-    if (patch.disabled) return { error: '不能禁用系统管理员 rds 账号' };
+  if (u.name === DEFAULT_ADMIN_USER) {
+    if (patch.role && patch.role !== 'admin') return { error: '不能修改系统管理员 ' + DEFAULT_ADMIN_USER + ' 的角色' };
+    if (patch.disabled) return { error: '不能禁用系统管理员 ' + DEFAULT_ADMIN_USER + ' 账号' };
   }
 
-  if (operatorId && operatorId === id && patch.disabled) {
-    return { error: '不能禁用当前登录的账号' };
+  if (operatorId && operatorId === id) {
+    if (patch.disabled) return { error: '不能禁用当前登录的账号' };
+    if (patch.role !== undefined) return { error: '不能修改当前登录账号自身的角色' };
   }
 
   const updates: Partial<UserRecord> = {};
@@ -243,7 +255,8 @@ export function adminResetPassword(id: string, newPass: string): { ok: true } | 
   if (!u) return { error: '用户不存在' };
   if (!newPass || newPass.length < 6) return { error: '密码至少 6 位' };
   const { salt, passHash } = hashPassword(newPass);
-  users.update(id, { salt, passHash });
+  // 递增 tokenEpoch：重置密码后被重置者此前签发的 JWT 立即失效
+  users.update(id, { salt, passHash, tokenEpoch: (u.tokenEpoch ?? 0) + 1 });
   return { ok: true };
 }
 
@@ -251,7 +264,7 @@ export function adminResetPassword(id: string, newPass: string): { ok: true } | 
 export function adminDeleteUser(id: string, operatorId?: string): { ok: true } | { error: string } {
   const u = users.byId(id);
   if (!u) return { error: '用户不存在' };
-  if (u.name === 'rds') return { error: '系统管理员账号 rds 不可删除' };
+  if (u.name === DEFAULT_ADMIN_USER) return { error: '系统管理员账号 ' + DEFAULT_ADMIN_USER + ' 不可删除' };
   if (operatorId && operatorId === id) return { error: '不能删除当前登录的管理员账号' };
 
   // 清理该用户在房间中的参与状态

@@ -420,6 +420,28 @@ test('poker: two short all-ins that add up to a full raise reopen the betting', 
   assert(legal.includes('CALL'), 'and the seat may still just call the difference');
 });
 
+test('poker: an accumulated short-all-in reopen keeps the full-raise minimum', () => {
+  // TDA 45 reopened action must NOT shrink the minimum raise: the two +5
+  // short all-ins reopened the betting, but the last FULL raise was the big
+  // blind (10), so the smallest raise is to 20 + 10 = 30 — not 20 + 5 = 25.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 53, { scenario: 'seats_4' });
+  const raw = engine.getRawState();
+  setChips(raw, 'p4', 15);
+  setChips(raw, 'p2', 20);
+  startHand(engine);
+
+  act(engine, 'ALL_IN'); // p4 shoves 15 (+5 over the big blind)
+  callAround(engine, 1); // p1 calls 15
+  act(engine, 'ALL_IN'); // p2 shoves 20 (+5 more, 10 accumulated = full raise)
+  callAround(engine, 1); // p3 completes to 20
+
+  assertEqual(engine.getActiveActorId(), 'p1', 'p1 faces the reopened action');
+  const tooSmall = engine.dispatch({ type: 'RAISE', playerId: 'p1', payload: { amount: 25 } });
+  assert(!!tooSmall.error, 'a raise to 25 (last short increment as minimum) is rejected');
+  act(engine, 'RAISE', { amount: 30 }); // 20 + lastRaiseSize 10 = the real minimum
+  assertEqual(hand(engine.getRawState()).currentBet, 30, 'raising to the full-raise minimum works');
+});
+
 test('poker: one short all-in closes the street once everyone matches it', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 49, { scenario: 'seats_4' });
   const raw = engine.getRawState();

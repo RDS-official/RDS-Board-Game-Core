@@ -11,6 +11,8 @@ export interface UserRecord {
   role?: 'admin' | 'user';
   /** 账号是否被管理员禁用 */
   disabled?: boolean;
+  /** 令牌世代：改密/重置密码时 +1，使该用户所有已签发 JWT 立即失效（缺省视为 0） */
+  tokenEpoch?: number;
 }
 export interface RoomRecord {
   id: string; name: string; gameId: string; hostId: string; status: 'open' | 'playing' | 'closed';

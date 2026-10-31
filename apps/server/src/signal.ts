@@ -1,6 +1,6 @@
 /** WebSocket 信令：房间组 + SDP/ICE 盲转发 + 大厅实时频道。不接触游戏数据。 */
 import type { WebSocket } from 'ws';
-import { verifyJwt, profileOf } from './auth.ts';
+import { authUserFromToken, profileOf } from './auth.ts';
 import { rooms } from './storage.ts';
 import type { HubRoomInfo, SignalMessage } from '@rds/room-protocol';
 
@@ -16,7 +16,7 @@ export class SignalHub {
   constructor(private readonly onAuthorizedClient?: (ws: WebSocket, userId: string) => void) {}
 
   accept(ws: WebSocket, token: string | null) {
-    const payload = token ? verifyJwt(token) : null;
+    const payload = authUserFromToken(token);
     if (!payload) { ws.close(4001, 'unauthorized'); return; }
     const client: Client = { userId: payload.sub, name: payload.name, ws, alive: true, lobby: false };
     // 同一用户新连接顶掉旧连接（页面重载/大厅→对局切换时旧 ws 可能未及时关闭，
