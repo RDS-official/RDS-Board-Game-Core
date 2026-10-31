@@ -748,7 +748,8 @@ export class PokerRules {
       shortRaiseAccum: 0,
       lastActions: {},
       revealed: [],
-      readyForNext: [],
+      // AI 座位不需要点「准备」：它们开局即就绪，只有真人要按。
+      readyForNext: order.filter(pid => isAiSeat(state, pid)),
       folded: [],
       allIn: [],
       community: [],
