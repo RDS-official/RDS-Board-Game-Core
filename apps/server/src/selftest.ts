@@ -1,11 +1,18 @@
 /** M1 自检：不依赖浏览器，直接调用各模块断言核心行为。 */
-import {
+// 数据隔离：自检必须在一次性临时目录里跑（部署机 data/ 软链到生产数据，
+// `pnpm test:server` 若不隔离会把 tester 用户/测试房间写进线上库）。
+// 因此必须先设好 HUB_DATA_DIR 再动态 import 业务模块（静态 import 会在本行之前求值）。
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+process.env.HUB_DATA_DIR ||= fs.mkdtempSync(path.join(os.tmpdir(), 'rds-selftest-'));
+const {
   register, login, verifyJwt, userFromAuthHeader, createUser, isAdminUser, changeOwnPassword,
   adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
-} from './auth.ts';
-import { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo } from './rooms.ts';
-import { GAMES } from './games.ts';
-import { MatchManager } from './match.ts';
+} = await import('./auth.ts');
+const { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo } = await import('./rooms.ts');
+const { GAMES } = await import('./games.ts');
+const { MatchManager } = await import('./match.ts');
 
 let failed = 0;
 const ok = (cond: boolean, name: string) => { if (!cond) { failed++; console.error('FAIL', name); } else console.log('ok -', name); };
@@ -182,4 +189,5 @@ const deleteRes: any = adminDeleteUser(other.user.id, adminLogin.user.id);
 ok(deleteRes.ok === true, 'adminDeleteUser works');
 
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');
+try { fs.rmSync(process.env.HUB_DATA_DIR!, { recursive: true, force: true }); } catch { /* 临时目录清理失败无所谓 */ }
 process.exit(failed ? 1 : 0);
