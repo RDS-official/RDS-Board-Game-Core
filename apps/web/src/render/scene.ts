@@ -2341,6 +2341,7 @@ export class BoardGameScene {
           {
             name: seatPlayer?.name ?? seatId,
             avatar: seatPlayer?.avatar ?? '👤',
+            avatarUrl: seatPlayer?.avatarUrl,
             color: seatPlayer?.color ?? '#455a64',
             detail: this.seatPlateDetail(state, seatId),
             active: seatId === activeActor,
