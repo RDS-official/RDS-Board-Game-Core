@@ -79,10 +79,9 @@ export function planSeats(humans: number, target: number = POKER_TABLE.minPlayer
   seats: SeatAssignment[];
 } {
   const humanCount = Math.max(1, Math.floor(humans));
-  const total = Math.min(
-    POKER_TABLE.maxPlayers,
-    Math.max(POKER_TABLE.minPlayers, Math.floor(target), humanCount)
-  );
+  // 目标座位数：不低于 6 人（低于 6 时用 AI 补齐），不超过 10 人，
+  // 且必须容得下所有真人。
+  const total = Math.min(POKER_TABLE.maxPlayers, Math.max(POKER_TABLE.minPlayers, Math.floor(target), humanCount));
   const aiCount = Math.max(0, total - humanCount);
   const seats: SeatAssignment[] = [];
   for (let index = 0; index < humanCount; index++) {

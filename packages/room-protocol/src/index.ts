@@ -52,6 +52,11 @@ export interface HubGameInfo {
   durationMin?: number; accent?: string;
   /** 可选开局变体（映射 kernel scenarios 的用户可选项；缺省=标准）。 */
   variants?: { id: string; label: string }[];
+  /**
+   * 该玩法是否允许房主添加内置 AI 补位（德州扑克为 true）。
+   * 大厅据此显示「添加 AI」控件。
+   */
+  aiSeats?: boolean;
 }
 export interface HubRoomInfo {
   id: string; name: string; gameId: string; hostId: string; hostName: string;
@@ -63,4 +68,9 @@ export interface HubRoomInfo {
   isPrivate?: boolean; code?: string;
   /** 开局变体（透传给游戏客户端 ?scenario=）。 */
   scenarioId?: string;
+  /**
+   * 房主添加的内置 AI 座位数（德州扑克等支持 AI 补位的玩法）。
+   * 这些座位不占真人名额，开局时由游戏夹具按等级编制填入。
+   */
+  aiSeats?: number;
 }

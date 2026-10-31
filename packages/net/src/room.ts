@@ -44,6 +44,10 @@ export interface GameRoomOptions {
    * would deal four seats and stall on a seat nobody controls.
    */
   seats?: number;
+  /** How many of those seats are humans; the rest may be filled by built-in AI. */
+  humans?: number;
+  /** How many built-in AI seats to add on top of `humans`. */
+  aiSeats?: number;
 }
 
 export type RoomAuthorizer = (viewer: PlayerId | 'GOD', token?: string) => boolean;
@@ -88,7 +92,9 @@ export class GameRoom implements RoomTransport {
   ) {
     const engineOptions = {
       ...(scenario ? { scenario } : {}),
-      ...(options.seats === undefined ? {} : { seats: options.seats })
+      ...(options.seats === undefined ? {} : { seats: options.seats }),
+      ...(options.humans === undefined ? {} : { humans: options.humans }),
+      ...(options.aiSeats === undefined ? {} : { aiSeats: options.aiSeats })
     };
     this.engine =
       engine ??

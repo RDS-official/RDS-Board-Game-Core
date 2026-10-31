@@ -36,6 +36,11 @@ export interface MatchOptions {
    * 不支持就抛错，避免"2 人房间摆了 4 个座位、回合卡在无人控制的 p4"。
    */
   seats?: number;
+  /**
+   * 房主添加的内置 AI 补位数量。AI 不占真人名额，实际桌面座位 =
+   * `seats + aiSeats`（由夹具裁剪到支持范围）。
+   */
+  aiSeats?: number;
   seed?: number;
 }
 
@@ -43,6 +48,8 @@ export interface MatchSeatInfo {
   userId: string;
   seat: PlayerId;
   name: string;
+  /** 该座位是内置 AI（无 hub userId，用 `ai:<seat>` 占位）。 */
+  isAi?: boolean;
 }
 
 const MAX_SEATS = 10;
@@ -81,14 +88,24 @@ export class ServerMatch {
       undefined,
       {
         hostActors: [], // 服务端没有任何「本地房主」，全部走 viewer 校验
-        ...(options.seats === undefined ? {} : { seats: options.seats })
+        // 桌面座位 = 真人 + AI 补位；`humans` 让夹具知道哪几个座位是真人，
+        // 其余按等级编制填入内置 AI。
+        ...(options.seats === undefined
+          ? {}
+          : {
+              // 总座位 = 真人 + AI 补位；夹具按 humans 决定哪几座是真人，
+              // 其余按等级编制填入内置 AI（见 poker/seating.ts）。
+              seats: Math.min(options.seats + (options.aiSeats ?? 0), MAX_SEATS),
+              humans: options.seats,
+              aiSeats: options.aiSeats ?? 0
+            })
       }
     );
 
-    // 座位数必须与房间里的真人一致：夹具可能不支持该人数（固定阵容的夹具会
+    // 座位数必须覆盖房间里的真人：夹具可能不支持该人数（固定阵容的夹具会
     // 忽略 seats 请求），这时宁可开局失败，也不要摆出无人控制的空座位。
     if (options.seats !== undefined) {
-      const wanted = Math.min(options.seats, MAX_SEATS);
+      const wanted = Math.min(options.seats + (options.aiSeats ?? 0), MAX_SEATS);
       const dealt = this.room.engine.getRawState().playerOrder.length;
       if (dealt !== wanted) {
         this.room.dispose();
@@ -128,12 +145,31 @@ export class ServerMatch {
     return this.seats.get(userId);
   }
 
+  /**
+   * 桌面全部座位（含内置 AI）。
+   *
+   * AI 座位没有 hub userId，用 `ai:<seat>` 作为占位 id，这样观测端点能如实
+   * 反映「这张桌子有几个座位」，而不只是有几个真人。
+   */
   public seatList(): MatchSeatInfo[] {
-    const out: MatchSeatInfo[] = [];
-    for (const [userId, seat] of this.seats) {
-      out.push({ userId, seat, name: this.room.engine.getActorName(seat) });
-    }
-    return out;
+    const raw = this.room.engine.getRawState();
+    const aiSeats = new Set(
+      ((raw.globalVars.seats as { playerId: string; isAi: boolean }[] | undefined) ?? [])
+        .filter(seat => seat.isAi)
+        .map(seat => seat.playerId)
+    );
+    const bySeat = new Map<string, string>();
+    for (const [userId, seat] of this.seats) bySeat.set(String(seat), userId);
+
+    return raw.playerOrder.map(seat => {
+      const isAi = aiSeats.has(seat);
+      return {
+        userId: isAi ? `ai:${seat}` : bySeat.get(seat) ?? `unknown:${seat}`,
+        seat,
+        name: this.room.engine.getActorName(seat),
+        isAi
+      };
+    });
   }
 
   /** 记录该用户已连接（推送 delta 用），返回其座位投影。 */
@@ -255,11 +291,20 @@ export class ServerMatch {
   }
 }
 
-/** 座位表是否与给定玩家顺序一致（只比较 userId）。 */
-function sameSeats(match: ServerMatch, players: MatchPlayerSeed[]): boolean {
+/**
+ * 座位表是否与给定配置一致：真人顺序 + 实际桌面座位数都要匹配。
+ *
+ * 只比较真人会漏掉 AI 补位——房主刚加了 5 个 AI，座位总数变了却仍复用旧对局，
+ * 结果 AI 永远上不了桌。
+ */
+function sameSeats(match: ServerMatch, options: MatchOptions): boolean {
   const seats = match.seatList();
-  if (seats.length !== Math.min(players.length, MAX_SEATS)) return false;
-  return seats.every((seat, index) => seat.userId === players[index]?.userId);
+  const humans = Math.min(options.players.length, MAX_SEATS);
+  const wanted = Math.min(humans + (options.aiSeats ?? 0), MAX_SEATS);
+  if (seats.length !== wanted) return false;
+  return options.players
+    .slice(0, humans)
+    .every((player, index) => seats[index]?.userId === player.userId);
 }
 
 /** 房间 → 对局映射。房间关闭或重开时销毁对局。 */
@@ -276,7 +321,7 @@ export class MatchManager {
     if (existing) {
       // 开局前（尚无任何真实跃迁）玩家名单可能仍在变化：按最新座位表重建，
       // 避免先进入的玩家把后来者挡在座位表外。一旦产生 revision 就不再重建。
-      if (existing.revision === 0 && !sameSeats(existing, options.players)) {
+      if (existing.revision === 0 && !sameSeats(existing, options)) {
         existing.dispose();
         this.matches.delete(options.roomId);
       } else {

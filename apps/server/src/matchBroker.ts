@@ -89,7 +89,8 @@ export class MatchBroker {
           avatarUrl: profile?.avatarUrl
         };
       });
-      // 桌面只摆真实存在的座位：房间里 2 个人就发 2 个座位。
+      // 桌面座位 = 真人 + 房主添加的 AI 补位。AI 不占真人名额，由夹具按
+      // 等级编制裁剪（见 packages/games/src/poker/seating.ts）。
       let match: ServerMatch;
       try {
         match = this.matches.ensure({
@@ -97,7 +98,8 @@ export class MatchBroker {
           gameId: room.gameId,
           scenario: room.scenarioId,
           players: seats,
-          seats: seats.length
+          seats: seats.length,
+          aiSeats: room.aiSeats ?? 0
         });
       } catch (error) {
         send({

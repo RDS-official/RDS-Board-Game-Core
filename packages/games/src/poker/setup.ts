@@ -25,6 +25,11 @@ export interface PokerConfig {
    * 小于 seats 时其余座位由内置 AI 补齐，等级取自 POKER_AI_ROSTER。
    */
   humans?: number;
+  /**
+   * 房主添加的 AI 补位数量。给了就用「真人座位 + 该数量」组成桌面，
+   * 不再自动补到 6 人；缺省时按 POKER_TABLE.minPlayers 补齐。
+   */
+  aiSeats?: number;
   /** 显式指定每个座位的 AI 等级（覆盖 POKER_AI_ROSTER 的顺序）。 */
   aiTiers?: PokerAiTier[];
   /** 是否开启「入座 → 准备 → 开局」流程（缺省 false，保持旧测试行为）。 */
@@ -106,7 +111,8 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
 
   // 座位编制：真人坐前 N 个座位，其余由内置 AI 补齐（等级分布固定、可测）。
   const humans = Math.max(1, Math.min(seats, Math.floor(config.humans ?? seats)));
-  const plan = planSeats(humans, seats);
+  // AI 补位数缺省时按最低开局人数（6）补齐；显式给出则用人类座位数 + AI 数。
+  const plan = planSeats(humans, config.aiSeats !== undefined ? humans + config.aiSeats : seats);
   const assignments: SeatAssignment[] =
     config.aiTiers && config.aiTiers.length > 0
       ? plan.seats.map((seat, index) =>
