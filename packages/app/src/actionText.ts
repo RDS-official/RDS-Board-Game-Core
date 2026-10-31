@@ -449,6 +449,8 @@ function describeActionZh(
         return { icon: '🪑', label: '入座', hint: '在本桌坐下 · 坐下后可以点准备', tone: 'primary' };
       case 'READY_UP':
         return { icon: '✅', label: '准备', hint: '全员准备后自动开局发牌', tone: 'primary' };
+      case 'FORCE_START':
+        return { icon: '⏭', label: '立即开始', hint: '不等未准备的座位 · 直接发下一手', tone: 'primary' };
       case 'DEBUG_READY_ALL':
         return { icon: '⚡', label: '全员准备', hint: '调试：所有存活座位一键就位', tone: 'primary' };
       case 'READY':

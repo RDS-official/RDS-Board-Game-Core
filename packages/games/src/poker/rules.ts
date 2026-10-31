@@ -286,24 +286,37 @@ export class PokerRules {
       actions.push({ type: 'SHOW', playerId });
       actions.push({ type: 'MUCK', playerId });
     }
+    // 不等了：任何人（尤其房主）都能直接开下一手，避免个别座位没点准备把桌子卡死。
+    actions.push({ type: 'FORCE_START', playerId });
     if (!hand.readyForNext.includes(playerId)) {
       actions.push({ type: 'READY', playerId });
       return actions;
     }
     const waiting = state.playerOrder.filter(
-      pid => chipsOf(state, pid) > 0 && !hand.readyForNext.includes(pid)
+      pid => chipsOf(state, pid) > 0 && !this.isReadyFor(hand, state, pid)
     );
     if (waiting.length === 0) actions.push({ type: 'START_HAND', playerId });
     // 一键全员准备只属于单人调试桌：多真人房间里它等于替别人按准备，不给。
     const seatPlan = state.globalVars.seats as { isAi: boolean }[] | undefined;
     const humans = seatPlan ? seatPlan.filter(seat => !seat.isAi).length : 0;
     if (humans <= 1) actions.push({ type: 'DEBUG_READY_ALL', playerId });
+    // 不等了：任何人（尤其房主）都能直接开下一手，避免个别座位没点准备就把桌子卡死。
     return actions;
   }
 
   /** 存活座位是否全部点过「准备」。 */
+  /**
+   * 该座位是否算「已就位」。
+   *
+   * AI 座位永远不会点准备按钮，所以不能只看 `readyForNext` 里有没有它——只要它是
+   * AI 就直接算就位。这样无论发牌时有没有把 AI 预置进去，牌桌都不会被 AI 卡死。
+   */
+  private static isReadyFor(hand: PokerHandState, state: GameState, playerId: PlayerId): boolean {
+    return hand.readyForNext.includes(playerId) || isAiSeat(state, playerId);
+  }
+
   private static everyoneReady(state: GameState, hand: PokerHandState): boolean {
-    return state.playerOrder.every(pid => chipsOf(state, pid) <= 0 || hand.readyForNext.includes(pid));
+    return state.playerOrder.every(pid => chipsOf(state, pid) <= 0 || this.isReadyFor(hand, state, pid));
   }
 
   /** Cross-field validation for the declarative raise amount. */
@@ -396,6 +409,13 @@ export class PokerRules {
 
     // 结算阶段的三种纯状态更新：准备、亮牌、弃牌（不亮）。
     // 上帝视角/调试：一键让所有存活座位就位，省去逐个点「准备」。
+    if (action.type === 'FORCE_START') {
+      if (hand.street !== 'COMPLETE') return state;
+      const solvent = state.playerOrder.filter(pid => chipsOf(state, pid) > 0);
+      const forced = withHand(state, { ...hand, readyForNext: solvent });
+      return { ...this.startHand(forced, ctx), turn: state.turn + 1 };
+    }
+
     if (action.type === 'DEBUG_READY_ALL') {
       if (hand.street !== 'COMPLETE') return state;
       const solvent = state.playerOrder.filter(pid => chipsOf(state, pid) > 0);
