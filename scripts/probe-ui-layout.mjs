@@ -114,9 +114,68 @@ const measure = ({ minFont, minTouch, tol }) => {
     if (r.height < minTouch || r.width < minTouch) tiny.push(`${el.className || el.tagName}:${Math.round(r.width)}x${Math.round(r.height)}`);
   }
 
+  // ---- topbar: must fit its own box and never overlap itself --------------
+  // 顶栏是唯一「内容多到需要按宽度做减法」的容器；曾因 slide-over 面板占用
+  // 网格轨道、行高写死、以及 1024px 直接 display:none 掉游戏页签，
+  // 出现内容溢出到屏幕外与控件互相重叠（实测 1610px 溢出 139px）。
+  let topbar = null;
+  const bar = document.querySelector('.topbar');
+  if (bar) {
+    const barBox = box(bar);
+    const visible = el => {
+      if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') return false;
+      const s = getComputedStyle(el);
+      return s.display !== 'none' && s.visibility !== 'hidden';
+    };
+    const leaves = [...bar.querySelectorAll(
+      '.brand, .game-switch, .scenario-switch, .viewer-switch, .cam-switch, .icon-btn, .shell-toggle'
+    )].filter(visible);
+
+    const selfOverlaps = [];
+    for (let i = 0; i < leaves.length; i++) {
+      for (let j = i + 1; j < leaves.length; j++) {
+        const a = leaves[i];
+        const c = leaves[j];
+        // 父子关系不算重叠；不同行（换行）也不算重叠。
+        if (a.contains(c) || c.contains(a)) continue;
+        const ba = box(a);
+        const bc = box(c);
+        const oy = Math.min(ba.b, bc.b) - Math.max(ba.t, bc.t);
+        const ox = Math.min(ba.r, bc.r) - Math.max(ba.l, bc.l);
+        if (oy > tol && ox > tol) {
+          const label = el => (el.className || el.id || el.tagName).toString().split(' ')[0];
+          selfOverlaps.push(`${label(a)}x${label(c)}(${Math.round(ox)}x${Math.round(oy)})`);
+        }
+      }
+    }
+
+    // 顶栏内容不得溢出自己的盒子（scrollWidth 超出即内容跑到栏外）。
+    const inner = leaves.length
+      ? Math.max(...leaves.map(el => box(el).r)) - Math.min(...leaves.map(el => box(el).l))
+      : 0;
+    const spills = [];
+    for (const el of leaves) {
+      const b2 = box(el);
+      if (b2.r > barBox.r + 1 || b2.l < barBox.l - 1) {
+        spills.push((el.className || el.id || el.tagName).toString().split(' ')[0]);
+      }
+    }
+
+    topbar = {
+      h: Math.round(barBox.h),
+      w: Math.round(barBox.w),
+      scrollOverflow: bar.scrollWidth - bar.clientWidth,
+      innerWidth: Math.round(inner),
+      controls: leaves.length,
+      selfOverlaps: [...new Set(selfOverlaps)].slice(0, 6),
+      spills: [...new Set(spills)].slice(0, 6)
+    };
+  }
+
   const dock = panels.dock ?? null;
   return {
     ratio: +(vw / vh).toFixed(3),
+    topbar,
     panels: Object.keys(panels),
     overlays: [...overlays],
     overflow,
@@ -179,12 +238,26 @@ for (const vp of VIEWPORTS) {
       if (report.dockCollapsed) problems.push('dock collapsed');
       if (report.smallCount) problems.push(`${report.smallCount} small fonts (${report.small.slice(0, 4).join(', ')})`);
       if (report.tinyCount) problems.push(`${report.tinyCount} small touch targets (${report.tiny.slice(0, 3).join(', ')})`);
+
+      // 顶栏：控件不得互相重叠、不得溢出自己的盒子；宽桌面必须是单行。
+      const tb = report.topbar;
+      if (!tb) {
+        problems.push('topbar missing');
+      } else {
+        if (tb.selfOverlaps.length) problems.push(`topbar overlap ${tb.selfOverlaps.join(',')}`);
+        if (tb.spills.length) problems.push(`topbar spill ${tb.spills.join(',')}`);
+        if (tb.scrollOverflow > 1) problems.push(`topbar scroll overflow ${tb.scrollOverflow}px`);
+        if (tb.w > 0 && tb.innerWidth > tb.w + 1) problems.push(`topbar content wider than bar (${tb.innerWidth}>${tb.w})`);
+        // >=1200px 时动作区必须收在一行内（顶栏高度不应显著超过基准 68px）。
+        if (vp.w >= 1200 && tb.h > 80) problems.push(`topbar wrapped at ${vp.w}px (h=${tb.h})`);
+      }
       if (problems.length) {
         failures.push(`${tag} [${label}] (${report.ratio}): ${problems.join(' | ')}`);
         console.log(`  x ${tag} [${label}]`);
         for (const p of problems) console.log(`      ${p}`);
       } else {
-        console.log(`  ok ${tag} [${label}] (${report.ratio}) - ${report.panels.join('+')}`);
+        const tbNote = report.topbar ? ` bar=${report.topbar.w}x${report.topbar.h}/${report.topbar.controls}ctl` : '';
+        console.log(`  ok ${tag} [${label}] (${report.ratio}) - ${report.panels.join('+')}${tbNote}`);
       }
       return report;
     };
@@ -197,13 +270,28 @@ for (const vp of VIEWPORTS) {
       const toggle = page.locator('[data-toggle="side"]');
       if (await toggle.count()) {
         await toggle.first().click();
-        await page.waitForTimeout(700);
+        // 等 slide-over 真正落位：data-side='open' 且 transform 归零。
+        // 只等固定时间会在过渡动画中量到平移中的矩形，从而误报「溢出」。
+        await page
+          .waitForFunction(
+            () => {
+              const shell = document.querySelector('.app-shell');
+              if (shell?.getAttribute('data-side') !== 'open') return false;
+              const el = document.querySelector('#side-column');
+              if (!el) return false;
+              const t = getComputedStyle(el).transform;
+              return t === 'none' || t === 'matrix(1, 0, 0, 1, 0, 0)';
+            },
+            { timeout: 5000 }
+          )
+          .catch(() => {});
+        await page.waitForTimeout(120);
         const opened = await state('side open');
         if (!opened.panels.includes('room') && !opened.panels.includes('mini')) {
           failures.push(`${tag} [side open]: the slide-over exposed no side panels`);
         }
         await toggle.first().click();
-        await page.waitForTimeout(300);
+        await page.waitForTimeout(260);
       } else {
         failures.push(`${tag}: no side toggle on a narrow shell`);
       }
@@ -214,7 +302,21 @@ for (const vp of VIEWPORTS) {
       const railToggle = page.locator('[data-toggle="rail"]');
       if (await railToggle.count()) {
         await railToggle.first().click();
-        await page.waitForTimeout(700);
+        // 同样要等过渡结束再量（手机角色栏是 translateX 滑入）。
+        await page
+          .waitForFunction(
+            () => {
+              const shell = document.querySelector('.app-shell');
+              if (shell?.getAttribute('data-rail') !== 'open') return false;
+              const el = document.querySelector('#player-rail');
+              if (!el) return false;
+              const t = getComputedStyle(el).transform;
+              return t === 'none' || t === 'matrix(1, 0, 0, 1, 0, 0)';
+            },
+            { timeout: 5000 }
+          )
+          .catch(() => {});
+        await page.waitForTimeout(120);
         const opened = await state('rail open');
         if (!opened.panels.includes('rail')) failures.push(`${tag} [rail open]: the rail did not appear`);
         await railToggle.first().click();

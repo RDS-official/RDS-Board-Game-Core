@@ -306,11 +306,26 @@
 .player-rail {
   container-type: inline-size;
   container-name: rail;
+  min-width: 0;
+}
+
+.app-shell > .player-rail > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .side-column {
   container-type: inline-size;
   container-name: side;
+  /* slide-over 时宽度可能小于面板的自然宽度：允许收缩，避免内容横向溢出。 */
+  min-width: 0;
+}
+
+.app-shell > .side-column > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 @container rail (max-width: 190px) {
@@ -389,9 +404,15 @@
    rest compress into slivers. These rules must stay *after* the panel-children
    reset above, which forces every rail child back to `position: static`. */
 
-.app-shell > .player-rail {
-  position: relative;
-  overflow: hidden;
+/* 鱼眼布局需要 relative 作为绝对定位子卡的容器；但手机上角色栏是 slide-over
+   抽屉，必须是 fixed。之前的书写顺序让这条覆盖掉了手机断点的 fixed，
+   角色栏掉进网格隐式行、高度塌成 16px（probe:ui 报 rail:y 溢出的真因）。
+   这里用 :not() 把鱼眼规则限定在非手机外壳。 */
+@media (min-width: 768px) {
+  .app-shell > .player-rail {
+    position: relative;
+    overflow: hidden;
+  }
 }
 
 .app-shell > .player-rail > .pc {
@@ -707,13 +728,20 @@
     display: none;
   }
 
+  /* 只留图标后必须保住触控面积：probe:ui 要求 >= 44x44，否则手机上点不中。
+     用 min-width/min-height 撑住，而不是靠 padding 猜。 */
   .app-shell > .topbar .game-pill {
     padding: 0 8px;
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
   }
 
   .app-shell > .topbar .cam-btn {
-    padding: 0 9px;
-    font-size: 11px;
+    padding: 0 7px;
+    /* 不要低于 12px：probe:ui 的可读性底线就是 12px，压到 11px 会被门禁
+       判为回归（真机上也确实难读）。省宽度靠 padding，不靠缩字。 */
+    font-size: var(--type-xs);
     letter-spacing: 0;
   }
 
