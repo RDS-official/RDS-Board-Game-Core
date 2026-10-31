@@ -354,7 +354,7 @@ export class BoardGameScene {
    * frame — with a per-seat random offset, so the table does not look like a row
    * of signs snapping to attention.
    */
-  private seatStandees: { group: THREE.Group; jitter: number }[] = [];
+  private seatStandees: { group: THREE.Group; jitter: number; lamp?: THREE.Mesh }[] = [];
   /** Previous poker snapshot, used to detect what to animate. */
   private pokerFxPrev: {
     handNo: number;
@@ -2244,7 +2244,7 @@ export class BoardGameScene {
                 : 'walnut'
             : 'walnut';
 
-        const { group, plate } = SeatPlateBuilder.createStandee(
+        const { group, plate, lamp } = SeatPlateBuilder.createStandee(
           {
             name: seatPlayer?.name ?? seatId,
             avatar: seatPlayer?.avatar ?? '👤',
@@ -2270,7 +2270,7 @@ export class BoardGameScene {
         // hashed from the seat id, so a rebuilt sync keeps the same pose.
         const jitter = (((fnv1a(seatId) % 1000) / 1000) - 0.5) * (Math.PI / 2);
         group.rotation.y = Math.atan2(-outward.x, -outward.y) + jitter;
-        this.seatStandees.push({ group, jitter });
+        this.seatStandees.push({ group, jitter, lamp });
         this.boardObjectsGroup.add(group);
         this.raycaster.registerInteractive(plate, {
           type: 'NODE',
@@ -4768,11 +4768,15 @@ export class BoardGameScene {
   private updateSeatStandees(): void {
     if (this.seatStandees.length === 0) return;
     const cam = this.camera.position;
-    for (const { group, jitter } of this.seatStandees) {
+    // 呼吸式红灯：0.56~1 的缩放循环，比常亮更容易被余光注意到。
+    const pulse = 0.78 + Math.sin(performance.now() / 280) * 0.22;
+    for (const { group, jitter, lamp } of this.seatStandees) {
+      // 行动灯随呼吸缩放，转向逻辑不变。
       const dx = cam.x - group.position.x;
       const dz = cam.z - group.position.z;
       if (Math.abs(dx) < 1e-4 && Math.abs(dz) < 1e-4) continue;
       group.rotation.y = Math.atan2(dx, dz) + jitter;
+      if (lamp) lamp.scale.set(pulse, pulse * 0.75, pulse);
     }
   }
 

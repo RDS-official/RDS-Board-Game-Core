@@ -70,6 +70,9 @@ export class ServerMatch {
   private readonly attached = new Set<string>();
   private readonly listeners = new Set<() => void>();
   private tickTimer: NodeJS.Timeout | null = null;
+  /** AI 节奏泵的定时器与上一次出手时刻。 */
+  private aiTimer?: ReturnType<typeof setInterval>;
+  private lastAiAt = 0;
   private disposed = false;
 
   constructor(options: MatchOptions) {
@@ -98,7 +101,9 @@ export class ServerMatch {
               seats: Math.min(options.seats + (options.aiSeats ?? 0), MAX_SEATS),
               humans: options.seats,
               aiSeats: options.aiSeats ?? 0
-            })
+            }),
+        // AI 交给房间按游戏声明的节奏驱动，真人才能看清每一步。
+        ...(module.presentation?.aiActionDelayMs ? { autoAi: false } : {})
       }
     );
 
@@ -245,6 +250,10 @@ export class ServerMatch {
     if (this.tickTimer) {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
+    if (this.aiTimer) {
+      clearInterval(this.aiTimer);
+      this.aiTimer = undefined;
+    }
     }
     this.listeners.clear();
     this.attached.clear();
@@ -268,6 +277,34 @@ export class ServerMatch {
       this.room.submitUnchecked({ type: '__TICK__', playerId: 'SYSTEM', payload: { ticks: 1 } });
     }, intervalMs);
     this.tickTimer.unref?.();
+    this.startAiPump();
+  }
+
+  /**
+   * 内置 AI 的节奏泵。
+   *
+   * 房间用 `autoAi: false` 建引擎时，AI 只会给出 `AI_ACT`，由这里按
+   * `presentation.aiActionDelayMs`（德州 = 5s）逐个派发：真人能看清 AI 的每一次
+   * 跟注/加注，而不是一瞬间跳过整轮。
+   */
+  private startAiPump(): void {
+    const delay = this.module.presentation?.aiActionDelayMs;
+    if (!delay) return;
+    const step = Math.max(100, Math.min(delay, 500));
+    this.aiTimer = setInterval(() => {
+      if (this.disposed) return;
+      const now = Date.now();
+      if (now - this.lastAiAt < delay) return;
+      const engine = this.room.engine;
+      if (engine.getRawState().gameOver) return;
+      const actor = engine.getActiveActorId();
+      if (!actor) return;
+      const pending = engine.getLegalActions(actor).find(action => action.type === 'AI_ACT');
+      if (!pending) return;
+      this.lastAiAt = now;
+      this.room.submitUnchecked(pending);
+    }, step);
+    this.aiTimer.unref?.();
   }
 
   private needsClock(): boolean {
