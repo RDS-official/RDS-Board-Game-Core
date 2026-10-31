@@ -1681,7 +1681,7 @@ export class CardMeshBuilder {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
+    texture.anisotropy = 8;
     this.faceCache.set(key, texture);
     return texture;
   }
@@ -1814,7 +1814,7 @@ export class CardMeshBuilder {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
+    texture.anisotropy = 8;
     this.playingCache.set(key, texture);
     return texture;
   }
@@ -2216,7 +2216,7 @@ export class CardMeshBuilder {
     if (cached) return cached;
     const tex = new THREE.TextureLoader().load(url);
     tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
+    tex.anisotropy = 8;
     this.imageTextureCache.set(url, tex);
     return tex;
   }

@@ -438,6 +438,8 @@ export class BoardGameScene {
   private draggedEntityOrigin?: {
     position: [number, number, number];
     offset: { dx: number; dz: number };
+    /** 原始朝向：松手后恢复平放，拖动时的"朝向相机"不能留在桌上。 */
+    quaternion: THREE.Quaternion;
   };
   private draggedHeldY?: number;
   private groupHeldY?: number;
@@ -650,6 +652,7 @@ export class BoardGameScene {
         this.draggedHeldY = surfaceY + 0.45;
         this.draggedEntityOrigin = {
           position: [mesh.position.x, mesh.position.y, mesh.position.z],
+          quaternion: mesh.quaternion.clone(),
           offset: { ...offset }
         };
       }
@@ -660,6 +663,11 @@ export class BoardGameScene {
   public onEntityDragEnd(cb: () => void): void {
     this.raycaster.onDragEnd(() => {
       this.controls.enabled = true;
+      // 松手：把牌放回原来的朝向。
+      if (this.draggedEntityId) {
+        const mesh = this.entityMeshes.get(this.draggedEntityId);
+        if (mesh && this.draggedEntityOrigin) mesh.quaternion.copy(this.draggedEntityOrigin.quaternion);
+      }
       cb();
       this.draggedEntityId = undefined;
       this.draggedEntityOrigin = undefined;
@@ -740,6 +748,11 @@ export class BoardGameScene {
     const mesh = this.entityMeshes.get(entityId);
     const point = this.screenToTable(clientX, clientY);
     if (!mesh || !point) return;
+    // 拿起时把牌转向自己的视角：拖动过程中牌面始终朝着相机，字才读得清。
+    const toViewer = new THREE.Vector3().subVectors(this.camera.position, mesh.position);
+    if (toViewer.lengthSq() > 1e-6) {
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), toViewer.normalize());
+    }
     this.cardSettles.delete(entityId);
     mesh.position.x = point[0];
     mesh.position.z = point[2];
