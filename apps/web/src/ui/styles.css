@@ -4944,3 +4944,30 @@ select.pf-control {
   font-size: 10px;
   color: rgba(214, 178, 108, 0.5);
 }
+
+/* ---------------------------------------------------------------------------
+   Cooling actions — 结算后 20 秒才能开下一手，角标显示剩余秒数。
+   --------------------------------------------------------------------------- */
+.dock-fan .act.cooling {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.dock-fan .act.cooling .act-ico {
+  filter: grayscale(1);
+}
+
+.dock-fan .act .act-cool {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #f6dc9c;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
