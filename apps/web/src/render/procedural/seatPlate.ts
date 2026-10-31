@@ -2,14 +2,21 @@ import * as THREE from 'three';
 import { CANVAS_FONT_STACK } from '../fonts';
 
 /**
- * Seat nameplates.
+ * Seat standees.
  *
- * A brass ring on the felt reads as "a slot", not as "a person". Each seat now
- * carries a small wooden plaque — avatar coin, nickname, and the player's colour
- * as an inlay stripe — drawn with the same palette as the rest of the table
- * (warm oak, brass rivets, ivory lettering). The plaque is a camera-facing
- * sprite, so the name stays readable from any orbit angle, and it is the click
- * target that opens the player sheet.
+ * A plaque that floats and follows the camera reads as a HUD element, not as a
+ * thing on the table. Each seat now gets a physical standee: a matte black metal
+ * disc turned from solid stock, with a dark-walnut board leaning back on it. The
+ * board is cut to playing-card size, so it belongs to the same family as the
+ * cards it stands next to.
+ *
+ * Board face (portrait, like a card):
+ *   ┌────────────┐
+ *   │   ◉ avatar │   avatar coin in the player's colour
+ *   │    昵称     │   nickname
+ *   │  筹码 990   │   the numbers that matter for this game
+ *   │    ♠ 2     │   suit / seat marker
+ *   └────────────┘
  */
 
 export interface SeatPlateInfo {
@@ -17,169 +24,215 @@ export interface SeatPlateInfo {
   avatar: string;
   /** Player accent colour (hex). */
   color: string;
-  /** Second line: role, seat marker or status. */
+  /** Second line: role, stack, status… */
   detail?: string;
-  /** Whose turn it is: brass rim + a ▶ marker. */
+  /** Whose turn it is: brass rim + a chevron. */
   active?: boolean;
   /** Dimmed when the seat is out of the hand (folded / busted / dead). */
   muted?: boolean;
+  /** Small marker under the text (suit symbol or seat number). */
+  marker?: string;
+  /**
+   * Wood species of the board. Blinds get their own timber so the table reads
+   * at a glance: pine for the big blind, red pine for the small blind, walnut
+   * for everyone else.
+   */
+  wood?: WoodKind;
 }
 
-const OAK_LIGHT = '#8a5a30';
-const OAK_DARK = '#5a3719';
-const OAK_GRAIN = 'rgba(38, 22, 10, 0.35)';
+export type WoodKind = 'walnut' | 'pine' | 'redPine';
+
+interface WoodPalette {
+  light: string;
+  mid: string;
+  dark: string;
+  /** Lettering colour: dark ink on pale pine, ivory on the dark species. */
+  ink: string;
+  /** Secondary line colour. */
+  inkSoft: string;
+  /** Grain stroke colour. */
+  grain: string;
+}
+
+const WOODS: Record<WoodKind, WoodPalette> = {
+  walnut: {
+    light: '#5c4128',
+    mid: '#4a3320',
+    dark: '#2a1b0e',
+    ink: '#f2e8d2',
+    inkSoft: 'rgba(242, 232, 210, 0.74)',
+    grain: 'rgba(0, 0, 0, 0.3)'
+  },
+  // Pine: pale, warm, clearly lighter than the felt.
+  pine: {
+    light: '#e8cd97',
+    mid: '#d8b878',
+    dark: '#b8934f',
+    ink: '#3a2412',
+    inkSoft: 'rgba(58, 36, 18, 0.72)',
+    grain: 'rgba(120, 82, 40, 0.34)'
+  },
+  // Red pine (红松): warm reddish brown, darker than pine, warmer than walnut.
+  redPine: {
+    light: '#b8734b',
+    mid: '#9c5636',
+    dark: '#6f3520',
+    ink: '#fbeee0',
+    inkSoft: 'rgba(251, 238, 224, 0.78)',
+    grain: 'rgba(58, 20, 8, 0.34)'
+  }
+};
+
+/** Card-sized board: matches the community/hole cards on the felt. */
+export const SEAT_BOARD = { width: 0.86, height: 1.24, thickness: 0.045 } as const;
+/** Metal disc under the board. */
+export const SEAT_BASE = { radius: 0.5, height: 0.055 } as const;
+/** Lean of the board away from the table centre (radians). */
+const BOARD_TILT = 0.74;
+
 const BRASS = '#c9a24a';
-const IVORY = '#f6ecd2';
 
 export class SeatPlateBuilder {
-  private static cache = new Map<string, THREE.CanvasTexture>();
+  private static faceCache = new Map<string, THREE.CanvasTexture>();
+  private static metalTexture: THREE.CanvasTexture | null = null;
 
-  /** Wood grain, avatar coin and lettering for one plaque. */
-  private static texture(info: SeatPlateInfo): THREE.CanvasTexture {
-    const key = [info.name, info.avatar, info.color, info.detail ?? '', info.active ? 'a' : '', info.muted ? 'm' : ''].join('|');
-    const cached = this.cache.get(key);
+  /** One board face: timber grain, brass frame, avatar coin and lettering. */
+  private static faceTexture(info: SeatPlateInfo): THREE.CanvasTexture {
+    const key = [
+      info.name,
+      info.avatar,
+      info.color,
+      info.detail ?? '',
+      info.marker ?? '',
+      info.active ? 'a' : '',
+      info.muted ? 'm' : '',
+      info.wood ?? 'walnut'
+    ].join('|');
+    const cached = this.faceCache.get(key);
     if (cached) return cached;
 
-    const width = 512;
-    const height = 224;
+    const wood = WOODS[info.wood ?? 'walnut'];
+
+    const width = 384;
+    const height = 554; // card aspect (0.86 : 1.24)
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('2D canvas context unavailable for the seat plate');
+    if (!ctx) throw new Error('2D canvas context unavailable for the seat board');
 
-    // Oak board: vertical gradient plus deterministic grain arcs.
-    const board = ctx.createLinearGradient(0, 0, 0, height);
-    board.addColorStop(0, OAK_LIGHT);
-    board.addColorStop(0.55, '#74492a');
-    board.addColorStop(1, OAK_DARK);
+    // Timber: the species is chosen by the caller (blinds get their own board).
+    const board = ctx.createLinearGradient(0, 0, width * 0.35, height);
+    board.addColorStop(0, wood.light);
+    board.addColorStop(0.5, wood.mid);
+    board.addColorStop(1, wood.dark);
     ctx.fillStyle = board;
-    ctx.beginPath();
-    ctx.roundRect(6, 6, width - 12, height - 12, 26);
-    ctx.fill();
+    ctx.fillRect(0, 0, width, height);
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(6, 6, width - 12, height - 12, 26);
-    ctx.clip();
-    let seed = 0x1f3d5b;
+    // Fine grain: long, slightly wavy lines plus a few darker seams.
+    let seed = 0x2c1b3f;
     const rnd = () => {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
       return seed / 4294967296;
     };
-    for (let i = 0; i < 46; i++) {
-      const y = rnd() * height;
-      const drift = 6 + rnd() * 16;
-      ctx.strokeStyle = OAK_GRAIN;
-      ctx.lineWidth = 0.6 + rnd() * 2.2;
+    for (let i = 0; i < 120; i++) {
+      const x = rnd() * width;
+      const wobble = 2 + rnd() * 7;
+      ctx.strokeStyle = wood.grain;
+      ctx.lineWidth = 0.5 + rnd() * 1.6;
       ctx.beginPath();
-      ctx.moveTo(-20, y);
-      for (let x = 0; x <= width + 20; x += 40) {
-        ctx.lineTo(x, y + Math.sin((x + i * 37) / 90) * drift);
+      ctx.moveTo(x, -10);
+      for (let y = 0; y <= height + 10; y += 36) {
+        ctx.lineTo(x + Math.sin((y + i * 29) / 70) * wobble, y);
       }
       ctx.stroke();
     }
-    // A couple of knots so the board is not uniform.
-    for (let i = 0; i < 3; i++) {
-      const cx = 60 + rnd() * (width - 120);
-      const cy = 30 + rnd() * (height - 60);
-      const radius = 8 + rnd() * 14;
+    // A knot or two.
+    for (let i = 0; i < 2; i++) {
+      const cx = 40 + rnd() * (width - 80);
+      const cy = 60 + rnd() * (height - 120);
+      const radius = 10 + rnd() * 16;
       const knot = ctx.createRadialGradient(cx, cy, 1, cx, cy, radius);
-      knot.addColorStop(0, 'rgba(30, 16, 6, 0.55)');
-      knot.addColorStop(1, 'rgba(30, 16, 6, 0)');
+      knot.addColorStop(0, 'rgba(0, 0, 0, 0.5)');
+      knot.addColorStop(1, 'rgba(0, 0, 0, 0)');
       ctx.fillStyle = knot;
       ctx.beginPath();
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.fill();
     }
-    ctx.restore();
 
-    // Bevel + rim (brass when it is this player's turn).
-    ctx.strokeStyle = 'rgba(20, 10, 4, 0.55)';
-    ctx.lineWidth = 6;
+    // Brass frame (thicker when it is this seat's turn).
+    ctx.strokeStyle = info.active ? BRASS : 'rgba(201, 162, 74, 0.5)';
+    ctx.lineWidth = info.active ? 7 : 3;
+    ctx.strokeRect(14, 14, width - 28, height - 28);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(24, 24, width - 48, height - 48);
+
+    // Avatar coin.
+    const coinX = width / 2;
+    const coinY = 148;
+    const coinR = 66;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
     ctx.beginPath();
-    ctx.roundRect(6, 6, width - 12, height - 12, 26);
-    ctx.stroke();
-    ctx.strokeStyle = info.active ? BRASS : 'rgba(201, 162, 74, 0.42)';
+    ctx.arc(coinX, coinY + 3, coinR + 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = info.muted ? 'rgba(110, 110, 110, 0.55)' : info.color;
+    ctx.beginPath();
+    ctx.arc(coinX, coinY, coinR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = info.active ? BRASS : wood.inkSoft;
     ctx.lineWidth = info.active ? 6 : 3;
     ctx.beginPath();
-    ctx.roundRect(12, 12, width - 24, height - 24, 20);
-    ctx.stroke();
-
-    // Brass rivets in the corners.
-    for (const [x, y] of [
-      [30, 30],
-      [width - 30, 30],
-      [30, height - 30],
-      [width - 30, height - 30]
-    ]) {
-      ctx.fillStyle = BRASS;
-      ctx.beginPath();
-      ctx.arc(x, y, 5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(255, 240, 200, 0.6)';
-      ctx.beginPath();
-      ctx.arc(x - 1.4, y - 1.4, 1.8, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Avatar coin: player colour ring, tinted face, emoji or letter inside.
-    const coinX = 96;
-    const coinY = height / 2;
-    const coinR = 62;
-    ctx.fillStyle = 'rgba(12, 8, 4, 0.45)';
-    ctx.beginPath();
-    ctx.arc(coinX, coinY, coinR + 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = info.muted ? 'rgba(120, 120, 120, 0.5)' : info.color;
-    ctx.beginPath();
-    ctx.arc(coinX, coinY, coinR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = info.active ? BRASS : 'rgba(246, 236, 210, 0.55)';
-    ctx.lineWidth = info.active ? 5 : 3;
-    ctx.beginPath();
     ctx.arc(coinX, coinY, coinR, 0, Math.PI * 2);
     ctx.stroke();
 
-    ctx.fillStyle = IVORY;
+    const glyph = String(info.avatar || info.name.slice(0, 1) || '?');
+    ctx.fillStyle = wood.ink;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    const glyph = String(info.avatar || info.name.slice(0, 1) || '?');
-    // Emoji avatars are wide; a single letter needs a bigger size.
-    const glyphSize = glyph.length > 1 ? 66 : 74;
-    ctx.font = `${glyphSize}px ${CANVAS_FONT_STACK}`;
+    ctx.font = `${glyph.length > 1 ? 70 : 78}px ${CANVAS_FONT_STACK}`;
     ctx.fillText(glyph, coinX, coinY + 4);
 
-    // Name + detail line.
-    const textLeft = coinX + coinR + 28;
-    const maxWidth = width - textLeft - 34;
-    ctx.textAlign = 'left';
-    ctx.fillStyle = info.muted ? 'rgba(246, 236, 210, 0.55)' : IVORY;
-    let nameSize = 54;
+    // Nickname.
+    ctx.textAlign = 'center';
+    ctx.fillStyle = info.muted ? 'rgba(120, 110, 96, 0.75)' : wood.ink;
+    let nameSize = 58;
     ctx.font = `700 ${nameSize}px ${CANVAS_FONT_STACK}`;
-    while (ctx.measureText(info.name).width > maxWidth && nameSize > 26) {
+    while (ctx.measureText(info.name).width > width - 56 && nameSize > 22) {
       nameSize -= 2;
       ctx.font = `700 ${nameSize}px ${CANVAS_FONT_STACK}`;
     }
-    ctx.fillText(info.name, textLeft, info.detail ? height / 2 - 22 : height / 2 + 2);
+    ctx.fillText(info.name, coinX, 276);
 
+    // Detail lines (at most two).
     if (info.detail) {
-      ctx.fillStyle = 'rgba(246, 236, 210, 0.72)';
-      ctx.font = `500 30px ${CANVAS_FONT_STACK}`;
-      let detail = info.detail;
-      while (ctx.measureText(detail).width > maxWidth && detail.length > 2) {
-        detail = detail.slice(0, -2);
-      }
-      ctx.fillText(detail, textLeft, height / 2 + 34);
+      ctx.fillStyle = wood.inkSoft;
+      ctx.font = `600 31px ${CANVAS_FONT_STACK}`;
+      info.detail
+        .split(' · ')
+        .slice(0, 2)
+        .forEach((part, index) => {
+          let text = part;
+          while (ctx.measureText(text).width > width - 60 && text.length > 2) text = text.slice(0, -2);
+          ctx.fillText(text, coinX, 330 + index * 38);
+        });
     }
 
-    // Turn marker: a brass chevron on the left edge.
+    // Suit / seat marker in the lower third.
+    if (info.marker) {
+      ctx.fillStyle = info.active ? BRASS : wood.inkSoft;
+      ctx.font = `600 64px ${CANVAS_FONT_STACK}`;
+      ctx.fillText(info.marker, coinX, height - 96);
+    }
+
+    // Turn chevron at the top edge.
     if (info.active) {
       ctx.fillStyle = BRASS;
       ctx.beginPath();
-      ctx.moveTo(18, height / 2 - 16);
-      ctx.lineTo(34, height / 2);
-      ctx.lineTo(18, height / 2 + 16);
+      ctx.moveTo(coinX - 18, 34);
+      ctx.lineTo(coinX, 54);
+      ctx.lineTo(coinX + 18, 34);
       ctx.closePath();
       ctx.fill();
     }
@@ -187,25 +240,96 @@ export class SeatPlateBuilder {
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 4;
-    this.cache.set(key, texture);
+    this.faceCache.set(key, texture);
+    return texture;
+  }
+
+  /** Brushed black metal for the disc (concentric machining marks). */
+  private static baseTexture(): THREE.CanvasTexture {
+    if (this.metalTexture) return this.metalTexture;
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('2D canvas context unavailable for the seat base');
+
+    ctx.fillStyle = '#14161a';
+    ctx.fillRect(0, 0, size, size);
+    ctx.translate(size / 2, size / 2);
+    let seed = 0x51f3a7;
+    const rnd = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    for (let radius = 6; radius < size / 2; radius += 1.6) {
+      ctx.strokeStyle = rnd() > 0.5 ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.22)';
+      ctx.lineWidth = 0.7;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(201, 162, 74, 0.28)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, size / 2 - 14, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = 4;
+    this.metalTexture = texture;
     return texture;
   }
 
   /**
-   * A camera-facing plaque. Sprites are used on purpose: the table is orbited,
-   * and a fixed orientation would show the back of the plaque from half of the
-   * angles.
+   * A standee: black metal disc plus a walnut board leaning away from the table
+   * centre, so its face tilts toward a camera above the table.
+   *
+   * `outward` is the unit vector from the table centre to the seat; the group is
+   * yawed to match, which keeps the board's top edge pointing away from the pot.
    */
-  public static createPlate(info: SeatPlateInfo, width = 3.1): THREE.Sprite {
-    const texture = this.texture(info);
-    const material = new THREE.SpriteMaterial({
-      map: texture,
-      transparent: true,
-      depthWrite: false
-    });
-    const sprite = new THREE.Sprite(material);
-    const aspect = 224 / 512;
-    sprite.scale.set(width, width * aspect, 1);
-    return sprite;
+  public static createStandee(
+    info: SeatPlateInfo,
+    outward: THREE.Vector2
+  ): { group: THREE.Group; plate: THREE.Mesh } {
+    const group = new THREE.Group();
+    group.rotation.y = Math.atan2(outward.x, outward.y);
+
+    const base = new THREE.Mesh(
+      new THREE.CylinderGeometry(SEAT_BASE.radius, SEAT_BASE.radius * 0.94, SEAT_BASE.height, 48),
+      new THREE.MeshStandardMaterial({
+        map: this.baseTexture(),
+        color: 0xffffff,
+        roughness: 0.58,
+        metalness: 0.82
+      })
+    );
+    base.position.y = SEAT_BASE.height / 2;
+    base.castShadow = true;
+    base.receiveShadow = true;
+    group.add(base);
+
+    const face = this.faceTexture(info);
+    const side = new THREE.MeshStandardMaterial({ color: 0x1b120c, roughness: 0.78, metalness: 0.05 });
+    const top = new THREE.MeshBasicMaterial({ map: face });
+    // Box material order: +X, -X, +Y, -Y, +Z, -Z — the painted face is +Y, the
+    // same convention the card meshes use.
+    const plate = new THREE.Mesh(
+      new THREE.BoxGeometry(SEAT_BOARD.width, SEAT_BOARD.thickness, SEAT_BOARD.height),
+      [side, side, top, side, side, side]
+    );
+    // Lean the far edge up so the face tilts toward the table (and the camera).
+    plate.rotation.x = -BOARD_TILT;
+    plate.position.set(
+      0,
+      SEAT_BASE.height + (SEAT_BOARD.height / 2) * Math.cos(BOARD_TILT),
+      (SEAT_BOARD.height / 2) * Math.sin(BOARD_TILT) * 0.55
+    );
+    plate.castShadow = true;
+    plate.receiveShadow = true;
+    group.add(plate);
+
+    return { group, plate };
   }
 }

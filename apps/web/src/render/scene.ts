@@ -5,7 +5,7 @@ import { TransactionalAnimationQueue } from './animationQueue';
 import { BoardRaycaster, InteractiveObjectData } from './raycaster';
 import { CardMeshBuilder } from './procedural/cardMesh';
 import { ChipMeshBuilder } from './procedural/chipMesh';
-import { SeatPlateBuilder } from './procedural/seatPlate';
+import { SeatPlateBuilder, type WoodKind } from './procedural/seatPlate';
 import { pokemonCardBackTexture, pokemonCardTexture } from './procedural/pokemonAssets';
 import { DiceMeshBuilder } from './procedural/diceMesh';
 import { HexTileBuilder } from './procedural/hexTile';
@@ -2190,28 +2190,45 @@ export class BoardGameScene {
           metadata: node.props
         });
       } else if (node.type === 'SEAT') {
-        // Seat nameplate: a wooden plaque with the player's avatar and nickname
-        // instead of the old brass ring. It is also the click target that opens
-        // the player sheet (metadata.type === 'SEAT').
+        // Seat standee: a black metal disc on the felt with a card-sized walnut
+        // board leaning back on it (avatar coin, nickname, key numbers). It is
+        // also the click target that opens the player sheet.
         const seatId = String(node.props?.playerId ?? '');
         const seatPlayer = state.players[seatId];
         const activeActor = state.activeActorId ?? state.activePlayerId;
-        const seatCount = Object.values(state.mapGraph.nodes).filter(entry => entry.type === 'SEAT').length;
-        const plateWidth = seatCount > 6 ? 2.3 : seatCount > 4 ? 2.7 : 3.1;
+        const [seatX, , seatZ] = node.position;
+        const seatLength = Math.max(0.0001, Math.hypot(seatX, seatZ));
+        const outward = new THREE.Vector2(seatX / seatLength, seatZ / seatLength);
+        const marker = state.gameId === 'poker' ? '♠' : state.gameId === 'sanguosha' ? '⚔' : undefined;
 
-        const plate = SeatPlateBuilder.createPlate(
+        // Blinds get their own timber: pine for the big blind, red pine for the
+        // small blind, walnut for the rest of the table.
+        const handState = state.globalVars.hand as { sbSeat?: number; bbSeat?: number } | undefined;
+        const seatIndex = Number(node.props?.seatIndex ?? -1);
+        const wood: WoodKind =
+          state.gameId === 'poker' && handState
+            ? handState.bbSeat === seatIndex
+              ? 'pine'
+              : handState.sbSeat === seatIndex
+                ? 'redPine'
+                : 'walnut'
+            : 'walnut';
+
+        const { group, plate } = SeatPlateBuilder.createStandee(
           {
             name: seatPlayer?.name ?? seatId,
             avatar: seatPlayer?.avatar ?? '👤',
             color: seatPlayer?.color ?? '#455a64',
             detail: this.seatPlateDetail(state, seatId),
             active: seatId === activeActor,
-            muted: seatPlayer ? !seatPlayer.alive : false
+            muted: seatPlayer ? !seatPlayer.alive : false,
+            marker,
+            wood
           },
-          plateWidth
+          outward
         );
-        plate.position.set(node.position[0], 1.05, node.position[2]);
-        this.boardObjectsGroup.add(plate);
+        group.position.set(seatX, 0.055, seatZ);
+        this.boardObjectsGroup.add(group);
         this.raycaster.registerInteractive(plate, {
           type: 'NODE',
           id: node.id,
