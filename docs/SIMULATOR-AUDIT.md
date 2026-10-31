@@ -3,7 +3,7 @@
 > 目标：把“手测/黑盒/回放发现的问题”从一次性修复变成**持续收集的模拟器质量清单**。
 > 规则夹具（Catan / Betrayal / …）只是触发器；这里记录的是内核、应用层、渲染层、交互层需要长期优化的问题。
 >
-> 基线：`239 passed / 0 failed / 0 boundary violations`（`node scripts/test-core.mjs`）。
+> 基线：`243 passed / 0 failed / 0 boundary violations`（`node scripts/test-core.mjs`）。
 
 ---
 
@@ -243,7 +243,7 @@
 ## 6. 持续验证方式
 
 ```bash
-pnpm test              # 内核一致性 + 边界检查（239 例）
+pnpm test              # 内核一致性 + 边界检查（243 例）
 pnpm test:matrix       # 六夹具 × 多 seed × 全场景黑盒
 pnpm test:ui           # Playwright UI 流程矩阵（含拖拽/旋转/落定）
 pnpm probe:layout      # 47 房间家具布局与门位冲突

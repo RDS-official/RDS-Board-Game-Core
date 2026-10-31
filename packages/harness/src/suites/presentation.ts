@@ -6,6 +6,8 @@ import { OccupancyIndex } from '@rds/kernel/occupancy';
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { UniversalSession } from '@rds/app/session';
+import { buildEntityInspectNotice } from '@rds/app/inspect';
+import { readdirSync, readFileSync } from 'node:fs';
 import { itemSlotId } from '@rds/games/betrayal/helpers';
 import { layoutRoom, hashString as layoutHash } from '@rds/web/render/procedural/roomLayout';
 import { PROPS } from '@rds/web/render/procedural/props';
@@ -364,4 +366,93 @@ test('presenter: payload fields collapse multi-step choices into one action', ()
     0,
     'victim loses the resource'
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/* Card inspection: one shared implementation, capability-driven previews */
+/* -------------------------------------------------------------------------- */
+
+function noticeFor(session: UniversalSession, entityId: string) {
+  const notices: { card?: { facts?: { label: string; value: string }[]; art?: string } }[] = [];
+  session.onNotice(notice => notices.push(notice as never));
+  const pick = session.pickTarget({ kind: 'entity', id: entityId });
+  return { pick, notices };
+}
+
+test('presentation: splendor declares hover previews and never opens a click sheet', () => {
+  assertEqual(GAME_REGISTRY.splendor.presentation?.cardPreviewOnHover, true, 'splendor declares hover previews');
+  const session = new UniversalSession(GAME_REGISTRY.splendor, 7);
+  const card = Object.values(session.getSnapshot().board.entities).find(entity => entity.components?.cardFace);
+  assert(!!card, 'splendor exposes a card');
+  const { pick, notices } = noticeFor(session, card!.id);
+  assert(pick.handled, `splendor card pick handled: ${pick.message ?? ''}`);
+  const notice = notices[notices.length - 1];
+  assert(!!notice, 'splendor card pick emits a notice');
+  assertEqual(notice.card, undefined, 'no second card sheet on top of the hover preview');
+  session.dispose();
+});
+
+test('presentation: betrayal item cards keep their sheet, facts come from the game', () => {
+  assert(!!GAME_REGISTRY.betrayal.presentation?.cardFacts, 'betrayal declares its own card facts');
+  const session = new UniversalSession(GAME_REGISTRY.betrayal, 5, 'exploration');
+  const item = Object.values(session.getSnapshot().board.entities).find(
+    entity => entity.components?.cardFace && entity.components?.custom?.kind
+  );
+  assert(!!item, 'betrayal exposes a typed item card');
+  const kind = String(item!.components?.custom?.kind);
+  const labels: Record<string, string> = { weapon: '武器', armor: '护甲', relic: '圣物', consumable: '消耗品', tool: '工具' };
+  const { pick, notices } = noticeFor(session, item!.id);
+  assert(pick.handled, `betrayal item pick handled: ${pick.message ?? ''}`);
+  const notice = notices[notices.length - 1];
+  assert(!!notice?.card, 'betrayal item opens the framed sheet');
+  assertEqual(notice.card!.facts?.[0]?.label, '类别', 'the game vocabulary row leads the facts');
+  assertEqual(notice.card!.facts?.[0]?.value, labels[kind] ?? kind, 'card kind is translated by the game');
+  session.dispose();
+});
+
+test('presentation: the shared inspector renders any game without a game-id branch', () => {
+  const entity = {
+    id: 'card_x',
+    components: {
+      cardFace: { title: '测试卡', type: 'RELIC', desc: '说明', color: '#abc', imageUrl: 'img/x.png' },
+      custom: { en: 'Test Card' }
+    }
+  };
+  // A module that declares nothing gets the neutral default: a sheet with the
+  // card's own artwork and no invented fact rows.
+  const neutral = buildEntityInspectNotice(entity, { snapshot: { actions: [] }, module: counterModule });
+  assert(!!neutral?.card, 'neutral module still opens a sheet');
+  assertEqual(neutral!.card!.art, 'img/x.png', 'imported face artwork is reused');
+  assertEqual(neutral!.card!.facts?.length, 0, 'no fact rows without a game declaration');
+  assertEqual(neutral!.card!.kind, 'RELIC', 'face type is the fallback kind');
+  // Hover-preview modules suppress the sheet but keep the toast.
+  const hover = buildEntityInspectNotice(entity, {
+    snapshot: { actions: [] },
+    module: { ...counterModule, presentation: { cardPreviewOnHover: true } }
+  });
+  assert(!!hover, 'hover-preview module still emits the toast');
+  assertEqual(hover!.card, undefined, 'hover-preview module suppresses the sheet');
+  // Entities without a card face are not inspectable cards at all.
+  assertEqual(
+    buildEntityInspectNotice({ id: 'plain', components: {} }, { snapshot: { actions: [] }, module: counterModule }),
+    null,
+    'a face-less entity is not a card'
+  );
+});
+
+test('presentation: both sessions inspect through the shared module, never by module id', () => {
+  const appDir = new URL('../../../app/src/', import.meta.url);
+  for (const file of ['session.ts', 'netSession.ts']) {
+    const source = readFileSync(new URL(file, appDir), 'utf8');
+    assert(source.includes("from './inspect'"), `${file} reuses the shared inspector`);
+  }
+  // Capability checks replaced identity checks: the application layer must not
+  // ask "which game is this?" to decide how to present something.
+  const offenders: string[] = [];
+  for (const entry of readdirSync(appDir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
+    const source = readFileSync(`${entry.parentPath}/${entry.name}`, 'utf8');
+    if (source.includes('meta.id ===')) offenders.push(entry.name);
+  }
+  assertEqual(offenders.length, 0, `presentation decided by module id: ${offenders.join(', ')}`);
 });
