@@ -84,8 +84,15 @@ export class BoardGameHUD {
   /** Set of room ids already seen, for the "new room discovered" reveal. */
   private knownRooms?: Set<string>;
   private sheetTimer: number | null = null;
-  /** Card under the pointer in the player rail (fisheye focus), or null. */
-  private railHoverIndex: number | null = null;
+  /**
+   * Pointer position along the player rail (0 = top, 1 = bottom), or null when
+   * it is outside. The fisheye focus is derived from this, never from which card
+   * the DOM reports as hovered: the layout moves the cards, so a DOM-derived
+   * focus feeds back into itself and the rail oscillates.
+   */
+  private railFocusY: number | null = null;
+  /** Pending animation frame for the rail fisheye (pointer events are coalesced). */
+  private railFrame = 0;
   /** Stamp of the sheet currently painted, so a repaint does not restart its timer. */
   private paintedSheetStamp = 0;
   /** The layer outlives a repaint, so its backdrop handler must be replaced, not added again. */
@@ -1821,12 +1828,14 @@ export class BoardGameHUD {
     if (height <= 0) return;
 
     const cardHeight = Math.max(72, Math.min(PLAYER_CARD_HEIGHT, Math.round(height / 2)));
+    const activeIndex = Math.max(
+      0,
+      cards.findIndex(card => card.classList.contains('active'))
+    );
     const focusIndex =
-      this.railHoverIndex ??
-      Math.max(
-        0,
-        cards.findIndex(card => card.classList.contains('active'))
-      );
+      this.railFocusY === null
+        ? activeIndex
+        : Math.min(count - 1, Math.max(0, Math.round(this.railFocusY * (count - 1))));
     const layout = handLayout({
       count,
       containerWidth: height,
@@ -2183,14 +2192,23 @@ export class BoardGameHUD {
     const containerWidth = fan.clientWidth - padLeft - padRight - hoverInset * 2;
     if (containerWidth <= 0) return;
 
-    const hoverIndex = cards.findIndex(card => card.matches(':hover'));
+    // Focus comes from the pointer's position along the row, never from
+    // `card.matches(':hover')`. The layout scales and lifts the focused card, so
+    // asking the DOM which card is under the pointer feeds the result back into
+    // the input: the row oscillates left/right at pointer-move frequency, which
+    // reads as flicker (worst on fractional display scaling, e.g. 175%).
+    const focusIndex =
+      this.fanFocusStrength > 0
+        ? Math.min(cards.length - 1, Math.max(0, Math.round(this.fanFocusX * (cards.length - 1))))
+        : null;
+
     const layout = handLayout({
       count: cards.length,
       containerWidth,
       cardWidth,
       focusX: this.fanFocusX,
       focusStrength: this.fanFocusStrength,
-      hoverIndex: hoverIndex >= 0 ? hoverIndex : null,
+      hoverIndex: focusIndex,
       lockCardWidth: true,
       focusPitchRatio: 1.15,
       contextPitchRatio: 0.1
@@ -2241,21 +2259,24 @@ export class BoardGameHUD {
     // Fisheye focus follows the pointer: whichever card it is over opens up and
     // the rest compress into slivers (the dock behaves the same way).
     rail.addEventListener('mousemove', event => {
-      const card = (event.target as HTMLElement | null)?.closest('.pc') as HTMLElement | null;
-      if (!card) return;
-      const index = Array.from(rail.querySelectorAll('.pc')).indexOf(card);
-      if (index < 0 || index === this.railHoverIndex) return;
-      this.railHoverIndex = index;
-      this.layoutPlayerRail(rail);
+      const rect = rail.getBoundingClientRect();
+      if (rect.height <= 0) return;
+      const next = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+      if (next === this.railFocusY) return;
+      this.railFocusY = next;
+      if (this.railFrame) return;
+      this.railFrame = requestAnimationFrame(() => {
+        this.railFrame = 0;
+        this.layoutPlayerRail(rail);
+      });
     });
     rail.addEventListener('mouseleave', () => {
-      if (this.railHoverIndex === null) return;
-      this.railHoverIndex = null;
+      if (this.railFocusY === null) return;
+      this.railFocusY = null;
       this.layoutPlayerRail(rail);
     });
   }
 
-  /** Floating list of the character's current buffs and debuffs. */
   /**
    * Player dossier, opened by clicking a seat nameplate on the board (or a card
    * in the rail when it carries effects). Shows everything the rail card shows
@@ -2366,6 +2387,10 @@ export class BoardGameHUD {
 
     // The action row is a fisheye: the pointer position decides which gaps open
     // up. Delegated on the dock so it survives every reconcile.
+    // Coalesce to one layout per animation frame: pointer events can arrive at
+    // the display's refresh rate, and re-running the fisheye on each one restarts
+    // every CSS transition mid-flight (visible as shimmer on 120Hz panels).
+    let fanFrame = 0;
     const fanPointerBound = (event: PointerEvent) => {
       const fan = dock.querySelector('[data-fan]') as HTMLElement | null;
       if (!fan) return;
@@ -2373,7 +2398,12 @@ export class BoardGameHUD {
       if (rect.width <= 0) return;
       this.fanFocusX = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
       this.fanFocusStrength = 1;
-      this.layoutActionFan(fan);
+      if (fanFrame) return;
+      fanFrame = requestAnimationFrame(() => {
+        fanFrame = 0;
+        const live = dock.querySelector('[data-fan]') as HTMLElement | null;
+        if (live) this.layoutActionFan(live);
+      });
     };
     dock.addEventListener('pointermove', fanPointerBound);
     dock.addEventListener('pointerleave', () => {

@@ -349,6 +349,12 @@ export class BoardGameScene {
    * poker sync.
    */
   private pokerFxGroup = new THREE.Group();
+  /**
+   * Seat standees, rebuilt on every sync. Their yaw follows the camera each
+   * frame — with a per-seat random offset, so the table does not look like a row
+   * of signs snapping to attention.
+   */
+  private seatStandees: { group: THREE.Group; jitter: number }[] = [];
   /** Previous poker snapshot, used to detect what to animate. */
   private pokerFxPrev: {
     handNo: number;
@@ -1952,6 +1958,10 @@ export class BoardGameScene {
   private renderMapGraph(state: ProjectedGameState): void {
     const graph = state.mapGraph;
 
+    // The board group is rebuilt from scratch every sync, so the standee list is
+    // rebuilt with it.
+    this.seatStandees = [];
+
     // Render Nodes
     Object.values(graph.nodes).forEach(node => {
       if (node.type === 'HEX') {
@@ -2245,13 +2255,13 @@ export class BoardGameScene {
           outward
         );
         group.position.set(seatX, 0.055, seatZ);
-        // Face the seat's own view direction (toward the pot) with a per-seat
-        // jitter of ±45°: perfectly parallel boards hide the structure of the
-        // table. The jitter is hashed from the seat id, so a rebuilt sync keeps
-        // the same pose.
-        const viewYaw = Math.atan2(-outward.x, -outward.y);
+        // The board tracks the camera (see `updateSeatStandees`) but keeps a
+        // per-seat random offset of ±45°: perfectly aligned boards hide the
+        // structure of the table and read as a HUD, not as objects. The offset is
+        // hashed from the seat id, so a rebuilt sync keeps the same pose.
         const jitter = (((fnv1a(seatId) % 1000) / 1000) - 0.5) * (Math.PI / 2);
-        group.rotation.y = viewYaw + jitter;
+        group.rotation.y = Math.atan2(-outward.x, -outward.y) + jitter;
+        this.seatStandees.push({ group, jitter });
         this.boardObjectsGroup.add(group);
         this.raycaster.registerInteractive(plate, {
           type: 'NODE',
@@ -4737,6 +4747,26 @@ export class BoardGameScene {
     this.renderer.setSize(w, h);
   }
 
+  /**
+   * Turn each seat board toward the camera (yaw only), keeping its own random
+   * offset.
+   *
+   * Dead-on aiming looked wrong: every board snapped into the same plane, which
+   * hides the table's structure. Each seat therefore carries a hashed ±45° offset
+   * and the whole board still swings with the orbit, so the face stays legible
+   * without the row looking mechanical.
+   */
+  private updateSeatStandees(): void {
+    if (this.seatStandees.length === 0) return;
+    const cam = this.camera.position;
+    for (const { group, jitter } of this.seatStandees) {
+      const dx = cam.x - group.position.x;
+      const dz = cam.z - group.position.z;
+      if (Math.abs(dx) < 1e-4 && Math.abs(dz) < 1e-4) continue;
+      group.rotation.y = Math.atan2(dx, dz) + jitter;
+    }
+  }
+
   private renderLoop(): void {
     if (this.isDestroyed) return;
     requestAnimationFrame(this.renderLoop.bind(this));
@@ -4753,6 +4783,7 @@ export class BoardGameScene {
     this.updateCardSettles(now);
     this.updateRoomSettles(now);
     this.updateNavArrows(now);
+    this.updateSeatStandees();
     this.renderer.render(this.scene, this.camera);
     this.labels.render(
       this.camera,
