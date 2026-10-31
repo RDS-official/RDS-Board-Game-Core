@@ -327,6 +327,8 @@ export interface GameSnapshot {
   viewers: { id: string; name: string }[];
 
   players: UiPlayer[];
+  /** 观察席：输光后仍留在房间里等低保 / 等换桌的牌手（没有则为空）。 */
+  observers?: UiObserver[];
   npcs: UiNpc[];
   actions: UiAction[];
   legalCount: number;
@@ -365,6 +367,23 @@ export interface GameSnapshot {
    * 服务端权威模式下就是「全服」视角；离线单机时降级为本桌数据。
    */
   chipRanking?: UiChipRank[];
+}
+
+/** 观察席上的一名牌手：输光后仍在房间里等低保 / 等换桌。 */
+export interface UiObserver {
+  playerId: string;
+  name: string;
+  /** 原来的座位号：观察席的镜头沿用它，看的是自己坐过的那一边。 */
+  seatIndex?: number;
+  chips: number;
+  /** 距离下一次低保还有多少秒（0 = 下一拍就发）。 */
+  stipendInSeconds: number;
+  /** 每次低保发多少筹码，用于「每分钟 +10」这类文案。 */
+  stipendAmount: number;
+  /** 已申请的换桌目标（「第 3 座 · 中级 AI」）；空 = 还没申请。 */
+  pendingLabel?: string;
+  /** 攒够买入、现在可以按「重新上桌」。 */
+  canRejoin: boolean;
 }
 
 /** 排行榜的一行：一名玩家的筹码与占比。 */
@@ -608,6 +627,12 @@ export interface GamePresenter {
   tokenBadge?(token: string): { label: string; glyph?: string } | null;
   /** Localised trait name, or null when the game has no such trait. */
   traitLabel?(traitKey: string): string | null;
+
+  /**
+   * 观察席上的某人申请重新上桌（座位由游戏随机挑一个 AI，轮末生效）。
+   * 没有观察者概念的游戏不实现这个方法，HUD 也就不会画这张卡。
+   */
+  rejoinTable?(playerId: string): { ok: boolean; error?: string };
 
   /** Rotate / confirm a preloaded room tile without opening a modal. */
   rotatePlacement(direction?: 1 | -1): void;

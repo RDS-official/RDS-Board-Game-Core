@@ -568,6 +568,9 @@ export class UniversalGameEngine {
 
   private isLegal(action: Action): boolean {
     const actorId = this.actorIdOf(action);
+    // 驱动方动作（心跳、补给等）只由 app / server 的定时器派发，永远不出现在
+    // 玩家可选动作表里，因此不能拿 legalActions 校验它们。
+    if (this.module.driverActions?.includes(action.type)) return true;
     const legal = this.module.legalActions(this.state, actorId);
     const key = canonicalize(action);
     return legal.some(candidate => {

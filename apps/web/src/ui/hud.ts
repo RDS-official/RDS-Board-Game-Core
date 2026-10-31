@@ -16,6 +16,7 @@ import {
   UiDetailView,
   UiHistoryEntry,
   UiNotice,
+  UiObserver,
   UiTraitChange,
   UiPlayer
 } from '@rds/app/contracts';
@@ -175,7 +176,16 @@ export class BoardGameHUD {
   public dispose(): void {
     this.unsubSnapshot?.();
     this.unsubNotice?.();
+    if (this.observerTimer !== null) {
+      window.clearInterval(this.observerTimer);
+      this.observerTimer = null;
+    }
   }
+
+  /** 观察席倒计时的本地刷新：只做减法，不动游戏状态。 */
+  private observerRows: UiObserver[] = [];
+  private observerAnchor = 0;
+  private observerTimer: number | null = null;
 
   public setInspectorActive(active: boolean): void {
     this.container.querySelector('#btn-inspector')?.classList.toggle('active', active);
@@ -1098,6 +1108,8 @@ export class BoardGameHUD {
         <aside class="mansion-minimap" id="mansion-minimap" style="display:none"></aside>
         <!-- 筹码排行（德州扑克）：放在「近期动态」上方 -->
         <aside class="chip-ranking" id="chip-ranking" style="display:none"></aside>
+        <!-- 观察席：输光但仍在房间里的牌手，等低保 / 等轮末回桌 -->
+        <aside class="observer-rail" id="observer-rail" style="display:none"></aside>
         <aside class="activity-feed" id="activity-feed"></aside>
       </div>
       <div class="action-dock" id="action-dock"></div>
@@ -1152,6 +1164,21 @@ export class BoardGameHUD {
 
     this.container.querySelector('#viewer-select')?.addEventListener('change', event => {
       this.presenter.setViewer((event.target as HTMLSelectElement).value);
+    });
+
+    // 观察席「重新上桌」：面板每次重绘都会换掉行，所以在容器上做事件委托。
+    this.container.querySelector('#observer-rail')?.addEventListener('click', event => {
+      const button = (event.target as HTMLElement).closest('.ob-join') as HTMLElement | null;
+      if (!button) return;
+      const playerId = button.dataset.ob;
+      if (!playerId) return;
+      const result = this.presenter.rejoinTable?.(playerId);
+      if (!result) return;
+      if (!result.ok) {
+        this.pushToast('⚠️', result.error ?? '暂时还不能上桌');
+        return;
+      }
+      this.pushToast('🪑', '已申请重新上桌 · 本轮结束后落座');
     });
 
     this.container.querySelector('#scenario-select')?.addEventListener('change', event => {
@@ -1218,6 +1245,7 @@ export class BoardGameHUD {
     this.renderRoomCard(snapshot);
     this.renderMinimap(snapshot);
     this.renderChipRanking(snapshot);
+    this.renderObservers(snapshot);
     this.renderHistory(snapshot);
     this.renderDock(snapshot);
     this.maybeRevealNode(snapshot);
@@ -1460,6 +1488,80 @@ export class BoardGameHUD {
       <div class="cr-body">${body}</div>
       <div class="cr-foot">占比 = 该玩家筹码 / 全桌总筹码</div>
     `;
+  }
+
+  /**
+   * 观察席卡片：谁输光了、还剩多少筹码、下一笔低保什么时候到、有没有在排队
+   * 等回桌。卡片只画数据，能不能回桌由 `canRejoin`（引擎的合法动作）决定。
+   */
+  private renderObservers(snapshot: GameSnapshot): void {
+    const panel = this.container.querySelector('#observer-rail') as HTMLElement | null;
+    if (!panel) return;
+    const rows = snapshot.observers ?? [];
+    if (rows.length === 0) {
+      panel.style.display = 'none';
+      panel.dataset.signature = '';
+      this.observerRows = [];
+      return;
+    }
+    panel.style.display = '';
+    const signature = rows
+      .map(row => `${row.playerId}:${row.chips}:${row.pendingLabel ?? ''}:${row.canRejoin}`)
+      .join('|');
+    if (panel.dataset.signature === signature) return;
+    panel.dataset.signature = signature;
+
+    const body = rows
+      .map(row => {
+        const self = row.playerId === snapshot.viewer ? ' self' : '';
+        const meta = row.pendingLabel
+          ? `<span class="ob-wait">等本轮结束 · ${escHtml(row.pendingLabel)}</span>`
+          : `<span class="ob-low" data-ob-low="${escHtml(row.playerId)}">下笔低保 ${row.stipendInSeconds}s · 每次 +${row.stipendAmount}</span>`;
+        const join =
+          row.canRejoin && !row.pendingLabel
+            ? `<button class="ob-join" data-ob="${escHtml(row.playerId)}">重新上桌</button>`
+            : '';
+        return `
+          <div class="ob-row${self}">
+            <span class="ob-name">${escHtml(row.name)}</span>
+            <span class="ob-chips">${row.chips}</span>
+            ${meta}
+            ${join}
+          </div>`;
+      })
+      .join('');
+
+    panel.innerHTML = `
+      <div class="ob-head">
+        <span class="ob-title">观察席</span>
+        <span class="ob-count">${rows.length}</span>
+      </div>
+      <div class="ob-body">${body}</div>
+      <div class="ob-foot">输光不散场：座位由 AI 接手，攒够买入即可申请回桌（轮末生效）</div>
+    `;
+    this.startObserverTicker(rows);
+  }
+
+  /**
+   * 低保倒计时按本地秒数走：快照只在心跳（20 秒一拍）时更新，直接显示快照里的
+   * 秒数会一跳 20 秒，看着像坏了。这里只做减法，真正发筹码仍在引擎里。
+   */
+  private startObserverTicker(rows: UiObserver[]): void {
+    this.observerRows = rows;
+    this.observerAnchor = Date.now();
+    if (this.observerTimer !== null) return;
+    this.observerTimer = window.setInterval(() => {
+      if (this.observerRows.length === 0) return;
+      const elapsed = Math.floor((Date.now() - this.observerAnchor) / 1000);
+      const panel = this.container.querySelector('#observer-rail');
+      if (!panel) return;
+      for (const row of this.observerRows) {
+        const node = panel.querySelector(`[data-ob-low="${row.playerId}"]`);
+        if (!node) continue;
+        const left = Math.max(0, row.stipendInSeconds - elapsed);
+        node.textContent = `下笔低保 ${left}s · 每次 +${row.stipendAmount}`;
+      }
+    }, 1000);
   }
 
   private renderHistory(snapshot: GameSnapshot): void {

@@ -563,7 +563,7 @@ export const pokerModule: GameModule = defineGame({
   meta: {
     id: 'poker',
     name: "德州扑克 (Texas Hold'em)",
-    description: '无限注德州扑克 · 52 张牌 · 2–10 人 · 边池 / 平分 · 输光即终局',
+    description: '无限注德州扑克 · 52 张牌 · 2–10 人 · 边池 / 平分 · 输光转观察者',
     version: '1.0.0',
     capabilities: {
       simultaneousMoves: false,
@@ -586,7 +586,10 @@ export const pokerModule: GameModule = defineGame({
     ALL_IN: { type: 'ALL_IN', allowPayload: false },
     // 座位流程：入座 → 准备（全员准备后 START_HAND 才放行）。
     TAKE_SEAT: { type: 'TAKE_SEAT', allowPayload: false },
-    READY_UP: { type: 'READY_UP', allowPayload: false }
+    READY_UP: { type: 'READY_UP', allowPayload: false },
+    // 观察者席位：重新上桌申请 + 驱动方心跳（低保结算）。
+    OBSERVER_REJOIN: { type: 'OBSERVER_REJOIN', allowPayload: false },
+    OBSERVER_TICK: { type: 'OBSERVER_TICK', payload: { seconds: { kind: 'integer', min: 0 } } }
   },
   scenarios: {
     seats_2: { description: '单挑（2 人）', setup: pokerScenario(2) },
@@ -599,7 +602,7 @@ export const pokerModule: GameModule = defineGame({
     seats_9: { description: '9 人桌', setup: pokerScenario(9) },
     seats_10: { description: '10 人满桌', setup: pokerScenario(10) },
     short_stack: {
-      description: '短码演示（玩家 4 只有 60 筹码，数手内触发终局）',
+      description: '短码演示（玩家 4 只有 60 筹码，输光后转观察者）',
       setup: pokerScenario(4, { stacks: [1000, 1000, 1000, 60] })
     },
     /** 默认桌：1 名真人 + 5 个内置 AI（入门桌）/ 1 真人 + 9 AI（满桌）。 */
@@ -627,6 +630,25 @@ export const pokerModule: GameModule = defineGame({
       ...(options?.aiSeats === undefined ? {} : { aiSeats: options.aiSeats }),
       ...(options?.autoAi === undefined ? {} : { autoAi: options.autoAi })
     }),
+  /** 只由驱动方心跳派发的动作：玩家永远看不到，客户端入口也会拒绝。 */
+  driverActions: ['OBSERVER_TICK'],
+  /**
+   * 观察者低保心跳：内核没有时钟，驱动方（app / server）每 20 秒派一拍，
+   * PokerRules 把这些秒数累计成「满 60 秒 +10 筹码」。桌上没有观察者时不派发。
+   */
+  heartbeat: {
+    intervalMs: 20_000,
+    action: state => {
+      const observers = (state.globalVars.observers as { list?: { playerId: string }[] } | undefined)
+        ?.list;
+      if (!Array.isArray(observers) || observers.length === 0) return null;
+      return {
+        type: 'OBSERVER_TICK',
+        playerId: observers[0].playerId,
+        payload: { seconds: 20 }
+      };
+    }
+  },
   presentation: definePresentation({
     // 结算幕布：每手结束播一次（key 含手数与结束方式，天然去重）。
     describeMoment: state => pokerSettlementMoment(state),

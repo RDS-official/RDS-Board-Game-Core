@@ -54,6 +54,7 @@ import {
   ViewerId
 } from './contracts';
 import { buildEntityInspectNotice, buildMoment, buildNodeDiscoveryView } from './inspect';
+import { buildObserverRoster } from './observers';
 import {
   UniversalSession,
   BoundAction,
@@ -576,6 +577,13 @@ export class NetSession implements GamePresenter {
     if (this.isLocalAuthority) return this.session!.onVisualEvent(listener);
     this.visualListeners.add(listener);
     return () => this.visualListeners.delete(listener);
+  }
+
+  /** 观察席「重新上桌」申请：交给主机校验，轮末生效。 */
+  public rejoinTable(playerId: string): { ok: boolean; error?: string } {
+    if (this.isLocalAuthority) return this.session!.rejoinTable(playerId);
+    if (playerId !== this.viewer) return { ok: false, error: '只能替自己申请重新上桌' };
+    return this.submitAction({ type: 'OBSERVER_REJOIN', playerId });
   }
 
   public perform(
@@ -1139,6 +1147,10 @@ export class NetSession implements GamePresenter {
       board: state,
 
       chipRanking: this.buildChipRanking(state),
+      observers: buildObserverRoster(
+        state,
+        pid => pid === this.viewer && this.legal.some(action => action.type === 'OBSERVER_REJOIN')
+      ),
       gameOver: state.gameOver,
       winnerLabel: state.gameOver
         ? Array.isArray(state.winner)

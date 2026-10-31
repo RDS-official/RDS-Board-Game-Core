@@ -15,8 +15,16 @@ import {
 import { cardOfEntity, cardText, holeCards, type Card } from './cards';
 import { compareHands, evaluateSeven, type HandValue } from './handEval';
 import { choosePokerAction } from './ai';
-import { isAiSeat, seatingOf, type SeatingState } from './seating';
-import { POKER_DEFAULTS } from './setup';
+import { AI_PROFILE, POKER_AI_ROSTER, isAiSeat, seatingOf, type SeatAssignment, type SeatingState } from './seating';
+import {
+  observerOf,
+  observerStateOf,
+  POKER_OBSERVER,
+  pickAiSeat,
+  withObserverState,
+  type PokerObserver
+} from './observers';
+import { createSeatPlayer, POKER_DEFAULTS, seatPosition } from './setup';
 
 /**
  * Texas Hold'em rules: legal actions, betting resolution, streets, showdown.
@@ -171,6 +179,234 @@ function livePlayers(state: GameState): string[] {
   return state.playerOrder.filter(pid => !hand.folded.includes(pid));
 }
 
+/* -------------------------------------------------------------------------- */
+/* 观察者席位 / 补位 AI                                                        */
+/* -------------------------------------------------------------------------- */
+
+function seatPlanOf(state: GameState): SeatAssignment[] | undefined {
+  return state.globalVars.seats as SeatAssignment[] | undefined;
+}
+
+/** 把座位编制表里的第 `seat` 项换成新的控制者（真人 ↔ 补位 AI）。 */
+function replaceSeatAssignment(
+  state: GameState,
+  seat: number,
+  assignment: SeatAssignment
+): GameState {
+  const seats = seatPlanOf(state);
+  if (!seats || !seats[seat]) return state;
+  const nextSeats = [...seats];
+  nextSeats[seat] = assignment;
+  return { ...state, globalVars: { ...state.globalVars, seats: nextSeats } };
+}
+
+/** 座位牌上的名字与 occupant 一起换：立牌、玩家卡、详情都读这里。 */
+function renameSeatNode(
+  state: GameState,
+  seat: number,
+  playerId: string,
+  name: string
+): GameState {
+  let changed = false;
+  const nodes = { ...state.mapGraph.nodes };
+  for (const [id, node] of Object.entries(nodes)) {
+    if (node.type !== 'SEAT') continue;
+    if (Number(node.props?.seatIndex) !== seat) continue;
+    nodes[id] = { ...node, props: { ...node.props, playerId, name } };
+    changed = true;
+  }
+  return changed ? { ...state, mapGraph: { ...state.mapGraph, nodes } } : state;
+}
+
+/** 手牌扇形跟随座位：换人之后发牌动画才不会还留在旧座位。 */
+function ensureHandZone(state: GameState, playerId: string, seat: number): GameState {
+  const zoneId = `zone_hand_${playerId}`;
+  const [x, , z] = seatPosition(seat, state.playerOrder.length);
+  const anchor: [number, number, number] = [x * 0.82, 0.12, z * 0.82];
+  const existing = state.zones[zoneId];
+  if (existing) {
+    return { ...state, zones: { ...state.zones, [zoneId]: { ...existing, anchorPosition: anchor } } };
+  }
+  return ECSManager.createZone(
+    state,
+    zoneId,
+    `${playerId} 底牌`,
+    'HAND',
+    { type: 'OWNER_ONLY', ownerId: playerId },
+    playerId,
+    'FAN',
+    anchor
+  );
+}
+
+/** 补位 AI 的 id：p1 → p1a1 → p1a2，永远不与现有玩家撞号。 */
+function replacementAiId(playerId: string, serial: number): string {
+  return `${playerId.replace(/a\d+$/, '')}a${serial}`;
+}
+
+/**
+ * 结算后把空座补满。
+ *
+ * 真人的座位输光 → 本人转为观察者（保留筹码账，等低保），座位立即由补位 AI
+ * 接手；AI 输光 → 直接换一个新的 AI。牌桌因此不会因为有人破产而散场。
+ */
+function refillBustedSeats(state: GameState): GameState {
+  let next = state;
+  const hand = handOf(next);
+  const observers = observerStateOf(next);
+  const list = [...observers.list];
+  let aiSerial = observers.aiSerial;
+  const order = [...next.playerOrder];
+  const config = configOf(next);
+
+  for (let seat = 0; seat < order.length; seat++) {
+    const pid = order[seat];
+    if (!pid || chipsOf(next, pid) > 0) continue;
+    const wasAi = isAiSeat(next, pid);
+
+    if (!wasAi) {
+      const entry: PokerObserver = {
+        playerId: pid,
+        seatIndex: seat,
+        stipendSeconds: 0,
+        pendingSeat: null,
+        sinceHand: hand?.handNo ?? 0
+      };
+      const existing = list.findIndex(item => item.playerId === pid);
+      if (existing >= 0) list[existing] = entry;
+      else list.push(entry);
+      next = patchPlayer(next, pid, player => ({
+        ...player,
+        alive: false,
+        status: 'SPECTATOR',
+        customProps: {
+          ...player.customProps,
+          chips: 0,
+          inHand: false,
+          folded: false,
+          allIn: false,
+          busted: true
+        }
+      }));
+      next = pushLog(
+        next,
+        `${nameOf(next, pid)} 输光筹码，转为观察者 · 筹码低于 ${POKER_OBSERVER.stipendThreshold} 时每分钟领 ${POKER_OBSERVER.stipendAmount} 低保`
+      );
+    }
+
+    aiSerial += 1;
+    const aiId = replacementAiId(pid, aiSerial);
+    const tier = POKER_AI_ROSTER[(aiSerial - 1) % POKER_AI_ROSTER.length];
+    const assignment: SeatAssignment = {
+      playerId: aiId,
+      isAi: true,
+      aiTier: tier,
+      aiLabel: `${AI_PROFILE[tier].label} AI`
+    };
+    const aiName = `${AI_PROFILE[tier].label} AI 补位 ${aiSerial}`;
+    const aiPlayer = createSeatPlayer(aiId, seat, config.startingStack, assignment, aiName);
+    const players = { ...next.players, [aiId]: aiPlayer };
+    if (wasAi) delete players[pid];
+    next = {
+      ...next,
+      players,
+      playerOrder: next.playerOrder.map((entry, index) => (index === seat ? aiId : entry))
+    };
+    next = replaceSeatAssignment(next, seat, assignment);
+    next = renameSeatNode(next, seat, aiId, aiName);
+    next = ensureHandZone(next, aiId, seat);
+    next = pushLog(next, `${aiName} 接替第 ${seat + 1} 座 · 买入 ${config.startingStack}`);
+  }
+
+  return withObserverState(next, { ...observers, aiSerial, list });
+}
+
+/** 观察者真正坐回牌桌：接手目标座位，把补位 AI 请出去。 */
+function swapObserverIn(state: GameState, entry: PokerObserver, seat: number): GameState {
+  let next = state;
+  const pid = entry.playerId;
+  const outgoing = next.playerOrder[seat];
+  if (!outgoing || outgoing === pid) return state;
+  next = patchPlayer(next, pid, player => ({
+    ...player,
+    alive: true,
+    status: 'ACTIVE',
+    handZoneId: `zone_hand_${pid}`,
+    customProps: {
+      ...player.customProps,
+      seat,
+      inHand: false,
+      folded: false,
+      allIn: false,
+      busted: false,
+      isAi: false
+    }
+  }));
+  const players = { ...next.players };
+  delete players[outgoing];
+  next = {
+    ...next,
+    players,
+    playerOrder: next.playerOrder.map((id, index) => (index === seat ? pid : id)),
+    activePlayerId: next.activePlayerId === outgoing ? pid : next.activePlayerId
+  };
+  next = replaceSeatAssignment(next, seat, { playerId: pid, isAi: false });
+  next = renameSeatNode(next, seat, pid, nameOf(next, pid));
+  next = ensureHandZone(next, pid, seat);
+  return pushLog(
+    next,
+    `${nameOf(next, pid)} 重新上桌 · 第 ${seat + 1} 座 · 买入 ${chipsOf(next, pid)} 筹码`
+  );
+}
+
+/** 把「等本轮结束」的换桌申请落到位（结算后调用）。 */
+function applyObserverSwaps(state: GameState): GameState {
+  const observers = observerStateOf(state);
+  if (observers.list.length === 0) return state;
+  let next = state;
+  const remaining: PokerObserver[] = [];
+  for (const entry of observers.list) {
+    const seat = entry.pendingSeat;
+    if (seat === null || seat === undefined) {
+      remaining.push(entry);
+      continue;
+    }
+    const occupant = next.playerOrder[seat];
+    const seatIsAi = !!occupant && isAiSeat(next, occupant);
+    if (!seatIsAi || chipsOf(next, entry.playerId) <= 0) {
+      remaining.push({ ...entry, pendingSeat: null });
+      continue;
+    }
+    next = swapObserverIn(next, entry, seat);
+  }
+  return withObserverState(next, { ...observers, list: remaining });
+}
+
+/** 低保：每满 `stipendPeriodSeconds` 秒、筹码仍低于门槛，就发一次。 */
+function chargeObserverStipend(state: GameState, seconds: number): GameState {
+  const observers = observerStateOf(state);
+  if (observers.list.length === 0 || seconds <= 0) return state;
+  let next = state;
+  const list = observers.list.map(entry => {
+    const chips = chipsOf(next, entry.playerId);
+    if (chips >= POKER_OBSERVER.stipendThreshold) return { ...entry, stipendSeconds: 0 };
+    const total = entry.stipendSeconds + seconds;
+    const grants = Math.floor(total / POKER_OBSERVER.stipendPeriodSeconds);
+    if (grants > 0) {
+      next = setChips(next, entry.playerId, chips + grants * POKER_OBSERVER.stipendAmount);
+      next = pushLog(
+        next,
+        `观察者 ${nameOf(next, entry.playerId)} 领取低保 ${grants * POKER_OBSERVER.stipendAmount} · 现有 ${chipsOf(
+          next,
+          entry.playerId
+        )} 筹码`
+      );
+    }
+    return { ...entry, stipendSeconds: total % POKER_OBSERVER.stipendPeriodSeconds };
+  });
+  return withObserverState(next, { ...observers, list });
+}
+
 /** Move the top card of the deck into `zoneId` and set its visibility. */
 function dealTo(
   state: GameState,
@@ -196,6 +432,14 @@ export class PokerRules {
     if (state.gameOver) return [];
     const hand = handOf(state);
     if (!hand) return [];
+
+    // 观察者不在牌局里，只有一件事可做：攒够一个大盲就申请重新上桌。
+    const observer = observerOf(state, playerId);
+    if (observer) {
+      const buyIn = configOf(state).bigBlind * POKER_OBSERVER.minBuyInBlinds;
+      if (observer.pendingSeat !== null || chipsOf(state, playerId) < buyIn) return [];
+      return [{ type: 'OBSERVER_REJOIN', playerId }];
+    }
 
     // 内置 AI 不吃玩家的鼠标操作：它由 PokerBrain 驱动（见 ai.ts），
     // 对真人永远不提供合法动作，避免玩家代替 AI 出牌。
@@ -377,6 +621,37 @@ export class PokerRules {
   private static applyHuman(state: GameState, action: Action, ctx: ReduceContext): GameState {
     const hand = handOf(state);
     if (!hand) return state;
+
+    // 观察者的两件事：领低保（驱动方心跳派发）与申请重新上桌。
+    if (action.type === 'OBSERVER_TICK') {
+      const seconds = Math.floor(Number(action.payload?.seconds ?? 0));
+      if (!Number.isFinite(seconds) || seconds <= 0) return state;
+      return { ...chargeObserverStipend(state, Math.min(seconds, 3600)), turn: state.turn + 1 };
+    }
+
+    if (action.type === 'OBSERVER_REJOIN') {
+      const entry = observerOf(state, action.playerId);
+      if (!entry || entry.pendingSeat !== null) return state;
+      const buyIn = configOf(state).bigBlind * POKER_OBSERVER.minBuyInBlinds;
+      if (chipsOf(state, action.playerId) < buyIn) return state;
+      const picked = pickAiSeat(state);
+      if (!picked) return state;
+      const observers = observerStateOf(state);
+      const list = observers.list.map(item =>
+        item.playerId === entry.playerId ? { ...item, pendingSeat: picked.seat } : item
+      );
+      let next = withObserverState(
+        { ...state, prngState: picked.nextSeed },
+        { ...observers, list }
+      );
+      next = pushLog(
+        next,
+        `${nameOf(next, entry.playerId)} 申请重新上桌 · 等本轮结束后接手第 ${picked.seat + 1} 座`
+      );
+      // 本轮已经结束（结算态）就不必再等一手，立刻换人。
+      if (handOf(next)?.street === 'COMPLETE') next = applyObserverSwaps(next);
+      return { ...next, turn: state.turn + 1 };
+    }
 
     // 「入座 → 准备」两个纯状态更新，不碰牌局。
     if (action.type === 'TAKE_SEAT' || action.type === 'READY_UP') {
@@ -991,13 +1266,18 @@ export class PokerRules {
     }
     for (const pid of next.playerOrder) {
       const chips = chipsOf(next, pid);
+      if (chips <= 0) continue;
       next = patchPlayer(next, pid, player => ({
         ...player,
-        alive: chips > 0,
-        status: chips > 0 ? 'ACTIVE' : 'ELIMINATED',
-        customProps: { ...player.customProps, inHand: false, busted: chips <= 0 }
+        alive: true,
+        status: 'ACTIVE',
+        customProps: { ...player.customProps, inHand: false, busted: false }
       }));
     }
+    // 输光的座位立刻补人：真人转观察者、AI 换新 AI，牌桌不散场。
+    next = refillBustedSeats(next);
+    // 本轮结束：观察者的换桌申请现在生效。
+    next = applyObserverSwaps(next);
     const seat = seatAfter(next.playerOrder, hand.buttonSeat, pid => chipsOf(next, pid) > 0);
     return { ...next, activePlayerId: next.playerOrder[seat], phase: 'HAND_OVER' };
   }
@@ -1007,33 +1287,17 @@ export class PokerRules {
   /* ---------------------------------------------------------------- */
 
   /**
-   * End condition: the hand settles, then any seat sitting on zero chips ends
-   * the whole session. Checking only between hands keeps an all-in shove from
-   * looking like a bust while the hand is still live.
+   * End condition.
+   *
+   * 牌局不再因为有人输光而结束：破产的座位由观察者机制接管——真人转观察者、
+   * 座位由补位 AI 顶上，牌桌永远满员。这里保留 `Outcome` 的形状（房间生命周期
+   * 仍需要一个「是否结束」的回答），但德州没有其它终止条件。
    */
-  public static checkWinCondition(state: GameState): {
+  public static checkWinCondition(_state: GameState): {
     gameOver: boolean;
     winner: PlayerId | PlayerId[] | null;
     reason?: string;
   } {
-    const hand = handOf(state);
-    if (hand?.street !== 'COMPLETE') return { gameOver: false, winner: null };
-
-    const busted = state.playerOrder.filter(pid => chipsOf(state, pid) <= 0);
-    if (busted.length === 0) return { gameOver: false, winner: null };
-
-    const solvent = state.playerOrder.filter(pid => chipsOf(state, pid) > 0);
-    if (solvent.length === 0) {
-      return { gameOver: true, winner: null, reason: '所有玩家都已输光筹码' };
-    }
-    const best = Math.max(...solvent.map(pid => chipsOf(state, pid)));
-    const winners = solvent.filter(pid => chipsOf(state, pid) === best);
-    return {
-      gameOver: true,
-      winner: winners.length === 1 ? winners[0] : winners,
-      reason: `${nameOf(state, busted[0])} 输光筹码，牌局结束 · ${winners
-        .map(pid => nameOf(state, pid))
-        .join(' / ')} 以 ${best} 筹码领先`
-    };
+    return { gameOver: false, winner: null };
   }
 }

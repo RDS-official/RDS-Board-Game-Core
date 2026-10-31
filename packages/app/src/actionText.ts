@@ -447,6 +447,13 @@ function describeActionZh(
       /* ---- 德州扑克 (Texas Hold'em) ------------------------------------- */
       case 'TAKE_SEAT':
         return { icon: '🪑', label: '入座', hint: '在本桌坐下 · 坐下后可以点准备', tone: 'primary' };
+      case 'OBSERVER_REJOIN':
+        return {
+          icon: '🪑',
+          label: '重新上桌',
+          hint: '顶替一个 AI 座位 · 本轮结束后正式落座',
+          tone: 'primary'
+        };
       case 'READY_UP':
         return { icon: '✅', label: '准备', hint: '全员准备后自动开局发牌', tone: 'primary' };
       case 'FORCE_START':
