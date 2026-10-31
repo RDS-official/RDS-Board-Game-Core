@@ -1,6 +1,6 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { describeActionView } from './actionText';
-import { buildEntityInspectNotice } from './inspect';
+import { buildEntityInspectNotice, buildNodeDiscoveryView } from './inspect';
 import { GameModule } from '@rds/kernel/module';
 import { Action, ActorId, GameState, PlayerId, ProjectedGameState, SelectionCandidate, SelectionSpec, VisualTraceEvent,
   type EffectInstance
@@ -13,6 +13,7 @@ import {
   GameSnapshot,
   UiAction,
   UiDecision,
+  UiDiscoveryView,
   UiHistoryEntry,
   UiHistoryKind,
   UiHook,
@@ -249,6 +250,11 @@ export class UniversalSession implements GamePresenter {
 
   public getSnapshot(): GameSnapshot {
     return this.snapshot;
+  }
+
+  /** Discovery view for a map node, resolved by the game presentation hints. */
+  public nodeDetail(nodeId: string): UiDiscoveryView | null {
+    return buildNodeDiscoveryView(this.snapshot.board.mapGraph.nodes[nodeId], { module: this.module });
   }
 
   public subscribe(listener: (snapshot: GameSnapshot) => void): () => void {

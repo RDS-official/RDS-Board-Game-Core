@@ -72,17 +72,19 @@ packages/games/src/*   六款夹具，仅实现 setup / legalActions / reduce / 
 apps/web/src/render    Three.js 表现层，负责几何体渲染与物理演算，不直接修改核心逻辑状态
 ```
 
-**能力优先于身份**：通用层（`packages/app`、`apps/web`)不得用 `meta.id === '<gameId>'` 或某款游戏的专有术语来决定表现；需要差异化时由游戏在 `GameModule.presentation`（`packages/kernel/src/module.ts` 的 `GamePresentationHints`：`cardPreviewOnHover` / `cardFacts` / `cardStyle`）里声明能力，框架给默认实现。回归守卫在 `packages/harness/src/suites/presentation.ts`。
+**能力优先于身份**：通用层（`packages/app`、`apps/web`)不得用 `meta.id === '<gameId>'` 或某款游戏的专有术语来决定表现；需要差异化时由游戏在 `GameModule.presentation`（`packages/kernel/src/module.ts` 的 `GamePresentationHints`：`cardPreviewOnHover` / `cardFacts` / `cardStyle` / `describeNode`）里声明能力，框架给默认实现；声明统一用 `definePresentation()` 写，键的类型错误在加载时就抛 `TypeError`。回归守卫在 `packages/harness/src/suites/presentation.ts`。
 
 **详情视图是中性结构**：`packages/app/src/contracts.ts` 的 `UiDetailView`（`key` / `title` / `subtitle` / `badge` / `tone` / `seal` / `desc` / `art` / `sections` / `actions`）不认识任何游戏词汇：类别文本走 `badge`（游戏本地化）、配色走不透明的 `tone` token（`danger` / `treasure` / `event` / `place`，由 `apps/web/src/ui/detailView.ts` 映射成 `--ink` / `--ribbon`）、装饰 glyph 走 `seal`、事实行走 `sections`（来自 `GamePresentationHints.cardFacts`）。新增表现一律加字段/加能力，不加 `if (gameId)`。
 
 **浮层唯一仲裁**：`apps/web/src/ui/overlay.ts` 的 `OverlayArbiter` 是悬浮芯片（`peek`）与详情大卡（`pinned` / `modal`）的唯一状态源，两个通道都只向它申请、都只从它绘制。三条不变量：①同一 `key`（`entityDetailKey` / `nodeDetailKey` / `fixedDetailKey`）在屏上只有一个视图；②强度序 `peek < pinned < modal`，弱条目永不能驱逐强条目（指针漂移不能顶掉玩家点开的卡）；③条目只因显式关闭或更强条目接管而消失。新增任何浮层都要走 `arbiter.open()`，不要再直接操作 `#hover-hint` / `#card-sheet-layer` 的 DOM。
 
+**发现时刻由游戏声明**：地图上新出现一个节点时，通用层只能判断「有新的 `node.id`」这一件事（`apps/web/src/ui/hud.ts` 的 `maybeRevealNode`：首帧只登记布局，之后把新 id 交给 `presenter.nodeDetail(nodeId)`）。给玩家看什么——房间档案的标题、副标题、事实行、脚注、是否全屏揭示——全部来自游戏的 `GamePresentationHints.describeNode`，经 `packages/app/src/inspect.ts` 的 `buildNodeDiscoveryView` 变成中性 `UiDetailView`。没声明 `describeNode` 的游戏不会弹任何过场，也不会因为没有房间概念而报错。
+
 ### 3.2 必跑验证矩阵
 在提交代码或提 PR 前，必须在终端执行以下检查确保全绿：
 
 ```bash
-# 1. 必跑：内核 244 项一致性测试与架构边界静态检查
+# 1. 必跑：内核 247 项一致性测试与架构边界静态检查
 pnpm test
 
 # 2. 动了 packages/kernel/src 或 packages/games/src/* 时必跑：黑盒随机对局与回放哈希一致性测试

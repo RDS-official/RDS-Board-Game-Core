@@ -1,7 +1,7 @@
-import { defineGame, GameModule } from '@rds/kernel/module';
+import { defineGame, definePresentation, GameModule } from '@rds/kernel/module';
 import { GameOutcome } from '@rds/kernel/types';
 import { BETRAYAL_HOOKS } from './betrayal/hooks';
-import { betrayalCardFacts, betrayalCardStyle } from './betrayal/presentation';
+import { betrayalCardFacts, betrayalCardStyle, betrayalDescribeNode } from './betrayal/presentation';
 import { BetrayalRules } from './betrayal/rules';
 import { BETRAYAL_SCENARIOS } from './betrayal/scenarios';
 import { BETRAYAL_SPATIAL } from './betrayal/spatial';
@@ -191,7 +191,7 @@ export const splendorModule: GameModule = defineGame({
   },
   // The market row already previews faces on hover; a click must not open a
   // second card view for the same card.
-  presentation: { cardPreviewOnHover: true },
+  presentation: definePresentation({ cardPreviewOnHover: true }),
   hooks: [],
   actionSchemas: {
     TAKE_3_DIFF_GEMS: {
@@ -303,8 +303,12 @@ export const betrayalModule: GameModule = defineGame({
       },
     }
   },
-  // 山屋的卡牌词汇（武器/护甲/预兆…）与派生的详情行由本包声明。
-  presentation: { cardFacts: betrayalCardFacts, cardStyle: betrayalCardStyle },
+  // 山屋的卡牌词汇（武器/护甲/预兆…）、派生的详情行与新房间档案都由本包声明。
+  presentation: definePresentation({
+    cardFacts: betrayalCardFacts,
+    cardStyle: betrayalCardStyle,
+    describeNode: betrayalDescribeNode
+  }),
   hooks: BETRAYAL_HOOKS,
   timing: { decision: 6, response: 4 },
   scenarios: BETRAYAL_SCENARIOS,
