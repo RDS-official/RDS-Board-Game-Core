@@ -353,6 +353,14 @@ export class PokerRules {
     next = withHand(next, nextHand);
     next = pushLog(next, label);
 
+    if (action.type === 'FOLD') {
+      // 弃牌即时进 muck 并保持 HIDDEN（docs/POKER.md：弃牌后不得再查看/亮出该手牌）
+      for (const card of holeCards(state, playerId)) {
+        next = ECSManager.moveEntity(next, card.id, 'zone_muck');
+        next = setVisibility(next, card.id, { type: 'HIDDEN' });
+      }
+    }
+
     if (raised) {
       ctx.trace({
         id: ctx.id('poker'),
@@ -705,6 +713,20 @@ export class PokerRules {
     const hand = handOf(state);
     if (!hand) return state;
     let next = state;
+    // 收牌（docs/POKER.md）：剩余手牌全部进 muck 且 HIDDEN（含摊牌后亮出的牌），
+    // 公共牌与烧牌回牌堆——下一手 start 时统一重洗。
+    for (const pid of next.playerOrder) {
+      for (const card of holeCards(next, pid)) {
+        next = ECSManager.moveEntity(next, card.id, 'zone_muck');
+        next = setVisibility(next, card.id, { type: 'HIDDEN' });
+      }
+    }
+    for (const zoneId of ['zone_board', 'zone_burn'] as const) {
+      for (const cardId of [...(next.zones[zoneId]?.orderedEntities ?? [])]) {
+        next = ECSManager.moveEntity(next, cardId, 'zone_deck');
+        next = setVisibility(next, cardId, { type: 'HIDDEN' });
+      }
+    }
     for (const pid of next.playerOrder) {
       const chips = chipsOf(next, pid);
       next = patchPlayer(next, pid, player => ({

@@ -536,8 +536,14 @@ export async function startAdmin(
 
     // 筛选
     $('adm-filter-search')?.addEventListener('input', ev => {
-      searchQuery = (ev.target as HTMLInputElement).value;
+      const el = ev.target as HTMLInputElement;
+      const caret = el.selectionStart;
+      searchQuery = el.value;
       renderDashboard();
+      // 全量重渲染会重建 input，恢复焦点与光标，避免每键丢焦点
+      const restored = document.getElementById('adm-filter-search') as HTMLInputElement | null;
+      restored?.focus();
+      if (restored && caret !== null) restored.setSelectionRange(caret, caret);
     });
     $('adm-filter-role')?.addEventListener('change', ev => {
       roleFilter = (ev.target as HTMLSelectElement).value as any;
