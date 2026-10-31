@@ -20,7 +20,7 @@
 pnpm install
 pnpm run dev       # http://127.0.0.1:5173/  （可视化调试器）
 # 场景直达：http://127.0.0.1:5173/?scenario=rich_action
-pnpm test          # 内核一致性 239 例 + 分层边界检查
+pnpm test          # 内核一致性 244 例 + 分层边界检查
 pnpm run build     # 生产构建
 pnpm shots         # 按需生成全部验证截图到 shots/（自动起停 dev server）
 ```
@@ -178,7 +178,7 @@ Universal Board Game Kernel — conformance suite
 
   ✓ UI / application / kernel imports are separated
 
-  239 passed, 0 failed, 239 cases, 0 boundary violations
+  244 passed, 0 failed, 244 cases, 0 boundary violations
 ```
 
 （节选；完整清单见 `node scripts/test-core.mjs` 输出）

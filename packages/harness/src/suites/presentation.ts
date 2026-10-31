@@ -6,6 +6,12 @@ import { OccupancyIndex } from '@rds/kernel/occupancy';
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { UniversalSession } from '@rds/app/session';
+import { buildEntityInspectNotice } from '@rds/app/inspect';
+import { entityDetailKey } from '@rds/app/contracts';
+import type { UiDetailView, UiNotice } from '@rds/app/contracts';
+import { OverlayArbiter } from '@rds/web/ui/overlay';
+import type { OverlayState } from '@rds/web/ui/overlay';
+import { readdirSync, readFileSync } from 'node:fs';
 import { itemSlotId } from '@rds/games/betrayal/helpers';
 import { layoutRoom, hashString as layoutHash } from '@rds/web/render/procedural/roomLayout';
 import { PROPS } from '@rds/web/render/procedural/props';
@@ -364,4 +370,157 @@ test('presenter: payload fields collapse multi-step choices into one action', ()
     0,
     'victim loses the resource'
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/* Card inspection: one shared implementation, capability-driven previews */
+/* -------------------------------------------------------------------------- */
+
+function noticeFor(session: UniversalSession, entityId: string) {
+  const notices: UiNotice[] = [];
+  session.onNotice(notice => notices.push(notice));
+  const pick = session.pickTarget({ kind: 'entity', id: entityId });
+  return { pick, notices };
+}
+
+test('presentation: splendor declares hover previews and never opens a click sheet', () => {
+  assertEqual(GAME_REGISTRY.splendor.presentation?.cardPreviewOnHover, true, 'splendor declares hover previews');
+  const session = new UniversalSession(GAME_REGISTRY.splendor, 7);
+  const card = Object.values(session.getSnapshot().board.entities).find(entity => entity.components?.cardFace);
+  assert(!!card, 'splendor exposes a card');
+  const { pick, notices } = noticeFor(session, String(card!.id));
+  assert(pick.handled, `splendor card pick handled: ${pick.message ?? ''}`);
+  const notice = notices[notices.length - 1];
+  assert(!!notice, 'splendor card pick emits a notice');
+  assertEqual(notice.view, undefined, 'no second card view on top of the hover preview');
+  session.dispose();
+});
+
+test('presentation: betrayal item cards keep their sheet, badge and facts come from the game', () => {
+  assert(!!GAME_REGISTRY.betrayal.presentation?.cardFacts, 'betrayal declares its own card facts');
+  assert(!!GAME_REGISTRY.betrayal.presentation?.cardStyle, 'betrayal declares its own card style');
+  const session = new UniversalSession(GAME_REGISTRY.betrayal, 5, 'exploration');
+  const item = Object.values(session.getSnapshot().board.entities).find(
+    entity => entity.components?.cardFace && entity.components?.custom?.kind
+  );
+  assert(!!item, 'betrayal exposes a typed item card');
+  const kind = String(item!.components?.custom?.kind);
+  const labels: Record<string, string> = { weapon: '武器', armor: '护甲', relic: '圣物', consumable: '消耗品', tool: '工具' };
+  const { pick, notices } = noticeFor(session, String(item!.id));
+  assert(pick.handled, `betrayal item pick handled: ${pick.message ?? ''}`);
+  const notice = notices[notices.length - 1];
+  assert(!!notice?.view, 'betrayal item opens the framed sheet');
+  const view = notice.view!;
+  assertEqual(view.sections[0]?.label, '类别', 'the game vocabulary row leads the sections');
+  assertEqual(view.sections[0]?.value, labels[kind] ?? kind, 'card kind is translated by the game');
+  assertEqual(view.badge, '遗物 · ITEM', 'the badge is a localised label owned by the game');
+  assertEqual(view.tone, 'treasure', 'the tone is an opaque token the view layer maps to paint');
+  assertEqual(view.seal, '◆', 'the decorative glyph also comes from the game');
+  session.dispose();
+});
+
+test('presentation: the shared inspector renders any game without a game-id branch', () => {
+  const entity = {
+    id: 'card_x',
+    components: {
+      cardFace: { title: '测试卡', type: 'RELIC', desc: '说明', color: '#abc', imageUrl: 'img/x.png' },
+      custom: { en: 'Test Card' }
+    }
+  };
+  // A module that declares nothing gets the neutral default: a sheet with the
+  // card's own artwork, no invented sections and no game-specific paint.
+  const neutral = buildEntityInspectNotice(entity, { snapshot: { actions: [] }, module: counterModule });
+  assert(!!neutral?.view, 'neutral module still opens a sheet');
+  assertEqual(neutral!.view!.art, 'img/x.png', 'imported face artwork is reused');
+  assertEqual(neutral!.view!.sections.length, 0, 'no sections without a game declaration');
+  assertEqual(neutral!.view!.badge, 'RELIC', 'face type is the fallback badge');
+  assertEqual(neutral!.view!.tone, undefined, 'no tone without a game declaration');
+  assertEqual(neutral!.view!.key, entityDetailKey('card_x'), 'the sheet key follows the shared convention');
+  // Hover-preview modules suppress the sheet but keep the toast.
+  const hover = buildEntityInspectNotice(entity, {
+    snapshot: { actions: [] },
+    module: { ...counterModule, presentation: { cardPreviewOnHover: true } }
+  });
+  assert(!!hover, 'hover-preview module still emits the toast');
+  assertEqual(hover!.view, undefined, 'hover-preview module suppresses the sheet');
+  // Entities without a card face are not inspectable cards at all.
+  assertEqual(
+    buildEntityInspectNotice({ id: 'plain', components: {} }, { snapshot: { actions: [] }, module: counterModule }),
+    null,
+    'a face-less entity is not a card'
+  );
+});
+
+test('presentation: both sessions inspect through the shared module, never by module id', () => {
+  const appDir = new URL('../../../app/src/', import.meta.url);
+  for (const file of ['session.ts', 'netSession.ts']) {
+    const source = readFileSync(new URL(file, appDir), 'utf8');
+    assert(source.includes("from './inspect'"), `${file} reuses the shared inspector`);
+    assert(source.includes('buildEntityInspectNotice('), `${file} calls the shared inspector`);
+  }
+  // Capability checks replaced identity checks: the application layer must not
+  // ask "which game is this?" to decide how to present something.
+  const offenders: string[] = [];
+  for (const entry of readdirSync(appDir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.ts')) continue;
+    const source = readFileSync(`${entry.parentPath}/${entry.name}`, 'utf8');
+    if (source.includes('meta.id ===')) offenders.push(entry.name);
+  }
+  assertEqual(offenders.length, 0, `presentation decided by module id: ${offenders.join(', ')}`);
+});
+
+test('presentation: the overlay arbiter keeps one view per subject and ranks peek below pinned', () => {
+  const arbiter = new OverlayArbiter();
+  const states: OverlayState[] = [];
+  const unsubscribe = arbiter.subscribe(state => states.push(state));
+  const card = (key: string): UiDetailView => ({ key, title: key, sections: [], actions: [] });
+
+  assert(arbiter.open({ owner: 'test', mode: 'peek', view: card('entity:a') }).accepted, 'peek accepted');
+  assertEqual(arbiter.current().peek?.view.key, 'entity:a', 'the chip addresses the hovered card');
+  // Moving the pointer to another card swaps the chip; peek never stacks.
+  assert(arbiter.open({ owner: 'test', mode: 'peek', view: card('entity:b') }).accepted, 'a new peek replaces');
+  assertEqual(arbiter.current().peek?.view.key, 'entity:b', 'only one peek at a time');
+
+  // Clicking pins the same subject and drops the redundant chip: the user sees
+  // one view of that card, not two.
+  assert(arbiter.open({ owner: 'test', mode: 'pinned', view: card('entity:b') }).accepted, 'pinned accepted');
+  assertEqual(arbiter.current().peek, undefined, 'pinning supersedes the chip for the same card');
+  assertEqual(arbiter.current().pinned?.view.key, 'entity:b', 'the sheet takes over');
+  assertEqual(arbiter.sheet()?.view.key, 'entity:b', 'sheet() resolves the visible sheet');
+
+  // Hovering a different card must not steal the pinned sheet.
+  const refused = arbiter.open({ owner: 'test', mode: 'peek', view: card('entity:c') });
+  assertEqual(refused.accepted, false, 'pointer drift cannot evict a pinned sheet');
+  assertEqual(refused.reason, 'busy-pinned', 'the refusal names the blocker');
+  assertEqual(arbiter.sheet()?.view.key, 'entity:b', 'the pinned sheet survives the hover');
+
+  // A modal (a room reveal) outranks the sheet and refuses weaker requests.
+  assert(arbiter.open({ owner: 'test', mode: 'modal', view: card('node:r1') }).accepted, 'modal accepted');
+  assertEqual(arbiter.sheet()?.view.key, 'node:r1', 'modal outranks the pinned sheet');
+  assertEqual(
+    arbiter.open({ owner: 'test', mode: 'peek', view: card('entity:b') }).reason,
+    'busy-modal',
+    'a modal refuses previews'
+  );
+  assertEqual(
+    arbiter.open({ owner: 'test', mode: 'pinned', view: card('entity:b') }).reason,
+    'busy-modal',
+    'a modal refuses the pinned sheet too'
+  );
+  assertEqual(arbiter.current().modal?.view.key, 'node:r1', 'the modal is not displaced');
+
+  // The same subject is never on screen twice across the three slots.
+  arbiter.close('modal');
+  arbiter.open({ owner: 'test', mode: 'peek', view: card('entity:a') });
+  arbiter.open({ owner: 'test', mode: 'pinned', view: card('entity:a') });
+  arbiter.closeKey('entity:a');
+  const visible = [arbiter.current().peek, arbiter.current().pinned, arbiter.current().modal]
+    .filter((entry): entry is NonNullable<typeof entry> => !!entry)
+    .map(entry => entry.view.key);
+  assertEqual(visible.length, 0, 'closing a key clears it from every slot');
+  assert(states.length > 0, 'listeners observe the stack');
+  unsubscribe();
+  const seen = states.length;
+  arbiter.open({ owner: 'test', mode: 'peek', view: card('entity:d') });
+  assertEqual(states.length, seen, 'unsubscribe stops notifications');
 });

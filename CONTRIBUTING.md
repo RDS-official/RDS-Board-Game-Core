@@ -52,7 +52,7 @@ BASE_URL=http://127.0.0.1:6000/ pnpm shots
 
 | 命令 | 覆盖 | 何时必跑 |
 | --- | --- | --- |
-| `pnpm test` | 内核一致性 239 例 + 分层边界检查 | 任何改动 |
+| `pnpm test` | 内核一致性 244 例 + 分层边界检查 | 任何改动 |
 | `pnpm docs:check` | 文档路径有效性（旧 `src/` 布局引用、失效链接） | 动任何 `.md` / 目录结构 |
 | `pnpm test:matrix` | 六款夹具 × 多 seed × 全场景黑盒 + 回放哈希 | 动 `packages/kernel/src` 或任一 `packages/games/src/*` |
 | `pnpm test:ui` | Playwright 流程矩阵（拖拽/旋转/落定/悬停） | 动 `apps/web/src/render`、`apps/web/src/ui`、`packages/app/src` 契约 |
