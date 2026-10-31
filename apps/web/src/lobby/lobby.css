@@ -31,11 +31,14 @@
 .lobby-root input:focus, .lobby-root select:focus { outline: 1px solid var(--gold); border-color: var(--gold); }
 .lobby-root input[type='range'] { padding: 0; accent-color: var(--gold); }
 
-.lobby-root button { background: var(--gold); color: var(--gold-ink); border: none; border-radius: var(--radius-s);
+/* 基础按钮外观。刻意用 :where() 把容器降权到 (0,0,1)：
+   否则 `.lobby-root button` 的 (0,1,1) 会压过 `.lob-gamecard` / `.lob-userchip`
+   这类 (0,1,0) 的组件类，把整张游戏卡和用户胶囊涂成金色。 */
+:where(.lobby-root) button { background: var(--gold); color: var(--gold-ink); border: none; border-radius: var(--radius-s);
   padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer; transition: filter .12s, transform .05s; }
-.lobby-root button:hover:not(:disabled) { filter: brightness(1.1); }
-.lobby-root button:active:not(:disabled) { transform: translateY(1px); }
-.lobby-root button:disabled { opacity: .45; cursor: not-allowed; }
+:where(.lobby-root) button:hover:not(:disabled) { filter: brightness(1.1); }
+:where(.lobby-root) button:active:not(:disabled) { transform: translateY(1px); }
+:where(.lobby-root) button:disabled { opacity: .45; cursor: not-allowed; }
 .lobby-root button.lob-secondary { background: #232c3a; color: #c7cdd8; }
 .lobby-root button.lob-primary-btn { box-shadow: 0 2px 10px rgba(217, 180, 91, .25); }
 .lobby-root button.lob-mini { padding: 3px 10px; font-size: 12px; background: #232c3a; color: #c7cdd8; }
