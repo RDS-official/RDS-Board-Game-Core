@@ -12,7 +12,7 @@
  */
 import type { GameModule } from '@rds/kernel/module';
 import type { Entity } from '@rds/kernel/types';
-import { entityDetailKey } from './contracts';
+import { actorDetailKey, entityDetailKey } from './contracts';
 import type { GameSnapshot, UiDetailView, UiNotice } from './contracts';
 
 /** A projected entity as the view layer receives it (kernel ProjectedGameState). */
@@ -22,6 +22,38 @@ export interface EntityInspectContext {
   /** Current snapshot: the detail view offers shortcuts to the entity's actions. */
   snapshot: Pick<GameSnapshot, 'actions'>;
   module: GameModule;
+}
+
+/**
+ * Build the neutral detail view for a seat, or null when the snapshot has no
+ * such player.
+ *
+ * The board draws a plaque per seat; hovering it opens this enlarged view. It
+ * only ever reads `UiPlayer`, so it works for any game with seats and never
+ * needs to know which one it is looking at.
+ */
+export function buildActorDetailView(
+  snapshot: Pick<GameSnapshot, 'players'>,
+  playerId: string
+): UiDetailView | null {
+  const player = snapshot.players.find(entry => entry.id === playerId);
+  if (!player) return null;
+  return {
+    key: actorDetailKey(player.id),
+    title: player.name,
+    subtitle: player.roleLabel,
+    badge: `${player.scoreLabel} ${player.score}`,
+    tone: 'treasure',
+    seal: player.avatar,
+    sections: [
+      ...player.stats.map(stat => ({ label: stat.label, value: stat.value })),
+      ...player.pips.map(pip => ({
+        label: pip.label,
+        value: `${pip.value}${pip.modifier ? ` (${pip.modifier > 0 ? '+' : ''}${pip.modifier})` : ''}`
+      }))
+    ],
+    actions: []
+  };
 }
 
 /**

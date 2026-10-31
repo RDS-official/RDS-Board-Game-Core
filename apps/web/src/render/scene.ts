@@ -2227,7 +2227,12 @@ export class BoardGameScene {
         // Blinds get their own timber: pine for the big blind, red pine for the
         // small blind, walnut for the rest of the table.
         const handState = state.globalVars.hand as
-          | { sbSeat?: number; bbSeat?: number; lastActions?: Record<string, string> }
+          | {
+              sbSeat?: number;
+              bbSeat?: number;
+              lastActions?: Record<string, string>;
+              folded?: string[];
+            }
           | undefined;
         const seatIndex = Number(node.props?.seatIndex ?? -1);
         const wood: WoodKind =
@@ -2249,7 +2254,11 @@ export class BoardGameScene {
             muted: seatPlayer ? !seatPlayer.alive : false,
             marker,
             // What this seat did on the current street, painted on the board.
-            action: handState?.lastActions?.[seatId],
+            // A fold outlives its street: once a seat is out of the hand the board
+            // keeps saying so until the next hand starts.
+            action: handState?.folded?.includes(seatId)
+              ? '弃牌'
+              : handState?.lastActions?.[seatId],
             wood
           },
           outward

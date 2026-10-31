@@ -11,6 +11,7 @@ import { checkWebGLSupport, renderWebGLErrorModal } from './render/webglSupport'
 import { hideGameLoading } from './gameLoading';
 import { BoardGameHUD } from './ui/hud';
 import { peekView } from './ui/detailView';
+import { buildActorDetailView } from '@rds/app/inspect';
 import { installDiagnostics } from './diagnostics/install';
 import { MathematicalInspectorUI } from './ui/mathInspector';
 import {
@@ -158,10 +159,20 @@ class BoardGameSimulatorApp {
     });
     this.scene.onInteractiveHover(data => {
       if (!data) {
+        this.hud.showSeatPeek(null);
         this.hud.showHoverHint(null);
         return;
       }
       const meta = (data.metadata ?? {}) as Record<string, unknown>;
+      // A seat plaque is a person, not a board subject: hovering it opens the
+      // enlarged plaque window (the same card the 3D board draws).
+      if (data.type === 'NODE' && meta?.type === 'SEAT' && typeof meta.playerId === 'string') {
+        const seatView = buildActorDetailView(this.session.getSnapshot(), meta.playerId);
+        this.hud.showHoverHint(null);
+        this.hud.showSeatPeek(seatView);
+        return;
+      }
+      this.hud.showSeatPeek(null);
       if (data.type === 'NODE') {
         if (meta?.type === 'ROOM_NAV') {
           const targetName = String(meta.targetName ?? meta.name ?? '相邻房间');

@@ -395,6 +395,11 @@ export function fixedDetailKey(name: string): string {
   return `fixed:${name}`;
 }
 
+/** Key for a seat's plaque (the board's stand-in for the player card). */
+export function actorDetailKey(id: string): string {
+  return `actor:${id}`;
+}
+
 /** One key/value row of a detail view. */
 export interface UiDetailSection {
   label: string;
