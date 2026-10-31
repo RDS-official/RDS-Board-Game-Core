@@ -28,6 +28,8 @@ class BoardGameSimulatorApp {
   private session: UniversalSession | NetSession;
   /** Set when URL params request a hub-backed lobby session. */
   private readonly netOptions?: NetSessionOptions;
+  /** `?seats=`：单机/演示时显式指定桌面人数（联机时由房间人数决定）。 */
+  private initialSeats?: number;
   private readonly hud: BoardGameHUD;
   private readonly inspector: MathematicalInspectorUI;
   private readonly ports: PresentationPorts;
@@ -56,6 +58,7 @@ class BoardGameSimulatorApp {
     const params = new URLSearchParams(window.location.search);
     this.initialScenario = params.get('scenario') ?? undefined;
     this.activeScenario = this.initialScenario;
+    this.initialSeats = parseSeats(params.get('seats'));
     this.currentGameId = params.get('game') ?? 'catan';
     this.netOptions = parseNetSessionOptions(params);
 
@@ -453,7 +456,7 @@ class BoardGameSimulatorApp {
       void net.start();
       return net;
     }
-    return new UniversalSession(module, 42, scenario);
+    return new UniversalSession(module, 42, scenario, undefined, this.initialSeats);
   }
 
   private bindSession(session: UniversalSession | NetSession): void {
@@ -855,9 +858,17 @@ function parseNetSessionOptions(params: URLSearchParams): NetSessionOptions | un
     playerId: player,
     hostId,
     scenario: params.get('scenario') ?? undefined,
+    // P2P 房主权威模式按房间人数发牌；中心模式由服务器决定，这里仅作兜底。
+    seats: parseSeats(params.get('seats') ?? String(Object.keys(roster ?? {}).length || '')),
     roster,
     seatOwners
   };
+}
+
+/** `?seats=` → 正整数，非法值当作"未指定"。 */
+function parseSeats(raw: string | null | undefined): number | undefined {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 /**

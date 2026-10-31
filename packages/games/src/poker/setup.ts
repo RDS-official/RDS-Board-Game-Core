@@ -206,7 +206,14 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
   return state;
 }
 
-/** Named seat-count scenarios (the kernel's `setup` only receives a seed). */
+/**
+ * Named seat-count scenarios.
+ *
+ * A `seats_N` scenario **pins** its table size — that is what the variant label
+ * promises, and it is how the lobby caps the room. A caller that wants the table
+ * to follow the room's headcount uses the module's default `setup` (no
+ * scenario), which honours `GameSetupOptions.seats`.
+ */
 export function pokerScenario(seats: number, overrides: Partial<PokerConfig> = {}) {
-  return (seed: number): GameState => setupPoker(seed, { seats, ...overrides });
+  return (seed: number): GameState => setupPoker(seed, { ...overrides, seats });
 }

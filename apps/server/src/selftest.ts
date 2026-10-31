@@ -110,7 +110,7 @@ ok((createRoom(reg.user.id, 'x', 'betrayal', { scenarioId: 'nope' }) as any).err
 
 // 德州扑克：房间座位数跟着所选场景走（默认 4 人，6 人桌变体给 6 个座位）
 const pokerDefault: any = createRoom(reg.user.id, '扑克默认房', 'poker');
-ok(pokerDefault.maxPlayers === 4, 'poker room defaults to the 4-seat fixture');
+ok(pokerDefault.maxPlayers === 10, 'poker room allows the full 2-10 range by default');
 const pokerSix: any = createRoom(reg.user.id, '扑克六人房', 'poker', { scenarioId: 'seats_6' });
 ok(pokerSix.maxPlayers === 6, 'poker 6-seat variant widens the room cap');
 const pokerTwo: any = createRoom(reg.user.id, '扑克单挑房', 'poker', { scenarioId: 'seats_2', maxPlayers: 9 });
@@ -163,6 +163,55 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
   // 房间关闭 → 对局释放
   ok(matches.close(room.id) === true, 'closing a room disposes its server match');
   ok(matches.get(room.id) === undefined, 'disposed match is no longer reachable');
+
+  // 座位数 = 房间里的真人：2 人房间的扑克桌只发 2 个座位（曾经的 bug 是发 4 个，
+  // 回合卡在无人控制的 p4）。
+  const duo = matches.ensure({
+    roomId: 'r_duo_poker',
+    gameId: 'poker',
+    players: [
+      { userId: host, name: '测试员1' },
+      { userId: guest, name: '测试员2' }
+    ],
+    seats: 2,
+    seed: 77
+  });
+  const duoState = duo.snapshotFor(host) as any;
+  ok(
+    duo.seatList().length === 2 && duoState.state.playerOrder.length === 2,
+    'a two-player poker room is dealt exactly two seats'
+  );
+  ok(duoState.state.players.p3 === undefined, 'no ghost seat p3 in a two-player room');
+  const duoActor = duoState.state.activePlayerId;
+  ok(['p1', 'p2'].includes(duoActor), 'the first actor is a real seat');
+  matches.close('r_duo_poker');
+
+  // 固定阵容的玩法无法为 2 人发牌 → 开局失败并给出可读原因，而不是摆空座位。
+  let fixedRosterRejected = false;
+  try {
+    matches.ensure({
+      roomId: 'r_bad_catan',
+      gameId: 'catan',
+      players: [
+        { userId: host, name: '测试员1' },
+        { userId: guest, name: '测试员2' }
+      ],
+      seats: 2,
+      seed: 5
+    });
+  } catch (error) {
+    fixedRosterRejected = /不支持 2 人/.test(String(error));
+  }
+  ok(fixedRosterRejected, 'a fixed-roster game refuses to deal a mismatched seat count');
+
+  // 大厅层面同样拦住人数不符的开局。
+  const catanRoom: any = createRoom(reg.user.id, '卡坦两人房', 'catan');
+  const badStart: any = setRoomStatus(reg.user.id, catanRoom.id, 'playing');
+  ok(typeof badStart.error === 'string' && /3 人/.test(badStart.error), 'lobby rejects starting catan with 2 players');
+  const pokerRoom: any = createRoom(reg.user.id, '扑克两人房', 'poker');
+  joinRoom(other.user.id, pokerRoom.id);
+  const pokerStart: any = setRoomStatus(reg.user.id, pokerRoom.id, 'playing');
+  ok(pokerStart.status === 'playing', 'lobby starts a two-player poker room');
 }
 
 // 测试用户删除

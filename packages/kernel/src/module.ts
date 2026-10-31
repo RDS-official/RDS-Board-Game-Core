@@ -49,7 +49,21 @@ export interface GameMeta {
 /** A named, deterministic initial position used by tests, demos and replays. */
 export interface GameScenario {
   description?: string;
-  setup: (seed: number) => GameState;
+  setup: (seed: number, options?: GameSetupOptions) => GameState;
+}
+
+/**
+ * Optional setup arguments.
+ *
+ * The kernel owns only the *shape* of the request; whether a fixture honours it
+ * is the fixture's business. Fixtures with a fixed roster ignore `seats`, and
+ * the caller can tell by comparing `playerOrder.length` with what it asked for
+ * (see `apps/server/src/match.ts`) — that is how a room refuses to deal more
+ * seats than it has players, or fewer seats than the game needs.
+ */
+export interface GameSetupOptions {
+  /** How many seats the table should have. */
+  seats?: number;
 }
 
 /**
@@ -134,7 +148,7 @@ export interface GameModule {
   spatial?: SpatialQuery;
   /** Logical-clock TTLs (in ticks) applied to decisions / response windows. */
   timing?: { decision?: number; response?: number };
-  setup: (seed: number) => GameState;
+  setup: (seed: number, options?: GameSetupOptions) => GameState;
   legalActions: (state: GameState, actorId: ActorId) => Action[];
   reduce: (state: GameState, action: Action, ctx: ReduceContext) => GameState;
   outcome: (state: GameState) => GameOutcome;

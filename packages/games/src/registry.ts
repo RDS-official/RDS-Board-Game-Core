@@ -247,12 +247,24 @@ export const splendorModule: GameModule = defineGame({
    * so the variant is baked into each closure.
    */
   scenarios: {
-    base: { description: '基础版', setup: seed => setupSplendor(seed, 2, { mega: false, pokemart: false }) },
-    mega: { description: '超级进化', setup: seed => setupSplendor(seed, 2, { mega: true, pokemart: false }) },
-    pokemart: { description: '宝可梦商店', setup: seed => setupSplendor(seed, 2, { mega: false, pokemart: true }) },
-    full: { description: '全扩展', setup: seed => setupSplendor(seed, 2, { mega: true, pokemart: true }) }
+    base: {
+      description: '基础版',
+      setup: (seed, options) => setupSplendor(seed, options?.seats ?? 2, { mega: false, pokemart: false })
+    },
+    mega: {
+      description: '超级进化',
+      setup: (seed, options) => setupSplendor(seed, options?.seats ?? 2, { mega: true, pokemart: false })
+    },
+    pokemart: {
+      description: '宝可梦商店',
+      setup: (seed, options) => setupSplendor(seed, options?.seats ?? 2, { mega: false, pokemart: true })
+    },
+    full: {
+      description: '全扩展',
+      setup: (seed, options) => setupSplendor(seed, options?.seats ?? 2, { mega: true, pokemart: true })
+    }
   },
-  setup: seed => setupSplendor(seed),
+  setup: (seed, options) => setupSplendor(seed, options?.seats),
   legalActions: (state, playerId) => SplendorRules.getLegalActions(state, playerId),
   reduce: (state, action, ctx) => SplendorRules.applyAction(state, action, ctx),
   outcome: state => toOutcome(SplendorRules.checkWinCondition(state))
@@ -550,7 +562,7 @@ export const pokerModule: GameModule = defineGame({
       setup: pokerScenario(4, { stacks: [1000, 1000, 1000, 60] })
     }
   },
-  setup: seed => setupPoker(seed, { seats: 4 }),
+  setup: (seed, options) => setupPoker(seed, { seats: options?.seats ?? 4 }),
   legalActions: (state, playerId) => PokerRules.getLegalActions(state, playerId),
   validatePayload: (state, action, payload) => PokerRules.validatePayload(state, action, payload),
   reduce: (state, action, ctx) => PokerRules.applyAction(state, action, ctx),

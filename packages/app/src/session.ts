@@ -196,11 +196,29 @@ export class UniversalSession implements GamePresenter {
    * @param engine 可选注入已有引擎（中期项 A2）：房主联机时 UniversalSession
    *               与权威 GameRoom 共用同一个实例，HUD 的 dispatch 直接就是
    *               权威状态跃迁，无需二次重放同步。
+   * @param seats  可选座位数：本地/单机演示时按 URL 的 `?seats=` 指定人数，
+   *               避免"2 人房间摆了 4 个座位"这类空座位死局。
    */
-  constructor(module: GameModule, seed = 1, scenario?: string, engine?: UniversalGameEngine) {
+  constructor(
+    module: GameModule,
+    seed = 1,
+    scenario?: string,
+    engine?: UniversalGameEngine,
+    seats?: number
+  ) {
     this.module = module;
     this.scenario = scenario;
-    this.engine = engine ?? new UniversalGameEngine(module, seed, { scenario });
+    const engineOptions = {
+      ...(scenario ? { scenario } : {}),
+      ...(seats === undefined ? {} : { seats })
+    };
+    this.engine =
+      engine ??
+      new UniversalGameEngine(
+        module,
+        seed,
+        Object.keys(engineOptions).length > 0 ? engineOptions : undefined
+      );
 
     this.unsubscribers.push(
       this.engine.onStateChange(() => {

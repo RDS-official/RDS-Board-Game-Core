@@ -563,7 +563,7 @@ interface GameModule {
   validateSelection?(state, candidate, targets, actorId): string[];
   spatial?: SpatialQuery;
   timing?: { decision?: number; response?: number };
-  setup(seed): GameState;
+  setup(seed, options?): GameState;          // options.seats：房间人数，见下
   legalActions(state, actorId): Action[];   // players and NPCs
   reduce(state, action, ctx): GameState;
   outcome(state): GameOutcome;
@@ -571,6 +571,12 @@ interface GameModule {
   onDecisionResolved?(state, window, ctx): GameState;
 }
 ```
+
+**座位数契约（S9 延伸）**：`EngineOptions.seats` / `GameSetupOptions.seats` 把「房间里有几个人」透传给夹具。
+
+- 可变人数夹具（德州扑克 2–10、璀璨宝石 2–4）据此发牌，**2 人房间绝不摆 4 个座位**；
+- 固定阵容夹具（卡坦岛 3、山屋 3）忽略该参数，服务端 `MatchManager` 与大厅 `setRoomStatus` 会比对实际座位数并**拒绝开局**（提示"该玩法需要 3 人开局"），而不是留一个永远等不到人的空座位；
+- 座位数写进 `ExportedLog.seats`，回放按同样的座位数重建初始状态。
 
 `ReduceContext`：
 
