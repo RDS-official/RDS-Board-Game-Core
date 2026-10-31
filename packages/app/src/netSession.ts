@@ -50,6 +50,7 @@ import {
   UiSpatialInfo,
   ViewerId
 } from './contracts';
+import { buildEntityInspectNotice } from './inspect';
 import {
   UniversalSession,
   BoundAction,
@@ -890,31 +891,12 @@ export class NetSession implements GamePresenter {
     }
 
     if (pick.kind === 'entity' && !this.activeBoardGroup) {
-      const entity = state.entities[pick.id];
-      const face = entity?.components?.cardFace;
-      if (face) {
-        const custom = (entity?.components?.custom ?? {}) as Record<string, unknown>;
-        const kind = String(face.type ?? custom.cardType ?? 'ITEM');
-        this.emitNotice({
-          kind: 'event',
-          icon: entity.isMasked ? '🂠' : '🃏',
-          title: entity.isMasked ? '未揭示的卡牌' : face.title,
-          detail: entity.isMasked ? '需要先揭示这张牌。' : face.desc,
-          durationMs: 6500,
-          card: entity.isMasked
-            ? undefined
-            : {
-                title: face.title,
-                en: String(custom.en ?? ''),
-                kind,
-                desc: String(face.desc ?? ''),
-                color: String(face.color ?? ''),
-                actions: snapshot.actions
-                  .filter(action => action.entityId === entity.id || action.placementEntityId === entity.id)
-                  .map(action => ({ id: action.id, icon: action.icon, label: action.label }))
-                  .slice(0, 6)
-              }
-        });
+      const notice = buildEntityInspectNotice(state.entities[pick.id], {
+        snapshot,
+        module: this.module
+      });
+      if (notice) {
+        this.emitNotice(notice);
         return { handled: true };
       }
     }

@@ -107,6 +107,29 @@ export interface SpatialQuery {
 }
 
 /**
+ * Optional presentation hints a game may declare.
+ *
+ * The kernel never reads these — they exist so a shared view layer (packages/app,
+ * apps/web) can describe and render *every* game without a single game-id branch.
+ * Whatever is specific to one game's cards (vocabulary, preview policy) is
+ * declared here, inside that game's own package, instead of inside the generic
+ * inspection code.
+ */
+export interface GamePresentationHints {
+  /**
+   * The board already previews card faces on hover, so a click on a card must
+   * not open a second, differently-styled detail sheet for the same card.
+   */
+  cardPreviewOnHover?: boolean;
+  /**
+   * Player-facing fact rows for a card's `components.custom` bag
+   * ("类别: 武器", "剩余次数: 2", ...). Games supply their own vocabulary; the
+   * view layer has no built-in card taxonomy. Must be pure: called per notice.
+   */
+  cardFacts?: (custom: Record<string, unknown>) => { label: string; value: string }[];
+}
+
+/**
  * The framework contract a game plugin must satisfy.
  * Games are fixtures: they exercise the kernel, not the other way round.
  */
@@ -144,6 +167,12 @@ export interface GameModule {
    * See docs/ENGINE-PASSIVE-MODIFIERS.md for the rationale.
    */
   statModifiers?: (state: GameState, actorId: ActorId) => Record<string, number>;
+  /**
+   * Optional presentation hints: capability declarations for the shared view
+   * layer. Rules never read this; a UI consults it so one generic renderer can
+   * serve every game without branching on the game id.
+   */
+  presentation?: GamePresentationHints;
   /** Optional spatial semantics (walls, doors, LOS, floors). */
   spatial?: SpatialQuery;
   /** Logical-clock TTLs (in ticks) applied to decisions / response windows. */

@@ -1,7 +1,7 @@
 # 《山屋惊魂》机制实现与模拟器缺陷评估
 
 > 本文对应代码：`packages/games/src/betrayal/*`（模块）、`packages/kernel/src/*`（内核）、`packages/app/src/session.ts`（呈现适配）、`apps/web/src/render/*`（桌面）。
-> 当前基线：`239 passed / 0 failed / 0 boundary violations`；`tsc --noEmit` 通过。
+> 当前基线：`243 passed / 0 failed / 0 boundary violations`；`tsc --noEmit` 通过。
 > 定位：内核是产品，山屋是**高复杂度一致性夹具**。本文既记录规则覆盖，也记录在实现过程中被证伪的内核假设。
 
 ---
@@ -25,7 +25,7 @@
 | 决策窗口 | 伤害分配、交易、水晶球窥视 | 走 `pendingDecisions` |
 | 中断栈 | 作祟检定 | `HAUNT_CHECK` 帧 + 超时自动掷骰 |
 | 规则钩子 | 5 个剧本各 1 个 | `FILTER_MODIFY` / `BEFORE_REPLACE` / `AFTER_TRIGGER` |
-| 测试 | 山屋专项（`suites/betrayal.ts` / `betrayalChecks.ts` / `rulesBetrayal.ts`）+ 内核/应用套件 | 239 total |
+| 测试 | 山屋专项（`suites/betrayal.ts` / `betrayalChecks.ts` / `rulesBetrayal.ts`）+ 内核/应用套件 | 243 total |
 
 ---
 
@@ -465,7 +465,7 @@ killPlayer:
 运行：
 
 ```bash
-node scripts/test-core.mjs          # 239 passed
+node scripts/test-core.mjs          # 243 passed
 node node_modules/typescript/bin/tsc --noEmit
 node node_modules/vite/bin/vite.js build
 ```
