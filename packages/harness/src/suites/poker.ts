@@ -97,6 +97,17 @@ function startHand(engine: UniversalGameEngine): void {
     }
   }
   const actor = engine.getActiveActorId();
+  // 一手结束后要先各自「准备」才能开下一手（结算画面 + 20s 冷却由驱动方负责）。
+  const finished = engine.getRawState().globalVars.hand as { street?: string } | undefined;
+  if (finished?.street === 'COMPLETE') {
+    for (const pid of engine.getRawState().playerOrder) {
+      engine.dispatch({ type: 'READY', playerId: pid });
+    }
+  }
+  // 全员准备后规则自动发牌；只有仍停在结算态时才需要手动开。
+  const stillSettled =
+    (engine.getRawState().globalVars.hand as { street?: string } | undefined)?.street === 'COMPLETE';
+  if (!stillSettled) return;
   const result = engine.dispatch({ type: 'START_HAND', playerId: actor });
   assert(result.ok, `START_HAND accepted: ${result.error ?? ''}`);
 }
@@ -667,39 +678,23 @@ test('poker: ten-seat tables keep the 1 beginner / 4 intermediate / 5 advanced m
   assertEqual(mix.advanced, 4, 'advanced fill what remains of the nine');
 });
 
-test('poker: a human takes a seat, readies up, and only then can start', () => {
+test('poker: there is no seating step — the first hand is ready to deal', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 17, { scenario: 'ai_table_6' });
   const types = () => engine.getLegalActions('p1').map(action => action.type);
 
-  assertEqual(types().join(','), 'TAKE_SEAT', 'the first action is taking a seat');
+  // 不再有「入座 → 准备」：开局即全员就绪，一手牌直接可开。
+  assert(types().includes('START_HAND'), 'the opening action is dealing a hand');
+  assert(!types().includes('TAKE_SEAT') && !types().includes('READY_UP'), 'no seating actions exist');
   assertEqual(engine.getLegalActions('p2').length, 0, 'AI seats expose no actions to the player');
-
-  assert(engine.dispatch({ type: 'TAKE_SEAT', playerId: 'p1' }).ok, 'taking the seat is accepted');
-  assertEqual(types().join(','), 'READY_UP', 'the seat then offers ready-up');
-
-  assert(engine.dispatch({ type: 'READY_UP', playerId: 'p1' }).ok, 'readiness is accepted');
-  assertEqual(types().join(','), 'START_HAND', 'everyone ready unlocks the start action');
 
   const started = engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
   assert(started.ok, 'the game starts');
-  const state = engine.getRawState();
-  assertEqual(state.phase, 'PREFLOP', 'the first hand deals straight away');
-  const seating = state.globalVars.seating as { started: boolean } | undefined;
-  assertEqual(seating?.started, true, 'the seating flow closes once play begins');
+  assertEqual(engine.getRawState().phase, 'PREFLOP', 'the first hand deals straight away');
+  const seating = engine.getRawState().globalVars.seating as { started: boolean } | undefined;
+  assertEqual(seating, undefined, 'no seating state is written any more');
   assert(
     engine.getLegalActions('p1').every(action => action.type !== 'TAKE_SEAT' && action.type !== 'READY_UP'),
-    'seat actions are gone during play'
-  );
-});
-
-test('poker: ready-up cannot be reached before taking the seat', () => {
-  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 23, { scenario: 'ai_table_6' });
-  const result = engine.dispatch({ type: 'READY_UP', playerId: 'p1' });
-  assertEqual(result.ok, false, 'ready without a seat is rejected');
-  assertEqual(
-    engine.getLegalActions('p1').map(action => action.type).join(','),
-    'TAKE_SEAT',
-    'the seat action is still the only option'
+    'seat actions never exist'
   );
 });
 
@@ -767,4 +762,123 @@ test('poker: lobby AI seats are added on top of the human seats', () => {
   assertEqual(two.getRawState().playerOrder.length, 6, 'two humans plus four AI seats six');
   assertEqual(twoSeats.filter(seat => !seat.isAi).length, 2, 'two human seats');
   assertEqual(twoSeats.slice(0, 2).every(seat => !seat.isAi), true, 'humans take the first seats');
+});
+
+/* -------------------------------------------------------------------------- */
+/* 结算：全员准备才开下一手 / 摊牌留牌                                          */
+/* -------------------------------------------------------------------------- */
+
+test('poker: a settled hand waits for every seat to be ready', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 71, { scenario: 'seats_4' });
+  startHand(engine);
+
+  // 一路弃牌到 p1：这手早结束，赢家可以选择亮牌或保留。
+  act(engine, 'FOLD'); // p4
+  act(engine, 'FOLD'); // p1
+  act(engine, 'FOLD'); // p2
+
+  const ended = engine.getRawState();
+  assertEqual(hand(ended).street, 'COMPLETE', 'the hand settled');
+  const last = ended.globalVars.lastHand as { endedBy: string; pots: { winners: string[] }[] };
+  assertEqual(last.endedBy, 'FOLD', 'the hand ended by folds');
+  const winner = last.pots[0].winners[0];
+
+  const offered = engine.getLegalActions(winner).map(action => action.type);
+  assert(offered.includes('READY'), 'the winner still has to be ready');
+  assert(offered.includes('SHOW'), 'an early winner may show');
+  assert(offered.includes('MUCK'), 'an early winner may keep the cards hidden');
+  assert(!offered.includes('START_HAND'), 'no deal before the ready check');
+
+  for (const pid of ended.playerOrder) engine.dispatch({ type: 'READY', playerId: pid });
+  assertEqual(
+    (engine.getRawState().globalVars.hand as { street?: string }).street,
+    'PREFLOP',
+    'the next hand deals itself once everyone is ready'
+  );
+});
+
+test('poker: a showdown keeps the surviving hands face up', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 72, { scenario: 'seats_2' });
+  startHand(engine);
+  for (let street = 0; street < 4; street++) callAround(engine, 2);
+
+  const settled = engine.getRawState();
+  const final = hand(settled);
+  assertEqual(final.street, 'COMPLETE', 'the hand reached showdown');
+  assertEqual(final.revealed.length, 2, 'both surviving hands are revealed');
+  {
+    // 牌面留在手牌区且保持 PUBLIC，渲染层据此在结算画面继续画牌。
+    const kept = settled.playerOrder.flatMap(player => settled.zones[`zone_hand_${player}`]?.orderedEntities ?? []);
+    const shown = kept.filter(id => settled.entities[id]?.visibility?.type === 'PUBLIC');
+    assertEqual(shown.length, 4, 'both surviving hands stay face up');
+  }
+});
+
+test('poker: the AI is stepped one action at a time when the driver asks for it', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 73, {
+    scenario: 'seats_4',
+    autoAi: false
+  } as never);
+  engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
+  engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
+
+  // 把 p4/p1/p2 三个真人座位弃掉，轮到 AI 时必须只给出 AI_ACT。
+  const seatOf = engine.getRawState().globalVars.seats as { playerId: string; isAi: boolean }[];
+  const humans = seatOf.filter(seat => !seat.isAi).map(seat => seat.playerId);
+  let guard = 0;
+  while (guard++ < 24) {
+    const actor = engine.getActiveActorId();
+    if (!actor || seatOf.find(seat => seat.playerId === actor)?.isAi) break;
+    const legal = engine.getLegalActions(actor).map(action => action.type);
+    if (legal.includes('FOLD') && humans.includes(actor)) {
+      engine.dispatch({ type: 'FOLD', playerId: actor });
+      continue;
+    }
+    break;
+  }
+  const aiActor = engine.getActiveActorId();
+  const isAi = !!seatOf.find(seat => seat.playerId === aiActor)?.isAi;
+  if (isAi) {
+    const offered = engine.getLegalActions(aiActor).map(action => action.type);
+    assertEqual(offered.join(','), 'AI_ACT', 'an AI seat only offers one step at a time');
+    const before = engine.getActiveActorId();
+    const step = engine.dispatch({ type: 'AI_ACT', playerId: aiActor });
+    assert(step.ok, `AI_ACT accepted: ${'$'}{step.error ?? ''}`);
+    assert(engine.getRawState().turn > 0, 'the step advanced the turn');
+    assert(before !== undefined, 'the AI had a seat');
+  }
+});
+
+test('poker: AI seats never block the next deal, and a human ready deals it', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 91, { scenario: 'ai_table_6' });
+  engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
+
+  const street = () => (engine.getRawState().globalVars.hand as { street?: string }).street;
+  const readyForNext = () => (engine.getRawState().globalVars.hand as { readyForNext?: string[] }).readyForNext ?? [];
+
+  // AI 座位开局即就绪：发牌后它们已经在 readyForNext 里。
+  assert(readyForNext().length >= 5, 'the AI seats are ready for the next hand');
+
+  let guard = 0;
+  while (guard++ < 60 && street() !== 'COMPLETE') {
+    const actor = engine.getActiveActorId();
+    const legal = engine.getLegalActions(actor).map(action => action.type);
+    if (!legal.includes('FOLD')) break;
+    engine.dispatch({ type: 'FOLD', playerId: actor });
+  }
+  assertEqual(street(), 'COMPLETE', 'the hand settled');
+
+  const before = engine.getLegalActions('p1').map(action => action.type);
+  assert(before.includes('READY'), 'the human still has to ready up');
+  assert(!before.includes('START_HAND'), 'and cannot deal before doing so');
+
+  assert(engine.dispatch({ type: 'READY', playerId: 'p1' }).ok, 'ready accepted');
+  assertEqual(street(), 'PREFLOP', 'the next hand deals as soon as the humans are in');
+});
+
+test('poker: a two-human room has no one-click ready', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 92, { scenario: 'seats_2' });
+  const offered = engine.getLegalActions('p1').map(action => action.type);
+  assert(!offered.includes('DEBUG_READY_ALL'), 'debug ready-all stays out of real tables');
+  assert(offered.includes('START_HAND'), 'the opening deal is still offered');
 });

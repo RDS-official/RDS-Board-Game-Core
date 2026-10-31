@@ -27,6 +27,7 @@ import { DuneMahjongRules } from './dune_mahjong/rules';
 import { setupDuneMahjong } from './dune_mahjong/setup';
 import { PokerRules } from './poker/rules';
 import { pokerScenario, setupPoker } from './poker/setup';
+import { pokerSettlementMoment } from './poker/presentation';
 import { POKER_TABLE } from './poker/seating';
 import { SANGUOSHA_HOOKS } from './sanguosha/hooks';
 import { sanguoshaRoleLabel } from './sanguosha/presentation';
@@ -601,19 +602,14 @@ export const pokerModule: GameModule = defineGame({
       description: '短码演示（玩家 4 只有 60 筹码，数手内触发终局）',
       setup: pokerScenario(4, { stacks: [1000, 1000, 1000, 60] })
     },
-    /**
-     * 默认桌：1 名真人 + 5 个内置 AI（1 初级 / 2 中级 / 2 高级），
-     * 走完整的「入座 → 准备 → 开局」流程。
-     */
+    /** 默认桌：1 名真人 + 5 个内置 AI（入门桌）/ 1 真人 + 9 AI（满桌）。 */
     ai_table_6: {
       description: '1 真人 + 5 AI（入门桌）',
-      setup: (seed: number) =>
-        setupPoker(seed, { seats: 6, humans: 1, seatingFlow: true })
+      setup: (seed: number) => setupPoker(seed, { seats: 6, humans: 1 })
     },
     ai_table_10: {
       description: '1 真人 + 9 AI（满桌）',
-      setup: (seed: number) =>
-        setupPoker(seed, { seats: 10, humans: 1, seatingFlow: true })
+      setup: (seed: number) => setupPoker(seed, { seats: 10, humans: 1 })
     }
   },
   /**
@@ -629,8 +625,16 @@ export const pokerModule: GameModule = defineGame({
       humans: options?.humans ?? options?.seats ?? 1,
       // 房主在大厅添加的 AI 补位数；缺省时由 planSeats 补到 6 人。
       ...(options?.aiSeats === undefined ? {} : { aiSeats: options.aiSeats }),
-      seatingFlow: true
+      ...(options?.autoAi === undefined ? {} : { autoAi: options.autoAi })
     }),
+  presentation: definePresentation({
+    // 结算幕布：每手结束播一次（key 含手数与结束方式，天然去重）。
+    describeMoment: state => pokerSettlementMoment(state),
+    // 内置 AI 每步至少 5 秒，真人跟得上牌桌；驱动方据此逐步派发 AI_ACT。
+    aiActionDelayMs: 5000,
+    // 一手刚结束，先让牌桌读完结算，20 秒后才允许开下一手。
+    actionCooldownMs: { START_HAND: 20000 }
+  }),
   legalActions: (state, playerId) => PokerRules.getLegalActions(state, playerId),
   validatePayload: (state, action, payload) => PokerRules.validatePayload(state, action, payload),
   reduce: (state, action, ctx) => PokerRules.applyAction(state, action, ctx),

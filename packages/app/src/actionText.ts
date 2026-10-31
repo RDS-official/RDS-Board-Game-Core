@@ -449,6 +449,14 @@ function describeActionZh(
         return { icon: '🪑', label: '入座', hint: '在本桌坐下 · 坐下后可以点准备', tone: 'primary' };
       case 'READY_UP':
         return { icon: '✅', label: '准备', hint: '全员准备后自动开局发牌', tone: 'primary' };
+      case 'DEBUG_READY_ALL':
+        return { icon: '⚡', label: '全员准备', hint: '调试：所有存活座位一键就位', tone: 'primary' };
+      case 'READY':
+        return { icon: '✅', label: '准备', hint: '准备下一手 · 全员准备后自动开局', tone: 'primary' };
+      case 'SHOW':
+        return { icon: '👁', label: '明牌', hint: '亮出底牌，让大家看到你用什么赢的', tone: 'normal' };
+      case 'MUCK':
+        return { icon: '🂠', label: '不明牌', hint: '保留底牌 · 只亮筹码', tone: 'normal' };
       case 'START_HAND': {
         // 座位流程里第一次 START_HAND 是「开始游戏」，之后才是「发下一手」。
         const seating = state.globalVars.seating as { started?: boolean } | undefined;

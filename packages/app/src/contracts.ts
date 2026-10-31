@@ -89,6 +89,11 @@ export interface UiAction {
   selection?: UiActionSelection;
   /** When present, the UI must collect these fields and send them as payload. */
   fields?: UiActionField[];
+  /**
+   * 剩余冷却时间（ms）。>0 时按钮置灰并显示倒计时：一手刚结束需要停一下再开
+   * 下一手，避免牌桌还没看清就被洗牌。时钟由驱动方掌控，内核本身无时钟。
+   */
+  cooldownMs?: number;
 }
 
 /** One buff or debuff currently attached to a player. */
@@ -497,6 +502,8 @@ export interface UiMoment {
   cast?: { label: string; name: string }[];
   objective?: string;
   durationMs?: number;
+  /** 幕布不自动消失，等游戏撤下（状态变化）或玩家点击。 */
+  hold?: boolean;
 }
 /** Structured trait movement attached to notices so the UI can animate it. */
 export interface UiTraitChange {
@@ -519,6 +526,8 @@ export interface UiNotice {
   title: string;
   detail?: string;
   durationMs?: number;
+  /** 幕布不自动消失，等游戏撤下（状态变化）或玩家点击。 */
+  hold?: boolean;
   /** Optional tab to focus when this notice arrives. */
   tabHint?: 'G' | 'STACK' | 'FACTIONS' | 'HOOKS' | 'TIME';
   /** When present the HUD opens a detail overlay for this subject. */

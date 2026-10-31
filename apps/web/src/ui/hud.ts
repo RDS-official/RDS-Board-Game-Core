@@ -89,6 +89,8 @@ export class BoardGameHUD {
   private railFocusY: number | null = null;
   /** Pending animation frame for the rail fisheye (pointer events are coalesced). */
   private railFrame = 0;
+  /** 冷却角标的刷新定时器（dock 建好后启动一次）。 */
+  private cooldownTimer: number | null = null;
   /** Stamp of the sheet currently painted, so a repaint does not restart its timer. */
   private paintedSheetStamp = 0;
   /** The layer outlives a repaint, so its backdrop handler must be replaced, not added again. */
@@ -964,6 +966,13 @@ export class BoardGameHUD {
   private maybeShowMoment(): void {
     const moment = this.presenter.moment?.() ?? null;
     if (!moment) {
+      // 游戏撤下了幕布（例如结算结束）：正在挂起的幕布要一起收起。
+      const open = this.container.querySelector('#moment-cine');
+      if (open?.classList.contains('open')) {
+        open.classList.remove('open');
+        open.innerHTML = '';
+      }
+      this.lastMomentKey = undefined;
       this.momentArmed = true;
       return;
     }
@@ -1008,7 +1017,8 @@ export class BoardGameHUD {
     };
     layer.addEventListener('click', close);
     if (this.momentTimer) window.clearTimeout(this.momentTimer);
-    this.momentTimer = window.setTimeout(close, moment.durationMs ?? 9000);
+    // hold 的幕布不自动消失：等游戏自己撤下，或玩家点一下。
+    if (!moment.hold) this.momentTimer = window.setTimeout(close, moment.durationMs ?? 9000);
   }
 
   private syncSoundButton(): void {
@@ -2008,15 +2018,20 @@ export class BoardGameHUD {
         const mid = (total - 1) / 2;
         const offset = index - mid;
         const tone = action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : '';
+        // 冷却中的动作（例如一手结束后 20 秒才允许开下一手）画成倒计时角标：
+        // 秒数由 `tickCooldowns` 每 250ms 刷新，到点自动恢复可点。
+        const cooling = action.cooldownMs && action.cooldownMs > 0;
+        const coolAttr = cooling ? ` data-cool-until="${Date.now() + action.cooldownMs!}"` : '';
         return `
-        <button class="act ${tone}"
+        <button class="act ${tone}${cooling ? ' cooling' : ''}"
                 data-action-id="${action.id}"
                 data-fan-label="${action.label}"
-                data-fan-hint="${action.hint}"
+                data-fan-hint="${action.hint}"${coolAttr}
                 style="--i:${index};--off:${offset.toFixed(2)};--abs:${Math.abs(offset).toFixed(2)}"
                 title="${action.label}">
           <span class="act-ico">${action.icon}</span>
           <span class="act-key">${index + 1}</span>
+          ${cooling ? `<span class="act-cool">${Math.ceil(action.cooldownMs! / 1000)}s</span>` : ''}
         </button>
       `;
       })
@@ -2337,6 +2352,30 @@ export class BoardGameHUD {
    *
    * Bound once and delegated, because the rail is reconciled on every snapshot.
    */
+  /**
+   * 冷却角标：每 250ms 把剩余秒数写回按钮，到点自动恢复可点。
+   *
+   * 冷却只存在于驱动层（见 `presentation.actionCooldownMs`），所以这里不需要一次
+   * 新的状态同步来「解冻」按钮——时钟走完，按钮自己就活了。
+   */
+  private startCooldownTicker(dock: HTMLElement): void {
+    if (this.cooldownTimer !== null) return;
+    this.cooldownTimer = window.setInterval(() => {
+      for (const card of dock.querySelectorAll<HTMLElement>('[data-cool-until]')) {
+        const until = Number(card.dataset.coolUntil ?? 0);
+        const left = until - Date.now();
+        if (left <= 0) {
+          delete card.dataset.coolUntil;
+          card.classList.remove('cooling');
+          card.querySelector('.act-cool')?.remove();
+          continue;
+        }
+        const label = card.querySelector('.act-cool');
+        if (label) label.textContent = `${Math.ceil(left / 1000)}s`;
+      }
+    }, 250);
+  }
+
   private bindPlayerRail(): void {
     const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
     if (!rail) return;
@@ -2477,6 +2516,7 @@ export class BoardGameHUD {
   }
 
   private bindDockEvents(dock: HTMLElement): void {
+    this.startCooldownTicker(dock);
     const REST_HINT =
       '<span class="fh-label">悬停查看动作</span><span class="fh-detail">点击牌面执行该动作 · 数字键直接执行</span>';
 
@@ -2512,6 +2552,7 @@ export class BoardGameHUD {
       if (fan) this.layoutActionFan(fan);
     });
     dock.addEventListener('click', event => {
+      // 冷却角标每 250ms 刷一次：到点自动摘掉 disabled，不需要一次状态同步。
       const target = event.target as HTMLElement | null;
       if (!target) return;
 
@@ -2541,6 +2582,13 @@ export class BoardGameHUD {
       const card = target.closest('[data-action-id]') as HTMLElement | null;
       const id = card?.dataset.actionId;
       if (id) {
+        // 冷却未走完：不派发，只把剩余秒数说清楚（结算画面还在等着被读完）。
+        const until = Number(card?.dataset.coolUntil ?? 0);
+        if (until > Date.now()) {
+          this.pushToast('⏳', `还需 ${Math.ceil((until - Date.now()) / 1000)} 秒才能开下一手`);
+          event.stopPropagation();
+          return;
+        }
         const action = this.latest?.actions.find(candidate => candidate.id === id);
         if (action) this.openActionDetail(action);
       }
