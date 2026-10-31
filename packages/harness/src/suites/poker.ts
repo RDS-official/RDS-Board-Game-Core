@@ -775,3 +775,85 @@ test('poker: lobby AI seats are added on top of the human seats', () => {
   assertEqual(twoSeats.filter(seat => !seat.isAi).length, 2, 'two human seats');
   assertEqual(twoSeats.slice(0, 2).every(seat => !seat.isAi), true, 'humans take the first seats');
 });
+
+/* -------------------------------------------------------------------------- */
+/* 结算：全员准备才开下一手 / 摊牌留牌                                          */
+/* -------------------------------------------------------------------------- */
+
+test('poker: a settled hand waits for every seat to be ready', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 71, { scenario: 'seats_4' });
+  startHand(engine);
+
+  // 一路弃牌到 p1：这手早结束，赢家可以选择亮牌或保留。
+  act(engine, 'FOLD'); // p4
+  act(engine, 'FOLD'); // p1
+  act(engine, 'FOLD'); // p2
+
+  const ended = engine.getRawState();
+  assertEqual(hand(ended).street, 'COMPLETE', 'the hand settled');
+  const last = ended.globalVars.lastHand as { endedBy: string; pots: { winners: string[] }[] };
+  assertEqual(last.endedBy, 'FOLD', 'the hand ended by folds');
+  const winner = last.pots[0].winners[0];
+
+  const offered = engine.getLegalActions(winner).map(action => action.type);
+  assert(offered.includes('READY'), 'the winner still has to be ready');
+  assert(offered.includes('SHOW'), 'an early winner may show');
+  assert(offered.includes('MUCK'), 'an early winner may keep the cards hidden');
+  assert(!offered.includes('START_HAND'), 'no deal before the ready check');
+
+  for (const pid of ended.playerOrder) engine.dispatch({ type: 'READY', playerId: pid });
+  const armed = engine.getLegalActions(winner).map(action => action.type);
+  assert(armed.includes('START_HAND'), 'the next hand opens once everyone is ready');
+});
+
+test('poker: a showdown keeps the surviving hands face up', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 72, { scenario: 'seats_2' });
+  startHand(engine);
+  for (let street = 0; street < 4; street++) callAround(engine, 2);
+
+  const settled = engine.getRawState();
+  const final = hand(settled);
+  assertEqual(final.street, 'COMPLETE', 'the hand reached showdown');
+  assertEqual(final.revealed.length, 2, 'both surviving hands are revealed');
+  {
+    // 牌面留在手牌区且保持 PUBLIC，渲染层据此在结算画面继续画牌。
+    const kept = settled.playerOrder.flatMap(player => settled.zones[`zone_hand_${player}`]?.orderedEntities ?? []);
+    const shown = kept.filter(id => settled.entities[id]?.visibility?.type === 'PUBLIC');
+    assertEqual(shown.length, 4, 'both surviving hands stay face up');
+  }
+});
+
+test('poker: the AI is stepped one action at a time when the driver asks for it', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 73, {
+    scenario: 'seats_4',
+    autoAi: false
+  } as never);
+  engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
+  engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
+
+  // 把 p4/p1/p2 三个真人座位弃掉，轮到 AI 时必须只给出 AI_ACT。
+  const seatOf = engine.getRawState().globalVars.seats as { playerId: string; isAi: boolean }[];
+  const humans = seatOf.filter(seat => !seat.isAi).map(seat => seat.playerId);
+  let guard = 0;
+  while (guard++ < 24) {
+    const actor = engine.getActiveActorId();
+    if (!actor || seatOf.find(seat => seat.playerId === actor)?.isAi) break;
+    const legal = engine.getLegalActions(actor).map(action => action.type);
+    if (legal.includes('FOLD') && humans.includes(actor)) {
+      engine.dispatch({ type: 'FOLD', playerId: actor });
+      continue;
+    }
+    break;
+  }
+  const aiActor = engine.getActiveActorId();
+  const isAi = !!seatOf.find(seat => seat.playerId === aiActor)?.isAi;
+  if (isAi) {
+    const offered = engine.getLegalActions(aiActor).map(action => action.type);
+    assertEqual(offered.join(','), 'AI_ACT', 'an AI seat only offers one step at a time');
+    const before = engine.getActiveActorId();
+    const step = engine.dispatch({ type: 'AI_ACT', playerId: aiActor });
+    assert(step.ok, `AI_ACT accepted: ${'$'}{step.error ?? ''}`);
+    assert(engine.getRawState().turn > 0, 'the step advanced the turn');
+    assert(before !== undefined, 'the AI had a seat');
+  }
+});
