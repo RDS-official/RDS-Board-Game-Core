@@ -27,16 +27,22 @@ const SHOTS = join(ROOT, 'shots');
 /* Sample deck: 3 per family, short and long Chinese titles                    */
 /* -------------------------------------------------------------------------- */
 
-const PALETTE = {
-  OMEN: { ink: '#f2cfd8', ribbon: '#4a1020', label: '预兆 · OMEN', seal: '👁' },
-  ITEM: { ink: '#f0dfc2', ribbon: '#3f2c12', label: '遗物 · ITEM', seal: '◆' },
-  EVENT: { ink: '#dbe6f2', ribbon: '#1d2733', label: '事件 · EVENT', seal: '✦' }
+/**
+ * Card families in the sample deck. The plate painter only understands opaque
+ * tone tokens (danger / treasure / event / place), so the band text and seal
+ * glyph — 山屋's own vocabulary — are spelled out here exactly as the game
+ * package declares them.
+ */
+const FAMILIES = {
+  OMEN: { tone: 'danger', badge: '预兆 · OMEN', seal: '👁' },
+  ITEM: { tone: 'treasure', badge: '遗物 · ITEM', seal: '◆' },
+  EVENT: { tone: 'event', badge: '事件 · EVENT', seal: '✦' }
 };
 
 const SAMPLES = [
   {
     slug: 'omen-bite',
-    kind: 'OMEN',
+    family: 'OMEN',
     en: 'Bite',
     title: '噬咬',
     desc: '不可名状之物从暗处扑出。右侧玩家代掷 4 颗骰对你进行一次力量攻击。此卡留在你面前作为预兆，不可交易或丢弃。',
@@ -47,7 +53,7 @@ const SAMPLES = [
   },
   {
     slug: 'omen-crystal-ball',
-    kind: 'OMEN',
+    family: 'OMEN',
     en: 'Crystal Ball',
     title: '水晶球',
     desc: '每回合一次：知识检定。4+ 窥视事件或物品牌堆顶牌并决定置于顶或底；1–3 失去 1 神智；0 失去 2 神智。',
@@ -58,7 +64,7 @@ const SAMPLES = [
   },
   {
     slug: 'omen-skeleton-key',
-    kind: 'OMEN',
+    family: 'OMEN',
     en: 'Skeleton Key',
     title: '骷髅万能钥匙',
     desc: '获得时知识 +1。开启任何上锁的门或金库时不需检定。失去时知识 -1。',
@@ -69,7 +75,7 @@ const SAMPLES = [
   },
   {
     slug: 'item-pickaxe',
-    kind: 'ITEM',
+    family: 'ITEM',
     en: 'Pickaxe',
     title: '铁镐',
     desc: '力量攻击 +1 骰。可砸开封锁的门，但会惊动宅邸里的东西。',
@@ -77,7 +83,7 @@ const SAMPLES = [
   },
   {
     slug: 'item-smelling-salts',
-    kind: 'ITEM',
+    family: 'ITEM',
     en: 'Smelling Salts',
     title: '刺激嗅盐',
     desc: '立刻结束你身上的眩晕状态，并恢复 1 点神智。用后弃置。',
@@ -85,7 +91,7 @@ const SAMPLES = [
   },
   {
     slug: 'item-revolver',
-    kind: 'ITEM',
+    family: 'ITEM',
     en: 'Revolver',
     title: '老式左轮手枪',
     desc: '速度攻击 +1 骰，可远程攻击同一房间内的目标。每场游戏只能装填一次。',
@@ -93,7 +99,7 @@ const SAMPLES = [
   },
   {
     slug: 'event-drip',
-    kind: 'EVENT',
+    family: 'EVENT',
     en: 'Drip',
     title: '滴血之声',
     desc: '天花板上传来缓慢的滴水声。速度检定：失败则受到 1 点物理伤害。',
@@ -101,7 +107,7 @@ const SAMPLES = [
   },
   {
     slug: 'event-time-warp',
-    kind: 'EVENT',
+    family: 'EVENT',
     en: 'Time Warp',
     title: '时空迷离',
     desc: '你脚下的地板忽然倾斜。掷骰决定被传送到哪一层。',
@@ -109,7 +115,7 @@ const SAMPLES = [
   },
   {
     slug: 'event-whisper',
-    kind: 'EVENT',
+    family: 'EVENT',
     en: 'Unnameable Whispering',
     title: '不可名状的低语在长廊尽头回荡',
     desc: '长廊尽头有人在低声念你的名字。神智检定：失败则失去 1 点神智，并在本回合无法移动。',
@@ -153,8 +159,9 @@ async function bundleRenderers() {
     stdin: {
       contents: `
         import { cardArtSvg } from './apps/web/src/ui/cardArt';
+        import { detailTone } from './apps/web/src/ui/detailView';
         import { CardMeshBuilder } from './apps/web/src/render/procedural/cardMesh';
-        export { cardArtSvg, CardMeshBuilder };
+        export { cardArtSvg, detailTone, CardMeshBuilder };
       `,
       resolveDir: ROOT,
       sourcefile: 'card-faces-entry.ts',
@@ -188,15 +195,15 @@ const SHEET_CSS = [
 
 /** The exact card-sheet markup the HUD builds, minus live action buttons. */
 function sheetHtml(card) {
-  const theme = PALETTE[card.kind];
+  const family = FAMILIES[card.family];
   const facts = (card.facts ?? []).map(row => `<li><span>${row.label}</span><b>${row.value}</b></li>`).join('');
   return `
-    <article class="card-sheet" data-kind="${card.kind}" style="--ink:${theme.ink};--ribbon:${theme.ribbon}">
+    <article class="card-sheet" data-tone="${family.tone}">
       <button class="cs-close" type="button" aria-label="关闭">×</button>
-      <div class="cs-ribbon"><span>${theme.label}</span></div>
+      <div class="cs-ribbon"><span>${family.badge}</span></div>
       <div class="cs-body">
         <div class="cs-art"></div>
-        <div class="cs-seal">${theme.seal}</div>
+        <div class="cs-seal">${family.seal}</div>
         <h2 class="cs-title">${card.title}</h2>
         ${card.en ? `<div class="cs-en">${card.en}</div>` : ''}
         <div class="cs-rule"></div>
@@ -256,19 +263,30 @@ async function main() {
 
     // ---- DOM plates: real sheet markup + shipped stylesheets ----------------
     for (const card of SAMPLES) {
-      const art = await page.evaluate(sample => window.CardFaces.cardArtSvg(sample), card);
+      const tone = FAMILIES[card.family].tone;
+      // cardArtSvg only reads the neutral view: title, subtitle and tone token.
+      const art = await page.evaluate(
+        view => window.CardFaces.cardArtSvg(view),
+        { title: card.title, subtitle: card.en, tone }
+      );
       await page.evaluate(
-        ({ html, art }) => {
+        ({ html, art, tone }) => {
           const stage = document.getElementById('stage');
           const holder = document.createElement('div');
           holder.innerHTML = html;
-          const artBox = holder.querySelector('.cs-art');
+          const sheet = holder.firstElementChild;
+          // The HUD paints the same two variables from the same tone mapping.
+          const theme = window.CardFaces.detailTone(tone);
+          sheet.style.setProperty('--ink', theme.ink);
+          sheet.style.setProperty('--ribbon', theme.ribbon);
+          const artBox = sheet.querySelector('.cs-art');
           if (artBox) artBox.innerHTML = art;
-          stage.appendChild(holder.firstElementChild);
+          stage.appendChild(sheet);
         },
-        { html: sheetHtml(card), art }
+        { html: sheetHtml(card), art, tone }
       );
     }
+
     await page.waitForTimeout(120);
 
     for (let i = 0; i < SAMPLES.length; i++) {
@@ -293,7 +311,7 @@ async function main() {
         wrapper.appendChild(sheet.cloneNode(true));
         figure.appendChild(wrapper);
         const cap = document.createElement('figcaption');
-        cap.innerHTML = `<b>${sheet.getAttribute('data-kind')}</b> · ${sheet.querySelector('.cs-title').textContent}`;
+        cap.innerHTML = `<b>${sheet.getAttribute('data-tone')}</b> · ${sheet.querySelector('.cs-title').textContent}`;
         figure.appendChild(cap);
         clone.appendChild(figure);
       }
@@ -310,7 +328,7 @@ async function main() {
     // ---- 3D faces ----------------------------------------------------------
     const faces = [];
     for (const card of SAMPLES) {
-      const face = { title: card.title, type: card.kind, desc: card.desc };
+      const face = { title: card.title, type: card.family, desc: card.desc };
       const dataUrl = await page.evaluate(input => {
         const texture = window.CardFaces.CardMeshBuilder.createCardFaceTexture(input, false);
         return texture.image.toDataURL('image/png');
@@ -318,7 +336,7 @@ async function main() {
       const file = join(SHOTS, `card-face-${card.slug}.png`);
       writeFileSync(file, Buffer.from(dataUrl.split(',')[1], 'base64'));
       written.push(file);
-      faces.push({ dataUrl, label: `<b>${card.kind}</b> · ${card.title}`, slug: card.slug });
+      faces.push({ dataUrl, label: `<b>${card.family}</b> · ${card.title}`, slug: card.slug });
     }
 
     const relicUrl = await page.evaluate(input => {
@@ -400,12 +418,17 @@ async function main() {
           cell.appendChild(art);
           figure.appendChild(cell);
           const cap = document.createElement('figcaption');
-          cap.innerHTML = `<b>${card.kind}</b> · ${card.title}`;
+          cap.innerHTML = `<b>${card.family}</b> · ${card.title}`;
           figure.appendChild(cap);
           grid.appendChild(figure);
         }
       },
-      SAMPLES
+      SAMPLES.map(card => ({
+        title: card.title,
+        subtitle: card.en,
+        tone: FAMILIES[card.family].tone,
+        family: card.family
+      }))
     );
     await page.waitForTimeout(80);
     const plateGridFile = join(SHOTS, 'card-faces-dom.png');
