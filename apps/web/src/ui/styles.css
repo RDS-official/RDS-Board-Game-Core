@@ -4559,9 +4559,12 @@ select.pf-control {
 
 .hover-hint.with-art .hh-art {
   display: block;
-  width: 220px;
+  /* 悬停大图：牌面文字要读得清，按窗口高度的 1/5 定高，宽度随牌面比例。 */
+  height: 20vh;
+  width: auto;
+  max-width: 46vw;
   aspect-ratio: 3 / 4;
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 8px;
   border: 1px solid rgba(214, 178, 108, 0.3);
   background: rgba(0, 0, 0, 0.35);

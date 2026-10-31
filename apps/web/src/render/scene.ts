@@ -438,6 +438,8 @@ export class BoardGameScene {
   private draggedEntityOrigin?: {
     position: [number, number, number];
     offset: { dx: number; dz: number };
+    /** 原始朝向：松手后恢复平放，拖动时的"朝向相机"不能留在桌上。 */
+    quaternion: THREE.Quaternion;
   };
   private draggedHeldY?: number;
   private groupHeldY?: number;
@@ -650,6 +652,7 @@ export class BoardGameScene {
         this.draggedHeldY = surfaceY + 0.45;
         this.draggedEntityOrigin = {
           position: [mesh.position.x, mesh.position.y, mesh.position.z],
+          quaternion: mesh.quaternion.clone(),
           offset: { ...offset }
         };
       }
@@ -660,6 +663,11 @@ export class BoardGameScene {
   public onEntityDragEnd(cb: () => void): void {
     this.raycaster.onDragEnd(() => {
       this.controls.enabled = true;
+      // 松手：把牌放回原来的朝向。
+      if (this.draggedEntityId) {
+        const mesh = this.entityMeshes.get(this.draggedEntityId);
+        if (mesh && this.draggedEntityOrigin) mesh.quaternion.copy(this.draggedEntityOrigin.quaternion);
+      }
       cb();
       this.draggedEntityId = undefined;
       this.draggedEntityOrigin = undefined;
@@ -740,6 +748,17 @@ export class BoardGameScene {
     const mesh = this.entityMeshes.get(entityId);
     const point = this.screenToTable(clientX, clientY);
     if (!mesh || !point) return;
+    // 拖动时牌心法线对准视锥原点（= 相机位置）：法线指向相机，牌面正对读牌的人。
+    // 用基向量构造而不是 setFromUnitVectors —— 后者只约束法线方向，绕视线的自转是
+    // 任意的，牌上的字会歪；这里把牌面的「上」（局部 -Z）对齐相机的 up，文字正立。
+    const normal = new THREE.Vector3().subVectors(this.camera.position, mesh.position);
+    if (normal.lengthSq() > 1e-6) {
+      normal.normalize();
+      const localZ = this.camera.up.clone().normalize().negate();
+      const localX = new THREE.Vector3().crossVectors(normal, localZ).normalize();
+      const fixedZ = new THREE.Vector3().crossVectors(localX, normal).normalize();
+      mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(localX, normal, fixedZ));
+    }
     this.cardSettles.delete(entityId);
     mesh.position.x = point[0];
     mesh.position.z = point[2];

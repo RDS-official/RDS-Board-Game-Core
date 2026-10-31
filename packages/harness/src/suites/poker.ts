@@ -882,3 +882,27 @@ test('poker: a two-human room has no one-click ready', () => {
   assert(!offered.includes('DEBUG_READY_ALL'), 'debug ready-all stays out of real tables');
   assert(offered.includes('START_HAND'), 'the opening deal is still offered');
 });
+
+test('poker: an AI seat never blocks the table, and anyone can force the next deal', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 93, { scenario: 'ai_table_6' });
+  engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
+
+  const street = () => (engine.getRawState().globalVars.hand as { street?: string }).street;
+  let guard = 0;
+  while (guard++ < 60 && street() !== 'COMPLETE') {
+    const actor = engine.getActiveActorId();
+    const legal = engine.getLegalActions(actor).map(action => action.type);
+    if (!legal.includes('FOLD')) break;
+    engine.dispatch({ type: 'FOLD', playerId: actor });
+  }
+  assertEqual(street(), 'COMPLETE', 'the hand settled');
+
+  // 即使 readyForNext 里一个 AI 都没有，AI 也不会挡住"全员就位"的判断。
+  const offered = engine.getLegalActions('p1').map(action => action.type);
+  assert(offered.includes('READY'), 'the human can still ready up');
+  assert(offered.includes('FORCE_START'), 'and can force the next deal without waiting');
+
+  const forced = engine.dispatch({ type: 'FORCE_START', playerId: 'p1' });
+  assert(forced.ok, 'force start is accepted');
+  assertEqual(street(), 'PREFLOP', 'the next hand was dealt immediately');
+});
