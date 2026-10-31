@@ -1,7 +1,7 @@
 import { defineGame, GameModule } from '@rds/kernel/module';
 import { GameOutcome } from '@rds/kernel/types';
 import { BETRAYAL_HOOKS } from './betrayal/hooks';
-import { betrayalCardFacts } from './betrayal/presentation';
+import { betrayalCardFacts, betrayalCardStyle } from './betrayal/presentation';
 import { BetrayalRules } from './betrayal/rules';
 import { BETRAYAL_SCENARIOS } from './betrayal/scenarios';
 import { BETRAYAL_SPATIAL } from './betrayal/spatial';
@@ -304,7 +304,7 @@ export const betrayalModule: GameModule = defineGame({
     }
   },
   // 山屋的卡牌词汇（武器/护甲/预兆…）与派生的详情行由本包声明。
-  presentation: { cardFacts: betrayalCardFacts },
+  presentation: { cardFacts: betrayalCardFacts, cardStyle: betrayalCardStyle },
   hooks: BETRAYAL_HOOKS,
   timing: { decision: 6, response: 4 },
   scenarios: BETRAYAL_SCENARIOS,
