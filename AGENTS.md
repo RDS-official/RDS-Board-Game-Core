@@ -84,23 +84,39 @@ apps/web/src/render    Three.js 表现层，负责几何体渲染与物理演算
 
 ### 3.2 必跑验证矩阵
 
-**日常内循环**（改完就测，~50 秒）：
+**日常内循环**（改完就测；耗时随改动面差异极大，见下表）：
 
 ```bash
-pnpm verify:changed   # 只跑本次 diff 可能影响的闸门（映射见下表），并发执行
-pnpm test:ui          # 动了 UI/渲染时另跑（21 屏 worker 池 + 卡面 overlay 探针，~3 分钟）
+pnpm verify:changed   # 只跑本次 diff 可能影响的闸门，并发执行
+pnpm test:ui          # 需要完整 UI 矩阵时显式跑（全量 21 屏 + 卡面 overlay 探针）
 ```
 
-**提交前 / 提 PR 前**（全绿）：
+`verify:changed` 按改动面选闸门，实测（6 核开发机）：
+
+| 改动 | 触发闸门 | 实测耗时 |
+| --- | --- | --- |
+| 只动 `.md` | docs | **~0.1s** |
+| 只动 `.css` | ui(smoke) + lint + docs | **~4 分钟** |
+| 动 `apps/web` / `packages/app` | core + ui(smoke) + lint + structure + types + docs | **~4.5 分钟** |
+| 动 `packages/kernel` / `packages/games` / `packages/harness` | core + matrix + lint + structure + types + docs | **~1.5 分钟** |
+| 动 `apps/server` / `scripts` | core + lint + structure + types + docs | **~40 秒** |
+
+- 内循环的 UI 闸门跑 **smoke 模式**（每游戏首屏，`UI_SMOKE=1`），不是全量 21 屏；
+  已经能抓到启动崩溃与首屏报错。要全量走 `pnpm verify:all`。
+- 只想验一屏时用 `UI_ONLY=<正则>`，例如
+  `UI_ONLY='betrayal:discard-settle' node scripts/test-ui-matrix.mjs`（~30 秒）。
+- `.css` 不再触发 33 秒的核心一致性套件：样式改不动内核行为。
+
+**提交前 / 提 PR 前**（全绿，实测 ~10 分钟；8 个闸门并发抢 CPU，UI 矩阵最慢）：
 
 ```bash
-pnpm verify:all       # core + matrix + overlap + lint/structure + tsc/build + docs + UI + card-overlay，全部并发，~3.5 分钟
+pnpm verify:all       # core + matrix + overlap + lint/structure + tsc/build + docs + UI 全量 + card-overlay
 ```
 
 单条闸门（需要单独定位时）：
 
 ```bash
-# 1. 必跑：内核 263 项一致性测试与架构边界静态检查（分片并行：CORE_SHARDS，默认 3）
+# 1. 必跑：内核 268 项一致性测试与架构边界静态检查（分片并行：CORE_SHARDS，默认 3）
 pnpm test:core:parallel
 
 # 2. 动了 packages/kernel/src 或 packages/games/src/* 时必跑：黑盒随机对局与回放哈希（按模块并行）
@@ -118,7 +134,7 @@ pnpm test:ui
 # 6. 必跑：文档路径有效性（旧 src/ 布局引用 / 失效链接）
 pnpm docs:check
 
-# 7. 必跑：Biome lint（0 error；当前基线 231 warning / 131 info 不阻断）
+# 7. 必跑：Biome lint（0 error；当前基线 232 warning / 139 info 不阻断）
 pnpm lint
 
 # 8. 必跑：TypeScript 类型检查与生产编译构建

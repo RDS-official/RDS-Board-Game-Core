@@ -452,7 +452,27 @@ async function runDiscardSettle(browser) {
     await drop.click();
     // The fan card opens its detail panel first; run it explicitly.
     await page.locator('#ad-run').click();
-    await page.waitForTimeout(400);
+    // Wait for the settle animation to land instead of sleeping a fixed 400ms.
+    // The animation is 220ms, but on a loaded 5-worker pool the click → settle
+    // chain can start later than the sleep, so the sample landed mid-flight
+    // (`y=0.210` against a `0.330` target) and failed healthy runs. The wait
+    // is purely a timing aid: the assertions below still report real numbers,
+    // so a genuine sink still fails.
+    await page
+      .waitForFunction(
+        () => {
+          const s = window.__boardGameApp?.scene;
+          const m = s?.entityMeshes.get('scenario_item_p1_axe');
+          if (!m) return false;
+          const surface = s.surfaceYAt(m.position.x, m.position.z, 'scenario_item_p1_axe');
+          return m.position.y >= surface + 0.012;
+        },
+        null,
+        { timeout: 5000 }
+      )
+      .catch(() => {
+        /* fall through: the measurement below reports the real numbers */
+      });
     const cameraAfter = await page.evaluate(() => window.__boardGameApp.scene.camera.position.toArray());
     if (JSON.stringify(cameraBefore) !== JSON.stringify(cameraAfter)) {
       failures.push(`${label}: camera moved on discard ${cameraBefore} -> ${cameraAfter}`);

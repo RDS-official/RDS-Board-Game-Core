@@ -9,7 +9,7 @@
 | 依赖 | 版本 | 说明 |
 | --- | --- | --- |
 | Node.js | ≥ 20 | 仓库用 ESM + 顶层 await |
-| pnpm | 12.14.0 | `package.json` 的 `packageManager` 已锁定，装了 corepack 可以自动拉 |
+| pnpm | 10.34.9 | `package.json` 的 `packageManager` 已锁定（与 `devEngines` 一致），装了 corepack 可以自动拉 |
 
 ```bash
 pnpm install
@@ -52,7 +52,7 @@ BASE_URL=http://127.0.0.1:6000/ pnpm shots
 
 | 命令 | 覆盖 | 何时必跑 |
 | --- | --- | --- |
-| `pnpm test` | 内核一致性 257 例 + 分层边界检查 | 任何改动 |
+| `pnpm test` | 内核一致性 268 例 + 分层边界检查 | 任何改动 |
 | `pnpm docs:check` | 文档路径有效性（旧 `src/` 布局引用、失效链接） | 动任何 `.md` / 目录结构 |
 | `pnpm test:matrix` | 六款夹具 × 多 seed × 全场景黑盒 + 回放哈希 | 动 `packages/kernel/src` 或任一 `packages/games/src/*` |
 | `pnpm test:ui` | Playwright 流程矩阵（拖拽/旋转/落定/悬停） | 动 `apps/web/src/render`、`apps/web/src/ui`、`packages/app/src` 契约 |
@@ -97,10 +97,11 @@ apps/web/src/render    Three.js 表现层，不写核心状态
 ## 5. 提交前自检
 
 ```bash
-pnpm test && pnpm test:matrix && pnpm test:ui
-pnpm probe:layout && pnpm probe:overlap
-node node_modules/typescript/bin/tsc --noEmit && pnpm build
+pnpm verify:all   # 一次跑完 core + matrix + overlap + lint/structure + tsc/build + docs + UI 全量 + card-overlay
 ```
+
+改完随手验时用 `pnpm verify:changed`（只跑受影响闸门，通常 1~5 分钟，见 [AGENTS.md](AGENTS.md) §3.2 的耗时表）；
+只想验一屏 UI 时 `UI_ONLY='betrayal:discard-settle' node scripts/test-ui-matrix.mjs`（~30 秒）。
 
 - 新增规则/卡牌/剧本 → 同步更新 [docs/BETRAYAL.md](docs/BETRAYAL.md) 的覆盖表；
 - 修掉一个手测问题 → 在 [docs/SIMULATOR-AUDIT.md](docs/SIMULATOR-AUDIT.md) 登记 `SA-xx`，保留复现描述；

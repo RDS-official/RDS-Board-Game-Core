@@ -53,12 +53,21 @@ const touches = pattern => files.some(file => pattern.test(file));
  *
  * Mirrors the matrix in AGENTS.md §3.2, so a docs-only change does not pay for a
  * Playwright run and a kernel change still gets the replay matrix.
+ *
+ * Granularity notes (measured on the dev box):
+ *  - a stylesheet cannot change kernel behaviour, so `.css` no longer pulls in
+ *    the 33s core suite; it only pulls in the UI matrix;
+ *  - the inner loop runs the UI matrix in smoke mode (`UI_SMOKE=1`, one screen
+ *    per game) instead of the full 21-screen sweep: 224s instead of 356s. Pass
+ *    `--ui`/`--all` for the full sweep, or `UI_ONLY=<regex>` to narrow further.
  */
 const selected = (() => {
   if (!CHANGED || files.length === 0) {
-    return { core: true, matrix: true, overlap: true, ui: WANT_UI, lint: true, types: true, docs: true };
+    return { core: true, matrix: true, overlap: true, ui: WANT_UI, uiSmoke: false, lint: true, types: true, docs: true };
   }
-  const code = touches(/\.(ts|tsx|mjs|cjs|js|css)$/);
+  // Executable sources only: a `.css` edit cannot affect a kernel test.
+  const code = touches(/\.(ts|tsx|mjs|cjs|js)$/);
+  const styles = touches(/\.css$/);
   const docs = touches(/\.md$/);
   const kernelish = touches(/^packages\/(kernel|games|harness)\//);
   const uish = touches(/^(apps\/web|packages\/app)\//);
@@ -67,7 +76,10 @@ const selected = (() => {
     core: code || kernelish,
     matrix: kernelish,
     overlap: geometry,
-    ui: WANT_UI || (uish && code),
+    ui: WANT_UI || (uish && (code || styles)),
+    // `--changed` is the inner loop: one screen per game is enough to catch a
+    // broken boot, and the full sweep still runs in `verify:all`.
+    uiSmoke: !WANT_UI,
     lint: code,
     types: code,
     docs: docs || code
@@ -90,7 +102,16 @@ if (selected.ui)
   // The overlay probe runs after the matrix inside test:ui: two concurrent
   // solo servers + Chromium pools starve the CPU-parallel core shards past
   // their time budgets, so the browser gates share one port in sequence.
-  add('ui', 'UI matrix + card-overlay', 'pnpm', ['test:ui'], { SOLO_PORT: '5180' });
+  // `--changed` runs only the smoke matrix (one screen per game, no overlay
+  // probe); `verify:all` still runs the full sweep.
+  if (selected.uiSmoke) {
+    add('ui', 'UI matrix (smoke)', process.execPath, ['scripts/test-ui-matrix.mjs'], {
+      SOLO_PORT: '5180',
+      UI_SMOKE: '1'
+    });
+  } else {
+    add('ui', 'UI matrix + card-overlay', 'pnpm', ['test:ui'], { SOLO_PORT: '5180' });
+  }
 if (selected.lint) add('lint', 'biome lint', 'pnpm', ['lint']);
 if (selected.lint) add('structure', 'structure budget', process.execPath, ['scripts/check-structure.mjs']);
 if (selected.types) add('types', 'tsc + build', process.execPath, ['scripts/verify-types.mjs']);
