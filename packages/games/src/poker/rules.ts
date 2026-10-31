@@ -1,4 +1,4 @@
-﻿import { ECSManager } from '@rds/kernel/ecs';
+import { ECSManager } from '@rds/kernel/ecs';
 import type { ReduceContext } from '@rds/kernel/module';
 import { DeterministicPRNG } from '@rds/kernel/prng';
 import type { Action, GameState, Player, PlayerId, VisibilityRule } from '@rds/kernel/types';
@@ -264,6 +264,7 @@ export class PokerRules {
     let spent = 0;
     let raised = false;
     let reopened = false;
+    let fullRaise = false;
     let shortRaiseAccum = hand.shortRaiseAccum;
     let label: string;
 
@@ -301,6 +302,7 @@ export class PokerRules {
           if (increment >= hand.lastRaiseSize) {
             // Full raise: the betting reopens and the minimum raise grows.
             reopened = true;
+            fullRaise = true;
             shortRaiseAccum = 0;
           } else {
             // Short all-in (TDA "Multiple Short All-Ins"): several incomplete
@@ -308,6 +310,9 @@ export class PokerRules {
             // betting reopens for players who had already acted.
             shortRaiseAccum = hand.shortRaiseAccum + increment;
             if (shortRaiseAccum >= hand.lastRaiseSize) {
+              // TDA 45 accumulated reopen: players may raise again, but the
+              // minimum raise size stays at the previous FULL raise (the short
+              // increments do not shrink lastRaiseSize).
               reopened = true;
               shortRaiseAccum = 0;
             }
@@ -340,7 +345,7 @@ export class PokerRules {
       actedSinceRaise,
       shortRaiseAccum,
       currentBet: raised ? Math.max(hand.currentBet, streetBets[playerId]) : hand.currentBet,
-      lastRaiseSize: reopened ? streetBets[playerId] - hand.currentBet : hand.lastRaiseSize,
+      lastRaiseSize: fullRaise ? streetBets[playerId] - hand.currentBet : hand.lastRaiseSize,
       lastAggressor: raised ? playerId : hand.lastAggressor
     };
 

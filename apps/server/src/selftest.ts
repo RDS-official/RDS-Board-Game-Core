@@ -1,6 +1,6 @@
 /** M1 自检：不依赖浏览器，直接调用各模块断言核心行为。 */
 import {
-  register, login, verifyJwt, createUser, isAdminUser, changeOwnPassword,
+  register, login, verifyJwt, userFromAuthHeader, createUser, isAdminUser, changeOwnPassword,
   adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
 } from './auth.ts';
 import { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo } from './rooms.ts';
@@ -49,17 +49,29 @@ const resetRes: any = adminResetPassword(reg.user.id, 'new_secret_888');
 ok(resetRes.ok === true, 'adminResetPassword works');
 ok(!!(login(name, 'new_secret_888') as any).token, 'login with new password works');
 
+// 令牌吊销：改密/重置后旧 token 必须立即失效（authUserFromToken 回查记录 + tokenEpoch）
+ok(userFromAuthHeader('Bearer ' + reg.token) === null, 'old token rejected after admin password reset');
+const reLogin: any = login(name, 'new_secret_888');
+ok(!!(userFromAuthHeader('Bearer ' + reLogin.token)?.sub), 'fresh token after reset is accepted');
+
 // 用户自主修改密码（需校验原密码）
 ok(!!(changeOwnPassword(reg.user.id, 'wrong_old', 'user_new_pass_666') as any).error, 'changeOwnPassword rejects wrong old password');
 ok(!!(changeOwnPassword(reg.user.id, 'new_secret_888', '123') as any).error, 'changeOwnPassword rejects short password');
 const selfChangeRes: any = changeOwnPassword(reg.user.id, 'new_secret_888', 'user_new_pass_666');
 ok(selfChangeRes.ok === true, 'changeOwnPassword works with correct old password');
 ok(!!(login(name, 'user_new_pass_666') as any).token, 'login with user changed password works');
+ok(userFromAuthHeader('Bearer ' + reLogin.token) === null, 'old token rejected after self password change');
 
 // 资料与禁用更新
 const updateRes: any = adminUpdateUser(reg.user.id, { displayName: '改名测试员', disabled: true }, adminLogin.user.id);
 ok(updateRes.user && updateRes.user.displayName === '改名测试员' && updateRes.user.disabled === true, 'adminUpdateUser works');
 ok(!!(login(name, 'user_new_pass_666') as any).error, 'disabled user login rejected');
+// 禁用账号的旧 token 同样被拒
+adminUpdateUser(reg.user.id, { disabled: false }, adminLogin.user.id);
+const enabledLogin: any = login(name, 'user_new_pass_666');
+adminUpdateUser(reg.user.id, { disabled: true }, adminLogin.user.id);
+ok(userFromAuthHeader('Bearer ' + enabledLogin.token) === null, 'token rejected while account is disabled');
+adminUpdateUser(reg.user.id, { disabled: false }, adminLogin.user.id);
 
 // 恢复启用
 adminUpdateUser(reg.user.id, { disabled: false }, adminLogin.user.id);

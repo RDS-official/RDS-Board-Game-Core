@@ -58,7 +58,7 @@ app.get('/api/admin/users', c => {
     users: adminListUsers(),
     stats: {
       totalUsers: users.all().length,
-      adminUsers: users.all().filter(u => u.role === 'admin' || u.name === 'rds').length,
+      adminUsers: users.all().filter(u => u.role === 'admin').length,
       disabledUsers: users.all().filter(u => !!u.disabled).length,
     }
   });
