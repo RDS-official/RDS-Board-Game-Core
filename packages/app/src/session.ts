@@ -242,6 +242,49 @@ export class UniversalSession implements GamePresenter {
     return this.module.presentation?.roleLabel?.(role) ?? null;
   }
 
+  /** The map node a player stands on, from the game's own hint. */
+  public playerNodeId(playerId: string): string | null {
+    const hint = this.module.presentation?.playerNode;
+    if (!hint) return null;
+    const raw = this.engine.getRawState();
+    return hint((raw.players[playerId]?.customProps ?? {}) as Record<string, unknown>);
+  }
+
+  /** Non-player figures on the map, as declared by the game. */
+  public castMembers(): { nodeId: string; label: string }[] {
+    const hint = this.module.presentation?.castMember;
+    if (!hint) return [];
+    const out: { nodeId: string; label: string }[] = [];
+    for (const entity of Object.values(this.engine.getRawState().entities ?? {})) {
+      const cast = hint((entity?.components?.custom ?? {}) as Record<string, unknown>);
+      if (cast) out.push(cast);
+    }
+    return out;
+  }
+
+  /** Loot summary for a room, or null when it holds nothing. */
+  public roomLoot(roomId: string): { label: string; count: number } | null {
+    const hint = this.module.presentation?.roomLoot;
+    if (!hint) return null;
+    return hint(
+      Object.values(this.engine.getRawState().entities ?? {}).map(entity => ({
+        zoneId: entity?.zoneId,
+        custom: (entity?.components?.custom ?? {}) as Record<string, unknown>
+      })),
+      roomId
+    );
+  }
+
+  /** Badge for a game token, or null when the game does not know it. */
+  public tokenBadge(token: string): { label: string; glyph?: string } | null {
+    return this.module.presentation?.tokenBadge?.(token) ?? null;
+  }
+
+  /** Localised trait name, or null when the game has no such trait. */
+  public traitLabel(traitKey: string): string | null {
+    return this.module.presentation?.describeTrait?.(traitKey)?.label ?? null;
+  }
+
   public subscribe(listener: (snapshot: GameSnapshot) => void): () => void {
     this.listeners.add(listener);
     listener(this.snapshot);
@@ -1137,14 +1180,22 @@ export class UniversalSession implements GamePresenter {
     return rows;
   }
 
-  private buildSpatial(state: ProjectedGameState, actor?: string): UiSpatialInfo | undefined {    const floors = state.mapGraph.topology?.layers ?? [];
+  private buildSpatial(state: ProjectedGameState, actor?: string): UiSpatialInfo | undefined {
+    const floors = state.mapGraph.topology?.layers ?? [];
     if (floors.length === 0) return undefined;
+    // Which node the active player stands on is game vocabulary: the hint
+    // reads the custom bag, the shell never learns the key.
+    const hints = this.module.presentation;
     const raw = this.engine.getRawState();
-    const playerRoom = actor ? raw.players[actor]?.customProps?.currentRoomId : undefined;
+    const playerRoom =
+      actor && hints?.playerNode
+        ? hints.playerNode((raw.players[actor]?.customProps ?? {}) as Record<string, unknown>) ?? undefined
+        : undefined;
     const npcRoom = actor ? raw.npcs?.[actor]?.customProps?.roomId : undefined;
     const activeNodeId = String(playerRoom ?? npcRoom ?? '') || undefined;
     return {
       floors,
+      title: hints?.mapTitle,
       activeNodeId,
       activeFloor: activeNodeId ? this.engine.getSpatialFloor(activeNodeId) : undefined
     };

@@ -2,12 +2,17 @@ import { defineGame, definePresentation, GameModule } from '@rds/kernel/module';
 import { GameOutcome } from '@rds/kernel/types';
 import { BETRAYAL_HOOKS } from './betrayal/hooks';
 import {
+  BETRAYAL_MAP_TITLE,
   betrayalCardFacts,
   betrayalCardStyle,
+  betrayalCastMember,
   betrayalDescribeMoment,
   betrayalDescribeNode,
   betrayalDescribeTrait,
+  betrayalPlayerNode,
   betrayalRoleLabel,
+  betrayalRoomLoot,
+  betrayalTokenBadge,
   betrayalTraits
 } from './betrayal/presentation';
 import { BetrayalRules } from './betrayal/rules';
@@ -324,7 +329,12 @@ export const betrayalModule: GameModule = defineGame({
     describeTrait: betrayalDescribeTrait,
     traits: betrayalTraits,
     describeMoment: betrayalDescribeMoment,
-    roleLabel: betrayalRoleLabel
+    roleLabel: betrayalRoleLabel,
+    mapTitle: BETRAYAL_MAP_TITLE,
+    playerNode: betrayalPlayerNode,
+    castMember: betrayalCastMember,
+    roomLoot: betrayalRoomLoot,
+    tokenBadge: betrayalTokenBadge
   }),
   hooks: BETRAYAL_HOOKS,
   timing: { decision: 6, response: 4 },

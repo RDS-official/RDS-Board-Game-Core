@@ -170,6 +170,8 @@ export interface TopologyLayer {
   id: string;
   name: string;
   index: number;
+  /** Short tab label (B / 1F / 2F); optional game vocabulary. */
+  tag?: string;
 }
 
 /**

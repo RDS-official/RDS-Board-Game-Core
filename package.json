@@ -12,7 +12,7 @@
     "test:core:parallel": "node scripts/test-core-parallel.mjs",
     "test:matrix": "node scripts/test-matrix.mjs",
     "test:matrix:parallel": "node scripts/test-matrix-parallel.mjs",
-    "test:ui": "node scripts/test-ui-matrix.mjs",
+    "test:ui": "node scripts/test-ui-matrix.mjs && node scripts/probe-card-overlay.mjs",
     "verify": "node scripts/verify.mjs",
     "verify:changed": "node scripts/verify.mjs --changed",
     "verify:all": "node scripts/verify.mjs --all",

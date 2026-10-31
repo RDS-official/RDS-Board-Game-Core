@@ -510,6 +510,54 @@ export class NetSession implements GamePresenter {
     return this.module.presentation?.roleLabel?.(role) ?? null;
   }
 
+  /** The map node a player stands on, from the game's own hint. */
+  public playerNodeId(playerId: string): string | null {
+    if (this.isLocalAuthority) return this.session?.playerNodeId(playerId) ?? null;
+    const hint = this.module.presentation?.playerNode;
+    const player = this.state?.players[playerId];
+    if (!hint || !player) return null;
+    return hint((player.customProps ?? {}) as Record<string, unknown>);
+  }
+
+  /** Non-player figures on the map, as declared by the game. */
+  public castMembers(): { nodeId: string; label: string }[] {
+    if (this.isLocalAuthority) return this.session?.castMembers() ?? [];
+    const hint = this.module.presentation?.castMember;
+    const state = this.state;
+    if (!hint || !state) return [];
+    const out: { nodeId: string; label: string }[] = [];
+    for (const entity of Object.values(state.entities ?? {})) {
+      const cast = hint((entity?.components?.custom ?? {}) as Record<string, unknown>);
+      if (cast) out.push(cast);
+    }
+    return out;
+  }
+
+  /** Loot summary for a room, or null when it holds nothing. */
+  public roomLoot(roomId: string): { label: string; count: number } | null {
+    if (this.isLocalAuthority) return this.session?.roomLoot(roomId) ?? null;
+    const hint = this.module.presentation?.roomLoot;
+    const state = this.state;
+    if (!hint || !state) return null;
+    return hint(
+      Object.values(state.entities ?? {}).map(entity => ({
+        zoneId: entity?.zoneId,
+        custom: (entity?.components?.custom ?? {}) as Record<string, unknown>
+      })),
+      roomId
+    );
+  }
+
+  /** Badge for a game token, or null when the game does not know it. */
+  public tokenBadge(token: string): { label: string; glyph?: string } | null {
+    return this.module.presentation?.tokenBadge?.(token) ?? null;
+  }
+
+  /** Localised trait name, or null when the game has no such trait. */
+  public traitLabel(traitKey: string): string | null {
+    return this.module.presentation?.describeTrait?.(traitKey)?.label ?? null;
+  }
+
   public subscribe(listener: (snapshot: GameSnapshot) => void): () => void {
     if (this.isLocalAuthority) return this.session!.subscribe(listener);
     this.listeners.add(listener);
@@ -1122,7 +1170,12 @@ export class NetSession implements GamePresenter {
   private buildSpatial(state: ProjectedGameState, actor?: string): UiSpatialInfo | undefined {
     const floors = state.mapGraph.topology?.layers ?? [];
     if (floors.length === 0) return undefined;
-    const playerRoom = actor ? state.players[actor]?.customProps?.currentRoomId : undefined;
+    // Which node the active player stands on is game vocabulary.
+    const hints = this.module.presentation;
+    const playerRoom =
+      actor && hints?.playerNode
+        ? hints.playerNode(((state.players[actor] ?? {}).customProps ?? {}) as Record<string, unknown>) ?? undefined
+        : undefined;
     const npcRoom = actor ? state.npcs?.[actor]?.customProps?.roomId : undefined;
     const activeNodeId = String(playerRoom ?? npcRoom ?? '') || undefined;
     let activeFloor: string | undefined;
@@ -1135,7 +1188,7 @@ export class NetSession implements GamePresenter {
       const node = state.mapGraph.nodes[activeNodeId];
       activeFloor = activeFloor ?? node?.layer ?? (node?.props?.floor as string | undefined);
     }
-    return { floors, activeNodeId, activeFloor };
+    return { floors, title: hints?.mapTitle, activeNodeId, activeFloor };
   }
 
   private emitNotice(notice: UiNotice): void {

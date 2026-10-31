@@ -87,8 +87,12 @@ if (selected.matrix)
 if (selected.overlap)
   add('overlap', 'probe:overlap', process.execPath, ['scripts/probe-overlap.mjs'], { SOLO_PORT: '5182' });
 if (selected.ui)
-  add('ui', 'UI matrix (worker pool)', process.execPath, ['scripts/test-ui-matrix.mjs'], { SOLO_PORT: '5180' });
+  // The overlay probe runs after the matrix inside test:ui: two concurrent
+  // solo servers + Chromium pools starve the CPU-parallel core shards past
+  // their time budgets, so the browser gates share one port in sequence.
+  add('ui', 'UI matrix + card-overlay', 'pnpm', ['test:ui'], { SOLO_PORT: '5180' });
 if (selected.lint) add('lint', 'biome lint', 'pnpm', ['lint']);
+if (selected.lint) add('structure', 'structure budget', process.execPath, ['scripts/check-structure.mjs']);
 if (selected.types) add('types', 'tsc + build', process.execPath, ['scripts/verify-types.mjs']);
 if (selected.docs) add('docs', 'docs:check', process.execPath, ['scripts/check-doc-paths.mjs']);
 

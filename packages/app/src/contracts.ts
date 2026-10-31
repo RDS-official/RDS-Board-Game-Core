@@ -261,7 +261,9 @@ export interface UiCapabilities {
 }
 
 export interface UiSpatialInfo {
-  floors: { id: string; name: string; index: number }[];
+  floors: { id: string; name: string; index: number; tag?: string }[];
+  /** Map overview title in the game's own vocabulary. */
+  title?: string;
   activeNodeId?: string;
   activeFloor?: string;
 }
@@ -587,6 +589,16 @@ export interface GamePresenter {
   moment?(): UiMoment | null;
   /** Localised role name, or null when the game does not know that role. */
   roleLabel?(role: string): string | null;
+  /** The map node a player stands on, or null when the game has no such notion. */
+  playerNodeId?(playerId: string): string | null;
+  /** Non-player figures on the map, as declared by the game. */
+  castMembers?(): { nodeId: string; label: string }[];
+  /** Loot summary for a room, or null when it holds nothing. */
+  roomLoot?(roomId: string): { label: string; count: number } | null;
+  /** Badge for a game token (room symbol), or null when unknown. */
+  tokenBadge?(token: string): { label: string; glyph?: string } | null;
+  /** Localised trait name, or null when the game has no such trait. */
+  traitLabel?(traitKey: string): string | null;
 
   /** Rotate / confirm a preloaded room tile without opening a modal. */
   rotatePlacement(direction?: 1 | -1): void;

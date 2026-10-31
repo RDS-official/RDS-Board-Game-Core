@@ -113,9 +113,10 @@
 - `deploy.yml` 在 `pnpm docs:check` 之后加 `pnpm lint`（此时已是 0 error，可直接全仓阻断）；
 - 若担心历史分支回退，可先 `biome lint --changed`，稳定后切全仓。
 
-### Phase 3（可选）
-- 全仓格式化 PR：`pnpm format`（建议同时把 `lineEnding` 与 git 换行策略对齐，避免 CRLF 噪声）；
-- 结构性规则：`max-lines: warn(1200)`（`suite.ts` 拆分后应满足）；
+### Phase 3（进行中）
+- 全仓格式化 PR：`pnpm format`（建议同时把 `lineEnding` 与 git 换行策略对齐，避免 CRLF 噪声）—— 待做；
+- 结构性规则：Biome 2.6.4 未开放可配置的 max-lines 规则，已由 `scripts/check-structure.mjs` 承接（非空行 1200 预算，随 verify 的 lint 门禁运行；当前为信息模式打印超标清单，设 `STRUCTURE_STRICT=1` 即变硬门禁，待 9 个超标大文件拆分后收紧）；
+- 卡面 overlay 探针：`scripts/probe-card-overlay.mjs`（五款卡牌游戏 × 6 项断言：单实例、显式关闭清空、快速循环不涨 DOM、9s 自动关闭后无幽灵重开、无控制台错误），已并入 `pnpm test:ui` 与 verify 的 UI 门禁；
 - 需要仓库专属 AST 规则时再补 ESLint，而非替换 Biome。
 
 ## 8. 验收（Phase 1 实测结果）
@@ -134,12 +135,12 @@
 
 | 命令 | 覆盖 | 实测耗时 |
 | --- | --- | --- |
-| `pnpm verify` | core(3 分片) ∥ matrix(3 并发) ∥ probe:overlap ∥ lint ∥ tsc+build ∥ docs，全部并发 | **~53s**（原顺序 ~2 分钟） |
-| `pnpm verify:all` | 上面 + UI 矩阵 | **~3.5 分钟**（原 ~16 分钟） |
+| `pnpm verify` | core(3 分片) ∥ matrix(3 并发) ∥ probe:overlap ∥ lint+structure ∥ tsc+build ∥ docs，全部并发 | **~53s**（原顺序 ~2 分钟） |
+| `pnpm verify:all` | 上面 + UI 矩阵 + probe:card-overlay | **~3.5 分钟**（原 ~16 分钟） |
 | `pnpm verify:changed` | 只跑本次 diff 可能影响的闸门（按 AGENTS.md §3.2 映射） | **~47s** |
 | `pnpm test:core:parallel` | 内核 253 例按用例下标分片（`CORE_SHARDS`，默认 3） | 42s → **26s** |
 | `pnpm test:matrix:parallel` | 六个夹具各一进程（`MATRIX_PARALLEL`，默认 3） | 70s → **43s** |
-| `pnpm test:ui` | 21 屏 worker 池（`UI_WORKERS`，默认 min(6, 核数-1)） | ~14min → **2.5min** |
+| `pnpm test:ui` | 21 屏 worker 池（`UI_WORKERS`，默认 min(6, 核数-1)）+ 卡面 overlay 探针 | ~14min → **~3min** |
 
 UI 矩阵的三个提速点（都不是砍覆盖）：
 
