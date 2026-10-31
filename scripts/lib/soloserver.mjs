@@ -15,7 +15,7 @@ const PORT = Number(process.env.SOLO_PORT ?? 5180);
 
 export const SOLO_URL = `http://${HOST}:${PORT}/`;
 
-function probe() {
+function portOpen() {
   return new Promise(resolve => {
     const socket = connect({ port: PORT, host: HOST });
     socket.setTimeout(800);
@@ -32,6 +32,26 @@ function probe() {
       resolve(false);
     });
   });
+}
+
+/**
+ * Is a *usable* solo server already listening?
+ *
+ * A TCP probe is not enough: when two gates run at the same time (verify runs
+ * them concurrently) one may be shutting its server down while the other sees the
+ * port open, reuses it, and then loses it mid-run — the screens fail with
+ * ECONNREFUSED. So reuse requires an actual 200 whose body is the app shell.
+ */
+async function probe() {
+  if (!(await portOpen())) return false;
+  try {
+    const response = await fetch(SOLO_URL, { signal: AbortSignal.timeout(2500) });
+    if (!response.ok) return false;
+    const html = await response.text();
+    return html.includes('canvas-container') || html.includes('boot-screen');
+  } catch {
+    return false;
+  }
 }
 
 async function waitForPort(timeoutMs = 45000) {

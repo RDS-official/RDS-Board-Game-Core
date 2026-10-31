@@ -40,10 +40,32 @@ export function assertEqual<T>(actual: T, expected: T, message: string): void {
   }
 }
 
+/**
+ * Sharding.
+ *
+ * The suite is one process by default. A CI/dev runner may spread the cases over
+ * N processes with `SUITE_SHARDS=<n> SUITE_SHARD=<i>` (0-based): every process
+ * still registers the whole suite — registration is deterministic and cheap — but
+ * only executes its slice, so shard i runs cases i, i+n, i+2n, … Striding by index
+ * rather than slicing a range keeps the slow cases (the full-game replays) spread
+ * across shards instead of landing in one.
+ */
+const SHARD_TOTAL = Math.max(1, Math.floor(Number(process.env.SUITE_SHARDS ?? 1)) || 1);
+const SHARD_INDEX = Math.min(
+  SHARD_TOTAL - 1,
+  Math.max(0, Math.floor(Number(process.env.SUITE_SHARD ?? 0)) || 0)
+);
+
+export function suiteShard(): { index: number; total: number } {
+  return { index: SHARD_INDEX, total: SHARD_TOTAL };
+}
+
 export async function runCoreSuite(): Promise<SuiteResult> {
   const results: SuiteCaseResult[] = [];
 
-  for (const testCase of cases) {
+  for (let index = 0; index < cases.length; index++) {
+    if (index % SHARD_TOTAL !== SHARD_INDEX) continue;
+    const testCase = cases[index];
     const started = Date.now();
     try {
       await testCase.fn();

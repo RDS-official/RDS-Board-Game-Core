@@ -125,3 +125,38 @@
 3. `pnpm test` 247/247 全绿 —— ✅；
 4. `pnpm test:server`、`pnpm docs:check`、`pnpm build` 全绿 —— ✅；
 5. 未改动任何游戏逻辑/内核语义：全部修复为括号/等价改写 —— ✅。
+
+---
+
+## 9. 回归提速与 time / memory 门禁（2026-10-31）
+
+一套完整回归原本要 ~16 分钟，其中 Playwright UI 矩阵占 85%。现在：
+
+| 命令 | 覆盖 | 实测耗时 |
+| --- | --- | --- |
+| `pnpm verify` | core(3 分片) ∥ matrix(3 并发) ∥ probe:overlap ∥ lint ∥ tsc+build ∥ docs，全部并发 | **~53s**（原顺序 ~2 分钟） |
+| `pnpm verify:all` | 上面 + UI 矩阵 | **~3.5 分钟**（原 ~16 分钟） |
+| `pnpm verify:changed` | 只跑本次 diff 可能影响的闸门（按 AGENTS.md §3.2 映射） | **~47s** |
+| `pnpm test:core:parallel` | 内核 253 例按用例下标分片（`CORE_SHARDS`，默认 3） | 42s → **26s** |
+| `pnpm test:matrix:parallel` | 六个夹具各一进程（`MATRIX_PARALLEL`，默认 3） | 70s → **43s** |
+| `pnpm test:ui` | 21 屏 worker 池（`UI_WORKERS`，默认 min(6, 核数-1)） | ~14min → **2.5min** |
+
+UI 矩阵的三个提速点（都不是砍覆盖）：
+
+1. **并行**：一屏一 page，worker 池跑；超过 6 个 worker 反而变慢（vite 服务端成为瓶颈）。
+2. **事件驱动等待**：`domcontentloaded` + 轮询 `session.revision` 取代 `networkidle` 与固定 sleep。此前每步点击后都等 revision 变化，但扇形卡第一步只开详情面板不派发动作，于是**每步白等 4s 超时**（6 步 ≈ 24s/屏）；改成按真实交互链（扇形卡 → `#ad-run` → 表单提交）后，单步从 ~5s 降到 ~0.5s。
+3. **减少往返**：一次 `page.evaluate` 探测所有浮层，取代四次 `locator.count()`；`click({ force: true })` 跳过 hover 动画导致的稳定性等待。
+
+### time / memory 门禁
+
+`scripts/lib/gates.mjs`：每个套件结束时打印一行 `GATE <name>` 并按预算判定，超时或超内存即失败（退出码 1）。
+
+| 套件 | 时间预算 | 内存预算（Node RSS） |
+| --- | --- | --- |
+| core | 90s | 900MB |
+| matrix | 180s | 900MB |
+| ui | 360s | 1400MB（另打印浏览器 JS heap 峰值） |
+
+- 预算是实测值的 ~2 倍，机器噪声不会误伤；真正的回归（多了一层 O(n²)、每次用例重新加载夹具、引擎泄漏）会立刻被抓到。
+- 覆盖：`GATE_SCALE=2` 整体放宽（慢 CI），或 `GATE_UI_MS` / `GATE_CORE_MB` 等单项覆盖。
+- 内核套件还支持 `SUITE_SHARDS`/`SUITE_SHARD` 分片；矩阵支持 `MATRIX_MODULES`、`MATRIX_SEEDS`、`MATRIX_FAST=1`；UI 支持 `UI_ONLY=<regex>`、`UI_SMOKE=1`、`UI_TIMING=1`（打印每屏 boot/交互耗时）。
