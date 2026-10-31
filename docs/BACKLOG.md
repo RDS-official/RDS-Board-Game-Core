@@ -4,7 +4,7 @@
 > [SIMULATOR-AUDIT.md](SIMULATOR-AUDIT.md)（SA-xx）与
 > [ARCHITECTURE-ISSUES.md](ARCHITECTURE-ISSUES.md)（AI-xx）里，不要在这里重复。
 >
-> 最近一次核对：2026-10-28。核对手法见 §7，**任何一条待办在动手前都应先按 §7 复核一次**——
+> 最近一次核对：2026-10-31（main `6ce4e9e`）。核对手法见 §7，**任何一条待办在动手前都应先按 §7 复核一次**——
 > 本文件历史上出现过把已修问题挂成待办的情况。
 
 ---

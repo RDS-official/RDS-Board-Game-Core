@@ -23,8 +23,8 @@
 | AI-15 | 房间物品视觉锚点重复计算 | zone_room 与 slot 两套语义；renderer 硬编码偏移 | 模块提供 `PlacementSlot.local/visual`，renderer 只做坐标/布局消费；不再按 `zone_room_*` 猜位置 |
 | AI-16 | 全量重建时相机可能被自动取景重置 | `syncState` 重建与相机 fit 策略绑定 | 相机属于 renderer；仅显式布局变化/用户请求才 fit，丢弃/新实体保持当前 camera/target |
 | AI-17 | 放置房间时相机反复 fit，放置后停在高位 | 相机 fit 与 placement 旋转耦合；缺少 placement 前相机快照 | 相机归 renderer：placement 开始保存 pose 并缓动抬高，旋转不 fit，结束/取消缓动恢复 |
-| AI-28 | 房主侧存在两个引擎：HUD 的 `UniversalSession` 与权威 `GameRoom` 镜像，靠 append-only 日志尾部重放保持同步 | 两个独立状态机 + 微任务尾部同步，任何丢步/重放错位都会造成双端分歧 | 中期项 A2：`GameRoom` 支持注入共享引擎，NetSession host 只创建一个引擎，HUD 与权威房间共用；`revision` 由引擎状态哈希变化推进；删除 `BridgedRoom` / `syncing` / 尾部重放；delta 推送统一由 `GameRoom.onChange` 驱动 |
-| AI-29 | 房客可抢先占据他人座位：`seatOwners` 仅用于 presence 展示，座位分配是先到先得 | 传输层座位与 hub 身份无绑定，抢座后可提交他人 actor 的动作 | 中期项 A3：`WebRtcHostTransport` 接收 `seatOwners`，座位只允许其 hub userId 加入；`GameRoom.setAuthorizer` 做房间侧二次校验；未绑定座位保持先到先得 |
+| AI-28 | 房主侧存在两个引擎：HUD 的 `UniversalSession` 与权威 `GameRoom` 镜像，靠 append-only 日志尾部重放保持同步 | 两个独立状态机 + 微任务尾部同步，任何丢步/重放错位都会造成双端分歧 | **已实现（中期项 A2，PR #67）**：`GameRoom` 构造器接受可注入引擎（`net/room.ts:86`），房主侧只创建一个 `UniversalGameEngine` 交给 `GameRoom` 与 `UniversalSession` 共用（`app/netSession.ts:204-211`）；`revision` 只在引擎状态哈希变化时推进，delta 推送统一由 `GameRoom.onChange` 驱动；`BridgedRoom` / `syncing` / 尾部重放已全部删除（全仓 grep 无残留） |
+| AI-29 | 房客可抢先占据他人座位：`seatOwners` 仅用于 presence 展示，座位分配是先到先得 | 传输层座位与 hub 身份无绑定，抢座后可提交他人 actor 的动作 | **已实现（中期项 A3，PR #67）**：`WebRtcHostTransport` 接收 `seatOwners`，已绑定座位只允许其 hub userId 加入、同一 peer 只能持一个座位且 `submit` 的 actor 必须等于自身座位（`net/webrtc-transport.ts:163`）；房间侧再用 `GameRoom.setAuthorizer` 二次校验（`net/room.ts:106`）；未绑定座位保持先到先得。大厅（Hub）路径为服务器权威：座位由服务端分配、actor 绑定本人座位 |
 
 ## 2. 重复相似特性（需要合并）
 
@@ -65,7 +65,7 @@
 
 ```bash
 pnpm test           # 内核一致性 + 分层边界
-pnpm test:matrix    # 五夹具 × 多 seed × 全场景黑盒
+pnpm test:matrix    # 六夹具 × 多 seed × 全场景黑盒
 pnpm test:ui        # Playwright UI 流程矩阵
 pnpm probe:layout   # 家具布局与门位冲突
 pnpm probe:overlap  # 房间几何 z-fighting 回归

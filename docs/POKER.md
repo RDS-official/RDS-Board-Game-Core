@@ -1,6 +1,8 @@
 # 德州扑克 (Texas Hold'em) · 设计与接入方案
 
-> 状态：**设计评审中（未开始编码）**
+> 状态：**已实现并合并**（`packages/games/src/poker/`，2026-10-31）。本文保留设计原貌；
+> 与实现的落地差异：座位数由房型决定（2–10，按房间实际人数发牌）、补上 TDA 45
+> 累计短全押重开的最小加注，以及弃牌/手尾收牌进 `zone_muck` 的收尾流程。
 > 目标读者：内核 / 夹具 / 表现层维护者
 > 相关文档：[ARCHITECTURE.md](ARCHITECTURE.md)（分层与模块契约）、[CORE.md](CORE.md)（形式化模型）、[QUALITY-GATES.md](QUALITY-GATES.md)（必跑自检）
 
