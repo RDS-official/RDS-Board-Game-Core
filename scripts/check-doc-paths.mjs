@@ -42,7 +42,10 @@ const EXTERNAL_ALLOWLIST = [
   { file: 'docs/SIMULATOR-AUDIT.md', snippet: 'scripts/tmp-' },
   // Biome 忽略名单：这一行列出的正是**不该进仓库**的运行期目录，要求它
   // 存在与文档的原意相反。
-  { file: 'docs/QUALITY-GATES.md', snippet: 'files.ignore' }
+  { file: 'docs/QUALITY-GATES.md', snippet: 'files.ignore' },
+  // 部署数据目录是运行期软链目标（.gitignore 里的 apps/server/data/），
+  // 只在部署机存在；CI 干净检出里必然没有，不能因此判定文档失效。
+  { file: 'docs/DEPLOY.md', snippet: 'apps/server/data' }
 ];
 
 function listMd(dir) {
