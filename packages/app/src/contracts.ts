@@ -351,6 +351,23 @@ export interface GameSnapshot {
    * always comes with a reason instead of a single silent END_TURN card.
    */
   blockedReason?: string;
+  /**
+   * 筹码排行（仅筹码类游戏，目前是德州扑克）：按筹码占全桌总量的比例排序。
+   * 服务端权威模式下就是「全服」视角；离线单机时降级为本桌数据。
+   */
+  chipRanking?: UiChipRank[];
+}
+
+/** 排行榜的一行：一名玩家的筹码与占比。 */
+export interface UiChipRank {
+  playerId: string;
+  name: string;
+  chips: number;
+  /** 0..1；渲染时格式化成百分比。 */
+  share: number;
+  isAi: boolean;
+  /** AI 等级标签（初级 / 中级 / 高级），真人座位为空。 */
+  tierLabel?: string;
 }
 
 /** One resolved dice roll, in the shape the UI needs to draw it. */
@@ -444,6 +461,22 @@ export interface UiDetailView {
   actions: UiDetailAction[];
 }
 
+/**
+ * A discovery moment the game wants presented when a map node first appears.
+ *
+ * The view is the same neutral structure a click produces; the wrapper only adds
+ * how loudly to say it (a full-screen reveal or a peripheral sheet) and the
+ * footer line. Whether a node deserves one at all is the game call — the
+ * generic layer only noticed that something new showed up here.
+ */
+export interface UiDiscoveryView {
+  view: UiDetailView;
+  /** Footer under the sheet, e.g. where the node came from. */
+  footer?: string;
+  /** Present full-screen (modal) instead of as a peripheral pinned sheet. */
+  reveal?: boolean;
+}
+
 /** Structured trait movement attached to notices so the UI can animate it. */
 export interface UiTraitChange {
   playerId: string;
@@ -523,6 +556,11 @@ export interface GamePresenter {
 
   /** Map a click on the 3D board to a legal action, if any. */
   pickTarget(pick: BoardPick): { handled: boolean; message?: string };
+  /**
+   * Neutral discovery view for a map node, resolved from the game presentation
+   * hints. Null when the game has nothing to say about that node.
+   */
+  nodeDetail?(nodeId: string): UiDiscoveryView | null;
 
   /** Rotate / confirm a preloaded room tile without opening a modal. */
   rotatePlacement(direction?: 1 | -1): void;

@@ -1,6 +1,6 @@
 import { RuleHookImpl } from './rules';
 import { ProjectionRedactor } from './observer';
-import { Action, ActorId, DecisionWindow, DiceSpec, GameOutcome, GameState, NodeId, RollResult, SelectionCandidate, SelectionSpec, TopologySpec, VisualTraceEvent } from './types';
+import { Action, ActorId, DecisionWindow, DiceSpec, GameOutcome, GameState, MapGraphNode, NodeId, RollResult, SelectionCandidate, SelectionSpec, TopologySpec, VisualTraceEvent } from './types';
 import { ActionSchemaMap } from './validation';
 
 /** Per-transition helpers handed to a module's reducer. */
@@ -107,6 +107,33 @@ export interface SpatialQuery {
 }
 
 /**
+ * How a game wants one map node presented when it first appears.
+ *
+ * The generic layer detects *that* a node appeared; only the game knows whether
+ * that is a room being explored, a station opening, or nothing worth a cutscene
+ * at all (return null). Every string here is the game's own vocabulary.
+ */
+export interface NodePresentationHints {
+  /** Headline. */
+  title: string;
+  /** Secondary line, e.g. a printed English name. */
+  subtitle?: string;
+  /** Category band text, localised by the game. */
+  badge?: string;
+  /** Opaque visual tone token; the view layer maps it onto one of its plates. */
+  tone?: string;
+  /** Optional decorative glyph. */
+  seal?: string;
+  desc?: string;
+  /** Label/value rows, in the game's own vocabulary. */
+  sections?: { label: string; value: string }[];
+  /** Footer line under the sheet, e.g. where the node came from. */
+  footer?: string;
+  /** Present as a full-screen discovery moment instead of a peripheral sheet. */
+  reveal?: boolean;
+}
+
+/**
  * Optional presentation hints a game may declare.
  *
  * The kernel never reads these — they exist so a shared view layer (packages/app,
@@ -138,6 +165,13 @@ export interface GamePresentationHints {
     tone?: string;
     seal?: string;
   };
+  /**
+   * How to present a map node that has just appeared (a newly explored room, an
+   * opened station, ...). Return null for nodes that deserve no discovery
+   * moment — the generic layer has no vocabulary for nodes of its own, and
+   * `node.props` belong to the game. Must be pure.
+   */
+  describeNode?: (node: MapGraphNode) => NodePresentationHints | null;
 }
 
 /**
@@ -207,4 +241,22 @@ export function defineGame(module: GameModule): GameModule {
   if (typeof module.setup !== 'function') throw new Error(`Game ${module.meta.id} requires setup()`);
   if (typeof module.reduce !== 'function') throw new Error(`Game ${module.meta.id} requires reduce()`);
   return module;
+}
+
+/**
+ * Authoring helper for `GameModule.presentation`.
+ *
+ * Declarations are data plus pure functions, called per frame by the view layer;
+ * a stray object or a typo would otherwise fail late and far from its cause. This
+ * fails at module load, next to the declaration that caused it.
+ */
+export function definePresentation(hints: GamePresentationHints): GamePresentationHints {
+  for (const [key, value] of Object.entries(hints)) {
+    if (key === 'cardPreviewOnHover') {
+      if (typeof value !== 'boolean') throw new TypeError('presentation.cardPreviewOnHover must be a boolean');
+      continue;
+    }
+    if (typeof value !== 'function') throw new TypeError(`presentation.${key} must be a pure function`);
+  }
+  return hints;
 }

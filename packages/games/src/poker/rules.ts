@@ -14,6 +14,8 @@ import {
 } from './betting';
 import { cardOfEntity, cardText, holeCards, type Card } from './cards';
 import { compareHands, evaluateSeven, type HandValue } from './handEval';
+import { choosePokerAction } from './ai';
+import { isAiSeat, seatingOf, type SeatingState } from './seating';
 import { POKER_DEFAULTS } from './setup';
 
 /**
@@ -125,6 +127,17 @@ function setChips(state: GameState, playerId: string, chips: number): GameState 
   }));
 }
 
+/** 「入座 → 准备」流程里，所有座位（AI 与真人）是否都已准备。 */
+function allReady(state: GameState, seating: SeatingState): boolean {
+  return state.playerOrder.every(
+    pid => !!seating.seated[pid] && !!seating.ready[pid]
+  );
+}
+
+function withSeating(state: GameState, seating: SeatingState): GameState {
+  return { ...state, globalVars: { ...state.globalVars, seating } };
+}
+
 function setVisibility(state: GameState, entityId: string, visibility: VisibilityRule): GameState {
   const entity = state.entities[entityId];
   if (!entity) return state;
@@ -171,6 +184,20 @@ export class PokerRules {
     if (state.gameOver) return [];
     const hand = handOf(state);
     if (!hand) return [];
+
+    // 内置 AI 不吃玩家的鼠标操作：它由 PokerBrain 驱动（见 ai.ts），
+    // 对真人永远不提供合法动作，避免玩家代替 AI 出牌。
+    if (isAiSeat(state, playerId) && playerId !== state.activePlayerId) return [];
+
+    // 「入座 → 准备 → 开局」：真人座位需要先后完成入座与准备。
+    // AI 座位开局即入座就绪，因此不提供任何操作。
+    const seating = seatingOf(state);
+    if (seating && !seating.started) {
+      if (isAiSeat(state, playerId)) return [];
+      if (!seating.seated[playerId]) return [{ type: 'TAKE_SEAT', playerId }];
+      if (!seating.ready[playerId]) return [{ type: 'READY_UP', playerId }];
+      return allReady(state, seating) ? [{ type: 'START_HAND', playerId }] : [];
+    }
 
     if (hand.street === 'COMPLETE') {
       return playerId === state.activePlayerId ? [{ type: 'START_HAND', playerId }] : [];
@@ -244,8 +271,55 @@ export class PokerRules {
   public static applyAction(state: GameState, action: Action, ctx: ReduceContext): GameState {
     const hand = handOf(state);
     if (!hand) return state;
+    // 每次真人动作落地后，让当前该出手的 AI 座位连续行动，直到轮到真人为止。
+    // 内联在 reduce 里（而不是外部定时器）保证状态跃迁与 replay 完全一致。
+    return this.advanceAi(this.applyHuman(state, action, ctx), ctx);
+  }
+
+  /**
+   * 连续驱动 AI 座位。上限 64 次防止病态循环；AI 永远给出合法动作，
+   * 由 `choosePokerAction` 保证，内核仍会再校验一次。
+   */
+  private static advanceAi(state: GameState, ctx: ReduceContext): GameState {
+    let next = state;
+    for (let guard = 0; guard < 64; guard++) {
+      if (next.gameOver) return next;
+      const active = next.activeActorId ?? next.activePlayerId;
+      if (!active || !isAiSeat(next, active)) return next;
+      const action = choosePokerAction(next, active);
+      if (!action) return next;
+      const stepped = this.applyHuman(next, action, ctx);
+      if (stepped === next) return next; // 动作被拒：停止推进，避免空转
+      next = stepped;
+    }
+    return next;
+  }
+
+  private static applyHuman(state: GameState, action: Action, ctx: ReduceContext): GameState {
+    const hand = handOf(state);
+    if (!hand) return state;
+
+    // 「入座 → 准备」两个纯状态更新，不碰牌局。
+    if (action.type === 'TAKE_SEAT' || action.type === 'READY_UP') {
+      const seating = seatingOf(state);
+      if (!seating || seating.started) return state;
+      const playerId = action.playerId;
+      if (isAiSeat(state, playerId)) return state;
+      if (action.type === 'TAKE_SEAT') {
+        return { ...withSeating(state, { ...seating, seated: { ...seating.seated, [playerId]: true } }), turn: state.turn + 1 };
+      }
+      // 必须先入座才能准备。
+      if (!seating.seated[playerId]) return state;
+      return { ...withSeating(state, { ...seating, ready: { ...seating.ready, [playerId]: true } }), turn: state.turn + 1 };
+    }
 
     if (action.type === 'START_HAND') {
+      const seating = seatingOf(state);
+      if (seating && !seating.started) {
+        // 只有全员准备后才允许真正开局；开局后座位流程永久关闭。
+        if (!allReady(state, seating)) return state;
+        state = withSeating(state, { ...seating, started: true });
+      }
       const started = this.startHand(state, ctx);
       return { ...started, turn: state.turn + 1 };
     }

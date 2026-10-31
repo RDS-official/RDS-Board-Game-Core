@@ -8,12 +8,13 @@
  *
  * Nothing here may know a game id: card vocabulary, category band and the
  * hover-preview policy come from GameModule.presentation hints declared by the
- * game itself.
+ * game itself. The same rule governs map nodes: the discovery sheet for a newly
+ * explored room is built from the describeNode hints, never from the HUD.
  */
 import type { GameModule } from '@rds/kernel/module';
-import type { Entity } from '@rds/kernel/types';
-import { actorDetailKey, entityDetailKey } from './contracts';
-import type { GameSnapshot, UiDetailView, UiNotice } from './contracts';
+import type { Entity, MapGraphNode } from '@rds/kernel/types';
+import { actorDetailKey, entityDetailKey, nodeDetailKey } from './contracts';
+import type { GameSnapshot, UiDetailView, UiDiscoveryView, UiNotice } from './contracts';
 
 /** A projected entity as the view layer receives it (kernel ProjectedGameState). */
 export type InspectableEntity = Partial<Entity> & { isMasked?: boolean };
@@ -118,5 +119,42 @@ export function buildEntityInspectNotice(
     detail: masked ? '需要先揭示这张牌。' : face.desc,
     durationMs: 6500,
     view
+  };
+}
+
+export interface NodeInspectContext {
+  module: GameModule;
+}
+
+/**
+ * Build the neutral discovery view for a map node, or null when the game has
+ * nothing to say about it.
+ *
+ * Rooms, stations and track spaces all arrive here; what they are called, which
+ * rows describe them and how loudly to announce them is declared by the game via
+ * presentation.describeNode. A game without those hints never gets a cutscene,
+ * rather than getting one in another game vocabulary.
+ */
+export function buildNodeDiscoveryView(
+  node: MapGraphNode | undefined,
+  context: NodeInspectContext
+): UiDiscoveryView | null {
+  if (!node) return null;
+  const hints = context.module.presentation?.describeNode?.(node);
+  if (!hints) return null;
+  return {
+    view: {
+      key: nodeDetailKey(String(node.id)),
+      title: hints.title,
+      subtitle: hints.subtitle,
+      badge: hints.badge,
+      tone: hints.tone,
+      seal: hints.seal,
+      desc: hints.desc,
+      sections: hints.sections ?? [],
+      actions: []
+    },
+    footer: hints.footer,
+    reveal: hints.reveal
   };
 }

@@ -14,7 +14,6 @@ import {
   PresentationPorts,
   UiAction,
   UiDetailView,
-  nodeDetailKey,
   UiHistoryEntry,
   UiNotice,
   UiTraitChange,
@@ -75,8 +74,8 @@ export class BoardGameHUD {
   private latest: GameSnapshot | null = null;
   /** 阶段二：在线玩家（联机对局 presence 映射后的 playerId 集合） */
   private onlinePlayerIds = new Set<string>();
-  /** Room the player last clicked; the dossier follows it until the turn moves. */
-  private pinnedRoomId?: string;
+  /** Node the player last clicked; the dossier follows it until the turn moves. */
+  private pinnedNodeId?: string;
   /** Latest snapshot, kept for click handlers that need the current data. */
   private lastSnapshot?: GameSnapshot;
   /** Pointer position across the action row: 0 = left edge, 1 = right edge. */
@@ -84,8 +83,8 @@ export class BoardGameHUD {
   /** 0 = flat row, 1 = full fisheye. Drops to 0 when the pointer leaves. */
   private fanFocusStrength = 0;
   private lastActorRoomId?: string;
-  /** Set of room ids already seen, for the "new room discovered" reveal. */
-  private knownRooms?: Set<string>;
+  /** Set of node ids already seen, for the "new node discovered" reveal. */
+  private knownNodes?: Set<string>;
   private sheetTimer: number | null = null;
   /** Last pointer position, used to place the seat peek window. */
   private pointerAt = { x: 0, y: 0 };
@@ -165,9 +164,9 @@ export class BoardGameHUD {
     this.closeAbout();
     this.overlays.closeAll();
     this.container.querySelector('#card-sheet-layer')?.remove();
-    // Switching fixtures must not treat the new board as "rooms discovered".
-    this.knownRooms = undefined;
-    this.pinnedRoomId = undefined;
+    // Switching fixtures must not treat the new board as "already discovered".
+    this.knownNodes = undefined;
+    this.pinnedNodeId = undefined;
     const roomCard = this.container.querySelector('#room-card') as HTMLElement | null;
     if (roomCard) roomCard.style.display = 'none';
     this.lastActorRoomId = undefined;
@@ -737,7 +736,7 @@ export class BoardGameHUD {
 
   private renderNotice(notice: UiNotice): void {
     if (notice.roomId) {
-      this.pinnedRoomId = notice.roomId;
+      this.pinnedNodeId = notice.roomId;
       // Inspection does not dispatch an action, so no snapshot arrives with it:
       // repaint the dossier straight away.
       if (this.latest) this.renderRoomCard(this.latest);
@@ -908,10 +907,6 @@ export class BoardGameHUD {
   }
 
   /**
-   * Discovery moment: when a newly explored room enters the projection, present
-   * it like a drawn card instead of silently growing the board.
-   */
-  /**
    * 所有动作的统一入口。
    *
    * 除了转交 presenter，还把「做了什么、成功没有」记进诊断面包屑 —— 卡死时
@@ -930,47 +925,33 @@ export class BoardGameHUD {
     return result;
   }
 
-  private maybeRevealRoom(snapshot: GameSnapshot): void {
-    const rooms = Object.values(snapshot.board.mapGraph.nodes).filter(node => node.type === 'ROOM');
-    if (!this.knownRooms) {
+  /**
+   * Discovery moment: a map node the viewer had not seen before has appeared.
+   *
+   * The generic layer only knows that something new showed up here. What to say
+   * about it — a room dossier, a station, a track space — comes from the game
+   * presentation hints through the presenter, so no game vocabulary lives in this
+   * file and a game that declares none simply gets no cutscene.
+   */
+  private maybeRevealNode(snapshot: GameSnapshot): void {
+    const nodes = Object.values(snapshot.board.mapGraph.nodes);
+    if (!this.knownNodes) {
       // First paint: register the opening layout without a cutscene.
-      this.knownRooms = new Set(rooms.map(node => node.id));
+      this.knownNodes = new Set(nodes.map(node => node.id));
       return;
     }
-    const fresh = rooms.filter(node => !this.knownRooms!.has(node.id));
-    for (const node of rooms) this.knownRooms.add(node.id);
+    const fresh = nodes.filter(node => !this.knownNodes!.has(node.id));
+    for (const node of nodes) this.knownNodes.add(node.id);
     if (fresh.length === 0) return;
 
-    const node = fresh[fresh.length - 1];
-    const props = (node.props ?? {}) as Record<string, unknown>;
-    const floorId = String(props.floor ?? '');
-    const floorLabel = floorId === 'BASEMENT' ? '地下室' : floorId === 'UPPER' ? '二楼' : '一楼';
-    const doors = Array.isArray(props.doors) ? (props.doors as string[]) : [];
-    const symbol =
-      props.symbol === 'OMEN'
-        ? '预兆 👁'
-        : props.symbol === 'ITEM'
-        ? '遗物 ◆'
-        : props.symbol === 'EVENT'
-        ? '事件 ✦'
-        : '无符号';
-    this.pinnedRoomId = node.id;
-    this.showCardSheet(
-      {
-        key: nodeDetailKey(node.id),
-        title: String(props.name ?? '房间'),
-        subtitle: String(props.en ?? ''),
-        tone: 'place',
-        desc: String(props.text ?? ''),
-        sections: [
-          { label: '楼层', value: floorLabel },
-          { label: '已连通门位', value: doors.join(' · ') || '无' },
-          { label: '符号', value: symbol }
-        ],
-        actions: []
-      },
-      { reveal: true, footer: '新房间已加入洋馆布局' }
-    );
+    const found = fresh
+      .map(node => ({ node, detail: this.presenter.nodeDetail?.(node.id) ?? null }))
+      .filter(entry => entry.detail)
+      .pop();
+    if (!found?.detail) return;
+
+    this.pinnedNodeId = found.node.id;
+    this.showCardSheet(found.detail.view, { reveal: found.detail.reveal, footer: found.detail.footer });
   }
 
   /**
@@ -1109,6 +1090,8 @@ export class BoardGameHUD {
              so a single-variant fixture keeps the column unchanged. -->
         <aside class="room-card" id="room-card" style="display:none"></aside>
         <aside class="mansion-minimap" id="mansion-minimap" style="display:none"></aside>
+        <!-- 筹码排行（德州扑克）：放在「近期动态」上方 -->
+        <aside class="chip-ranking" id="chip-ranking" style="display:none"></aside>
         <aside class="activity-feed" id="activity-feed"></aside>
       </div>
       <div class="action-dock" id="action-dock"></div>
@@ -1228,9 +1211,10 @@ export class BoardGameHUD {
     this.renderPlayers(snapshot);
     this.renderRoomCard(snapshot);
     this.renderMinimap(snapshot);
+    this.renderChipRanking(snapshot);
     this.renderHistory(snapshot);
     this.renderDock(snapshot);
-    this.maybeRevealRoom(snapshot);
+    this.maybeRevealNode(snapshot);
     this.maybeShowHaunt(snapshot);
   }
 
@@ -1305,7 +1289,7 @@ export class BoardGameHUD {
           const rx = (c - minCol) * cellSize + padding;
           const ry = (rw - minRow) * cellSize + padding;
           const isActorHere = actorRoomId === r.id;
-          const isPinned = this.pinnedRoomId === r.id;
+          const isPinned = this.pinnedNodeId === r.id;
 
           const herePlayers = playersOnFloor.filter(p => p.customProps?.currentRoomId === r.id);
           const hereMonsters = monstersOnFloor.filter(m => (m.components?.custom as any)?.roomId === r.id);
@@ -1415,6 +1399,54 @@ export class BoardGameHUD {
     if (source && trait) return `${source} · ${trait}检定`;
     if (source) return source;
     return trait ? `${trait}检定` : '检定';
+  }
+
+  /**
+   * 筹码排行面板（德州扑克）。按筹码占全桌比例排序，展示玩家/等级/筹码/占比条。
+   * 其他游戏 `chipRanking` 为 undefined，面板整体隐藏。
+   */
+  private renderChipRanking(snapshot: GameSnapshot): void {
+    const panel = this.container.querySelector('#chip-ranking') as HTMLElement | null;
+    if (!panel) return;
+    const rows = snapshot.chipRanking;
+    if (!rows || rows.length === 0) {
+      panel.style.display = 'none';
+      panel.dataset.signature = '';
+      return;
+    }
+    panel.style.display = '';
+
+    const signature = rows.map(row => `${row.playerId}:${row.chips}`).join('|');
+    if (panel.dataset.signature === signature) return;
+    panel.dataset.signature = signature;
+
+    const total = rows.reduce((sum, row) => sum + row.chips, 0);
+    const body = rows
+      .map((row, index) => {
+        const percent = (row.share * 100).toFixed(1);
+        const isSelf = row.playerId === snapshot.viewer;
+        const tag = row.isAi
+          ? `<span class="cr-tag ai">${escHtml(row.tierLabel ?? 'AI')}</span>`
+          : `<span class="cr-tag human">真人</span>`;
+        return `
+          <div class="cr-row${isSelf ? ' self' : ''}" title="${escHtml(row.name)} · ${row.chips} 筹码">
+            <span class="cr-rank">${index + 1}</span>
+            <span class="cr-name">${escHtml(row.name)}${tag}</span>
+            <span class="cr-chips">${row.chips}</span>
+            <span class="cr-pct">${percent}%</span>
+            <span class="cr-bar"><i style="width:${Math.max(2, row.share * 100).toFixed(1)}%"></i></span>
+          </div>`;
+      })
+      .join('');
+
+    panel.innerHTML = `
+      <div class="cr-head">
+        <span class="cr-title">筹码排行</span>
+        <span class="cr-total">${total}</span>
+      </div>
+      <div class="cr-body">${body}</div>
+      <div class="cr-foot">占比 = 该玩家筹码 / 全桌总筹码</div>
+    `;
   }
 
   private renderHistory(snapshot: GameSnapshot): void {
@@ -1574,10 +1606,10 @@ export class BoardGameHUD {
     // dossier until the actor moves somewhere else.
     if (actorRoomId !== this.lastActorRoomId) {
       this.lastActorRoomId = actorRoomId;
-      this.pinnedRoomId = undefined;
+      this.pinnedNodeId = undefined;
     }
-    const pinnedNode = this.pinnedRoomId ? board.mapGraph.nodes[this.pinnedRoomId] : undefined;
-    const roomId = pinnedNode && pinnedNode.type === 'ROOM' ? this.pinnedRoomId! : actorRoomId;
+    const pinnedNode = this.pinnedNodeId ? board.mapGraph.nodes[this.pinnedNodeId] : undefined;
+    const roomId = pinnedNode && pinnedNode.type === 'ROOM' ? this.pinnedNodeId! : actorRoomId;
     const node = roomId ? board.mapGraph.nodes[roomId] : undefined;
 
     if (!node || node.type !== 'ROOM') {

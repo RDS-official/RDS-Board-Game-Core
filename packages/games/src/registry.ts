@@ -1,7 +1,7 @@
-import { defineGame, GameModule } from '@rds/kernel/module';
+import { defineGame, definePresentation, GameModule } from '@rds/kernel/module';
 import { GameOutcome } from '@rds/kernel/types';
 import { BETRAYAL_HOOKS } from './betrayal/hooks';
-import { betrayalCardFacts, betrayalCardStyle } from './betrayal/presentation';
+import { betrayalCardFacts, betrayalCardStyle, betrayalDescribeNode } from './betrayal/presentation';
 import { BetrayalRules } from './betrayal/rules';
 import { BETRAYAL_SCENARIOS } from './betrayal/scenarios';
 import { BETRAYAL_SPATIAL } from './betrayal/spatial';
@@ -14,6 +14,7 @@ import { DuneMahjongRules } from './dune_mahjong/rules';
 import { setupDuneMahjong } from './dune_mahjong/setup';
 import { PokerRules } from './poker/rules';
 import { pokerScenario, setupPoker } from './poker/setup';
+import { POKER_TABLE } from './poker/seating';
 import { SANGUOSHA_HOOKS } from './sanguosha/hooks';
 import { SanguoshaRules } from './sanguosha/rules';
 import { setupSanguosha } from './sanguosha/setup';
@@ -191,7 +192,7 @@ export const splendorModule: GameModule = defineGame({
   },
   // The market row already previews faces on hover; a click must not open a
   // second card view for the same card.
-  presentation: { cardPreviewOnHover: true },
+  presentation: definePresentation({ cardPreviewOnHover: true }),
   hooks: [],
   actionSchemas: {
     TAKE_3_DIFF_GEMS: {
@@ -303,8 +304,12 @@ export const betrayalModule: GameModule = defineGame({
       },
     }
   },
-  // 山屋的卡牌词汇（武器/护甲/预兆…）与派生的详情行由本包声明。
-  presentation: { cardFacts: betrayalCardFacts, cardStyle: betrayalCardStyle },
+  // 山屋的卡牌词汇（武器/护甲/预兆…）、派生的详情行与新房间档案都由本包声明。
+  presentation: definePresentation({
+    cardFacts: betrayalCardFacts,
+    cardStyle: betrayalCardStyle,
+    describeNode: betrayalDescribeNode
+  }),
   hooks: BETRAYAL_HOOKS,
   timing: { decision: 6, response: 4 },
   scenarios: BETRAYAL_SCENARIOS,
@@ -551,7 +556,10 @@ export const pokerModule: GameModule = defineGame({
     // The legal range depends on the live stack, so bounds are checked in
     // PokerRules.validatePayload instead of the static schema.
     RAISE: { type: 'RAISE', payload: { amount: { kind: 'integer', min: 0 } } },
-    ALL_IN: { type: 'ALL_IN', allowPayload: false }
+    ALL_IN: { type: 'ALL_IN', allowPayload: false },
+    // 座位流程：入座 → 准备（全员准备后 START_HAND 才放行）。
+    TAKE_SEAT: { type: 'TAKE_SEAT', allowPayload: false },
+    READY_UP: { type: 'READY_UP', allowPayload: false }
   },
   scenarios: {
     seats_2: { description: '单挑（2 人）', setup: pokerScenario(2) },
@@ -566,9 +574,34 @@ export const pokerModule: GameModule = defineGame({
     short_stack: {
       description: '短码演示（玩家 4 只有 60 筹码，数手内触发终局）',
       setup: pokerScenario(4, { stacks: [1000, 1000, 1000, 60] })
+    },
+    /**
+     * 默认桌：1 名真人 + 5 个内置 AI（1 初级 / 2 中级 / 2 高级），
+     * 走完整的「入座 → 准备 → 开局」流程。
+     */
+    ai_table_6: {
+      description: '1 真人 + 5 AI（入门桌）',
+      setup: (seed: number) =>
+        setupPoker(seed, { seats: 6, humans: 1, seatingFlow: true })
+    },
+    ai_table_10: {
+      description: '1 真人 + 9 AI（满桌）',
+      setup: (seed: number) =>
+        setupPoker(seed, { seats: 10, humans: 1, seatingFlow: true })
     }
   },
-  setup: (seed, options) => setupPoker(seed, { seats: options?.seats ?? 4 }),
+  /**
+   * 座位规则：
+   *  - 调用方显式给出座位数（联机房间按真人数量）时，这些座位全是真人；
+   *  - 未指定时用默认桌：1 名真人 + 内置 AI 补齐到 6 人（单人也能开一桌）。
+   * 两种情况都走「入座 → 准备 → 开局」流程。
+   */
+  setup: (seed, options) =>
+    setupPoker(seed, {
+      seats: options?.seats ?? POKER_TABLE.minPlayers,
+      humans: options?.seats ?? 1,
+      seatingFlow: true
+    }),
   legalActions: (state, playerId) => PokerRules.getLegalActions(state, playerId),
   validatePayload: (state, action, payload) => PokerRules.validatePayload(state, action, payload),
   reduce: (state, action, ctx) => PokerRules.applyAction(state, action, ctx),
