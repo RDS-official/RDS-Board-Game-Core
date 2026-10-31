@@ -4776,7 +4776,8 @@ export class BoardGameScene {
       const dz = cam.z - group.position.z;
       if (Math.abs(dx) < 1e-4 && Math.abs(dz) < 1e-4) continue;
       group.rotation.y = Math.atan2(dx, dz) + jitter;
-      if (lamp) lamp.scale.set(pulse, pulse * 0.75, pulse);
+      // 灯是嵌进底座的圆片：只让直径呼吸，别让它前后窜出边缘。
+      if (lamp) lamp.scale.set(pulse, 1, pulse);
     }
   }
 

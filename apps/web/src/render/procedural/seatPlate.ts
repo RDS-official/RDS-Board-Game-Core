@@ -343,17 +343,25 @@ export class SeatPlateBuilder {
     base.receiveShadow = true;
     group.add(base);
 
-    // 行动指示灯：底座正面圆边缘正中一颗红灯。谁在操作，一眼就能看出来；
-    // 立在牌桌对面时也能从底座边缘读到，不会被立牌本身挡住。
+    // 行动指示灯：嵌在底座正面边缘正中，端面与底座侧面齐平。谁在操作，一眼
+    // 就能看出来；立在牌桌对面时也读得到，且不会像贴片一样浮在木头表面。
     let lamp: THREE.Mesh | undefined;
     if (info.active) {
       lamp = new THREE.Mesh(
-        new THREE.SphereGeometry(0.055, 16, 12),
-        new THREE.MeshBasicMaterial({ color: 0xff3b2a, transparent: true, opacity: 0.95 })
+        new THREE.CylinderGeometry(0.042, 0.042, 0.016, 20),
+        new THREE.MeshBasicMaterial({ color: 0xff3b2a })
       );
-      lamp.position.set(0, SEAT_BASE.height * 0.55, SEAT_BASE.radius * 0.97);
-      lamp.scale.set(1, 0.75, 1);
+      lamp.rotation.x = Math.PI / 2;
+      lamp.position.set(0, SEAT_BASE.height * 0.5, SEAT_BASE.radius - 0.006);
       group.add(lamp);
+
+      // 一层极淡的光晕，让这颗灯在俯视角也能被注意到（不参与拾取）。
+      const halo = new THREE.Mesh(
+        new THREE.CircleGeometry(0.07, 20),
+        new THREE.MeshBasicMaterial({ color: 0xff6a4a, transparent: true, opacity: 0.2 })
+      );
+      halo.position.set(0, SEAT_BASE.height * 0.5, SEAT_BASE.radius + 0.001);
+      group.add(halo);
     }
 
     const face = this.faceTexture(info);
@@ -374,7 +382,8 @@ export class SeatPlateBuilder {
     plate.rotation.x = BOARD_TILT;
     plate.position.set(
       0,
-      SEAT_BASE.height + (SEAT_BOARD.height / 2) * Math.cos(BOARD_TILT),
+      // 抬高一点：牌脚原本压在底座上，看起来像陷进去了。
+      SEAT_BASE.height + 0.05 + (SEAT_BOARD.height / 2) * Math.cos(BOARD_TILT),
       (SEAT_BOARD.height / 2) * Math.sin(BOARD_TILT) * 0.55
     );
     plate.castShadow = true;
