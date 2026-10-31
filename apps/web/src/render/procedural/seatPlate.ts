@@ -88,7 +88,7 @@ export const SEAT_BOARD = { width: 0.86, height: 1.24, thickness: 0.045 } as con
 /** Metal disc under the board. */
 export const SEAT_BASE = { radius: 0.5, height: 0.055 } as const;
 /** Lean of the board away from the table centre (radians). */
-const BOARD_TILT = 0.74;
+const BOARD_TILT = 1.02;
 
 const BRASS = '#c9a24a';
 
@@ -319,8 +319,13 @@ export class SeatPlateBuilder {
       new THREE.BoxGeometry(SEAT_BOARD.width, SEAT_BOARD.thickness, SEAT_BOARD.height),
       [side, side, top, side, side, side]
     );
-    // Lean the far edge up so the face tilts toward the table (and the camera).
-    plate.rotation.x = -BOARD_TILT;
+    // Lean the board so its face tilts up toward the viewer.
+    //
+    // BoxGeometry maps a texture's top edge to local -Z, so the raised edge must
+    // be -Z: with the group yawed at the camera that puts the lettering's top
+    // away from the viewer (upright) and the face normal up-and-toward them.
+    // Rotating the other way tips the face away and the text reads upside down.
+    plate.rotation.x = BOARD_TILT;
     plate.position.set(
       0,
       SEAT_BASE.height + (SEAT_BOARD.height / 2) * Math.cos(BOARD_TILT),

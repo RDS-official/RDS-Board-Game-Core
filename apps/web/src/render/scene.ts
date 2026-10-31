@@ -336,6 +336,12 @@ export class BoardGameScene {
    * poker sync.
    */
   private pokerFxGroup = new THREE.Group();
+  /**
+   * Seat standees rebuilt on every sync. Their yaw is re-aimed at the camera
+   * each frame, so the boards always present their face to whoever is looking
+   * (a fixed yaw would show the back from half the orbit).
+   */
+  private seatStandees: THREE.Group[] = [];
   /** Previous poker snapshot, used to detect what to animate. */
   private pokerFxPrev: {
     handNo: number;
@@ -1939,6 +1945,10 @@ export class BoardGameScene {
   private renderMapGraph(state: ProjectedGameState): void {
     const graph = state.mapGraph;
 
+    // The board group is rebuilt from scratch every sync, so the standee list is
+    // rebuilt with it.
+    this.seatStandees = [];
+
     // Render Nodes
     Object.values(graph.nodes).forEach(node => {
       if (node.type === 'HEX') {
@@ -2229,6 +2239,7 @@ export class BoardGameScene {
         );
         group.position.set(seatX, 0.055, seatZ);
         this.boardObjectsGroup.add(group);
+        this.seatStandees.push(group);
         this.raycaster.registerInteractive(plate, {
           type: 'NODE',
           id: node.id,
@@ -4718,6 +4729,24 @@ export class BoardGameScene {
     this.renderer.setSize(w, h);
   }
 
+  /**
+   * Aim every seat board at the camera (yaw only).
+   *
+   * The board keeps its lean, so it always tilts its face up toward the viewer —
+   * a fixed yaw would show the back of half the table from any orbit, and the
+   * lettering would read upside down from the default seat.
+   */
+  private updateSeatStandees(): void {
+    if (this.seatStandees.length === 0) return;
+    const cam = this.camera.position;
+    for (const group of this.seatStandees) {
+      const dx = cam.x - group.position.x;
+      const dz = cam.z - group.position.z;
+      if (Math.abs(dx) < 1e-4 && Math.abs(dz) < 1e-4) continue;
+      group.rotation.y = Math.atan2(dx, dz);
+    }
+  }
+
   private renderLoop(): void {
     if (this.isDestroyed) return;
     requestAnimationFrame(this.renderLoop.bind(this));
@@ -4734,6 +4763,7 @@ export class BoardGameScene {
     this.updateCardSettles(now);
     this.updateRoomSettles(now);
     this.updateNavArrows(now);
+    this.updateSeatStandees();
     this.renderer.render(this.scene, this.camera);
     this.labels.render(
       this.camera,
