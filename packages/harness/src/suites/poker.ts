@@ -78,7 +78,24 @@ function hand(state: GameState): PokerHandState {
   return state.globalVars.hand as PokerHandState;
 }
 
+/**
+ * 开一手牌。默认桌开启「入座 → 准备 → 开局」流程，因此这里先把每个真人座位
+ * 走完入座与准备（AI 座位开局即就绪），再发牌；没有流程的对局直接开。
+ */
 function startHand(engine: UniversalGameEngine): void {
+  const seating = engine.getRawState().globalVars.seating as
+    | { started: boolean; aiSeats: string[] }
+    | undefined;
+  if (seating && !seating.started) {
+    const aiSeats = new Set(seating.aiSeats);
+    for (const pid of engine.getRawState().playerOrder) {
+      if (aiSeats.has(pid)) continue;
+      for (const type of ['TAKE_SEAT', 'READY_UP']) {
+        const result = engine.dispatch({ type, playerId: pid });
+        assert(result.ok, `${type} by ${pid} accepted: ${result.error ?? ''}`);
+      }
+    }
+  }
   const actor = engine.getActiveActorId();
   const result = engine.dispatch({ type: 'START_HAND', playerId: actor });
   assert(result.ok, `START_HAND accepted: ${result.error ?? ''}`);
