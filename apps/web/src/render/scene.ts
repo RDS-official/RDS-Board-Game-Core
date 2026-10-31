@@ -4056,9 +4056,22 @@ export class BoardGameScene {
         const mesh = object as THREE.Mesh;
         if (mesh.geometry) mesh.geometry.dispose();
         const material = mesh.material as THREE.Material | THREE.Material[] | undefined;
+        // material.dispose() 不会释放贴图：标签精灵的 CanvasTexture 必须单独 dispose，
+        // 否则每手牌泄漏一批 1024x256 纹理。静态共享的桌面呢绒纹理除外。
+        const maps: THREE.Texture[] = [];
         if (Array.isArray(material)) {
-          for (const entry of material) entry.dispose();
-        } else material?.dispose();
+          for (const entry of material) {
+            entry.dispose();
+            if ((entry as THREE.MeshStandardMaterial).map) maps.push((entry as THREE.MeshStandardMaterial).map!);
+          }
+        } else if (material) {
+          material.dispose();
+          const map = (material as THREE.SpriteMaterial | THREE.MeshStandardMaterial).map;
+          if (map) maps.push(map);
+        }
+        for (const map of maps) {
+          if (map !== BoardGameScene.pokerCloth) map.dispose();
+        }
       });
     }
   }

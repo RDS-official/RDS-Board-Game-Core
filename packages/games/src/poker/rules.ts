@@ -1,4 +1,4 @@
-﻿import { ECSManager } from '@rds/kernel/ecs';
+import { ECSManager } from '@rds/kernel/ecs';
 import type { ReduceContext } from '@rds/kernel/module';
 import { DeterministicPRNG } from '@rds/kernel/prng';
 import type { Action, GameState, Player, PlayerId, VisibilityRule } from '@rds/kernel/types';
@@ -264,6 +264,7 @@ export class PokerRules {
     let spent = 0;
     let raised = false;
     let reopened = false;
+    let fullRaise = false;
     let shortRaiseAccum = hand.shortRaiseAccum;
     let label: string;
 
@@ -301,6 +302,7 @@ export class PokerRules {
           if (increment >= hand.lastRaiseSize) {
             // Full raise: the betting reopens and the minimum raise grows.
             reopened = true;
+            fullRaise = true;
             shortRaiseAccum = 0;
           } else {
             // Short all-in (TDA "Multiple Short All-Ins"): several incomplete
@@ -308,6 +310,9 @@ export class PokerRules {
             // betting reopens for players who had already acted.
             shortRaiseAccum = hand.shortRaiseAccum + increment;
             if (shortRaiseAccum >= hand.lastRaiseSize) {
+              // TDA 45 accumulated reopen: players may raise again, but the
+              // minimum raise size stays at the previous FULL raise (the short
+              // increments do not shrink lastRaiseSize).
               reopened = true;
               shortRaiseAccum = 0;
             }
@@ -340,13 +345,21 @@ export class PokerRules {
       actedSinceRaise,
       shortRaiseAccum,
       currentBet: raised ? Math.max(hand.currentBet, streetBets[playerId]) : hand.currentBet,
-      lastRaiseSize: reopened ? streetBets[playerId] - hand.currentBet : hand.lastRaiseSize,
+      lastRaiseSize: fullRaise ? streetBets[playerId] - hand.currentBet : hand.lastRaiseSize,
       lastAggressor: raised ? playerId : hand.lastAggressor
     };
 
     let next = setChips(state, playerId, remaining);
     next = withHand(next, nextHand);
     next = pushLog(next, label);
+
+    if (action.type === 'FOLD') {
+      // 弃牌即时进 muck 并保持 HIDDEN（docs/POKER.md：弃牌后不得再查看/亮出该手牌）
+      for (const card of holeCards(state, playerId)) {
+        next = ECSManager.moveEntity(next, card.id, 'zone_muck');
+        next = setVisibility(next, card.id, { type: 'HIDDEN' });
+      }
+    }
 
     if (raised) {
       ctx.trace({
@@ -700,6 +713,20 @@ export class PokerRules {
     const hand = handOf(state);
     if (!hand) return state;
     let next = state;
+    // 收牌（docs/POKER.md）：剩余手牌全部进 muck 且 HIDDEN（含摊牌后亮出的牌），
+    // 公共牌与烧牌回牌堆——下一手 start 时统一重洗。
+    for (const pid of next.playerOrder) {
+      for (const card of holeCards(next, pid)) {
+        next = ECSManager.moveEntity(next, card.id, 'zone_muck');
+        next = setVisibility(next, card.id, { type: 'HIDDEN' });
+      }
+    }
+    for (const zoneId of ['zone_board', 'zone_burn'] as const) {
+      for (const cardId of [...(next.zones[zoneId]?.orderedEntities ?? [])]) {
+        next = ECSManager.moveEntity(next, cardId, 'zone_deck');
+        next = setVisibility(next, cardId, { type: 'HIDDEN' });
+      }
+    }
     for (const pid of next.playerOrder) {
       const chips = chipsOf(next, pid);
       next = patchPlayer(next, pid, player => ({

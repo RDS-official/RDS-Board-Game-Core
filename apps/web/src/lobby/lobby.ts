@@ -49,6 +49,8 @@ let games: HubGameInfo[] = [];
 let currentRoom: HubRoomInfo | null = null;
 let roomsCache: HubRoomInfo[] = [];
 let roomsCacheSig = '';
+/** 首屏房间列表是否已经渲染过（空列表的签名也是 ''，不能只靠签名判断）。 */
+let roomsRendered = false;
 /** 阶段二：当前房间在线的 userId 列表（信令 presence 推送） */
 let onlineIds: string[] = [];
 let roomTimer: ReturnType<typeof setInterval> | null = null;
@@ -135,6 +137,7 @@ function onRoomUpdated(room: HubRoomInfo): void {
     return;
   }
   roomsCacheSig = '';
+  roomsRendered = false;
   void refreshRooms();
 }
 
@@ -198,7 +201,8 @@ export async function startLobby(
       closeWs();
       if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler);
       if (rootEl) rootEl.innerHTML = '';
-      rootEl = null; onEnterGame = null; onAdmin = null; currentRoom = null; lastRoomSig = ''; roomsCacheSig = ''; onlineIds = [];
+      rootEl = null; onEnterGame = null; onAdmin = null; currentRoom = null; lastRoomSig = '';
+      roomsCacheSig = ''; roomsRendered = false; onlineIds = [];
     }
   };
 }
@@ -287,7 +291,7 @@ function lobbyHtml() {
       </div>
       <div class="lob-card">
         <b>联机说明</b>
-        <p class="lob-muted">对局为 P2P（WebRTC）：房主浏览器是对局权威。全员就绪后由房主开局。</p>
+        <p class="lob-muted">对局由服务器统一裁决：牌局状态保存在服务端，任何玩家掉线都不影响其他人。全员就绪后由房主开局。</p>
       </div>
     </aside>
   </div>
@@ -328,8 +332,11 @@ async function refreshRooms() {
     const rooms = await getRooms();
     const sig = rooms.map(r => r.id + r.status + r.players.length + (r.isPrivate ? 1 : 0)).join('|');
     roomsCache = rooms;
-    if (sig !== roomsCacheSig) {
+    // 空列表的签名是 ''，与初始值相同——若只按「签名变化」重绘，房间为空时
+    // 首屏会永远停在「加载中…」。用 rendered 标记保证首次成功拉取一定落地。
+    if (sig !== roomsCacheSig || !roomsRendered) {
       roomsCacheSig = sig;
+      roomsRendered = true;
       // 阶段二：列表同时展示对局中的房间（不可加入，仅展示状态）
       const openRooms = rooms.filter(r => r.status === 'open' && r.players.length < r.maxPlayers)
         .sort((a, b) => b.players.length - a.players.length);
@@ -482,7 +489,7 @@ function roomHtml() {
         ${isHost && r.status === 'playing' ? '<button id="reopen-game">再次进入对局</button>' : ''}
         ${!isHost && r.status === 'playing' ? '<button id="join-game">进入对局</button>' : ''}
       </div>
-      <p class="lob-muted lob-room-note">对局为 P2P（WebRTC）：房主浏览器是对局权威，房主关闭对局窗口则对局中断。你的座位：p${seat + 1}。</p>
+      <p class="lob-muted lob-room-note">对局由服务器统一裁决：房主关闭窗口不影响牌局，全员掉线后由服务器回收。你的座位：p${seat + 1}。</p>
     </section>
     <aside class="lob-card lob-chat">
       <b>房间聊天</b>
@@ -601,6 +608,7 @@ function bind() {
       // 房间页 seat 卡与大厅列表里的展示名即时刷新
       if (currentRoom) { try { currentRoom = await getRoom(currentRoom.id); } catch { /* 忽略 */ } }
       roomsCacheSig = '';
+      roomsRendered = false;
       render();
       showToast('资料已更新', 'success');
     } catch (e: any) { showToast(e.message, 'error'); }

@@ -1,11 +1,18 @@
 /** M1 自检：不依赖浏览器，直接调用各模块断言核心行为。 */
-import {
-  register, login, verifyJwt, createUser, isAdminUser, changeOwnPassword,
+// 数据隔离：自检必须在一次性临时目录里跑（部署机 data/ 软链到生产数据，
+// `pnpm test:server` 若不隔离会把 tester 用户/测试房间写进线上库）。
+// 因此必须先设好 HUB_DATA_DIR 再动态 import 业务模块（静态 import 会在本行之前求值）。
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+process.env.HUB_DATA_DIR ||= fs.mkdtempSync(path.join(os.tmpdir(), 'rds-selftest-'));
+const {
+  register, login, verifyJwt, userFromAuthHeader, createUser, isAdminUser, changeOwnPassword,
   adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
-} from './auth.ts';
-import { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo } from './rooms.ts';
-import { GAMES } from './games.ts';
-import { MatchManager } from './match.ts';
+} = await import('./auth.ts');
+const { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo } = await import('./rooms.ts');
+const { GAMES } = await import('./games.ts');
+const { MatchManager } = await import('./match.ts');
 
 let failed = 0;
 const ok = (cond: boolean, name: string) => { if (!cond) { failed++; console.error('FAIL', name); } else console.log('ok -', name); };
@@ -49,17 +56,29 @@ const resetRes: any = adminResetPassword(reg.user.id, 'new_secret_888');
 ok(resetRes.ok === true, 'adminResetPassword works');
 ok(!!(login(name, 'new_secret_888') as any).token, 'login with new password works');
 
+// 令牌吊销：改密/重置后旧 token 必须立即失效（authUserFromToken 回查记录 + tokenEpoch）
+ok(userFromAuthHeader('Bearer ' + reg.token) === null, 'old token rejected after admin password reset');
+const reLogin: any = login(name, 'new_secret_888');
+ok(!!(userFromAuthHeader('Bearer ' + reLogin.token)?.sub), 'fresh token after reset is accepted');
+
 // 用户自主修改密码（需校验原密码）
 ok(!!(changeOwnPassword(reg.user.id, 'wrong_old', 'user_new_pass_666') as any).error, 'changeOwnPassword rejects wrong old password');
 ok(!!(changeOwnPassword(reg.user.id, 'new_secret_888', '123') as any).error, 'changeOwnPassword rejects short password');
 const selfChangeRes: any = changeOwnPassword(reg.user.id, 'new_secret_888', 'user_new_pass_666');
 ok(selfChangeRes.ok === true, 'changeOwnPassword works with correct old password');
 ok(!!(login(name, 'user_new_pass_666') as any).token, 'login with user changed password works');
+ok(userFromAuthHeader('Bearer ' + reLogin.token) === null, 'old token rejected after self password change');
 
 // 资料与禁用更新
 const updateRes: any = adminUpdateUser(reg.user.id, { displayName: '改名测试员', disabled: true }, adminLogin.user.id);
 ok(updateRes.user && updateRes.user.displayName === '改名测试员' && updateRes.user.disabled === true, 'adminUpdateUser works');
 ok(!!(login(name, 'user_new_pass_666') as any).error, 'disabled user login rejected');
+// 禁用账号的旧 token 同样被拒
+adminUpdateUser(reg.user.id, { disabled: false }, adminLogin.user.id);
+const enabledLogin: any = login(name, 'user_new_pass_666');
+adminUpdateUser(reg.user.id, { disabled: true }, adminLogin.user.id);
+ok(userFromAuthHeader('Bearer ' + enabledLogin.token) === null, 'token rejected while account is disabled');
+adminUpdateUser(reg.user.id, { disabled: false }, adminLogin.user.id);
 
 // 恢复启用
 adminUpdateUser(reg.user.id, { disabled: false }, adminLogin.user.id);
@@ -219,4 +238,5 @@ const deleteRes: any = adminDeleteUser(other.user.id, adminLogin.user.id);
 ok(deleteRes.ok === true, 'adminDeleteUser works');
 
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');
+try { fs.rmSync(process.env.HUB_DATA_DIR!, { recursive: true, force: true }); } catch { /* 临时目录清理失败无所谓 */ }
 process.exit(failed ? 1 : 0);

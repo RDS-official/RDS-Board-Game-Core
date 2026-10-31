@@ -6,6 +6,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { WebSocketServer } from 'ws';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { PORT, DATA_DIR } from './config.ts';
@@ -34,9 +35,27 @@ const app = new Hono<AppEnv>();
 app.post('/api/auth/register', async c => {
   return c.json({ error: '注册功能已关闭，请联系管理员分配账号' }, 403);
 });
+// 登录失败限速：同一 IP+用户名 15 分钟内失败 10 次后暂时锁定（防在线爆破）
+const loginFails = new Map<string, { count: number; resetAt: number }>();
 app.post('/api/auth/login', async c => {
   const body = await c.req.json().catch(() => ({}));
-  const r = login(String(body.name ?? ''), String(body.password ?? ''));
+  const name = String(body.name ?? '');
+  const key = clientIp(c) + '|' + name.toLowerCase();
+  const fail = loginFails.get(key);
+  if (fail && fail.count >= 10 && fail.resetAt > Date.now()) {
+    return c.json({ error: '尝试过于频繁，请 15 分钟后再试' }, 429);
+  }
+  const r = login(name, String(body.password ?? ''));
+  if ('error' in r) {
+    const now = Date.now();
+    const cur = loginFails.get(key);
+    if (!cur || cur.resetAt < now) loginFails.set(key, { count: 1, resetAt: now + 15 * 60_000 });
+    else cur.count += 1;
+    // 顺手清理过期项，防止 Map 无限增长
+    if (loginFails.size > 10_000) for (const [k, v] of loginFails) if (v.resetAt < now) loginFails.delete(k);
+  } else {
+    loginFails.delete(key);
+  }
   return 'error' in r ? c.json({ error: r.error }, 401) : c.json(r);
 });
 app.get('/api/auth/me', c => {
@@ -58,7 +77,7 @@ app.get('/api/admin/users', c => {
     users: adminListUsers(),
     stats: {
       totalUsers: users.all().length,
-      adminUsers: users.all().filter(u => u.role === 'admin' || u.name === 'rds').length,
+      adminUsers: users.all().filter(u => u.role === 'admin').length,
       disabledUsers: users.all().filter(u => !!u.disabled).length,
     }
   });
@@ -163,27 +182,51 @@ const diagnosticsHits = new Map<string, { count: number; resetAt: number }>();
 const DIAG_WINDOW_MS = 60_000;
 const DIAG_MAX_PER_WINDOW = 12;
 const DIAG_MAX_BYTES = 256 * 1024;
+// 相同内容去重：只记最近 128 个指纹，重复上报不再落盘（防客户端死循环刷爆日志）
+const DIAG_FINGERPRINTS: string[] = [];
+
+/**
+ * 客户端真实 IP：仅当 TCP 直连来自本机（反代同机部署）时才信任 X-Forwarded-For，
+ * 否则外部客户端可伪造该头绕过限流 / 污染去重键。
+ */
+function clientIp(c: { env?: unknown; req: { header(name: string): string | undefined } }): string {
+  const remote = (c.env as { info?: { remote?: { address?: string } } } | undefined)?.info?.remote?.address ?? '';
+  const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+  const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('x-real-ip') || '';
+  if (forwarded && loopback) return forwarded;
+  return remote || forwarded || 'unknown';
+}
 
 app.post('/api/diagnostics', async c => {
-  const ip = c.req.header('x-forwarded-for')?.split(',')[0]?.trim() || c.req.header('x-real-ip') || 'unknown';
+  const ip = clientIp(c);
   const now = Date.now();
   const hit = diagnosticsHits.get(ip);
   if (!hit || hit.resetAt < now) diagnosticsHits.set(ip, { count: 1, resetAt: now + DIAG_WINDOW_MS });
   else if (hit.count >= DIAG_MAX_PER_WINDOW) return c.body(null, 429);
   else hit.count += 1;
+  // 上限保护：超过 1 万个键时清掉已过期项，防止伪造 IP 撑爆内存
+  if (diagnosticsHits.size > 10_000) {
+    for (const [k, v] of diagnosticsHits) if (v.resetAt < now) diagnosticsHits.delete(k);
+  }
 
   const text = await c.req.text().catch(() => '');
   if (!text) return c.body(null, 400);
   if (text.length > DIAG_MAX_BYTES) return c.body(null, 413);
 
-  let payload: unknown;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    payload = { unparsable: text.slice(0, 2000) };
+  // 内容指纹去重：客户端同一异常反复上报时只落盘第一份
+  const fingerprint = crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
+  if (!DIAG_FINGERPRINTS.includes(fingerprint)) {
+    DIAG_FINGERPRINTS.push(fingerprint);
+    if (DIAG_FINGERPRINTS.length > 128) DIAG_FINGERPRINTS.shift();
+    let payload: unknown;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { unparsable: text.slice(0, 2000) };
+    }
+    saveDiagnostics(payload, { ip });
+    log.warn('diagnostics', 'client report received', { ip });
   }
-  saveDiagnostics(payload, { ip });
-  log.warn('diagnostics', 'client report received', { ip });
   return c.body(null, 204);
 });
 
@@ -269,9 +312,11 @@ app.get('/api/rooms/:id/match', c => {
   return c.json(stats);
 });
 
-// 中心模式健康概览（不泄露任何对局内容）
+// 中心模式健康概览：未登录仅返回对局数量；房间号列表只对管理员开放（防枚举房间探测）
 app.get('/api/match/stats', c => {
   const list = matchBroker.stats();
+  const u = userFromAuthHeader(c.req.header('authorization'));
+  if (!isAdminUser(u)) return c.json({ authority: 'server', matches: list.length });
   return c.json({ authority: 'server', matches: list.length, rooms: list.map(m => m.roomId) });
 });
 
@@ -290,7 +335,7 @@ const server = serve({ fetch: app.fetch, port: PORT }, info => {
 // ---- /ws 信令 + 中心模式（服务器权威）对局通道 ----
 // 同一条 ws 上：SignalHub 处理 join-room / sdp / presence / lobby-chat，
 // MatchBroker 额外接管 match-* 消息（服务器持有唯一引擎）。联机接口零破坏。
-const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+const wss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 }); // 信令/对局消息都很小，1MB 只会放大滥用面
 const matchBroker = new MatchBroker();
 const hub = new SignalHub((ws, userId) => matchBroker.attach(ws, userId));
 hub.startHeartbeat();

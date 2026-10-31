@@ -499,6 +499,8 @@ export function rollTraitCheck(
   }
   count += Number(player.customProps.checkBonus ?? 0);
   count += Number(options.extraDice ?? 0);
+  // 骰数钳制：异常状态/叠加加成不应产生负数或离谱骰数（与天使羽毛路径的 0..8 一致）
+  count = Math.max(0, Math.min(8, Math.floor(count)));
 
 
   if (player.customProps.checkBonus) {

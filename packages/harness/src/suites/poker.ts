@@ -292,6 +292,29 @@ test('poker: everyone folding hands the pot to the last seat standing', () => {
   assertEqual(result.endedBy, 'FOLD', 'the hand ended without a showdown');
 });
 
+test('poker: folded and end-of-hand cards go to the muck face-down', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 19, { scenario: 'seats_4' });
+  startHand(engine);
+
+  act(engine, 'FOLD'); // p4
+  const mid = engine.getRawState();
+  assertEqual(mid.zones.zone_hand_p4.orderedEntities.length, 0, 'the folder keeps no hole cards in hand');
+  for (const id of mid.zones.zone_muck.orderedEntities) {
+    assertEqual(mid.entities[id].visibility.type, 'HIDDEN', `mucked card ${id} stays hidden`);
+  }
+  assertEqual(mid.zones.zone_muck.orderedEntities.length, 2, 'the folded hand went to the muck');
+
+  act(engine, 'FOLD'); // p1
+  act(engine, 'FOLD'); // p2 — hand over, p3 takes it blinds-fold
+  const state = engine.getRawState();
+  assertEqual(hand(state).street, 'COMPLETE', 'the hand is over');
+  assertEqual(state.zones.zone_muck.orderedEntities.length, 8, 'every hole card ends in the muck');
+  assertEqual(state.zones.zone_board.orderedEntities.length, 0, 'community cards return to the deck');
+  for (const pid of state.playerOrder) {
+    assertEqual(state.zones[`zone_hand_${pid}`].orderedEntities.length, 0, `${pid} hand zone is empty`);
+  }
+});
+
 test('poker: the button moves clockwise and the blinds follow it', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 17, { scenario: 'seats_4' });
   startHand(engine);
@@ -418,6 +441,28 @@ test('poker: two short all-ins that add up to a full raise reopen the betting', 
   const legal = engine.getLegalActions('p1').map(action => action.type);
   assert(legal.includes('RAISE'), 'a full raise worth of short all-ins reopens raising');
   assert(legal.includes('CALL'), 'and the seat may still just call the difference');
+});
+
+test('poker: an accumulated short-all-in reopen keeps the full-raise minimum', () => {
+  // TDA 45 reopened action must NOT shrink the minimum raise: the two +5
+  // short all-ins reopened the betting, but the last FULL raise was the big
+  // blind (10), so the smallest raise is to 20 + 10 = 30 — not 20 + 5 = 25.
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 53, { scenario: 'seats_4' });
+  const raw = engine.getRawState();
+  setChips(raw, 'p4', 15);
+  setChips(raw, 'p2', 20);
+  startHand(engine);
+
+  act(engine, 'ALL_IN'); // p4 shoves 15 (+5 over the big blind)
+  callAround(engine, 1); // p1 calls 15
+  act(engine, 'ALL_IN'); // p2 shoves 20 (+5 more, 10 accumulated = full raise)
+  callAround(engine, 1); // p3 completes to 20
+
+  assertEqual(engine.getActiveActorId(), 'p1', 'p1 faces the reopened action');
+  const tooSmall = engine.dispatch({ type: 'RAISE', playerId: 'p1', payload: { amount: 25 } });
+  assert(!!tooSmall.error, 'a raise to 25 (last short increment as minimum) is rejected');
+  act(engine, 'RAISE', { amount: 30 }); // 20 + lastRaiseSize 10 = the real minimum
+  assertEqual(hand(engine.getRawState()).currentBet, 30, 'raising to the full-raise minimum works');
 });
 
 test('poker: one short all-in closes the street once everyone matches it', () => {
