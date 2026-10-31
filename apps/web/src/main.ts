@@ -702,6 +702,17 @@ class BoardGameSimulatorApp {
   }
 
   private handleBoardPick(data: InteractiveObjectData): void {
+    // Clicking a seat nameplate opens that player's sheet: the plaque is the
+    // board's stand-in for the player card, and seats are not action targets.
+    const seatMeta = data.metadata as { type?: string; playerId?: string } | undefined;
+    if (data.type === 'NODE' && seatMeta?.type === 'SEAT' && seatMeta.playerId) {
+      const player = this.session.getSnapshot().players.find(entry => entry.id === seatMeta.playerId);
+      if (player) {
+        this.hud.openPlayerSheet(player);
+        return;
+      }
+    }
+
     const kind =
       data.type === 'NODE'
         ? 'node'

@@ -2142,6 +2142,76 @@ export class BoardGameHUD {
   }
 
   /** Floating list of the character's current buffs and debuffs. */
+  /**
+   * Player dossier, opened by clicking a seat nameplate on the board (or a card
+   * in the rail when it carries effects). Shows everything the rail card shows
+   * plus the full stat/track list, so a seat is never a dead click target.
+   */
+  public openPlayerSheet(player: UiPlayer): void {
+    const layer = this.container.querySelector('#payload-layer') as HTMLElement | null;
+    if (!layer) return;
+
+    const avatar = player.avatarUrl
+      ? `<img class="ps-avatar" src="${escHtml(player.avatarUrl)}" alt="" />`
+      : `<span class="ps-avatar ps-emoji">${escHtml(player.avatar || '👤')}</span>`;
+
+    const row = (label: string, value: string, dot?: string): string =>
+      `<div class="ps-row"><span class="ps-k">${
+        dot ? `<i class="ps-dot" style="--dot:${dot}"></i>` : ''
+      }${escHtml(label)}</span><span class="ps-v">${value}</span></div>`;
+
+    const stats = (player.stats ?? []).map(entry => row(entry.label, escHtml(entry.value))).join('');
+    const pips = (player.pips ?? [])
+      .map(pip =>
+        row(
+          pip.label,
+          `${escHtml(String(pip.value))}${
+            pip.modifier ? ` <em class="ps-mod">${pip.modifier > 0 ? '+' : ''}${pip.modifier}</em>` : ''
+          }`,
+          pip.color
+        )
+      )
+      .join('');
+    const effects = (player.effects ?? [])
+      .map(
+        effect => `<li class="fx-row ${effect.tone ?? 'neutral'}">
+          <span class="fx-name">${escHtml(effect.label)}</span>
+          <span class="fx-detail">${escHtml(effect.detail ?? '')}</span>
+        </li>`
+      )
+      .join('');
+
+    layer.innerHTML = `
+      <div class="payload-backdrop"></div>
+      <div class="payload-card player-sheet" style="--pc-color:${player.color}">
+        <header class="ps-head">
+          ${avatar}
+          <div class="ps-id">
+            <div class="ps-name">${escHtml(player.name)}</div>
+            <div class="ps-sub">
+              ${player.roleLabel ? `${escHtml(player.roleLabel)} · ` : ''}${escHtml(player.scoreLabel)} ${player.score}${
+                player.alive ? '' : ' · 已出局'
+              }
+            </div>
+          </div>
+          <button type="button" class="pf-btn" id="ps-close">关闭</button>
+        </header>
+        <div class="ps-body">
+          ${stats}${pips}
+          ${effects ? `<ul class="ps-fx">${effects}</ul>` : ''}
+        </div>
+      </div>
+    `;
+    layer.style.display = 'flex';
+
+    const close = (): void => {
+      layer.style.display = 'none';
+      layer.innerHTML = '';
+    };
+    layer.querySelector('.payload-backdrop')?.addEventListener('click', close);
+    layer.querySelector('#ps-close')?.addEventListener('click', close);
+  }
+
   private openEffectsWindow(player: UiPlayer): void {
     const layer = this.container.querySelector('#payload-layer') as HTMLElement | null;
     if (!layer) return;
