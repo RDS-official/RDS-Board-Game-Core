@@ -1,9 +1,13 @@
+import type { NodePresentationHints } from '@rds/kernel/module';
+import type { MapGraphNode } from '@rds/kernel/types';
+
 /**
  * Presentation hints for 山屋惊魂 (Betrayal at House on the Hill).
  *
- * The card vocabulary (weapon / armor / relic / ...) and the derived fact rows the
- * HUD shows live here, next to the rules that produce the `custom` bag, instead of
- * inside the generic inspection path in packages/app.
+ * The card vocabulary (weapon / armor / relic / ...), the derived fact rows and
+ * the room dossier the HUD shows all live here, next to the rules that produce
+ * the `custom` bag and the node props, instead of inside the generic inspection
+ * path in packages/app — and above all, instead of inside apps/web.
  */
 
 const KIND_LABELS: Record<string, string> = {
@@ -50,3 +54,41 @@ export function betrayalCardStyle(custom: Record<string, unknown>): {
   const key = String(custom.cardType ?? '');
   return CARD_STYLES[key] ?? {};
 }
+
+/* -------------------------------------------------------------------------- */
+/* Map nodes: the mansion rooms                                                  */
+/* -------------------------------------------------------------------------- */
+
+/** Floor id to localised label; unlisted floors read as the ground floor. */
+const FLOOR_LABELS: Record<string, string> = { BASEMENT: '地下室', UPPER: '二楼', GROUND: '一楼' };
+
+/** Tile symbol printed on a room corner; rooms without one are quiet. */
+const SYMBOL_LABELS: Record<string, string> = { OMEN: '预兆 👁', ITEM: '遗物 ◆', EVENT: '事件 ✦' };
+
+/**
+ * The discovery dossier for a freshly explored room.
+ *
+ * Floors, door positions and tile symbols are the vocabulary of this board; the
+ * HUD only knows that a new node appeared and that the game now has something to
+ * say about it. Returning null keeps a node quiet — doors and navigation arrows
+ * travel the same path.
+ */
+export function betrayalDescribeNode(node: MapGraphNode): NodePresentationHints | null {
+  if (node.type !== 'ROOM') return null;
+  const props = (node.props ?? {}) as Record<string, unknown>;
+  if (typeof props.name !== 'string' || !props.name) return null;
+  const doors = Array.isArray(props.doors) ? props.doors.map(String) : [];
+  return {
+    title: props.name,
+    subtitle: typeof props.en === 'string' ? props.en : undefined,
+    tone: 'place',
+    desc: typeof props.text === 'string' ? props.text : undefined,
+    sections: [
+      { label: '楼层', value: FLOOR_LABELS[String(props.floor ?? '')] ?? '一楼' },
+      { label: '已连通门位', value: doors.join(' · ') || '无' },
+      { label: '符号', value: SYMBOL_LABELS[String(props.symbol ?? '')] ?? '无符号' }
+    ],
+    footer: '新房间已加入洋馆布局',
+    reveal: true
+  };
+}

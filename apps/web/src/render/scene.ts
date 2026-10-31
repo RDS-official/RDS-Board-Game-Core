@@ -301,6 +301,19 @@ const PKMN_MARKET_Z1 = PKMN_DECK_Z_TOP;
 const PKMN_MARKET_PITCH_X = PKMN_CARD_W + 0.34;
 const PKMN_MARKET_PITCH_Z = PKMN_CARD_H + 0.52;
 
+/**
+ * FNV-1a 32-bit hash. Used for stable per-seat jitter: the standees are rebuilt
+ * on every sync, so a `Math.random()` tilt would flicker.
+ */
+function fnv1a(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
+}
+
 export class BoardGameScene {
   private static readonly _scratchNdc = new THREE.Vector2();
   private static readonly _scratchRaycaster = new THREE.Raycaster();
@@ -337,11 +350,11 @@ export class BoardGameScene {
    */
   private pokerFxGroup = new THREE.Group();
   /**
-   * Seat standees rebuilt on every sync. Their yaw is re-aimed at the camera
-   * each frame, so the boards always present their face to whoever is looking
-   * (a fixed yaw would show the back from half the orbit).
+   * Seat standees, rebuilt on every sync. Their yaw follows the camera each
+   * frame — with a per-seat random offset, so the table does not look like a row
+   * of signs snapping to attention.
    */
-  private seatStandees: THREE.Group[] = [];
+  private seatStandees: { group: THREE.Group; jitter: number }[] = [];
   /** Previous poker snapshot, used to detect what to animate. */
   private pokerFxPrev: {
     handNo: number;
@@ -2213,7 +2226,9 @@ export class BoardGameScene {
 
         // Blinds get their own timber: pine for the big blind, red pine for the
         // small blind, walnut for the rest of the table.
-        const handState = state.globalVars.hand as { sbSeat?: number; bbSeat?: number } | undefined;
+        const handState = state.globalVars.hand as
+          | { sbSeat?: number; bbSeat?: number; lastActions?: Record<string, string> }
+          | undefined;
         const seatIndex = Number(node.props?.seatIndex ?? -1);
         const wood: WoodKind =
           state.gameId === 'poker' && handState
@@ -2233,13 +2248,21 @@ export class BoardGameScene {
             active: seatId === activeActor,
             muted: seatPlayer ? !seatPlayer.alive : false,
             marker,
+            // What this seat did on the current street, painted on the board.
+            action: handState?.lastActions?.[seatId],
             wood
           },
           outward
         );
         group.position.set(seatX, 0.055, seatZ);
+        // The board tracks the camera (see `updateSeatStandees`) but keeps a
+        // per-seat random offset of ±45°: perfectly aligned boards hide the
+        // structure of the table and read as a HUD, not as objects. The offset is
+        // hashed from the seat id, so a rebuilt sync keeps the same pose.
+        const jitter = (((fnv1a(seatId) % 1000) / 1000) - 0.5) * (Math.PI / 2);
+        group.rotation.y = Math.atan2(-outward.x, -outward.y) + jitter;
+        this.seatStandees.push({ group, jitter });
         this.boardObjectsGroup.add(group);
-        this.seatStandees.push(group);
         this.raycaster.registerInteractive(plate, {
           type: 'NODE',
           id: node.id,
@@ -4098,11 +4121,6 @@ export class BoardGameScene {
       }
     });
 
-    const title = this.createLabelSprite("TEXAS HOLD'EM · 德州扑克", '#c9b57a', 38);
-    title.position.set(0, 0.5, -rz - 0.9);
-    title.scale.set(4.4, 0.62, 1);
-    this.boardObjectsGroup.add(title);
-
     this.animatePokerDeltas(state);
   }
 
@@ -4730,20 +4748,22 @@ export class BoardGameScene {
   }
 
   /**
-   * Aim every seat board at the camera (yaw only).
+   * Turn each seat board toward the camera (yaw only), keeping its own random
+   * offset.
    *
-   * The board keeps its lean, so it always tilts its face up toward the viewer —
-   * a fixed yaw would show the back of half the table from any orbit, and the
-   * lettering would read upside down from the default seat.
+   * Dead-on aiming looked wrong: every board snapped into the same plane, which
+   * hides the table's structure. Each seat therefore carries a hashed ±45° offset
+   * and the whole board still swings with the orbit, so the face stays legible
+   * without the row looking mechanical.
    */
   private updateSeatStandees(): void {
     if (this.seatStandees.length === 0) return;
     const cam = this.camera.position;
-    for (const group of this.seatStandees) {
+    for (const { group, jitter } of this.seatStandees) {
       const dx = cam.x - group.position.x;
       const dz = cam.z - group.position.z;
       if (Math.abs(dx) < 1e-4 && Math.abs(dz) < 1e-4) continue;
-      group.rotation.y = Math.atan2(dx, dz);
+      group.rotation.y = Math.atan2(dx, dz) + jitter;
     }
   }
 

@@ -555,6 +555,33 @@ test('poker: a two-seat table plays a whole hand without a ghost seat', () => {
 });
 
 /* -------------------------------------------------------------------------- */
+/* Seat signs: what each board shows                                          */
+/* -------------------------------------------------------------------------- */
+
+test('poker: each seat board records what it did on this street', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 53, { scenario: 'seats_4' });
+  startHand(engine);
+
+  const opening = engine.getRawState();
+  assertEqual(hand(opening).lastActions.p2, '小盲 5', 'the small blind is posted on the board');
+  assertEqual(hand(opening).lastActions.p3, '大盲 10', 'the big blind is posted on the board');
+
+  callAround(engine, 1); // p4 calls (the legal action carries its amount)
+  act(engine, 'RAISE', { amount: 40 }); // p1
+  act(engine, 'FOLD'); // p2
+
+  const mid = engine.getRawState();
+  assertEqual(hand(mid).lastActions.p4, '跟注 10', 'a call is recorded');
+  assertEqual(hand(mid).lastActions.p1, '加注到 40', 'a raise is recorded');
+  assertEqual(hand(mid).lastActions.p2, '弃牌', 'a fold is recorded');
+
+  callAround(engine, 2); // p3 and p4 call → flop
+  const flop = engine.getRawState();
+  assertEqual(hand(flop).street, 'FLOP', 'the street advanced');
+  assertEqual(Object.keys(hand(flop).lastActions).length, 0, 'the signs clear with the street');
+});
+
+/* -------------------------------------------------------------------------- */
 /* Hidden information and determinism                                          */
 /* -------------------------------------------------------------------------- */
 

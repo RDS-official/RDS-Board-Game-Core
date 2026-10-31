@@ -46,12 +46,13 @@ import {
   GamePresenter,
   GameSnapshot,
   UiChipRank,
+  UiDiscoveryView,
   UiHistoryEntry,
   UiNotice,
   UiSpatialInfo,
   ViewerId
 } from './contracts';
-import { buildEntityInspectNotice } from './inspect';
+import { buildEntityInspectNotice, buildNodeDiscoveryView } from './inspect';
 import {
   UniversalSession,
   BoundAction,
@@ -487,6 +488,13 @@ export class NetSession implements GamePresenter {
 
   public getSnapshot(): GameSnapshot {
     return this.isLocalAuthority ? this.session!.getSnapshot() : this.snapshot!;
+  }
+
+  /** Discovery view for a map node, resolved by the game presentation hints. */
+  public nodeDetail(nodeId: string): UiDiscoveryView | null {
+    if (this.isLocalAuthority) return this.session?.nodeDetail(nodeId) ?? null;
+    const state = this.state;
+    return state ? buildNodeDiscoveryView(state.mapGraph.nodes[nodeId], { module: this.module }) : null;
   }
 
   public subscribe(listener: (snapshot: GameSnapshot) => void): () => void {

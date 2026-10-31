@@ -14,7 +14,6 @@ import {
   PresentationPorts,
   UiAction,
   UiDetailView,
-  nodeDetailKey,
   UiHistoryEntry,
   UiNotice,
   UiTraitChange,
@@ -28,6 +27,12 @@ import {
 const escHtml = (v: unknown) =>
   String(v ?? '').replace(/[&<>"']/g, ch =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
+
+/**
+ * Base height of one player card in the rail, in px. The rail's fisheye uses it
+ * as its "card width" so the compression matches the action dock's.
+ */
+const PLAYER_CARD_HEIGHT = 104;
 
 /** Short trait key → character-sheet abbreviation used by the pip ladder. */
 const HUD_TRAIT_SHORT: Record<string, string> = {
@@ -66,8 +71,8 @@ export class BoardGameHUD {
   private latest: GameSnapshot | null = null;
   /** 阶段二：在线玩家（联机对局 presence 映射后的 playerId 集合） */
   private onlinePlayerIds = new Set<string>();
-  /** Room the player last clicked; the dossier follows it until the turn moves. */
-  private pinnedRoomId?: string;
+  /** Node the player last clicked; the dossier follows it until the turn moves. */
+  private pinnedNodeId?: string;
   /** Latest snapshot, kept for click handlers that need the current data. */
   private lastSnapshot?: GameSnapshot;
   /** Pointer position across the action row: 0 = left edge, 1 = right edge. */
@@ -75,9 +80,18 @@ export class BoardGameHUD {
   /** 0 = flat row, 1 = full fisheye. Drops to 0 when the pointer leaves. */
   private fanFocusStrength = 0;
   private lastActorRoomId?: string;
-  /** Set of room ids already seen, for the "new room discovered" reveal. */
-  private knownRooms?: Set<string>;
+  /** Set of node ids already seen, for the "new node discovered" reveal. */
+  private knownNodes?: Set<string>;
   private sheetTimer: number | null = null;
+  /**
+   * Pointer position along the player rail (0 = top, 1 = bottom), or null when
+   * it is outside. The fisheye focus is derived from this, never from which card
+   * the DOM reports as hovered: the layout moves the cards, so a DOM-derived
+   * focus feeds back into itself and the rail oscillates.
+   */
+  private railFocusY: number | null = null;
+  /** Pending animation frame for the rail fisheye (pointer events are coalesced). */
+  private railFrame = 0;
   /** Stamp of the sheet currently painted, so a repaint does not restart its timer. */
   private paintedSheetStamp = 0;
   /** The layer outlives a repaint, so its backdrop handler must be replaced, not added again. */
@@ -145,9 +159,9 @@ export class BoardGameHUD {
     this.closeAbout();
     this.overlays.closeAll();
     this.container.querySelector('#card-sheet-layer')?.remove();
-    // Switching fixtures must not treat the new board as "rooms discovered".
-    this.knownRooms = undefined;
-    this.pinnedRoomId = undefined;
+    // Switching fixtures must not treat the new board as "already discovered".
+    this.knownNodes = undefined;
+    this.pinnedNodeId = undefined;
     const roomCard = this.container.querySelector('#room-card') as HTMLElement | null;
     if (roomCard) roomCard.style.display = 'none';
     this.lastActorRoomId = undefined;
@@ -647,7 +661,7 @@ export class BoardGameHUD {
 
   private renderNotice(notice: UiNotice): void {
     if (notice.roomId) {
-      this.pinnedRoomId = notice.roomId;
+      this.pinnedNodeId = notice.roomId;
       // Inspection does not dispatch an action, so no snapshot arrives with it:
       // repaint the dossier straight away.
       if (this.latest) this.renderRoomCard(this.latest);
@@ -818,10 +832,6 @@ export class BoardGameHUD {
   }
 
   /**
-   * Discovery moment: when a newly explored room enters the projection, present
-   * it like a drawn card instead of silently growing the board.
-   */
-  /**
    * 所有动作的统一入口。
    *
    * 除了转交 presenter，还把「做了什么、成功没有」记进诊断面包屑 —— 卡死时
@@ -840,47 +850,33 @@ export class BoardGameHUD {
     return result;
   }
 
-  private maybeRevealRoom(snapshot: GameSnapshot): void {
-    const rooms = Object.values(snapshot.board.mapGraph.nodes).filter(node => node.type === 'ROOM');
-    if (!this.knownRooms) {
+  /**
+   * Discovery moment: a map node the viewer had not seen before has appeared.
+   *
+   * The generic layer only knows that something new showed up here. What to say
+   * about it — a room dossier, a station, a track space — comes from the game
+   * presentation hints through the presenter, so no game vocabulary lives in this
+   * file and a game that declares none simply gets no cutscene.
+   */
+  private maybeRevealNode(snapshot: GameSnapshot): void {
+    const nodes = Object.values(snapshot.board.mapGraph.nodes);
+    if (!this.knownNodes) {
       // First paint: register the opening layout without a cutscene.
-      this.knownRooms = new Set(rooms.map(node => node.id));
+      this.knownNodes = new Set(nodes.map(node => node.id));
       return;
     }
-    const fresh = rooms.filter(node => !this.knownRooms!.has(node.id));
-    for (const node of rooms) this.knownRooms.add(node.id);
+    const fresh = nodes.filter(node => !this.knownNodes!.has(node.id));
+    for (const node of nodes) this.knownNodes.add(node.id);
     if (fresh.length === 0) return;
 
-    const node = fresh[fresh.length - 1];
-    const props = (node.props ?? {}) as Record<string, unknown>;
-    const floorId = String(props.floor ?? '');
-    const floorLabel = floorId === 'BASEMENT' ? '地下室' : floorId === 'UPPER' ? '二楼' : '一楼';
-    const doors = Array.isArray(props.doors) ? (props.doors as string[]) : [];
-    const symbol =
-      props.symbol === 'OMEN'
-        ? '预兆 👁'
-        : props.symbol === 'ITEM'
-        ? '遗物 ◆'
-        : props.symbol === 'EVENT'
-        ? '事件 ✦'
-        : '无符号';
-    this.pinnedRoomId = node.id;
-    this.showCardSheet(
-      {
-        key: nodeDetailKey(node.id),
-        title: String(props.name ?? '房间'),
-        subtitle: String(props.en ?? ''),
-        tone: 'place',
-        desc: String(props.text ?? ''),
-        sections: [
-          { label: '楼层', value: floorLabel },
-          { label: '已连通门位', value: doors.join(' · ') || '无' },
-          { label: '符号', value: symbol }
-        ],
-        actions: []
-      },
-      { reveal: true, footer: '新房间已加入洋馆布局' }
-    );
+    const found = fresh
+      .map(node => ({ node, detail: this.presenter.nodeDetail?.(node.id) ?? null }))
+      .filter(entry => entry.detail)
+      .pop();
+    if (!found?.detail) return;
+
+    this.pinnedNodeId = found.node.id;
+    this.showCardSheet(found.detail.view, { reveal: found.detail.reveal, footer: found.detail.footer });
   }
 
   /**
@@ -1143,7 +1139,7 @@ export class BoardGameHUD {
     this.renderChipRanking(snapshot);
     this.renderHistory(snapshot);
     this.renderDock(snapshot);
-    this.maybeRevealRoom(snapshot);
+    this.maybeRevealNode(snapshot);
     this.maybeShowHaunt(snapshot);
   }
 
@@ -1218,7 +1214,7 @@ export class BoardGameHUD {
           const rx = (c - minCol) * cellSize + padding;
           const ry = (rw - minRow) * cellSize + padding;
           const isActorHere = actorRoomId === r.id;
-          const isPinned = this.pinnedRoomId === r.id;
+          const isPinned = this.pinnedNodeId === r.id;
 
           const herePlayers = playersOnFloor.filter(p => p.customProps?.currentRoomId === r.id);
           const hereMonsters = monstersOnFloor.filter(m => (m.components?.custom as any)?.roomId === r.id);
@@ -1535,10 +1531,10 @@ export class BoardGameHUD {
     // dossier until the actor moves somewhere else.
     if (actorRoomId !== this.lastActorRoomId) {
       this.lastActorRoomId = actorRoomId;
-      this.pinnedRoomId = undefined;
+      this.pinnedNodeId = undefined;
     }
-    const pinnedNode = this.pinnedRoomId ? board.mapGraph.nodes[this.pinnedRoomId] : undefined;
-    const roomId = pinnedNode && pinnedNode.type === 'ROOM' ? this.pinnedRoomId! : actorRoomId;
+    const pinnedNode = this.pinnedNodeId ? board.mapGraph.nodes[this.pinnedNodeId] : undefined;
+    const roomId = pinnedNode && pinnedNode.type === 'ROOM' ? this.pinnedNodeId! : actorRoomId;
     const node = roomId ? board.mapGraph.nodes[roomId] : undefined;
 
     if (!node || node.type !== 'ROOM') {
@@ -1844,6 +1840,54 @@ export class BoardGameHUD {
     // Reconcile instead of rebuilding: a player card holds focus and hover, and
     // the rail holds the scroll position.
     reconcileKeyed(rail, [...playerCards, ...npcCards]);
+    this.layoutPlayerRail(rail);
+  }
+
+  /**
+   * Lay the player rail out like a hand of cards.
+   *
+   * Ten players do not fit a fixed column, so the rail reuses the dock's fisheye
+   * (`handLayout`, unit-agnostic — here the "row" runs down the screen): every
+   * card keeps its full height and the pitch compresses around the pointer, so
+   * the rail reads as an overlapping stack and the card under the cursor opens
+   * up. Falls back to a plain stack when there are only a few players.
+   */
+  private layoutPlayerRail(rail: HTMLElement): void {
+    const cards = Array.from(rail.querySelectorAll<HTMLElement>('.pc'));
+    const count = cards.length;
+    if (count === 0) return;
+    const height = rail.clientHeight;
+    if (height <= 0) return;
+
+    const cardHeight = Math.max(72, Math.min(PLAYER_CARD_HEIGHT, Math.round(height / 2)));
+    const activeIndex = Math.max(
+      0,
+      cards.findIndex(card => card.classList.contains('active'))
+    );
+    const focusIndex =
+      this.railFocusY === null
+        ? activeIndex
+        : Math.min(count - 1, Math.max(0, Math.round(this.railFocusY * (count - 1))));
+    const layout = handLayout({
+      count,
+      containerWidth: height,
+      cardWidth: cardHeight,
+      focusX: count > 1 ? focusIndex / (count - 1) : 0.5,
+      // Three players do not need a fisheye; the compression only earns its keep
+      // once the rail would otherwise overflow.
+      focusStrength: count > 3 ? 1 : 0.3,
+      hoverIndex: focusIndex,
+      lockCardWidth: true,
+      maxPitchRatio: 1
+    });
+
+    for (const entry of layout.cards) {
+      const card = cards[entry.index];
+      if (!card) continue;
+      card.style.height = `${cardHeight}px`;
+      card.style.transform = `translateY(${(entry.x - cardHeight / 2).toFixed(2)}px)`;
+      card.style.zIndex = String(10 + Math.round(entry.z));
+    }
   }
 
   private renderDock(snapshot: GameSnapshot): void {
@@ -2180,14 +2224,23 @@ export class BoardGameHUD {
     const containerWidth = fan.clientWidth - padLeft - padRight - hoverInset * 2;
     if (containerWidth <= 0) return;
 
-    const hoverIndex = cards.findIndex(card => card.matches(':hover'));
+    // Focus comes from the pointer's position along the row, never from
+    // `card.matches(':hover')`. The layout scales and lifts the focused card, so
+    // asking the DOM which card is under the pointer feeds the result back into
+    // the input: the row oscillates left/right at pointer-move frequency, which
+    // reads as flicker (worst on fractional display scaling, e.g. 175%).
+    const focusIndex =
+      this.fanFocusStrength > 0
+        ? Math.min(cards.length - 1, Math.max(0, Math.round(this.fanFocusX * (cards.length - 1))))
+        : null;
+
     const layout = handLayout({
       count: cards.length,
       containerWidth,
       cardWidth,
       focusX: this.fanFocusX,
       focusStrength: this.fanFocusStrength,
-      hoverIndex: hoverIndex >= 0 ? hoverIndex : null,
+      hoverIndex: focusIndex,
       lockCardWidth: true,
       focusPitchRatio: 1.15,
       contextPitchRatio: 0.1
@@ -2234,9 +2287,28 @@ export class BoardGameHUD {
       if (!player) return;
       if (player.effects && player.effects.length > 0) this.openEffectsWindow(player);
     });
+
+    // Fisheye focus follows the pointer: whichever card it is over opens up and
+    // the rest compress into slivers (the dock behaves the same way).
+    rail.addEventListener('mousemove', event => {
+      const rect = rail.getBoundingClientRect();
+      if (rect.height <= 0) return;
+      const next = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+      if (next === this.railFocusY) return;
+      this.railFocusY = next;
+      if (this.railFrame) return;
+      this.railFrame = requestAnimationFrame(() => {
+        this.railFrame = 0;
+        this.layoutPlayerRail(rail);
+      });
+    });
+    rail.addEventListener('mouseleave', () => {
+      if (this.railFocusY === null) return;
+      this.railFocusY = null;
+      this.layoutPlayerRail(rail);
+    });
   }
 
-  /** Floating list of the character's current buffs and debuffs. */
   /**
    * Player dossier, opened by clicking a seat nameplate on the board (or a card
    * in the rail when it carries effects). Shows everything the rail card shows
@@ -2347,6 +2419,10 @@ export class BoardGameHUD {
 
     // The action row is a fisheye: the pointer position decides which gaps open
     // up. Delegated on the dock so it survives every reconcile.
+    // Coalesce to one layout per animation frame: pointer events can arrive at
+    // the display's refresh rate, and re-running the fisheye on each one restarts
+    // every CSS transition mid-flight (visible as shimmer on 120Hz panels).
+    let fanFrame = 0;
     const fanPointerBound = (event: PointerEvent) => {
       const fan = dock.querySelector('[data-fan]') as HTMLElement | null;
       if (!fan) return;
@@ -2354,7 +2430,12 @@ export class BoardGameHUD {
       if (rect.width <= 0) return;
       this.fanFocusX = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
       this.fanFocusStrength = 1;
-      this.layoutActionFan(fan);
+      if (fanFrame) return;
+      fanFrame = requestAnimationFrame(() => {
+        fanFrame = 0;
+        const live = dock.querySelector('[data-fan]') as HTMLElement | null;
+        if (live) this.layoutActionFan(live);
+      });
     };
     dock.addEventListener('pointermove', fanPointerBound);
     dock.addEventListener('pointerleave', () => {

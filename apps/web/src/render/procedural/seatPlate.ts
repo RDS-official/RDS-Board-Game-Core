@@ -33,6 +33,11 @@ export interface SeatPlateInfo {
   /** Small marker under the text (suit symbol or seat number). */
   marker?: string;
   /**
+   * What this seat did on the current street (过牌 / 跟注 20 / 加注到 40 / 弃牌 /
+   * 全押 200). Painted as a badge on the board; replaces the marker while set.
+   */
+  action?: string;
+  /**
    * Wood species of the board. Blinds get their own timber so the table reads
    * at a glance: pine for the big blind, red pine for the small blind, walnut
    * for everyone else.
@@ -104,6 +109,7 @@ export class SeatPlateBuilder {
       info.color,
       info.detail ?? '',
       info.marker ?? '',
+      info.action ?? '',
       info.active ? 'a' : '',
       info.muted ? 'm' : '',
       info.wood ?? 'walnut'
@@ -220,9 +226,36 @@ export class SeatPlateBuilder {
     }
 
     // Suit / seat marker in the lower third.
-    if (info.marker) {
+    // Action badge: what this seat did on the current street. It takes the
+    // marker's place while set, because the action is the more urgent fact.
+    if (info.action) {
+      const aggressive = /加注|全押|下注/.test(info.action);
+      const folded = /弃牌/.test(info.action);
+      const badgeW = 268;
+      const badgeH = 62;
+      const badgeY = height - 128;
+      ctx.fillStyle = folded ? '#8c1c28' : aggressive ? BRASS : 'rgba(10, 7, 4, 0.66)';
+      ctx.beginPath();
+      ctx.roundRect(coinX - badgeW / 2, badgeY - badgeH / 2, badgeW, badgeH, 18);
+      ctx.fill();
+      ctx.strokeStyle = aggressive || folded ? 'rgba(0, 0, 0, 0.45)' : 'rgba(201, 162, 74, 0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(coinX - badgeW / 2, badgeY - badgeH / 2, badgeW, badgeH, 18);
+      ctx.stroke();
+
+      ctx.fillStyle = aggressive ? '#241708' : '#f6ecd2';
+      ctx.font = `700 34px ${CANVAS_FONT_STACK}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      let text = info.action;
+      while (ctx.measureText(text).width > badgeW - 26 && text.length > 2) text = text.slice(0, -2);
+      ctx.fillText(text, coinX, badgeY + 1);
+    } else if (info.marker) {
       ctx.fillStyle = info.active ? BRASS : wood.inkSoft;
       ctx.font = `600 64px ${CANVAS_FONT_STACK}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillText(info.marker, coinX, height - 96);
     }
 

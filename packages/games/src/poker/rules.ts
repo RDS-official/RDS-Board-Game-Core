@@ -46,6 +46,12 @@ export interface PokerHandState extends BettingState {
   shortRaiseAccum: number;
   community: string[];
   lastAggressor: string | null;
+  /**
+   * What each seat last did on the current street (过牌 / 跟注 20 / 加注到 40 /
+   * 弃牌 / 全押 200). Cleared when the street closes; the renderer draws it as
+   * the action sign beside each seat's standee.
+   */
+  lastActions: Record<string, string>;
 }
 
 export interface PokerPotResult {
@@ -410,6 +416,19 @@ export class PokerRules {
         ? [playerId]
         : [...new Set([...hand.actedSinceRaise, playerId])];
 
+    // The short form painted on this seat's board: what the table needs to read
+    // at a glance, not the full log line.
+    const sign =
+      action.type === 'FOLD'
+        ? '弃牌'
+        : action.type === 'CHECK'
+          ? '过牌'
+          : action.type === 'CALL'
+            ? `跟注 ${spent}`
+            : remaining === 0
+              ? `全押 ${streetBets[playerId]}`
+              : `加注到 ${streetBets[playerId]}`;
+
     const nextHand: PokerHandState = {
       ...hand,
       streetBets,
@@ -418,6 +437,7 @@ export class PokerRules {
       folded,
       actedSinceRaise,
       shortRaiseAccum,
+      lastActions: { ...hand.lastActions, [playerId]: sign },
       currentBet: raised ? Math.max(hand.currentBet, streetBets[playerId]) : hand.currentBet,
       lastRaiseSize: fullRaise ? streetBets[playerId] - hand.currentBet : hand.lastRaiseSize,
       lastAggressor: raised ? playerId : hand.lastAggressor
@@ -511,7 +531,8 @@ export class PokerRules {
       currentBet: 0,
       lastRaiseSize: hand.bigBlind,
       actedSinceRaise: [],
-      shortRaiseAccum: 0
+      shortRaiseAccum: 0,
+      lastActions: {}
     });
   }
 
@@ -606,6 +627,7 @@ export class PokerRules {
       handBets: zeros(order),
       actedSinceRaise: [],
       shortRaiseAccum: 0,
+      lastActions: {},
       folded: [],
       allIn: [],
       community: [],
@@ -617,6 +639,18 @@ export class PokerRules {
     // 5. Forced bets.
     next = this.postBlind(next, order[sbSeat], config.smallBlind);
     next = this.postBlind(next, order[bbSeat], config.bigBlind);
+    // The blinds are the first thing each of those seats "did" this street, so
+    // their boards start out saying so.
+    const afterBlinds = handOf(next);
+    if (afterBlinds) {
+      next = withHand(next, {
+        ...afterBlinds,
+        lastActions: {
+          [order[sbSeat]]: `小盲 ${afterBlinds.streetBets[order[sbSeat]] ?? config.smallBlind}`,
+          [order[bbSeat]]: `大盲 ${afterBlinds.streetBets[order[bbSeat]] ?? config.bigBlind}`
+        }
+      });
+    }
 
     // 6. Two hole cards each, one at a time clockwise from the small blind.
     const dealingSeats: number[] = [];
@@ -724,7 +758,8 @@ export class PokerRules {
       currentBet: 0,
       street: 'COMPLETE',
       actedSinceRaise: [],
-      shortRaiseAccum: 0
+      shortRaiseAccum: 0,
+      lastActions: {}
     });
     next = this.writeHandResult(next, { handNo: hand.handNo, endedBy: 'SHOWDOWN', pots: results, showdown });
     next = pushLog(
@@ -757,7 +792,8 @@ export class PokerRules {
       currentBet: 0,
       street: 'COMPLETE',
       actedSinceRaise: [],
-      shortRaiseAccum: 0
+      shortRaiseAccum: 0,
+      lastActions: {}
     });
 
     if (winnerId) {

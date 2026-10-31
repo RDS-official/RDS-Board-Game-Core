@@ -456,6 +456,22 @@ export interface UiDetailView {
   actions: UiDetailAction[];
 }
 
+/**
+ * A discovery moment the game wants presented when a map node first appears.
+ *
+ * The view is the same neutral structure a click produces; the wrapper only adds
+ * how loudly to say it (a full-screen reveal or a peripheral sheet) and the
+ * footer line. Whether a node deserves one at all is the game call — the
+ * generic layer only noticed that something new showed up here.
+ */
+export interface UiDiscoveryView {
+  view: UiDetailView;
+  /** Footer under the sheet, e.g. where the node came from. */
+  footer?: string;
+  /** Present full-screen (modal) instead of as a peripheral pinned sheet. */
+  reveal?: boolean;
+}
+
 /** Structured trait movement attached to notices so the UI can animate it. */
 export interface UiTraitChange {
   playerId: string;
@@ -535,6 +551,11 @@ export interface GamePresenter {
 
   /** Map a click on the 3D board to a legal action, if any. */
   pickTarget(pick: BoardPick): { handled: boolean; message?: string };
+  /**
+   * Neutral discovery view for a map node, resolved from the game presentation
+   * hints. Null when the game has nothing to say about that node.
+   */
+  nodeDetail?(nodeId: string): UiDiscoveryView | null;
 
   /** Rotate / confirm a preloaded room tile without opening a modal. */
   rotatePlacement(direction?: 1 | -1): void;

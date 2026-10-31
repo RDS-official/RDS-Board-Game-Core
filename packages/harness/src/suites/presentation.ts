@@ -6,11 +6,12 @@ import { OccupancyIndex } from '@rds/kernel/occupancy';
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { UniversalSession } from '@rds/app/session';
-import { buildEntityInspectNotice } from '@rds/app/inspect';
-import { entityDetailKey } from '@rds/app/contracts';
+import { buildEntityInspectNotice, buildNodeDiscoveryView } from '@rds/app/inspect';
+import { entityDetailKey, nodeDetailKey } from '@rds/app/contracts';
 import type { UiDetailView, UiNotice } from '@rds/app/contracts';
 import { OverlayArbiter } from '@rds/web/ui/overlay';
 import type { OverlayState } from '@rds/web/ui/overlay';
+import type { MapGraphNode } from '@rds/kernel/types';
 import { readdirSync, readFileSync } from 'node:fs';
 import { itemSlotId } from '@rds/games/betrayal/helpers';
 import { layoutRoom, hashString as layoutHash } from '@rds/web/render/procedural/roomLayout';
@@ -523,4 +524,65 @@ test('presentation: the overlay arbiter keeps one view per subject and ranks pee
   const seen = states.length;
   arbiter.open({ owner: 'test', mode: 'peek', view: card('entity:d') });
   assertEqual(states.length, seen, 'unsubscribe stops notifications');
+});
+
+test('presentation: a newly explored node is described by the game, not by the HUD', () => {
+  // The generic layer only knows that a node it had never seen just appeared.
+  // Everything the player reads about it comes from the game's describeNode.
+  const node = {
+    id: 'room_x',
+    type: 'ROOM',
+    position: [0, 0, 0],
+    neighbors: [],
+    props: {
+      name: '图书馆',
+      en: 'Library',
+      floor: 'UPPER',
+      doors: ['N', 'S'],
+      symbol: 'OMEN',
+      text: '书架上摆满了发霉的卷册。'
+    }
+  } as unknown as MapGraphNode;
+
+  const discovery = buildNodeDiscoveryView(node, { module: GAME_REGISTRY.betrayal });
+  assert(!!discovery, 'betrayal describes its rooms');
+  assertEqual(discovery!.view.key, nodeDetailKey('room_x'), 'the dossier addresses the node');
+  assertEqual(discovery!.view.title, '图书馆', 'the name is the room name');
+  assertEqual(discovery!.view.subtitle, 'Library', 'the english line survives');
+  assertEqual(discovery!.view.tone, 'place', 'rooms use the neutral place tone');
+  assertEqual(discovery!.view.desc, '书架上摆满了发霉的卷册。', 'the flavour text is the room text');
+  assertEqual(
+    discovery!.view.sections.map(section => section.label).join('/'),
+    '楼层/已连通门位/符号',
+    'the dossier rows are the game vocabulary'
+  );
+  assertEqual(
+    discovery!.view.sections.map(section => section.value).join('|'),
+    '二楼|N · S|预兆 👁',
+    'the values are translated by the game'
+  );
+  assertEqual(discovery!.footer, '新房间已加入洋馆布局', 'the footnote belongs to the game');
+  assertEqual(discovery!.reveal, true, 'rooms that matter reveal full screen');
+
+  // A game that declares no node hints simply gets no cutscene.
+  assertEqual(buildNodeDiscoveryView(node, { module: counterModule }), null, 'no hints, no dossier');
+  assertEqual(buildNodeDiscoveryView(node, { module: GAME_REGISTRY.splendor }), null, 'splendor declares none');
+  assertEqual(buildNodeDiscoveryView(undefined, { module: GAME_REGISTRY.betrayal }), null, 'missing node is null');
+  const door = { ...node, id: 'door_1', type: 'DOOR' } as unknown as MapGraphNode;
+  assertEqual(buildNodeDiscoveryView(door, { module: GAME_REGISTRY.betrayal }), null, 'only rooms carry dossiers');
+});
+
+test('presentation: the HUD holds no room vocabulary, the game package does', () => {
+  const read = (relative: string) =>
+    readFileSync(new URL(relative, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const hud = read('../../../../apps/web/src/ui/hud.ts');
+  for (const word of ['已连通门位', '新房间已加入洋馆布局', '洋馆布局']) {
+    assert(!hud.includes(word), `generic HUD still spells out ${word}`);
+  }
+  assert(hud.includes('maybeRevealNode('), 'the HUD reacts to a new node');
+  assert(hud.includes('presenter.nodeDetail?.'), 'the dossier is asked from the presenter');
+
+  const betrayal = read('../../../games/src/betrayal/presentation.ts');
+  assert(betrayal.includes('已连通门位'), 'the room vocabulary lives with the game');
+  assert(betrayal.includes('betrayalDescribeNode'), 'the game exports its node description');
 });
