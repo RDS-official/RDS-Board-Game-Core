@@ -9,6 +9,8 @@ interface RoomRec {
   id: string; name: string; gameId: string; hostId: string;
   status: 'open' | 'playing' | 'closed'; maxPlayers: number;
   players: string[]; createdAt: number;
+  /** 房主添加的内置 AI 座位数（目前只有德州扑克支持；开局时由夹具补齐）。 */
+  aiSeats?: number;
   /** Phase B */
   readyPlayers: string[];      // 已就绪玩家 id（开局时清空）
   isPrivate: boolean;
@@ -44,6 +46,7 @@ function toInfo(r: RoomRec, opts: { includeCode?: boolean } = {}): HubRoomInfo {
     readyPlayers: [...(r.readyPlayers ?? [])],
     isPrivate: r.isPrivate ?? false,
     scenarioId: r.scenarioId,
+    aiSeats: r.aiSeats ?? 0,
   };
   if (opts.includeCode && r.code) info.code = r.code;
   return info;
@@ -174,13 +177,20 @@ export function setRoomStatus(hostId: string, roomId: string, status: 'open' | '
   if (!r) return { error: '房间不存在' };
   if (r.hostId !== hostId) return { error: '只有房主可以操作' };
   if (status === 'playing') {
-    // 开局前核对人数：桌面只摆真实存在的座位。支持可变人数的玩法（德州扑克
-    // 2–10 人）按当前人数发牌；固定阵容的玩法（卡坦岛 3 人、璀璨宝石 2 人、
-    // 山屋 3 人）则必须凑齐，否则会出现"空座位永远等不到人"的死局。
-    const support = seatsSupport(r.gameId, r.scenarioId, r.players.length);
+    // 开局前核对人数：桌面座位 = 真人 + 房主添加的 AI 补位。支持可变人数的玩法
+    // （德州扑克 2–10 人）按当前人数发牌；固定阵容的玩法（卡坦岛 3 人、
+    // 璀璨宝石 2 人、山屋 3 人）则必须凑齐，否则会出现"空座位永远等不到人"的死局。
+    const totalSeats = r.players.length + (r.aiSeats ?? 0);
+    const support = seatsSupport(r.gameId, r.scenarioId, totalSeats);
     if (!support.ok) {
       const needed = support.dealt > 0 ? `${support.dealt} 人` : '固定人数';
-      return { error: `该玩法需要 ${needed}开局，当前房间 ${r.players.length} 人` };
+      return { error: `该玩法需要 ${needed}开局，当前房间 ${r.players.length} 人${r.aiSeats ? ` + ${r.aiSeats} AI` : ''}` };
+    }
+    // 支持 AI 补位的玩法要求至少达到最低开局人数，AI 就是用来补齐这个缺口的。
+    const game = gameById(r.gameId);
+    const min = game?.minPlayers ?? 1;
+    if (totalSeats < min) {
+      return { error: `至少需要 ${min} 个座位开局，可以添加 AI 补位` };
     }
   }
   const patch: Partial<RoomRec> = { status };
@@ -228,6 +238,25 @@ export function transferHost(hostId: string, roomId: string, targetId: string) {
  * 规则：全员离线超过 10 分钟，或 6 小时无任何动作 → 关房（closed 会经 changed()
  * 广播给房间组成员与大厅订阅者）。返回本次被关闭的房间 id 列表。
  */
+/**
+ * 房主增删内置 AI 座位（目前只有支持 AI 补位的玩法：德州扑克）。
+ *
+ * AI 不占真人名额：`players` 仍只记真人，`aiSeats` 是额外补位的数量，
+ * 开局时由夹具按等级编制填入（见 packages/games/src/poker/seating.ts）。
+ */
+export function setAiSeats(hostId: string, roomId: string, aiSeats: number) {
+  const r = rooms.byId(roomId) as RoomRec | undefined;
+  if (!r) return { error: '房间不存在' };
+  if (r.hostId !== hostId) return { error: '只有房主可以操作' };
+  if (r.status !== 'open') return { error: '对局进行中不能调整 AI' };
+  const game = gameById(r.gameId);
+  if (!game?.aiSeats) return { error: '该玩法不支持添加 AI' };
+  const ceiling = Math.max(0, (game.maxPlayers ?? 0) - r.players.length);
+  const wanted = Math.min(ceiling, Math.max(0, Math.floor(aiSeats)));
+  rooms.update(roomId, { aiSeats: wanted });
+  return changed(rooms.byId(roomId)! as RoomRec);
+}
+
 export function sweepRooms(onlineOf: (roomId: string) => string[]): string[] {
   const closedIds: string[] = [];
   const now = Date.now();

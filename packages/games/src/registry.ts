@@ -598,8 +598,11 @@ export const pokerModule: GameModule = defineGame({
    */
   setup: (seed, options) =>
     setupPoker(seed, {
+      // 总座位 = 调用方要的座位数（联机房间 = 真人 + AI），缺省用最低 6 人桌。
       seats: options?.seats ?? POKER_TABLE.minPlayers,
-      humans: options?.seats ?? 1,
+      humans: options?.humans ?? options?.seats ?? 1,
+      // 房主在大厅添加的 AI 补位数；缺省时由 planSeats 补到 6 人。
+      ...(options?.aiSeats === undefined ? {} : { aiSeats: options.aiSeats }),
       seatingFlow: true
     }),
   legalActions: (state, playerId) => PokerRules.getLegalActions(state, playerId),

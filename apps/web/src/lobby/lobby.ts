@@ -1,5 +1,5 @@
 import type { HubGameInfo, HubRoomInfo } from '@rds/room-protocol';
-import { getGames, getRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoom, me, setReady, kickPlayer, transferHost, updateDisplayName, changeMyPassword, uploadAvatar, UserProfile } from './api.ts';
+import { getGames, getRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoom, me, setReady, kickPlayer, transferHost, setAiSeats, updateDisplayName, changeMyPassword, uploadAvatar, UserProfile } from './api.ts';
 import { showToast } from './toast.ts';
 
 /**
@@ -452,8 +452,11 @@ function roomHtml() {
   const seat = seatOf(r, user!.sub);
   const ready = (r.readyPlayers ?? []);
   const min = g?.minPlayers ?? 1;
+  const aiSeats = r.aiSeats ?? 0;
+  const totalSeats = r.players.length + aiSeats;
   const allReady = r.players.every(p => ready.includes(p.id));
-  const canStart = isHost && r.status === 'open' && r.players.length >= min && allReady;
+  // 开局条件按「真人 + AI」的总座位数判断：AI 就是用来补齐人数缺口的。
+  const canStart = isHost && r.status === 'open' && totalSeats >= min && allReady;
   const myReady = ready.includes(user!.sub);
   const variantLabel = r.scenarioId ? (g?.variants?.find(v => v.id === r.scenarioId)?.label ?? r.scenarioId) : '';
   return `
@@ -474,13 +477,22 @@ function roomHtml() {
       </div>
       <div class="lob-seats">
         ${r.players.map((p, i) => seatCard(r, p, i, isHost)).join('')}
-        ${Array.from({ length: Math.max(0, r.maxPlayers - r.players.length) }, (_, i) =>
-          '<div class="lob-seat empty"><span class="lob-seat-avatar"></span><span class="lob-seat-name lob-muted">空位 p' + (r.players.length + i + 1) + '</span></div>').join('')}
+        ${aiSeatCards(r.players.length, aiSeats)}
+        ${Array.from({ length: Math.max(0, r.maxPlayers - totalSeats) }, (_, i) =>
+          '<div class="lob-seat empty"><span class="lob-seat-avatar"></span><span class="lob-seat-name lob-muted">空位 p' + (totalSeats + i + 1) + '</span></div>').join('')}
       </div>
+      ${isHost && r.status === 'open' && g?.aiSeats ? `
+      <div class="lob-row lob-ai-bar">
+        <span class="lob-muted">内置 AI 补位</span>
+        <button id="ai-add" class="lob-mini" title="添加一个 AI 玩家">＋ AI</button>
+        <button id="ai-remove" class="lob-mini"${aiSeats > 0 ? '' : ' disabled'} title="移除一个 AI 玩家">－ AI</button>
+        <span class="lob-ai-count">${aiSeats} 个 AI</span>
+        <span class="lob-muted">（AI 不占真人名额；6 人起可开局）</span>
+      </div>` : ''}
       <div class="lob-row lob-room-actions">
         ${isHost && r.status === 'open'
           ? '<button id="start-game" class="lob-primary-btn"' + (canStart ? '' : ' disabled') + '>开始游戏（' + min + '人起，需全员就绪）</button>'
-            + (canStart ? '' : '<span class="lob-muted">' + (r.players.length < min ? '人数不足' : ready.length + '/' + r.players.length + ' 已就绪') + '</span>')
+            + (canStart ? '' : '<span class="lob-muted">' + (totalSeats < min ? '人数不足（可添加 AI 补位）' : ready.length + '/' + r.players.length + ' 已就绪') + '</span>')
           : ''}
         ${!isHost && r.status === 'open'
           ? '<button id="ready-toggle" class="' + (myReady ? 'lob-secondary' : 'lob-primary-btn') + '">' + (myReady ? '✓ 已就绪（点击取消）' : '准备') + '</button>'
@@ -503,6 +515,22 @@ function roomHtml() {
       </div>
     </aside>
   </div>`;
+}
+
+/**
+ * 内置 AI 座位卡。AI 由服务端在开局时按等级编制填入（1 初级 / 4 中级 / 5 高级），
+ * 因此大厅只知道「有 N 个 AI」，等级在进入对局后才可见。
+ */
+function aiSeatCards(humanCount: number, aiSeats: number): string {
+  if (aiSeats <= 0) return '';
+  return Array.from({ length: aiSeats }, (_, i) => {
+    const seatIndex = humanCount + i + 1;
+    return `<div class="lob-seat ai" data-ai-seat="${i + 1}">
+    <span class="lob-seat-avatar">🤖</span>
+    <span class="lob-seat-name">内置 AI</span>
+    <span class="lob-seat-sub">座位 p${seatIndex} · <span class="lob-ready-tag">已就绪</span></span>
+  </div>`;
+  }).join('');
 }
 
 function seatCard(r: HubRoomInfo, p: { id: string; name: string; displayName?: string; avatarUrl?: string }, i: number, isHost: boolean) {
@@ -769,6 +797,20 @@ function bindRoom() {
       onEnterGame?.({ query: gameQuery(currentRoom, 'host') });
     } catch (e: any) { showToast(e.message, 'error'); }
   });
+
+  // 房主增删内置 AI 补位（目前仅德州扑克）。
+  const adjustAi = async (delta: number) => {
+    if (!currentRoom) return;
+    const next = Math.max(0, (currentRoom.aiSeats ?? 0) + delta);
+    try {
+      currentRoom = await setAiSeats(currentRoom.id, next);
+      lastRoomSig = roomSig(currentRoom);
+      render();
+      showToast(next > 0 ? `已添加 ${next} 个 AI` : '已移除全部 AI', 'success');
+    } catch (e: any) { showToast(e.message, 'error'); }
+  };
+  $('ai-add')?.addEventListener('click', () => void adjustAi(1));
+  $('ai-remove')?.addEventListener('click', () => void adjustAi(-1));
   $('reopen-game')?.addEventListener('click', () => onEnterGame?.({ query: gameQuery(currentRoom ?? r0, 'host') }));
   $('join-game')?.addEventListener('click', () => onEnterGame?.({ query: gameQuery(currentRoom ?? r0, 'guest') }));
   $('ready-toggle')?.addEventListener('click', async () => {
