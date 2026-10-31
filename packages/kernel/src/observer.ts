@@ -245,7 +245,11 @@ export class CognitiveObserver {
       mapGraph: projectedMapGraph,
       effects: projectedEffects,
       globalVars: projectedVars,
-      interruptStack: state.interruptStack,
+      interruptStack: state.interruptStack.map(frame => {
+        const visible = { ...frame };
+        delete visible.followUpContinuation;
+        return visible;
+      }),
       pendingDecisions: state.pendingDecisions.map(w => projectDecision(w, viewerId)),
       activeHooks: state.activeHooks.filter(h => this.isVisibleTo(h.visibility, viewerId, h.ownerId)),
       // The action log is public audit data. Entity ids and payloads are stripped:

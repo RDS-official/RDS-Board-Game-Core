@@ -103,7 +103,7 @@ GAME_REGISTRY[id] = myModule;
 5. **合法性**：`canonicalize(action)` 必须命中 `ℒ(s,i)`；
 6. **AOP 前置**：`FILTER_MODIFY` → `BEFORE_REPLACE`；
 7. **纯函数 reduce**；
-8. **AOP 后置**：`AFTER_TRIGGER` 与 follow-up 链（深度上限 8）；
+8. **AOP 后置**：`AFTER_TRIGGER` 与 follow-up 链（引擎持有的显式栈；默认预算 256 / 深度 64，超限整次 `dispatch` 原子拒绝）；
 9. **胜负判定**；
 10. **不变量校验**（strict 模式失败则拒绝提交）；
 11. **写入日志、计算哈希、派发视觉事件、通知订阅者**。

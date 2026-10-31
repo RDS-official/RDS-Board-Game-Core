@@ -125,7 +125,7 @@ UniversalGameEngine.dispatch(action)
                          ├─ AOP BEFORE_REPLACE
                          ├─ module.reduce
                          ├─ AOP AFTER_TRIGGER
-                         └─ followUpActions（递归，深度上限 8）
+                         └─ followUpActions（引擎持有的显式栈，默认预算 256 / 深度 64）
         │
         ▼
 finalizeTransition
@@ -480,6 +480,8 @@ ProjectedGameState extends Omit<GameState, 'entities' | 'zones' | 'prngState' | 
 new UniversalGameEngine(module, seed, {
   strict?: boolean;   // 默认 true
   scenario?: string;  // module.scenarios 中的命名场景
+  maxFollowUpActions?: number; // 默认 256
+  maxFollowUpDepth?: number;   // 默认 64
 })
 ```
 
@@ -506,8 +508,19 @@ reduceWithPipeline:
   BEFORE_REPLACE  → 可取消/替换动作
   module.reduce
   AFTER_TRIGGER   → 可产生后续动作
-  followUpActions → 递归（深度上限 8）
+  followUpActions → 引擎持有的显式 LIFO 栈（深度优先）
 ```
+
+后续链是**内核调度数据**，不会出现在 `legalActions` 里：
+
+- 默认每条后续链最多推进 256 个后续动作、嵌套深度 64；可用
+  `EngineOptions.maxFollowUpActions` / `maxFollowUpDepth` 收紧或放宽。
+- 超出预算意味着规则死循环或未建模的链，整个 `dispatch` 被拒绝且状态**完全不提交**，
+  不会留下“结算了一半”的棋盘。
+- 某个后续动作打开决策/响应窗口时，剩余后续会挂在该窗口的
+  `followUpContinuation` 上（内核内部字段，投影会剥离）；窗口结算后由引擎继续推进，玩家不能用别的动作插队或替代。
+- 自动触发、顺序结算、死亡清理、抽牌触发由引擎连续推进；需要玩家选择的环节只通过
+  决策窗口暴露，窗口结算后引擎继续推进剩余链，玩家无法用别的动作替代。
 
 被规则取消的动作：
 

@@ -7,6 +7,8 @@ import { ECSManager } from '@rds/kernel/ecs';
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { GameExpansion, GameModule, defineGame } from '@rds/kernel/module';
 import { DeterministicPRNG } from '@rds/kernel/prng';
+import { RuleHookImpl } from '@rds/kernel/rules';
+import { InterruptStackManager } from '@rds/kernel/stack';
 import { Entity, GameState } from '@rds/kernel/types';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { setupSplendor } from '@rds/games/splendor/setup';
@@ -246,8 +248,275 @@ export const npcModule: GameModule = defineGame({
   outcome: () => ({ gameOver: false, winner: null })
 });
 
-export const crossFieldModule: GameModule = defineGame({
-  ...counterModule,
+const followUpHook: RuleHookImpl = {
+  id: 'follow_up_chain',
+  name: 'Follow-up chain',
+  stage: 'AFTER_TRIGGER',
+  priority: 1,
+  description: 'Chains engine-internal follow-ups for kernel conformance tests.',
+  predicate: action => action.type === 'CHAIN',
+  handler: action => {
+    if (action.payload?.mode === 'tree') {
+      const children = action.payload.node === 'A' ? ['A1', 'B'] : [];
+      return {
+        type: 'CONTINUE',
+        followUpActions: children.map(node => ({
+          type: 'CHAIN',
+          playerId: action.playerId,
+          payload: { mode: 'tree', node }
+        }))
+      };
+    }
+
+    const remaining = Number(action.payload?.remaining ?? 0);
+    if (remaining <= 1) return { type: 'CONTINUE' };
+    return {
+      type: 'CONTINUE',
+      followUpActions: [
+        { type: 'CHAIN', playerId: action.playerId, payload: { remaining: remaining - 1 } }
+      ]
+    };
+  }
+};
+
+export const followUpModule: GameModule = defineGame({
+  meta: {
+    id: 'follow_up_fixture',
+    name: 'Follow-up fixture',
+    description: 'Engine-owned follow-up chains',
+    version: '1.0.0',
+    capabilities: {
+      simultaneousMoves: false,
+      hiddenInformation: false,
+      interruptStack: false,
+      dynamicRules: true,
+      topology: 'none'
+    }
+  },
+  hooks: [followUpHook],
+  setup: seed => ({
+    ...emptyState('follow_up_fixture', seed),
+    activeHooks: [{ instanceId: 'follow_up', hookId: 'follow_up_chain', visibility: { type: 'PUBLIC' } }],
+    globalVars: { order: [] }
+  }),
+  legalActions: (state, actorId) =>
+    actorId === state.activePlayerId
+      ? [
+          {
+            type: 'CHAIN',
+            playerId: actorId,
+            fields: [
+              { key: 'remaining', label: 'remaining', kind: 'number' },
+              { key: 'mode', label: 'mode', kind: 'string' },
+              { key: 'node', label: 'node', kind: 'string' }
+            ]
+          }
+        ]
+      : [],
+  reduce: (state, action) => {
+    if (action.type !== 'CHAIN') return state;
+    const label = String(action.payload?.node ?? `t${Number(action.payload?.remaining ?? 0)}`);
+    const order = [...(state.globalVars.order as string[]), label];
+    return { ...state, globalVars: { ...state.globalVars, order } };
+  },
+  outcome: () => ({ gameOver: false, winner: null })
+});
+
+const decisionFollowUpHook: RuleHookImpl = {
+  id: 'decision_follow_up',
+  name: 'Decision follow-up',
+  stage: 'AFTER_TRIGGER',
+  priority: 1,
+  description: 'Schedules an input window with a follow-up behind it.',
+  predicate: action => action.type === 'START',
+  handler: action => ({
+    type: 'CONTINUE',
+    followUpActions: [
+      { type: 'OPEN_CHOICE', playerId: action.playerId },
+      { type: 'AFTER_CHOICE', playerId: action.playerId }
+    ]
+  })
+};
+
+export const decisionFollowUpModule: GameModule = defineGame({
+  meta: {
+    id: 'decision_follow_up_fixture',
+    name: 'Decision follow-up fixture',
+    description: 'A follow-up chain that pauses on a decision window',
+    version: '1.0.0',
+    capabilities: {
+      simultaneousMoves: true,
+      hiddenInformation: false,
+      interruptStack: false,
+      dynamicRules: true,
+      topology: 'none'
+    }
+  },
+  hooks: [decisionFollowUpHook],
+  setup: seed => ({
+    ...emptyState('decision_follow_up_fixture', seed),
+    activeHooks: [
+      { instanceId: 'decision_follow_up', hookId: 'decision_follow_up', visibility: { type: 'PUBLIC' } }
+    ],
+    globalVars: { order: [], started: false }
+  }),
+  legalActions: (state, actorId) => {
+    if (actorId !== state.activePlayerId) return [];
+    const open = state.pendingDecisions.find(window => window.status === 'OPEN');
+    if (open) return open.participants.includes(actorId) ? [{ type: 'CHOOSE', playerId: actorId }] : [];
+    return state.globalVars.started ? [] : [{ type: 'START', playerId: actorId }];
+  },
+  reduce: (state, action, ctx) => {
+    const order = [...(state.globalVars.order as string[])];
+    if (action.type === 'START') {
+      return { ...state, globalVars: { ...state.globalVars, started: true, order: [...order, 'start'] } };
+    }
+    if (action.type === 'OPEN_CHOICE') {
+      const opened = openDecision(
+        state,
+        {
+          kind: 'VOTE',
+          title: 'test choice',
+          participants: [action.playerId],
+          secret: false,
+          policy: { type: 'FIRST_ACCEPT', acceptTypes: ['CHOOSE'] }
+        },
+        ctx.id('choice')
+      );
+      return {
+        ...opened.state,
+        globalVars: { ...opened.state.globalVars, order: [...order, 'open'] }
+      };
+    }
+    if (action.type === 'CHOOSE') {
+      return { ...state, globalVars: { ...state.globalVars, choice: true, order: [...order, 'choose'] } };
+    }
+    if (action.type === 'AFTER_CHOICE') {
+      return { ...state, globalVars: { ...state.globalVars, order: [...order, 'after'] } };
+    }
+    return state;
+  },
+  outcome: () => ({ gameOver: false, winner: null })
+});
+
+const responseFollowUpHook: RuleHookImpl = {
+  id: 'response_follow_up',
+  name: 'Response follow-up',
+  stage: 'AFTER_TRIGGER',
+  priority: 1,
+  description: 'Schedules an interrupt frame with a follow-up behind it.',
+  predicate: action => action.type === 'START',
+  handler: action => ({
+    type: 'CONTINUE',
+    followUpActions: [
+      { type: 'PUSH_FRAME', playerId: action.playerId },
+      { type: 'AFTER_FRAME', playerId: action.playerId }
+    ]
+  })
+};
+
+export const responseFollowUpModule: GameModule = defineGame({
+  meta: {
+    id: 'response_follow_up_fixture',
+    name: 'Response follow-up fixture',
+    description: 'A follow-up chain that pauses on an interrupt window',
+    version: '1.0.0',
+    capabilities: {
+      simultaneousMoves: false,
+      hiddenInformation: false,
+      interruptStack: true,
+      dynamicRules: true,
+      topology: 'none'
+    }
+  },
+  hooks: [responseFollowUpHook],
+  setup: seed => ({
+    ...emptyState('response_follow_up_fixture', seed),
+    activeHooks: [
+      { instanceId: 'response_follow_up', hookId: 'response_follow_up', visibility: { type: 'PUBLIC' } }
+    ],
+    globalVars: { order: [], started: false }
+  }),
+  legalActions: (state, actorId) => {
+    if (actorId !== state.activePlayerId) return [];
+    const top = state.interruptStack[state.interruptStack.length - 1];
+    if (top?.status === 'WAITING_INPUT') return [{ type: 'PASS', playerId: actorId }];
+    return state.globalVars.started ? [] : [{ type: 'START', playerId: actorId }];
+  },
+  reduce: (state, action) => {
+    const order = [...(state.globalVars.order as string[])];
+    if (action.type === 'START') {
+      return { ...state, globalVars: { ...state.globalVars, started: true, order: [...order, 'start'] } };
+    }
+    if (action.type === 'PUSH_FRAME') {
+      const pushed = InterruptStackManager.push(
+        {
+          ...state,
+          globalVars: { ...state.globalVars, order: [...order, 'push'] }
+        },
+        {
+          id: 'test_frame',
+          type: 'TEST',
+          title: 'test response',
+          description: '',
+          sourcePlayerId: 'p1',
+          actionPayload: null,
+          responseWindow: {
+            eligiblePlayers: ['p1'],
+            pendingResponses: { p1: 'PENDING' }
+          },
+          status: 'PENDING'
+        }
+      );
+      return pushed;
+    }
+    if (action.type === 'AFTER_FRAME') {
+      return { ...state, globalVars: { ...state.globalVars, order: [...order, 'after'] } };
+    }
+    return state;
+  },
+  outcome: () => ({ gameOver: false, winner: null })
+});
+
+export const lockedDecisionModule: GameModule = defineGame({
+  meta: {
+    id: 'locked_decision_fixture',
+    name: 'Locked decision fixture',
+    description: 'Non-participants must not act while a decision is open',
+    version: '1.0.0',
+    capabilities: {
+      simultaneousMoves: true,
+      hiddenInformation: false,
+      interruptStack: false,
+      dynamicRules: false,
+      topology: 'none'
+    }
+  },
+  hooks: [],
+  setup: seed => {
+    const base = emptyState('locked_decision_fixture', seed);
+    const opened = openDecision(
+      base,
+      {
+        kind: 'VOTE',
+        title: 'locked vote',
+        participants: ['p2'],
+        secret: false,
+        policy: { type: 'ALL_COMMITTED' }
+      },
+      'locked_1'
+    );
+    return { ...opened.state, phase: 'WAIT', globalVars: { sneaked: false } };
+  },
+  legalActions: (_state, actorId) => (actorId === 'p1' ? [{ type: 'SNEAK', playerId: 'p1' }] : []),
+  reduce: (state, action) =>
+    action.type === 'SNEAK'
+      ? { ...state, globalVars: { ...state.globalVars, sneaked: true } }
+      : state,
+  outcome: () => ({ gameOver: false, winner: null })
+});
+
+export const crossFieldModule: GameModule = defineGame({  ...counterModule,
   meta: { ...counterModule.meta, id: 'cross_field', name: 'Cross-field fixture' },
   legalActions: (state, playerId) =>
     playerId === state.activePlayerId

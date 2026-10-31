@@ -2,7 +2,7 @@ import { RuleRegistry } from './rules';
 import { MapGraphManager } from './graph';
 import { OccupancyIndex } from './occupancy';
 import { isSerializableState } from './serialize';
-import { GameState } from './types';
+import { FollowUpFrame, GameState } from './types';
 
 export interface InvariantViolation {
   code: string;
@@ -23,6 +23,17 @@ export class KernelInvariantError extends Error {
 export function checkInvariants(state: GameState, rules: RuleRegistry): InvariantViolation[] {
   const errors: InvariantViolation[] = [];
   const push = (code: string, message: string) => errors.push({ code, message });
+
+  const checkContinuation = (owner: string, frames?: FollowUpFrame[]) => {
+    for (const frame of frames ?? []) {
+      if (!frame?.action || typeof frame.action.type !== 'string') {
+        push('FOLLOW_UP_BAD_ACTION', `${owner} has a follow-up without an action type`);
+      }
+      if (!Number.isInteger(frame?.depth) || frame.depth < 0) {
+        push('FOLLOW_UP_BAD_DEPTH', `${owner} has a follow-up with an invalid depth`);
+      }
+    }
+  };
 
   /* Players ------------------------------------------------------------- */
   const order = state.playerOrder;
@@ -203,6 +214,8 @@ export function checkInvariants(state: GameState, rules: RuleRegistry): Invarian
     if (frame.actionPayload && typeof frame.actionPayload === 'object') {
       if (typeof frame.actionPayload.type !== 'string') push('STACK_BAD_PAYLOAD', `frame ${frame.id} payload has no action type`);
     }
+
+    checkContinuation(`frame ${frame.id}`, frame.followUpContinuation);
   }
 
   /* Decision windows ----------------------------------------------------- */
@@ -220,6 +233,8 @@ export function checkInvariants(state: GameState, rules: RuleRegistry): Invarian
         push('DECISION_EXTRA_SUBMISSION', `decision ${window.id} submission from non-participant ${pid}`);
       }
     }
+
+    checkContinuation(`decision ${window.id}`, window.followUpContinuation);
   }
 
   /* Rule hooks ----------------------------------------------------------- */
