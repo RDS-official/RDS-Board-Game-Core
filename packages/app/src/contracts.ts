@@ -89,6 +89,11 @@ export interface UiAction {
   selection?: UiActionSelection;
   /** When present, the UI must collect these fields and send them as payload. */
   fields?: UiActionField[];
+  /**
+   * 剩余冷却时间（ms）。>0 时按钮置灰并显示倒计时：一手刚结束需要停一下再开
+   * 下一手，避免牌桌还没看清就被洗牌。时钟由驱动方掌控，内核本身无时钟。
+   */
+  cooldownMs?: number;
 }
 
 /** One buff or debuff currently attached to a player. */

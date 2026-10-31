@@ -38,6 +38,11 @@ export interface SeatPlateInfo {
    */
   action?: string;
   /**
+   * 底座半圆环的灯态：轮到此人 = 'turn'（呼吸红），已准备待命 = 'idle'（白），
+   * 还没准备 = 'off'（磨砂白、不发光）。
+   */
+  lamp?: 'off' | 'idle' | 'turn';
+  /**
    * Wood species of the board. Blinds get their own timber so the table reads
    * at a glance: pine for the big blind, red pine for the small blind, walnut
    * for everyone else.
@@ -325,7 +330,7 @@ export class SeatPlateBuilder {
   public static createStandee(
     info: SeatPlateInfo,
     outward: THREE.Vector2
-  ): { group: THREE.Group; plate: THREE.Mesh } {
+  ): { group: THREE.Group; plate: THREE.Mesh; lamp?: THREE.Mesh } {
     const group = new THREE.Group();
     group.rotation.y = Math.atan2(outward.x, outward.y);
 
@@ -342,6 +347,40 @@ export class SeatPlateBuilder {
     base.castShadow = true;
     base.receiveShadow = true;
     group.add(base);
+    // 半圆环呼吸灯：贴在底座上表面、沿前缘的一段弧。`lamp` 三态由调用方按牌**局**
+    // 语义给出——轮到此人 = 红，已准备 / 本轮已动作 = 淡绿，未就位 = 磨砂白。
+    // 灯是贴在底座上的，不做成贴片或宝石，近看也只是一道细弧。
+    let lamp: THREE.Mesh | undefined;
+    {
+      // 初始一律磨砂白；真正的灯态由场景每帧按牌局刷新（节点是增量复用的，
+      // 建牌那一刻的状态不可靠）。
+      const tone = 0xd6d9de;
+      const opacity = 0.22;
+      lamp = new THREE.Mesh(
+        new THREE.RingGeometry(SEAT_BASE.radius * 0.868, SEAT_BASE.radius * 0.914, 64, 1, 0, Math.PI),
+        new THREE.MeshBasicMaterial({
+          color: tone,
+          transparent: true,
+          opacity,
+          // 灯是贴在底座顶面上的平面：不开 polygonOffset 会与圆盘顶面共面打架
+          // （深度值几乎相同，画面上时有时无）。让它永远压过底座。
+          // RingGeometry 是单面平面，绕 X 转 90° 后法线朝下；从上往下看就是背面，
+          // 会被默认的 FrontSide 剔除——这是它一直看不见的根本原因。
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2
+        })
+      );
+      // 半径对齐底座贴图里的黄铜装饰槽：贴图 256px、槽在 114px（= 0.8906 半径），
+      // 所以灯环取 0.868~0.914 R，点亮的正是那道装饰条本身。
+      // RingGeometry 画在 XY 平面；抬平后 +Y 指向 +Z。板身挡住的是 +Z 那半，
+      // 所以取 PI..2PI 这半圈——正好落在相机看得见的那一侧（后缘）。
+      lamp.rotation.x = Math.PI / 2;
+      lamp.position.y = SEAT_BASE.height + 0.005;
+      group.add(lamp);
+    }
 
     const face = this.faceTexture(info);
     const side = new THREE.MeshStandardMaterial({ color: 0x1b120c, roughness: 0.78, metalness: 0.05 });
@@ -359,15 +398,22 @@ export class SeatPlateBuilder {
     // away from the viewer (upright) and the face normal up-and-toward them.
     // Rotating the other way tips the face away and the text reads upside down.
     plate.rotation.x = BOARD_TILT;
-    plate.position.set(
-      0,
-      SEAT_BASE.height + (SEAT_BOARD.height / 2) * Math.cos(BOARD_TILT),
-      (SEAT_BOARD.height / 2) * Math.sin(BOARD_TILT) * 0.55
-    );
+    // 让牌的下沿**正好贴在底座上表面**，不要陷进去、也不要悬空。
+    //
+    // 绕 X 转 θ 之后，板的最低角在局部坐标是 (0, ±T/2, +H/2)，落到世界里下沉
+    // (H/2)·sinθ + (T/2)·cosθ —— 所以板心的 y 必须等于「底座高 + 这段下沉量」。
+    // 同一旋转把下沿往前推了 (H/2)·cosθ，因此板心还要往回退同样多（再加一点前移
+    // 余量），下沿才落在底座圆心附近而不是伸出盘沿。
+    const sink =
+      (SEAT_BOARD.height / 2) * Math.sin(BOARD_TILT) +
+      (SEAT_BOARD.thickness / 2) * Math.cos(BOARD_TILT);
+    const toeForward = (SEAT_BOARD.height / 2) * Math.cos(BOARD_TILT);
+    const toeZ = 0.1; // 下沿相对底座圆心的前后位置
+    plate.position.set(0, SEAT_BASE.height + sink, toeZ - toeForward);
     plate.castShadow = true;
     plate.receiveShadow = true;
     group.add(plate);
 
-    return { group, plate };
+    return { group, plate, lamp };
   }
 }

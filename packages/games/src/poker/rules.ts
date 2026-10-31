@@ -52,6 +52,13 @@ export interface PokerHandState extends BettingState {
    * the action sign beside each seat's standee.
    */
   lastActions: Record<string, string>;
+  /**
+   * 结算阶段仍然亮着的座位：摊牌时所有存活玩家必须亮牌，早结束（全部弃牌）时
+   * 由赢家自己选择。结算画面据此保留牌面，下一手开始才收回牌堆。
+   */
+  revealed: string[];
+  /** 已经点过「准备」的座位；全部存活座位都准备后才能开下一手。 */
+  readyForNext: string[];
 }
 
 export interface PokerPotResult {
@@ -71,6 +78,11 @@ export interface PokerConfigValues {
   startingStack: number;
   smallBlind: number;
   bigBlind: number;
+  /**
+   * 由内核内联推进 AI（默认）。app/server 设为 false 时改为逐步派发 `AI_ACT`，
+   * 每个 AI 动作之间才有可感知的停顿。
+   */
+  autoAi: boolean;
 }
 
 const STREET_LABEL: Record<string, string> = {
@@ -189,6 +201,16 @@ export class PokerRules {
     // 对真人永远不提供合法动作，避免玩家代替 AI 出牌。
     if (isAiSeat(state, playerId) && playerId !== state.activePlayerId) return [];
 
+    // 外部驱动模式（app/server）：AI 座位每步只走一个动作，由驱动方按节奏派发
+    // `AI_ACT`。内核内联推进会让一桌 AI 在一个 reduce 里瞬间打完，真人根本看不清。
+    // 外部驱动模式下，AI 座位额外提供一个「走一步」给驱动方；但不独占，否则
+    // 调试用的上帝视角会看到一份空动作表，没法替 AI 出牌。
+    const aiStep: Action[] = [];
+    if (!configOf(state).autoAi) {
+      const actor = state.activeActorId ?? state.activePlayerId;
+      if (isAiSeat(state, playerId) && playerId === actor) aiStep.push({ type: 'AI_ACT', playerId });
+    }
+
     // 「入座 → 准备 → 开局」：真人座位需要先后完成入座与准备。
     // AI 座位开局即入座就绪，因此不提供任何操作。
     const seating = seatingOf(state);
@@ -200,7 +222,7 @@ export class PokerRules {
     }
 
     if (hand.street === 'COMPLETE') {
-      return playerId === state.activePlayerId ? [{ type: 'START_HAND', playerId }] : [];
+      return this.settlementActions(state, playerId, hand);
     }
     if (playerId !== state.activePlayerId) return [];
     if (hand.folded.includes(playerId) || hand.allIn.includes(playerId)) return [];
@@ -239,7 +261,49 @@ export class PokerRules {
       actions.push({ type: 'ALL_IN', playerId });
     }
 
+    return [...aiStep, ...actions];
+  }
+
+  /**
+   * What a seat may do once the hand is settled.
+   *
+   * Every surviving seat has to click 准备 before the next hand can be dealt —
+   * a settlement is something to read, not a formality to skip. The winner of a
+   * hand that ended early (everyone folded) may additionally choose whether to
+   * show their cards; a hand that went to showdown has already shown them, which
+   * is not a choice.
+   */
+  private static settlementActions(
+    state: GameState,
+    playerId: PlayerId,
+    hand: PokerHandState
+  ): Action[] {
+    if (chipsOf(state, playerId) <= 0) return [];
+    const actions: Action[] = [];
+    const lastHand = state.globalVars.lastHand as PokerHandResult | undefined;
+    const winner = lastHand?.endedBy === 'FOLD' ? lastHand.pots[0]?.winners[0] : undefined;
+    if (winner === playerId && !hand.revealed.includes(playerId)) {
+      actions.push({ type: 'SHOW', playerId });
+      actions.push({ type: 'MUCK', playerId });
+    }
+    if (!hand.readyForNext.includes(playerId)) {
+      actions.push({ type: 'READY', playerId });
+      return actions;
+    }
+    const waiting = state.playerOrder.filter(
+      pid => chipsOf(state, pid) > 0 && !hand.readyForNext.includes(pid)
+    );
+    if (waiting.length === 0) actions.push({ type: 'START_HAND', playerId });
+    // 一键全员准备只属于单人调试桌：多真人房间里它等于替别人按准备，不给。
+    const seatPlan = state.globalVars.seats as { isAi: boolean }[] | undefined;
+    const humans = seatPlan ? seatPlan.filter(seat => !seat.isAi).length : 0;
+    if (humans <= 1) actions.push({ type: 'DEBUG_READY_ALL', playerId });
     return actions;
+  }
+
+  /** 存活座位是否全部点过「准备」。 */
+  private static everyoneReady(state: GameState, hand: PokerHandState): boolean {
+    return state.playerOrder.every(pid => chipsOf(state, pid) <= 0 || hand.readyForNext.includes(pid));
   }
 
   /** Cross-field validation for the declarative raise amount. */
@@ -281,6 +345,8 @@ export class PokerRules {
    * 由 `choosePokerAction` 保证，内核仍会再校验一次。
    */
   private static advanceAi(state: GameState, ctx: ReduceContext): GameState {
+    // 外部驱动模式下每个 AI 动作由驱动方单独派发（AI_ACT），内核不再内联推进。
+    if (!configOf(state).autoAi) return state;
     let next = state;
     for (let guard = 0; guard < 64; guard++) {
       if (next.gameOver) return next;
@@ -319,10 +385,69 @@ export class PokerRules {
         // 只有全员准备后才允许真正开局；开局后座位流程永久关闭。
         if (!allReady(state, seating)) return state;
         state = withSeating(state, { ...seating, started: true });
+      } else {
+        // 每一手结束后的下一手同样要全员准备。
+        if (hand.street !== 'COMPLETE') return state;
+        if (!this.everyoneReady(state, hand)) return state;
       }
       const started = this.startHand(state, ctx);
       return { ...started, turn: state.turn + 1 };
     }
+
+    // 结算阶段的三种纯状态更新：准备、亮牌、弃牌（不亮）。
+    // 上帝视角/调试：一键让所有存活座位就位，省去逐个点「准备」。
+    if (action.type === 'DEBUG_READY_ALL') {
+      if (hand.street !== 'COMPLETE') return state;
+      const solvent = state.playerOrder.filter(pid => chipsOf(state, pid) > 0);
+      return { ...withHand(state, { ...hand, readyForNext: solvent }), turn: state.turn + 1 };
+    }
+
+    if (action.type === 'READY' || action.type === 'SHOW' || action.type === 'MUCK') {
+      if (hand.street !== 'COMPLETE') return state;
+      const playerId = action.playerId;
+      if (chipsOf(state, playerId) <= 0) return state;
+      if (action.type === 'READY') {
+        if (hand.readyForNext.includes(playerId)) return state;
+        const nextReady = [...hand.readyForNext, playerId];
+        const nextHandState = { ...hand, readyForNext: nextReady };
+        // 全员准备即自动发牌：不依赖某个座位再点一次「发下一手」，也不必赌
+        // AI 恰好抓到 START_HAND。
+        if (this.everyoneReady(state, nextHandState)) {
+          return { ...this.startHand(withHand(state, nextHandState), ctx), turn: state.turn + 1 };
+        }
+        return { ...withHand(state, nextHandState), turn: state.turn + 1 };
+      }
+      const lastHand = state.globalVars.lastHand as PokerHandResult | undefined;
+      const winner = lastHand?.endedBy === 'FOLD' ? lastHand.pots[0]?.winners[0] : undefined;
+      if (winner !== playerId) return state;
+      if (action.type === 'SHOW') {
+        if (hand.revealed.includes(playerId)) return state;
+        for (const card of holeCards(state, playerId)) {
+          state = setVisibility(state, card.id, { type: 'PUBLIC' });
+        }
+        return {
+          ...withHand(state, { ...hand, revealed: [...hand.revealed, playerId] }),
+          turn: state.turn + 1
+        };
+      }
+      // MUCK：不亮牌，只记一笔，避免反复提示。
+      return {
+        ...withHand(state, { ...hand, revealed: hand.revealed.filter(pid => pid !== playerId) }),
+        turn: state.turn + 1
+      };
+    }
+
+    if (action.type === 'AI_ACT') {
+      const actor = state.activeActorId ?? state.activePlayerId;
+      if (!actor || !isAiSeat(state, actor) || action.playerId !== actor) return state;
+      const decided = choosePokerAction(state, actor);
+      if (!decided) return state;
+      const stepped = this.applyBet(state, decided, ctx);
+      if (stepped === state) return state;
+      const settled = this.settle(stepped, ctx);
+      return { ...settled, turn: state.turn + 1 };
+    }
+
     if (hand.street === 'COMPLETE') return state;
     if (action.playerId !== state.activePlayerId) return state;
 
@@ -628,6 +753,9 @@ export class PokerRules {
       actedSinceRaise: [],
       shortRaiseAccum: 0,
       lastActions: {},
+      revealed: [],
+      // AI 座位不需要点「准备」：它们开局即就绪，只有真人要按。
+      readyForNext: order.filter(pid => isAiSeat(state, pid)),
       folded: [],
       allIn: [],
       community: [],
@@ -759,7 +887,9 @@ export class PokerRules {
       street: 'COMPLETE',
       actedSinceRaise: [],
       shortRaiseAccum: 0,
-      lastActions: {}
+      lastActions: {},
+      // 走到摊牌就必须亮：牌面留在桌上，结算画面才看得清谁靠什么赢。
+      revealed: [...live]
     });
     next = this.writeHandResult(next, { handNo: hand.handNo, endedBy: 'SHOWDOWN', pots: results, showdown });
     next = pushLog(
@@ -793,7 +923,8 @@ export class PokerRules {
       street: 'COMPLETE',
       actedSinceRaise: [],
       shortRaiseAccum: 0,
-      lastActions: {}
+      lastActions: {},
+      revealed: []
     });
 
     if (winnerId) {
@@ -823,19 +954,20 @@ export class PokerRules {
     const hand = handOf(state);
     if (!hand) return state;
     let next = state;
-    // 收牌（docs/POKER.md）：剩余手牌全部进 muck 且 HIDDEN（含摊牌后亮出的牌），
-    // 公共牌与烧牌回牌堆——下一手 start 时统一重洗。
+    // 收牌（docs/POKER.md）：未亮出的手牌进 muck 且 HIDDEN；已亮出的（摊牌、或早
+    // 结束时赢家选择明牌）留在手牌区并保持 PUBLIC，直到下一手开始——否则结算画面
+    // 上牌面会瞬间消失，玩家看不清是什么牌赢了。
     for (const pid of next.playerOrder) {
+      if (hand.revealed.includes(pid)) continue;
       for (const card of holeCards(next, pid)) {
         next = ECSManager.moveEntity(next, card.id, 'zone_muck');
         next = setVisibility(next, card.id, { type: 'HIDDEN' });
       }
     }
-    for (const zoneId of ['zone_board', 'zone_burn'] as const) {
-      for (const cardId of [...(next.zones[zoneId]?.orderedEntities ?? [])]) {
-        next = ECSManager.moveEntity(next, cardId, 'zone_deck');
-        next = setVisibility(next, cardId, { type: 'HIDDEN' });
-      }
+    // 烧牌回牌堆；公共牌留在桌上——结算画面要看完整牌面，下一手 start 时统一收。
+    for (const cardId of [...(next.zones.zone_burn?.orderedEntities ?? [])]) {
+      next = ECSManager.moveEntity(next, cardId, 'zone_deck');
+      next = setVisibility(next, cardId, { type: 'HIDDEN' });
     }
     for (const pid of next.playerOrder) {
       const chips = chipsOf(next, pid);
