@@ -178,6 +178,7 @@ export function resolveDecision(state: GameState, windowId: string): { state: Ga
   for (const entry of orderedSubmissions(window)) reveal[entry.playerId] = entry.submission;
 
   const resolved: DecisionWindow = { ...window, status: 'RESOLVED', reveal };
+  delete resolved.followUpContinuation;
   const pendingDecisions = [...state.pendingDecisions];
 
   // Keep the most recent completed windows for auditability but bound growth.
@@ -191,7 +192,11 @@ export function resolveDecision(state: GameState, windowId: string): { state: Ga
 
 /** Projection of a decision window for one viewer: secret submissions stay hidden. */
 export function projectDecision(window: DecisionWindow, viewerId: PlayerId | 'GOD'): DecisionWindow {
-  if (!window.secret || window.status !== 'OPEN' || viewerId === 'GOD') return window;
+  // The continuation queue is kernel scheduling data; clients never need it.
+  const visible: DecisionWindow = { ...window };
+  delete visible.followUpContinuation;
+
+  if (!window.secret || window.status !== 'OPEN' || viewerId === 'GOD') return visible;
 
   const submissions: DecisionWindow['submissions'] = {};
   for (const pid of window.participants) {
@@ -199,7 +204,7 @@ export function projectDecision(window: DecisionWindow, viewerId: PlayerId | 'GO
     submissions[pid] = submission === undefined ? undefined : 'COMMITTED';
   }
 
-  const { reveal, ...rest } = window;
+  const { reveal: _reveal, ...rest } = visible;
   return { ...rest, submissions };
 }
 

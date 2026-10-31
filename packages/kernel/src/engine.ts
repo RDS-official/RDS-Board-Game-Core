@@ -20,6 +20,7 @@ import {
   ActorId,
   DecisionWindow,
   DispatchResult,
+  FollowUpFrame,
   GameState,
   Npc,
   NodeId,
@@ -33,6 +34,16 @@ import {
   VisualEventType,
   VisualTraceEvent
 } from './types';
+
+/**
+ * Safety budget for engine-internal follow-ups. This is not a gameplay rule:
+ * legitimate "passive triggers passive" chains can nest far deeper than a
+ * handful of links, so the budget sits well above normal play. Exceeding it
+ * means a rule loop or an unmodeled chain; the whole dispatch is rejected
+ * atomically instead of committing a half-resolved board.
+ */
+export const DEFAULT_MAX_FOLLOW_UP_ACTIONS = 256;
+export const DEFAULT_MAX_FOLLOW_UP_DEPTH = 64;
 
 export interface EngineOptions {
   /** Reject illegal actions and validate state invariants after every transition. */
@@ -48,7 +59,18 @@ export interface EngineOptions {
   humans?: number;
   /** How many built-in AI seats to add on top of the human seats. */
   aiSeats?: number;
+  /**
+   * Maximum automatic follow-ups in one chain (root action excluded).
+   * Defaults to {@link DEFAULT_MAX_FOLLOW_UP_ACTIONS}.
+   */
+  maxFollowUpActions?: number;
+  /**
+   * Maximum nesting depth of a follow-up chain.
+   * Defaults to {@link DEFAULT_MAX_FOLLOW_UP_DEPTH}.
+   */
+  maxFollowUpDepth?: number;
 }
+
 
 export interface ReplayReport {
   ok: boolean;
@@ -56,6 +78,15 @@ export interface ReplayReport {
   actualHash: string;
   steps: number;
   errors: string[];
+}
+
+interface PipelineResult {
+  state: GameState;
+  cancelled: boolean;
+  /** Chain reached an input window; `state` carries the parked continuation. */
+  suspended?: boolean;
+  /** Hard safety failure; the caller must reject the dispatch without committing `state`. */
+  error?: string;
 }
 
 export interface ExportedLog {
@@ -78,6 +109,14 @@ export interface ExportedLog {
 /** Bump when scheduling/legality semantics change; logs are rejected, not migrated. */
 export const ENGINE_VERSION = 3;
 
+function normalizeLimit(value: number | undefined, fallback: number, name: string): number {
+  if (value === undefined) return fallback;
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
 /**
  * Deterministic, observable, replayable kernel.
  *
@@ -90,6 +129,8 @@ export class UniversalGameEngine {
   private readonly pipeline: RulePipeline;
   private readonly strict: boolean;
   private readonly projectRedactor: ProjectionRedactor;
+  private readonly maxFollowUpActions: number;
+  private readonly maxFollowUpDepth: number;
 
   private state: GameState;
   private scenario?: string;
@@ -113,6 +154,16 @@ export class UniversalGameEngine {
     this.pipeline = new RulePipeline(this.rules);
     this.strict = options.strict ?? true;
     this.projectRedactor = module.project ?? {};
+    this.maxFollowUpActions = normalizeLimit(
+      options.maxFollowUpActions,
+      DEFAULT_MAX_FOLLOW_UP_ACTIONS,
+      'maxFollowUpActions'
+    );
+    this.maxFollowUpDepth = normalizeLimit(
+      options.maxFollowUpDepth,
+      DEFAULT_MAX_FOLLOW_UP_DEPTH,
+      'maxFollowUpDepth'
+    );
     this.scenario = options.scenario;
     this.seats = options.seats;
     this.humans = options.humans;
@@ -322,8 +373,18 @@ export class UniversalGameEngine {
     if (state.gameOver || !this.getActor(actorId)) return [];
 
     const decision = topDecision(state);
-    if (decision && decision.status === 'OPEN' && decision.participants.includes(actorId)) {
+    if (decision && decision.status === 'OPEN') {
+      if (!decision.participants.includes(actorId)) return [];
       if (decision.submissions[actorId] !== undefined) return [];
+      return this.module.legalActions(state, actorId);
+    }
+
+    const frame = InterruptStackManager.peek(state);
+    if (frame && frame.status === 'WAITING_INPUT' && frame.responseWindow) {
+      const eligible = frame.responseWindow.eligibleActors ?? frame.responseWindow.eligiblePlayers;
+      if (!eligible.includes(actorId)) return [];
+      const pending = frame.responseWindow.pendingResponses[actorId];
+      if (pending !== undefined && pending !== 'PENDING') return [];
       return this.module.legalActions(state, actorId);
     }
 
@@ -420,19 +481,24 @@ export class UniversalGameEngine {
       this.history = this.history.slice(0, this.state.actionLog.length);
     }
 
-    // 1. Secret / simultaneous decision window
+    // 1. Secret / simultaneous decision window. While one is open nobody else
+    //    may act: arbitrary actions must never bypass an engine-owned sequence.
     const decision = topDecision(this.state);
-    if (decision && decision.status === 'OPEN' && decision.participants.includes(actorId)) {
+    if (decision && decision.status === 'OPEN') {
+      if (!decision.participants.includes(actorId)) {
+        return this.fail(`decision window "${decision.title}" is open; only its participants may act`);
+      }
       return this.commitDecision(decision, action, events);
     }
 
-    // 2. Interrupt-stack response window
+    // 2. Interrupt-stack response window. Only eligible responders may act
+    //    while the frame is waiting for input.
     const frame = InterruptStackManager.peek(this.state);
-    if (
-      frame &&
-      frame.status === 'WAITING_INPUT' &&
-      (frame.responseWindow?.eligibleActors ?? frame.responseWindow?.eligiblePlayers ?? []).includes(actorId)
-    ) {
+    if (frame && frame.status === 'WAITING_INPUT' && frame.responseWindow) {
+      const eligible = frame.responseWindow.eligibleActors ?? frame.responseWindow.eligiblePlayers;
+      if (!eligible.includes(actorId)) {
+        return this.fail(`response window "${frame.title}" is open; only eligible actors may respond`);
+      }
       return this.resolveResponse(action, frame, events);
     }
 
@@ -545,43 +611,149 @@ export class UniversalGameEngine {
     );
   }
 
-  /** AOP + reduce + after-triggers + follow-ups. No logging, no notify. */
+  /**
+   * AOP + reduce + after-triggers + follow-ups. No logging, no notify.
+   *
+   * The chain is an explicit LIFO work stack owned by the engine. This keeps
+   * ordering identical to the old recursive version (a follow-up's own
+   * follow-ups settle before its next sibling) without consuming the JS call
+   * stack, so the safety limit is a deliberate budget rather than a stack
+   * accident. When the chain reaches a player-input window it parks the
+   * remaining frames on that window and resumes after the window settles.
+   */
   private reduceWithPipeline(
     state: GameState,
     action: Action,
     ctx: ReduceContext,
+    events: VisualTraceEvent[]
+  ): PipelineResult {
+    return this.runActionChain(state, [{ action, depth: 0 }], ctx, events, true);
+  }
+
+  /** Continue a queue parked on a decision/response window. */
+  private resumeFollowUpQueue(
+    state: GameState,
+    queue: FollowUpFrame[] | undefined,
+    ctx: ReduceContext,
+    events: VisualTraceEvent[]
+  ): PipelineResult {
+    if (!queue || queue.length === 0) return { state, cancelled: false };
+    return this.runActionChain(state, [...queue], ctx, events, false);
+  }
+
+  private runActionChain(
+    state: GameState,
+    initial: FollowUpFrame[],
+    ctx: ReduceContext,
     events: VisualTraceEvent[],
-    depth = 0
-  ): { state: GameState; cancelled: boolean } {
-    if (depth > 8) {
-      events.push(this.event(ctx, 'STACK_CANCEL', 'Follow-up chain depth exceeded', 200));
-      return { state, cancelled: true };
-    }
+    rootIsAction: boolean
+  ): PipelineResult {
+    let next = state;
+    const pending: FollowUpFrame[] = [...initial];
+    let followUpCount = 0;
 
-    const result = this.pipeline.processAction(action, state);
-    for (const message of result.messages) {
-      events.push(this.event(ctx, 'RULE_MUTATE', message, 300));
-    }
+    while (pending.length > 0) {
+      // A follow-up opened a decision or response window: park the rest of the
+      // chain on that window. The engine — not the player — keeps ownership.
+      const target = this.pendingInputTarget(next);
+      if (target) {
+        return {
+          state: this.parkContinuation(next, target, pending),
+          cancelled: false,
+          suspended: true
+        };
+      }
 
-    if (result.cancelled) {
-      events.push(this.event(ctx, 'STACK_CANCEL', `${action.type} cancelled by rule hook`, 300));
-      return { state, cancelled: true };
-    }
+      const frame = pending.pop()!;
+      if (frame.depth > this.maxFollowUpDepth) {
+        const error = `follow-up chain exceeded depth limit ${this.maxFollowUpDepth} at "${frame.action.type}"`;
+        events.push(this.event(ctx, 'STACK_CANCEL', error, 200));
+        return { state, cancelled: false, error };
+      }
+      if (frame.depth > 0) {
+        followUpCount += 1;
+        if (followUpCount > this.maxFollowUpActions) {
+          const error = `follow-up chain exceeded budget of ${this.maxFollowUpActions} actions before "${frame.action.type}"`;
+          events.push(this.event(ctx, 'STACK_CANCEL', error, 200));
+          return { state, cancelled: false, error };
+        }
+      }
 
-    let next = this.module.reduce(state, result.finalAction, ctx);
+      const result = this.pipeline.processAction(frame.action, next);
+      for (const message of result.messages) {
+        events.push(this.event(ctx, 'RULE_MUTATE', message, 300));
+      }
 
-    const after = this.pipeline.triggerAfter(result.finalAction, next);
-    for (const message of after.messages) {
-      events.push(this.event(ctx, 'RULE_MUTATE', message, 300));
-    }
+      if (result.cancelled) {
+        events.push(this.event(ctx, 'STACK_CANCEL', `${frame.action.type} cancelled by rule hook`, 300));
+        // A cancelled root action means the whole transition is intercepted;
+        // a cancelled follow-up only drops its own branch.
+        if (rootIsAction && frame.depth === 0) return { state: next, cancelled: true };
+        continue;
+      }
 
-    const chained = [...result.followUpActions, ...after.chainedActions];
-    for (const followUp of chained) {
-      const chainedResult = this.reduceWithPipeline(next, followUp, ctx, events, depth + 1);
-      next = chainedResult.state;
+      next = this.module.reduce(next, result.finalAction, ctx);
+
+      const after = this.pipeline.triggerAfter(result.finalAction, next);
+      for (const message of after.messages) {
+        events.push(this.event(ctx, 'RULE_MUTATE', message, 300));
+      }
+
+      const chained = [...result.followUpActions, ...after.chainedActions];
+      // LIFO: push in reverse so the first follow-up pops first (depth-first).
+      for (let i = chained.length - 1; i >= 0; i -= 1) {
+        pending.push({ action: chained[i], depth: frame.depth + 1 });
+      }
     }
 
     return { state: next, cancelled: false };
+  }
+
+  private pendingInputTarget(
+    state: GameState
+  ): { kind: 'decision' | 'frame'; id: string } | undefined {
+    const decision = topDecision(state);
+    if (decision && decision.status === 'OPEN') return { kind: 'decision', id: decision.id };
+
+    const frame = InterruptStackManager.peek(state);
+    if (frame && frame.status === 'WAITING_INPUT' && frame.responseWindow) {
+      return { kind: 'frame', id: frame.id };
+    }
+    return undefined;
+  }
+
+  private parkContinuation(
+    state: GameState,
+    target: { kind: 'decision' | 'frame'; id: string },
+    pending: FollowUpFrame[]
+  ): GameState {
+    if (target.kind === 'decision') {
+      return {
+        ...state,
+        pendingDecisions: state.pendingDecisions.map(window =>
+          window.id === target.id
+            ? {
+                ...window,
+                // `pending` is a LIFO stack (next action at the end). Existing
+                // frames were parked earlier, so they must pop first.
+                followUpContinuation: [...pending, ...(window.followUpContinuation ?? [])]
+              }
+            : window
+        )
+      };
+    }
+
+    return {
+      ...state,
+      interruptStack: state.interruptStack.map(frame =>
+        frame.id === target.id
+          ? {
+              ...frame,
+              followUpContinuation: [...pending, ...(frame.followUpContinuation ?? [])]
+            }
+          : frame
+      )
+    };
   }
 
   private makeContext(nextSeq: number, events: VisualTraceEvent[]): ReduceContext {
@@ -604,7 +776,8 @@ export class UniversalGameEngine {
     const seq = this.state.seq + 1;
     const ctx = this.makeContext(seq, events);
 
-    const { state: reduced, cancelled } = this.reduceWithPipeline(this.state, action, ctx, events);
+    const { state: reduced, cancelled, error } = this.reduceWithPipeline(this.state, action, ctx, events);
+    if (error) return this.fail(error, events);
     if (cancelled) {
       // Intercepted actions do not advance the transition counter and are not
       // logged, so replay stays aligned with the live state.
@@ -701,7 +874,9 @@ export class UniversalGameEngine {
         const updated = next.pendingDecisions.find(window => window.id === dueWindow.id);
         const ready = updated ? updated.status === 'READY' || evaluateWindow(updated).ready : false;
         if (updated && (wholeWindow || ready)) {
-          next = this.resolveOpenDecision(next, updated, ctx, events).state;
+          const resolved = this.resolveOpenDecision(next, updated, ctx, events);
+          if (resolved.error) return this.fail(resolved.error, events);
+          next = resolved.state;
         }
         next = this.stampDeadlines(next);
         continue;
@@ -733,7 +908,19 @@ export class UniversalGameEngine {
       const popped = InterruptStackManager.pop(next);
       next = popped.state;
       const effect = popped.poppedFrame?.actionPayload ?? null;
-      if (effect) next = this.reduceWithPipeline(next, effect, ctx, events).state;
+      if (effect) {
+        const reduced = this.reduceWithPipeline(next, effect, ctx, events);
+        if (reduced.error) return this.fail(reduced.error, events);
+        next = reduced.state;
+      }
+      const resumed = this.resumeFollowUpQueue(
+        next,
+        popped.poppedFrame?.followUpContinuation,
+        ctx,
+        events
+      );
+      if (resumed.error) return this.fail(resumed.error, events);
+      next = resumed.state;
       next = this.stampDeadlines(next);
     }
 
@@ -846,6 +1033,7 @@ export class UniversalGameEngine {
     let decisionResolved = false;
     if (submission.ready) {
       const resolved = this.resolveOpenDecision(next, submission.window ?? decision, ctx, events);
+      if (resolved.error) return this.fail(resolved.error, events);
       next = resolved.state;
       decisionResolved = true;
     }
@@ -883,7 +1071,8 @@ export class UniversalGameEngine {
     window: DecisionWindow,
     ctx: ReduceContext,
     events: VisualTraceEvent[]
-  ): { state: GameState } {
+  ): { state: GameState; error?: string } {
+    const continuation = window.followUpContinuation;
     const reveal = orderedSubmissions(window);
     events.push(
       this.event(
@@ -899,6 +1088,7 @@ export class UniversalGameEngine {
       const submission = entry.submission;
       if (submission === 'PASS' || submission === 'COMMITTED') continue;
       const reduced = this.reduceWithPipeline(current, submission, ctx, events);
+      if (reduced.error) return { state: current, error: reduced.error };
       if (!reduced.cancelled) current = reduced.state;
     }
 
@@ -907,6 +1097,12 @@ export class UniversalGameEngine {
 
     if (this.module.onDecisionResolved && marked.window) {
       current = this.module.onDecisionResolved(current, marked.window, ctx);
+    }
+
+    if (continuation && continuation.length > 0) {
+      const resumed = this.runActionChain(current, [...continuation], ctx, events, false);
+      if (resumed.error) return { state: current, error: resumed.error };
+      current = resumed.state;
     }
 
     return { state: current };
@@ -945,8 +1141,18 @@ export class UniversalGameEngine {
 
         if (effect) {
           const reduced = this.reduceWithPipeline(next, effect, ctx, events);
+          if (reduced.error) return this.fail(reduced.error, events);
           next = reduced.state;
         }
+
+        const resumed = this.resumeFollowUpQueue(
+          next,
+          popped.poppedFrame.followUpContinuation,
+          ctx,
+          events
+        );
+        if (resumed.error) return this.fail(resumed.error, events);
+        next = resumed.state;
       }
     }
 

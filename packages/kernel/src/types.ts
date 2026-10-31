@@ -409,6 +409,20 @@ export interface StackResponseWindow {
 
 export type StackFrameStatus = 'PENDING' | 'WAITING_INPUT' | 'RESOLVING' | 'RESOLVED' | 'CANCELLED';
 
+/**
+ * One engine-owned automatic follow-up.
+ *
+ * The queue lives in kernel scheduling, not in `legalActions`: players can
+ * never substitute a follow-up with an arbitrary action. When a follow-up
+ * opens a decision/response window mid-chain, the remaining frames are parked
+ * on that window and resumed by the engine after it resolves.
+ */
+export interface FollowUpFrame {
+  action: Action;
+  /** Nesting depth relative to the originating dispatch; used by the safety budget. */
+  depth: number;
+}
+
 export interface StackFrame {
   id: string;
   type: string;
@@ -421,6 +435,8 @@ export interface StackFrame {
   responseWindow?: StackResponseWindow;
   status: StackFrameStatus;
   metadata?: Record<string, any>;
+  /** Engine-owned follow-ups waiting for this frame's response window to settle. */
+  followUpContinuation?: FollowUpFrame[];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -481,6 +497,8 @@ export interface DecisionWindow {
   participantDeadlines?: Record<ActorId, number>;
   payload?: JsonRecord;
   reveal?: Record<PlayerId, DecisionSubmission>;
+  /** Engine-owned follow-ups waiting for this window to settle. */
+  followUpContinuation?: FollowUpFrame[];
 }
 
 /* -------------------------------------------------------------------------- */

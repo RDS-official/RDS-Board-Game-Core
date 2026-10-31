@@ -311,6 +311,11 @@ const PKMN_MARKET_PITCH_Z = PKMN_CARD_H + 0.52;
  * 两个来源：开局前看 `globalVars.seating.ready`，每手结束后看 `hand.readyForNext`。
  * 只有准备好了，底座半圆环才点亮（白）；否则保持磨砂白。
  */
+function isSeatAi(state: ProjectedGameState, seatId: string): boolean {
+  const seats = state.globalVars.seats as { playerId?: string; isAi?: boolean }[] | undefined;
+  return seats?.find(s => s.playerId === seatId)?.isAi === true;
+}
+
 function seatReadyForPlay(
   state: ProjectedGameState,
   hand: { street?: string; readyForNext?: string[] } | undefined,
@@ -318,8 +323,10 @@ function seatReadyForPlay(
 ): boolean {
   const seating = state.globalVars.seating as { started?: boolean; ready?: Record<string, boolean> } | undefined;
   if (seating && !seating.started) return seating.ready?.[seatId] === true;
-  if (hand?.street === 'COMPLETE') return (hand.readyForNext ?? []).includes(seatId);
-  return true;
+  if (hand?.street === 'COMPLETE') {
+    return (hand.readyForNext ?? []).includes(seatId) || isSeatAi(state, seatId);
+  }
+  return false;
 }
 function fnv1a(text: string): number {
   let hash = 0x811c9dc5;
@@ -4817,6 +4824,7 @@ export class BoardGameScene {
     const hand = live?.globalVars.hand as
       | { street?: string; readyForNext?: string[]; lastActions?: Record<string, string>; folded?: string[] }
       | undefined;
+    const isSettlement = hand?.street === 'COMPLETE';
     for (const { group, jitter, lamp, seatId } of this.seatStandees) {
       const dx = cam.x - group.position.x;
       const dz = cam.z - group.position.z;
@@ -4824,15 +4832,38 @@ export class BoardGameScene {
       group.rotation.y = Math.atan2(dx, dz) + jitter;
       if (!lamp) continue;
       const material = lamp.material as THREE.MeshBasicMaterial;
-      const turn = !!live && seatId === actor;
-      const ready = !!live && seatReadyForPlay(live, hand, seatId);
-      // 「已准备」或「这一轮已经动作过」都算就位：亮淡绿灯。
-      const acted = !!hand?.lastActions?.[seatId] && !hand?.folded?.includes(seatId);
-      const settled = ready || acted;
-      // 弃牌 = 出局：灯压成近黑，和其他人一眼区分开。
+
       const folded = !!hand?.folded?.includes(seatId);
-      material.color.setHex(folded ? 0x0a0a0a : turn ? 0xff3b2a : settled ? 0xa8e6a0 : 0xd6d9de);
-      material.opacity = folded ? 0.55 : turn ? pulse : settled ? 0.62 : 0.22;
+      // 打牌中轮到该玩家亮红灯（呼吸）；结算态大家都在准备，不亮个人红灯
+      const turn = !isSettlement && !!live && seatId === actor;
+      // 结算态：准备好了（已点准备或 AI）亮绿灯
+      const ready = isSettlement && !!live && seatReadyForPlay(live, hand, seatId);
+      // 打牌中：本轮操作过（有过牌、跟注、加注、全押记录，且没弃牌，排除盲注）亮绿灯
+      const lastAction = hand?.lastActions?.[seatId];
+      const acted =
+        !isSettlement &&
+        !!lastAction &&
+        !folded &&
+        !lastAction.includes('盲');
+      const green = ready || acted;
+
+      if (folded) {
+        // 弃牌的人底座灯变黑
+        material.color.setHex(0x050505);
+        material.opacity = 0.85;
+      } else if (turn) {
+        // 轮到该玩家：红灯呼吸
+        material.color.setHex(0xff3b2a);
+        material.opacity = pulse;
+      } else if (green) {
+        // 准备好 / 这一轮操作过：翠绿高亮（高饱和度，绝不发白）
+        material.color.setHex(0x22c55e);
+        material.opacity = 0.95;
+      } else {
+        // 未准备 / 这一轮尚未操作：熄灭（磨砂灰白）
+        material.color.setHex(0x94a3b8);
+        material.opacity = 0.22;
+      }
     }
   }
   private renderLoop(): void {

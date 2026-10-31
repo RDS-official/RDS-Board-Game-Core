@@ -1052,13 +1052,25 @@ export class NetSession implements GamePresenter {
       ? openDecision.participants.filter(pid => openDecision.submissions[pid] === undefined)
       : focusActors;
 
-    // The projection's legalActions are always the viewer's own; show them
-    // only when it is actually this viewer's turn to act.
-    this.legal = acting.length === 0 || acting.includes(this.viewer) ? state.legalActions : [];
+    // The projection's legalActions are the viewer's own as computed by the server's
+    // authoritative engine. Show them whenever the server determines the viewer has legal actions.
+    // Never suppress them based on activePlayerId (which broke between-round readiness and multi-actor phases).
+    this.legal = state.legalActions ?? [];
     this.bound = buildActionsView(state, this.legal, (actorId, spec) => this.resolveCandidates(actorId, spec));
+    if (this.viewer !== 'GOD') {
+      this.bound = this.bound.filter(
+        entry => !String(entry.action?.type ?? entry.ui.actionType ?? '').startsWith('DEBUG_')
+      );
+    }
 
-    const actorNameLabel =
-      acting.length > 1 ? `${acting.length} 个行动者待提交` : actorName(acting[0] ?? actor);
+    const isSettlement =
+      state.phase === 'HAND_OVER' ||
+      (state.globalVars?.hand as { street?: string } | undefined)?.street === 'COMPLETE';
+    const actorNameLabel = isSettlement
+      ? '全员准备中'
+      : acting.length > 1
+      ? `${acting.length} 个行动者待提交`
+      : actorName(acting[0] ?? actor);
 
     const placement = buildPlacementView(state, this.viewer, actor, this.placementRotation ?? 0);
     if (!placement) this.placementRotation = undefined;
