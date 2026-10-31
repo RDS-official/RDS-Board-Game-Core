@@ -674,39 +674,23 @@ test('poker: ten-seat tables keep the 1 beginner / 4 intermediate / 5 advanced m
   assertEqual(mix.advanced, 4, 'advanced fill what remains of the nine');
 });
 
-test('poker: a human takes a seat, readies up, and only then can start', () => {
+test('poker: there is no seating step — the first hand is ready to deal', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 17, { scenario: 'ai_table_6' });
   const types = () => engine.getLegalActions('p1').map(action => action.type);
 
-  assertEqual(types().join(','), 'TAKE_SEAT', 'the first action is taking a seat');
+  // 不再有「入座 → 准备」：开局即全员就绪，一手牌直接可开。
+  assert(types().includes('START_HAND'), 'the opening action is dealing a hand');
+  assert(!types().includes('TAKE_SEAT') && !types().includes('READY_UP'), 'no seating actions exist');
   assertEqual(engine.getLegalActions('p2').length, 0, 'AI seats expose no actions to the player');
-
-  assert(engine.dispatch({ type: 'TAKE_SEAT', playerId: 'p1' }).ok, 'taking the seat is accepted');
-  assertEqual(types().join(','), 'READY_UP', 'the seat then offers ready-up');
-
-  assert(engine.dispatch({ type: 'READY_UP', playerId: 'p1' }).ok, 'readiness is accepted');
-  assertEqual(types().join(','), 'START_HAND', 'everyone ready unlocks the start action');
 
   const started = engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
   assert(started.ok, 'the game starts');
-  const state = engine.getRawState();
-  assertEqual(state.phase, 'PREFLOP', 'the first hand deals straight away');
-  const seating = state.globalVars.seating as { started: boolean } | undefined;
-  assertEqual(seating?.started, true, 'the seating flow closes once play begins');
+  assertEqual(engine.getRawState().phase, 'PREFLOP', 'the first hand deals straight away');
+  const seating = engine.getRawState().globalVars.seating as { started: boolean } | undefined;
+  assertEqual(seating, undefined, 'no seating state is written any more');
   assert(
     engine.getLegalActions('p1').every(action => action.type !== 'TAKE_SEAT' && action.type !== 'READY_UP'),
-    'seat actions are gone during play'
-  );
-});
-
-test('poker: ready-up cannot be reached before taking the seat', () => {
-  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 23, { scenario: 'ai_table_6' });
-  const result = engine.dispatch({ type: 'READY_UP', playerId: 'p1' });
-  assertEqual(result.ok, false, 'ready without a seat is rejected');
-  assertEqual(
-    engine.getLegalActions('p1').map(action => action.type).join(','),
-    'TAKE_SEAT',
-    'the seat action is still the only option'
+    'seat actions never exist'
   );
 });
 

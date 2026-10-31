@@ -294,6 +294,8 @@ export class PokerRules {
       pid => chipsOf(state, pid) > 0 && !hand.readyForNext.includes(pid)
     );
     if (waiting.length === 0) actions.push({ type: 'START_HAND', playerId });
+    // 上帝视角/调试：一键让所有存活座位就位，省去逐个点「准备」。
+    actions.push({ type: 'DEBUG_READY_ALL', playerId });
     return actions;
   }
 
@@ -391,6 +393,13 @@ export class PokerRules {
     }
 
     // 结算阶段的三种纯状态更新：准备、亮牌、弃牌（不亮）。
+    // 上帝视角/调试：一键让所有存活座位就位，省去逐个点「准备」。
+    if (action.type === 'DEBUG_READY_ALL') {
+      if (hand.street !== 'COMPLETE') return state;
+      const solvent = state.playerOrder.filter(pid => chipsOf(state, pid) > 0);
+      return { ...withHand(state, { ...hand, readyForNext: solvent }), turn: state.turn + 1 };
+    }
+
     if (action.type === 'READY' || action.type === 'SHOW' || action.type === 'MUCK') {
       if (hand.street !== 'COMPLETE') return state;
       const playerId = action.playerId;

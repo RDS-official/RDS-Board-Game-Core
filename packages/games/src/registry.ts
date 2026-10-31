@@ -592,19 +592,14 @@ export const pokerModule: GameModule = defineGame({
       description: '短码演示（玩家 4 只有 60 筹码，数手内触发终局）',
       setup: pokerScenario(4, { stacks: [1000, 1000, 1000, 60] })
     },
-    /**
-     * 默认桌：1 名真人 + 5 个内置 AI（1 初级 / 2 中级 / 2 高级），
-     * 走完整的「入座 → 准备 → 开局」流程。
-     */
+    /** 默认桌：1 名真人 + 5 个内置 AI（入门桌）/ 1 真人 + 9 AI（满桌）。 */
     ai_table_6: {
       description: '1 真人 + 5 AI（入门桌）',
-      setup: (seed: number) =>
-        setupPoker(seed, { seats: 6, humans: 1, seatingFlow: true })
+      setup: (seed: number) => setupPoker(seed, { seats: 6, humans: 1 })
     },
     ai_table_10: {
       description: '1 真人 + 9 AI（满桌）',
-      setup: (seed: number) =>
-        setupPoker(seed, { seats: 10, humans: 1, seatingFlow: true })
+      setup: (seed: number) => setupPoker(seed, { seats: 10, humans: 1 })
     }
   },
   /**
@@ -620,7 +615,6 @@ export const pokerModule: GameModule = defineGame({
       humans: options?.humans ?? options?.seats ?? 1,
       // 房主在大厅添加的 AI 补位数；缺省时由 planSeats 补到 6 人。
       ...(options?.aiSeats === undefined ? {} : { aiSeats: options.aiSeats }),
-      seatingFlow: true,
       ...(options?.autoAi === undefined ? {} : { autoAi: options.autoAi })
     }),
   presentation: definePresentation({

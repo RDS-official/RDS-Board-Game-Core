@@ -221,7 +221,8 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
         shortRaiseAccum: 0,
         lastActions: {},
         revealed: [],
-        readyForNext: [],
+        // 不再有「入座」环节：开局即全员就绪，第一手直接可开。
+        readyForNext: [...playerOrder],
         folded: [],
         allIn: [],
         community: [],

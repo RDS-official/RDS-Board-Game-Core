@@ -974,10 +974,15 @@ export class UniversalSession implements GamePresenter {
     this.bound = buildActionsView(state, legal, (actorId, spec) =>
       this.engine.getSelectionCandidates(actorId, spec)
     );
+    // DEBUG_* 是调试动作（例如一键全员准备），只在上帝视角出现。
+    if (this.engine.getViewer() !== 'GOD') {
+      this.bound = this.bound.filter(entry => !String(entry.action?.type ?? entry.ui.actionType ?? '').startsWith('DEBUG_'));
+    }
 
     // 动作冷却（游戏声明 `actionCooldownMs`）：一手刚结束先留出阅读时间，再允许
     // 开下一手。时钟只存在于驱动层，内核保持无时钟、可回放。
-    const cooldowns = module.presentation?.actionCooldownMs;
+    // 首帧（revision 0）不设冷却：开局那一次 START_HAND 本来就该立刻可用。
+    const cooldowns = this.revision === 0 ? undefined : module.presentation?.actionCooldownMs;
     if (cooldowns) {
       const now = Date.now();
       const live = new Set<string>();
