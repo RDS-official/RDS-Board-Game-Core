@@ -29,6 +29,13 @@ export interface MatchOptions {
   scenario?: string;
   /** 按大厅房间的玩家顺序生成座位 p1..pN。 */
   players: MatchPlayerSeed[];
+  /**
+   * 桌面座位数 = 房间里的真人数量。
+   *
+   * 缺省时退回夹具默认配置（历史行为）；传入后由夹具决定是否支持该人数，
+   * 不支持就抛错，避免"2 人房间摆了 4 个座位、回合卡在无人控制的 p4"。
+   */
+  seats?: number;
   seed?: number;
 }
 
@@ -38,7 +45,7 @@ export interface MatchSeatInfo {
   name: string;
 }
 
-const MAX_SEATS = 8;
+const MAX_SEATS = 10;
 
 function randomSeed32(): number {
   return crypto.randomBytes(4).readUInt32BE(0);
@@ -72,8 +79,22 @@ export class ServerMatch {
       undefined,
       options.scenario,
       undefined,
-      { hostActors: [] } // 服务端没有任何「本地房主」，全部走 viewer 校验
+      {
+        hostActors: [], // 服务端没有任何「本地房主」，全部走 viewer 校验
+        ...(options.seats === undefined ? {} : { seats: options.seats })
+      }
     );
+
+    // 座位数必须与房间里的真人一致：夹具可能不支持该人数（固定阵容的夹具会
+    // 忽略 seats 请求），这时宁可开局失败，也不要摆出无人控制的空座位。
+    if (options.seats !== undefined) {
+      const wanted = Math.min(options.seats, MAX_SEATS);
+      const dealt = this.room.engine.getRawState().playerOrder.length;
+      if (dealt !== wanted) {
+        this.room.dispose();
+        throw new Error(`${module.meta.name} 不支持 ${wanted} 人：该玩法固定 ${dealt} 个座位`);
+      }
+    }
 
     // 座位 p1..pN 由大厅玩家顺序决定，并写入展示用昵称/头像（只改展示字段）。
     const rawState = this.room.engine.getRawState();

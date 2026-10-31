@@ -97,6 +97,11 @@ export interface NetSessionOptions {
   /** Guest only: hub userId of the host to dial. */
   hostId?: string;
   scenario?: string;
+  /**
+   * 桌面座位数。P2P 房主权威模式下由房主决定；缺省取 `roster` 的人数，
+   * 再退回夹具默认配置。中心模式由服务器按房间人数决定，这里不生效。
+   */
+  seats?: number;
   /** Host only; guests ignore this (the host owns the seed). 未传时随机生成（S6）。 */
   seed?: number;
   /** 阶段一：座位 → hub 身份（昵称/头像）。房主开局时写进内核 Player，随 snapshot 同步全员。 */
@@ -190,10 +195,16 @@ export class NetSession implements GamePresenter {
       // 中期项 A2：房主侧只有唯一一个权威引擎。HUD（UniversalSession）与
       // 权威房间（GameRoom）共用它，因此本地 dispatch 直接就是权威跃迁，
       // 不需要「本地引擎 → 重放 action 到镜像房间」的双引擎同步。
+      // 座位数按房间人数发牌：2 人房间不该摆出 4 个无人控制的座位。
+      const seats = options.seats ?? (options.roster ? Object.keys(options.roster).length : undefined);
+      const engineOptions = {
+        ...(options.scenario ? { scenario: options.scenario } : {}),
+        ...(seats === undefined ? {} : { seats })
+      };
       const engine = new UniversalGameEngine(
         module,
         seed,
-        options.scenario ? { scenario: options.scenario } : undefined
+        Object.keys(engineOptions).length > 0 ? engineOptions : undefined
       );
       engine.setAliasSecret(this.aliasSecret);
       const room = new GameRoom(module, seed, this.seatAuthorizer(), options.scenario, engine);

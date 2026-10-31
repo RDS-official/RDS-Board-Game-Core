@@ -24,7 +24,7 @@
 | 项 | 说明 |
 | --- | --- |
 | 52 张牌 | 无鬼牌；点数 A-K-Q-J-10…2，花色 ♠♥♦♣ |
-| 人数 | 2–10；默认 4 人（`setup` 只能收 `seed`，故用 `scenarios` 表达人数变体） |
+| 人数 | 2–10；默认 4 人。`setup(seed, { seats })` 按调用方要的人数发牌（联机时 = 房间人数），`scenarios` 只是固定人数的演示/变体 |
 | 盲注 | 小盲 = 大盲的一半（5 / 10），庄家位顺时针轮转 |
 | 街道 | Pre-Flop → Flop → Turn → River → Showdown |
 | 动作 | 弃牌 Fold / 过牌 Check / 跟注 Call / 加注 Raise / 全押 All-in |

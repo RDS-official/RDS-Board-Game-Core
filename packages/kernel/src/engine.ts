@@ -39,6 +39,11 @@ export interface EngineOptions {
   strict?: boolean;
   /** Named scenario from module.scenarios; replayable and serialized in logs. */
   scenario?: string;
+  /**
+   * Seats the caller wants the table to have. Passed straight to `module.setup`;
+   * a fixture with a fixed roster ignores it (see `GameSetupOptions`).
+   */
+  seats?: number;
 }
 
 export interface ReplayReport {
@@ -53,6 +58,8 @@ export interface ExportedLog {
   moduleId: string;
   seed: number;
   scenario?: string;
+  /** Requested seat count; part of the initial position, so replay needs it. */
+  seats?: number;
   actions: Action[];
   stateHash: string;
   /** Absent on legacy logs; current logs always write both. */
@@ -78,6 +85,8 @@ export class UniversalGameEngine {
 
   private state: GameState;
   private scenario?: string;
+  /** Requested seat count, kept for `exportLog` / replay. */
+  private seats?: number;
   /** Full accepted action history (survives time-machine rewinds). */
   private history: Action[] = [];
   private currentViewer: PlayerId | 'GOD' = 'GOD';
@@ -95,8 +104,9 @@ export class UniversalGameEngine {
     this.strict = options.strict ?? true;
     this.projectRedactor = module.project ?? {};
     this.scenario = options.scenario;
+    this.seats = options.seats;
 
-    const initial = this.initialState(seed, options.scenario);
+    const initial = this.initialState(seed, options.scenario, options.seats);
     this.state = { ...initial, seed, seq: 0, clock: initial.clock ?? 0, gameId: module.meta.id };
 
     const dependencyErrors = this.rules.dependencyErrors();
@@ -106,13 +116,19 @@ export class UniversalGameEngine {
 
     if (this.strict) this.validateInitialState();
   }
-  private initialState(seed: number, scenario?: string): GameState {
-    if (!scenario) return this.module.setup(seed);
+  private initialState(seed: number, scenario?: string, seats?: number): GameState {
+    const setupOptions = seats === undefined ? undefined : { seats };
+    if (!scenario) return this.module.setup(seed, setupOptions);
     const factory = this.module.scenarios?.[scenario];
     if (!factory) {
       throw new Error(`Unknown scenario "${scenario}" for game ${this.module.meta.id}`);
     }
-    return factory.setup(seed);
+    return factory.setup(seed, setupOptions);
+  }
+
+  /** Requested seat count (undefined when the caller did not ask for one). */
+  public getRequestedSeats(): number | undefined {
+    return this.seats;
   }
 
   /* ------------------------------------------------------------------ */
@@ -942,6 +958,7 @@ export class UniversalGameEngine {
       moduleId: this.module.meta.id,
       seed: this.state.seed,
       scenario: this.scenario,
+      ...(this.seats === undefined ? {} : { seats: this.seats }),
       actions: [...this.history],
       stateHash: hashState(head),
       schemaVersion: this.module.meta.schemaVersion ?? 1,
@@ -952,9 +969,14 @@ export class UniversalGameEngine {
   private replayState(
     actions: Action[],
     seed = this.state.seed,
-    scenario = this.scenario
+    scenario = this.scenario,
+    seats = this.seats
   ): { state: GameState; errors: string[] } {
-    const shadow = new UniversalGameEngine(this.module, seed, { strict: false, scenario });
+    const shadow = new UniversalGameEngine(this.module, seed, {
+      strict: false,
+      scenario,
+      ...(seats === undefined ? {} : { seats })
+    });
     shadow.silent = true;
     const errors: string[] = [];
 
@@ -1040,7 +1062,8 @@ export class UniversalGameEngine {
     }
 
     this.scenario = payload.scenario;
-    const { state, errors } = this.replayState(payload.actions, payload.seed, payload.scenario);
+    this.seats = payload.seats;
+    const { state, errors } = this.replayState(payload.actions, payload.seed, payload.scenario, payload.seats);
     this.state = state;
     this.history = [...payload.actions];
     this.notifyStateChange();

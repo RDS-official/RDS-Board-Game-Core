@@ -442,6 +442,56 @@ test('poker: one short all-in closes the street once everyone matches it', () =>
 });
 
 /* -------------------------------------------------------------------------- */
+/* Seat count: the table only holds real players                              */
+/* -------------------------------------------------------------------------- */
+
+test('poker: the engine honours the requested seat count', () => {
+  // A lobby room deals exactly as many seats as it has players: the engine
+  // forwards `seats` to the fixture instead of using the fixture's default.
+  const duo = new UniversalGameEngine(GAME_REGISTRY.poker, 11, { seats: 2 });
+  assertEqual(duo.getRawState().playerOrder.length, 2, 'a two-player request deals two seats');
+  assertEqual(duo.getRawState().players.p3, undefined, 'no ghost seat p3');
+
+  const ring = new UniversalGameEngine(GAME_REGISTRY.poker, 11, { seats: 10 });
+  assertEqual(ring.getRawState().playerOrder.length, 10, 'a ten-player request deals ten seats');
+
+  // Fixed-roster fixtures ignore the request; the server refuses the mismatch.
+  const catan = new UniversalGameEngine(GAME_REGISTRY.catan, 11, { seats: 2 });
+  assertEqual(catan.getRawState().playerOrder.length, 3, 'catan keeps its three seats');
+});
+
+test('poker: the seat count is part of the log and replays exactly', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 21, { seats: 3 });
+  startHand(engine);
+  act(engine, 'FOLD');
+
+  const log = engine.exportLog();
+  assertEqual(log.seats, 3, 'the log records the requested seats');
+
+  const replay = new UniversalGameEngine(GAME_REGISTRY.poker, 21, { seats: 3 });
+  const report = replay.loadLog(log);
+  assert(report.ok, `the log replays: ${report.errors.slice(0, 2).join(' | ')}`);
+  assertEqual(replay.getRawState().playerOrder.length, 3, 'replay keeps three seats');
+  assertEqual(replay.getStateHash(), engine.getStateHash(), 'replay lands on the same hash');
+});
+
+test('poker: a two-seat table plays a whole hand without a ghost seat', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 31, { seats: 2 });
+  startHand(engine);
+  callAround(engine, 1); // button / small blind completes
+  callAround(engine, 1); // big blind checks → flop
+  assertEqual(hand(engine.getRawState()).street, 'FLOP', 'the flop is dealt to a heads-up table');
+
+  callAround(engine, 2); // flop
+  callAround(engine, 2); // turn
+  callAround(engine, 2); // river
+
+  const state = engine.getRawState();
+  assertEqual(hand(state).street, 'COMPLETE', 'the hand reaches showdown');
+  assertEqual(state.playerOrder.length, 2, 'still exactly two seats');
+});
+
+/* -------------------------------------------------------------------------- */
 /* Hidden information and determinism                                          */
 /* -------------------------------------------------------------------------- */
 

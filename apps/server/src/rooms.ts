@@ -142,10 +142,43 @@ export function leaveRoom(userId: string, roomId: string) {
   return changed(after);
 }
 
+/**
+ * Can this fixture deal exactly `wanted` seats?
+ *
+ * Asks the fixture itself (`setup(1, { seats })`): variable-table games honour
+ * the request, fixed-roster ones return their own count and the mismatch is the
+ * answer. This is what keeps a room from starting with seats nobody sits in.
+ */
+function seatsSupport(
+  gameId: string,
+  scenarioId: string | undefined,
+  wanted: number
+): { ok: boolean; dealt: number } {
+  const module = GAME_REGISTRY[gameId];
+  const factory = scenarioId ? module?.scenarios?.[scenarioId]?.setup : module?.setup;
+  if (!factory) return { ok: false, dealt: 0 };
+  try {
+    const dealt = factory(1, { seats: wanted }).playerOrder.length;
+    return { ok: dealt === wanted, dealt };
+  } catch {
+    return { ok: false, dealt: 0 };
+  }
+}
+
 export function setRoomStatus(hostId: string, roomId: string, status: 'open' | 'playing' | 'closed') {
   const r = rooms.byId(roomId) as RoomRec | undefined;
   if (!r) return { error: '房间不存在' };
   if (r.hostId !== hostId) return { error: '只有房主可以操作' };
+  if (status === 'playing') {
+    // 开局前核对人数：桌面只摆真实存在的座位。支持可变人数的玩法（德州扑克
+    // 2–10 人）按当前人数发牌；固定阵容的玩法（卡坦岛 3 人、璀璨宝石 2 人、
+    // 山屋 3 人）则必须凑齐，否则会出现"空座位永远等不到人"的死局。
+    const support = seatsSupport(r.gameId, r.scenarioId, r.players.length);
+    if (!support.ok) {
+      const needed = support.dealt > 0 ? `${support.dealt} 人` : '固定人数';
+      return { error: `该玩法需要 ${needed}开局，当前房间 ${r.players.length} 人` };
+    }
+  }
   const patch: Partial<RoomRec> = { status };
   if (status === 'playing') patch.readyPlayers = [];   // 开局清就绪态
   if (status === 'open') patch.readyPlayers = [hostId]; // 回到准备页：房主重新就绪

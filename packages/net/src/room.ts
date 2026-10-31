@@ -38,6 +38,12 @@ export interface RoomJoinOptions {
 /** 房主本地调用的 actor 授权（见构造器 options.hostActors）。 */
 export interface GameRoomOptions {
   hostActors?: PlayerId[] | 'ALL';
+  /**
+   * Seats the table should have. A room is created from a lobby roster, and the
+   * fixture's default roster may be bigger — without this a two-player room
+   * would deal four seats and stall on a seat nobody controls.
+   */
+  seats?: number;
 }
 
 export type RoomAuthorizer = (viewer: PlayerId | 'GOD', token?: string) => boolean;
@@ -80,7 +86,17 @@ export class GameRoom implements RoomTransport {
     engine?: UniversalGameEngine,
     private readonly options: GameRoomOptions = {}
   ) {
-    this.engine = engine ?? new UniversalGameEngine(module, seed, scenario ? { scenario } : undefined);
+    const engineOptions = {
+      ...(scenario ? { scenario } : {}),
+      ...(options.seats === undefined ? {} : { seats: options.seats })
+    };
+    this.engine =
+      engine ??
+      new UniversalGameEngine(
+        module,
+        seed,
+        Object.keys(engineOptions).length > 0 ? engineOptions : undefined
+      );
     this.authorizer = authorizer;
     this.lastSeenHash = this.engine.getStateHash();
     this.unobserveState = this.engine.onStateChange(() => this.onEngineStateChange());
@@ -252,6 +268,7 @@ export class GameRoom implements RoomTransport {
       moduleId: payload.moduleId,
       seed: payload.seed,
       scenario: payload.scenario,
+      ...(payload.seats === undefined ? {} : { seats: payload.seats }),
       actions: payload.actions,
       stateHash: payload.stateHash,
       schemaVersion: payload.schemaVersion,

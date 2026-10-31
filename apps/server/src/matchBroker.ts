@@ -1,6 +1,7 @@
 import type { WebSocket } from 'ws';
 import type { Action } from '@rds/kernel/types';
 import { MatchManager } from './match.ts';
+import type { ServerMatch } from './match.ts';
 import { profileOf } from './auth.ts';
 import { rooms } from './storage.ts';
 
@@ -84,12 +85,23 @@ export class MatchBroker {
           avatarUrl: profile?.avatarUrl
         };
       });
-      const match = this.matches.ensure({
-        roomId: room.id,
-        gameId: room.gameId,
-        scenario: room.scenarioId,
-        players: seats
-      });
+      // 桌面只摆真实存在的座位：房间里 2 个人就发 2 个座位。
+      let match: ServerMatch;
+      try {
+        match = this.matches.ensure({
+          roomId: room.id,
+          gameId: room.gameId,
+          scenario: room.scenarioId,
+          players: seats,
+          seats: seats.length
+        });
+      } catch (error) {
+        send({
+          t: 'error',
+          message: error instanceof Error ? error.message : String(error)
+        });
+        return;
+      }
 
       const update = match.attach(userId);
       if ('error' in update) {

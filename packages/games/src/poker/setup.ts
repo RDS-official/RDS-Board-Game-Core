@@ -206,7 +206,14 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
   return state;
 }
 
-/** Named seat-count scenarios (the kernel's `setup` only receives a seed). */
+/**
+ * Named seat-count scenarios.
+ *
+ * `seats` is the scenario's default; a caller that asks for a different count
+ * through `GameSetupOptions.seats` (a two-player lobby room, say) wins, so a
+ * room never deals seats nobody is sitting in.
+ */
 export function pokerScenario(seats: number, overrides: Partial<PokerConfig> = {}) {
-  return (seed: number): GameState => setupPoker(seed, { seats, ...overrides });
+  return (seed: number, options?: { seats?: number }): GameState =>
+    setupPoker(seed, { ...overrides, seats: options?.seats ?? seats });
 }

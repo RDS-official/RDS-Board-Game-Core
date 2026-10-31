@@ -30,6 +30,17 @@
 - `role` 仅用于 UI 文案（谁是房主）；不再决定权威位置。
 - `hostId` 只在 `authority=p2p` 且 `role=guest` 时需要。
 - `roster` / `owners`（座位 → 昵称 / hub userId）继续透传，中心模式用于 seats 展示与 presence。
+- `seats`（可选）：单机/演示时显式指定桌面人数；联机时以**房间里的真人数量**为准。
+
+### 座位数 = 房间人数（S9 延伸）
+
+桌面只摆真实存在的座位：`MatchBroker` 把 `room.players.length` 作为 `seats` 透传给
+`GameRoom` → `UniversalGameEngine` → `module.setup(seed, { seats })`。
+
+- 可变人数夹具（德州扑克 2–10、璀璨宝石 2–4）据此发牌；
+- 固定阵容夹具（卡坦岛 3、山屋 3）忽略该参数，`MatchManager` 发现实际座位数与请求不符时
+  **拒绝开局**并回 `{ t: 'error' }`（"该玩法需要 3 人"）；大厅 `setRoomStatus` 也会在
+  点"开始"时先拦一次，避免出现「回合永远停在无人控制的 p4」这类死局。
 
 ## 消息契约（中心模式，走既有 `/ws`）
 
