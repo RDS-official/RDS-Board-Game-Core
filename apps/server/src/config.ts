@@ -19,16 +19,18 @@ export const TOKEN_TTL_SEC = 7 * 24 * 3600;
 export const DATA_DIR = env.HUB_DATA_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'data');
 
 // 初始管理员账号配置（可通过环境变量 ADMIN_USER / ADMIN_PASSWORD 自定义）。
-// 生产环境必须显式提供 ADMIN_PASSWORD，拒绝用入库默认口令启动（公开仓库 + 默认口令 = 任何人可直登 admin）。
+// 生产环境强烈建议显式提供 ADMIN_PASSWORD（可在 ecosystem secrets.json 配置）。
+// 注意：默认口令已随公开仓库泄露，未配置 ADMIN_PASSWORD 时这里只降级为高危警告而不拒绝启动
+// （自动部署机无法交互补配，硬拒启会把线上站点打挂）；首次登录后应立即改密。
 export const DEFAULT_ADMIN_USER = env.ADMIN_USER || 'rds';
 export const DEFAULT_ADMIN_PASSWORD = adminPassword();
 
 function adminPassword(): string {
   if (env.ADMIN_PASSWORD) return env.ADMIN_PASSWORD;
   if (env.NODE_ENV === 'production') {
-    throw new Error('[hub] 生产环境必须通过 ADMIN_PASSWORD 提供初始管理员口令，拒绝用默认口令启动');
+    console.error('[hub] 高危：未配置 ADMIN_PASSWORD，正在使用仓库内默认管理员口令（已泄露）。请在部署环境（ecosystem secrets.json 或环境变量）中设置 ADMIN_PASSWORD 并重启。');
   }
-  return 'kgnb666'; // 仅开发/自检环境使用
+  return 'kgnb666';
 }
 
 export function randomId(prefix = ''): string {
