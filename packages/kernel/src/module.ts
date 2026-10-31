@@ -127,6 +127,17 @@ export interface GamePresentationHints {
    * view layer has no built-in card taxonomy. Must be pure: called per notice.
    */
   cardFacts?: (custom: Record<string, unknown>) => { label: string; value: string }[];
+  /**
+   * How this game wants a card presented: the localised category band ("预兆 ·
+   * OMEN"), an opaque visual tone token the HUD maps onto one of its neutral
+   * plates, and an optional decorative glyph. Everything the view layer needs in
+   * order not to guess a taxonomy from a game's identity. Must be pure.
+   */
+  cardStyle?: (custom: Record<string, unknown>) => {
+    badge?: string;
+    tone?: string;
+    seal?: string;
+  };
 }
 
 /**

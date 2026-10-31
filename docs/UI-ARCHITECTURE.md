@@ -306,6 +306,8 @@ apps/web/src/ui/
 
 **结论**：真正的问题是「常驻面板每次快照整段重建」——它把滚动位置、悬停态、键盘焦点一起冲掉。临时浮层重建没有代价，不需要组件化。
 
+> 后续（Step 1）：`showHoverHint` 与 `showCardSheet` 已不再是两个各自为政的注入点，而是同一个 `apps/web/src/ui/overlay.ts` `OverlayArbiter` 的两种绘制（`peek` 芯片 / `pinned`·`modal` 大卡）；`paintSheet` 用 entry 戳记避免同一份内容重放动画与定时器，浮层 backdrop 监听器随重建替换而非叠加。
+
 **实测证据**（在 `exploration` 剧本、1680×1050 下触发一次快照更新）：
 
 | 观测项 | 结果 |

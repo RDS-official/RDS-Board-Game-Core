@@ -26,3 +26,27 @@ export function betrayalCardFacts(custom: Record<string, unknown>): { label: str
   if (custom.stealable === false) facts.push({ label: '夺取', value: '不可被抢' });
   return facts;
 }
+
+/**
+ * Category band, plate tone and seal glyph for 山屋's own card taxonomy.
+ *
+ * The HUD only understands opaque tone tokens (danger / treasure / event /
+ * place …); the mapping from OMEN / ITEM / EVENT / ROOM to those tokens — and the
+ * Chinese band text — is the mansion's vocabulary, so it lives here.
+ */
+const CARD_STYLES: Record<string, { badge: string; tone: string; seal: string }> = {
+  OMEN: { badge: '预兆 · OMEN', tone: 'danger', seal: '👁' },
+  ITEM: { badge: '遗物 · ITEM', tone: 'treasure', seal: '◆' },
+  EVENT: { badge: '事件 · EVENT', tone: 'event', seal: '✦' },
+  ROOM: { badge: '房间 · ROOM', tone: 'place', seal: '⌂' }
+};
+
+/** Presentation for one card's `custom` bag; unclassified cards keep the neutral plate. */
+export function betrayalCardStyle(custom: Record<string, unknown>): {
+  badge?: string;
+  tone?: string;
+  seal?: string;
+} {
+  const key = String(custom.cardType ?? '');
+  return CARD_STYLES[key] ?? {};
+}

@@ -10,9 +10,17 @@ import { ensureCanvasFontsReady } from './render/fonts';
 import { checkWebGLSupport, renderWebGLErrorModal } from './render/webglSupport';
 import { hideGameLoading } from './gameLoading';
 import { BoardGameHUD } from './ui/hud';
+import { peekView } from './ui/detailView';
 import { installDiagnostics } from './diagnostics/install';
 import { MathematicalInspectorUI } from './ui/mathInspector';
-import { CameraView, GameSnapshot, PresentationPorts } from '@rds/app/contracts';
+import {
+  CameraView,
+  GameSnapshot,
+  PresentationPorts,
+  entityDetailKey,
+  fixedDetailKey,
+  nodeDetailKey
+} from '@rds/app/contracts';
 import { layoutForGame } from '@rds/app/layout';
 import { NetSession, NetSessionOptions } from '@rds/app/netSession';
 import { UniversalSession } from '@rds/app/session';
@@ -157,24 +165,33 @@ class BoardGameSimulatorApp {
       if (data.type === 'NODE') {
         if (meta?.type === 'ROOM_NAV') {
           const targetName = String(meta.targetName ?? meta.name ?? '相邻房间');
-          this.hud.showHoverHint({
-            title: `→ 进入【${targetName}】`,
-            detail: '点击地上高亮箭头直接走入该房间（消耗 1 步）'
-          });
+          this.hud.showHoverHint(
+            peekView({
+              key: nodeDetailKey(data.id),
+              title: `→ 进入【${targetName}】`,
+              desc: '点击地上高亮箭头直接走入该房间（消耗 1 步）'
+            })
+          );
           return;
         }
         if (meta?.type === 'DOOR') {
-          this.hud.showHoverHint({
-            title: `${String(meta.name ?? '门位')} · 探索未开启的门`,
-            detail: '点击地上高亮箭头开启并抽取新房间'
-          });
+          this.hud.showHoverHint(
+            peekView({
+              key: nodeDetailKey(data.id),
+              title: `${String(meta.name ?? '门位')} · 探索未开启的门`,
+              desc: '点击地上高亮箭头开启并抽取新房间'
+            })
+          );
           return;
         }
         if (typeof meta.name === 'string') {
-          this.hud.showHoverHint({
-            title: String(meta.name),
-            detail: '点击查看房间档案与陈设'
-          });
+          this.hud.showHoverHint(
+            peekView({
+              key: nodeDetailKey(data.id),
+              title: String(meta.name),
+              desc: '点击查看房间档案与陈设'
+            })
+          );
           return;
         }
       }
@@ -182,18 +199,24 @@ class BoardGameSimulatorApp {
         const cardFace = meta as { title?: string; imageUrl?: string };
         if (cardFace.title) {
           // The imported card artwork travels with the raycast metadata, so the
-          // hover preview can show the real face instead of a text stub.
+          // hover preview can show the real face instead of a text stub. The key
+          // matches the one the sheet will use, so the two can never stack.
           const art = typeof cardFace.imageUrl === 'string' ? cardFace.imageUrl : undefined;
-          this.hud.showHoverHint({
-            title: String(cardFace.title),
-            detail: '点击查看卡牌详情',
-            art
-          });
+          this.hud.showHoverHint(
+            peekView({
+              key: entityDetailKey(data.id),
+              title: String(cardFace.title),
+              desc: '点击查看卡牌详情',
+              art
+            })
+          );
           return;
         }
       }
       if (data.type === 'DICE') {
-        this.hud.showHoverHint({ title: '骰子', detail: '点击掷骰' });
+        this.hud.showHoverHint(
+          peekView({ key: fixedDetailKey('dice'), title: '骰子', desc: '点击掷骰' })
+        );
         return;
       }
       this.hud.showHoverHint(null);

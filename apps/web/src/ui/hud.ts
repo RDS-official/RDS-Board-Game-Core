@@ -1,5 +1,7 @@
 import confetti from 'canvas-confetti';
 import { cardArtSvg } from './cardArt';
+import { detailTone } from './detailView';
+import { OverlayArbiter, OverlayEntry, OverlayState } from './overlay';
 import { handLayout } from './handLayout';
 import { diagnostics } from '../diagnostics/install';
 import { hash, reconcileKeyed, reconcileKeyedPreservingScroll } from './dom/keyed';
@@ -11,7 +13,8 @@ import {
   GameSnapshot,
   PresentationPorts,
   UiAction,
-  UiCardDetail,
+  UiDetailView,
+  nodeDetailKey,
   UiHistoryEntry,
   UiNotice,
   UiTraitChange,
@@ -75,6 +78,12 @@ export class BoardGameHUD {
   /** Set of room ids already seen, for the "new room discovered" reveal. */
   private knownRooms?: Set<string>;
   private sheetTimer: number | null = null;
+  /** Stamp of the sheet currently painted, so a repaint does not restart its timer. */
+  private paintedSheetStamp = 0;
+  /** The layer outlives a repaint, so its backdrop handler must be replaced, not added again. */
+  private sheetBackdrop?: (event: Event) => void;
+  /** Single owner of every subject overlay: hover preview, sheet, modal. */
+  private readonly overlays = new OverlayArbiter();
   /** Haunt id whose overture has already played. */
   private lastHauntId?: string;
   /** False until the first snapshot has been observed. */
@@ -122,6 +131,10 @@ export class BoardGameHUD {
     this.renderSkeleton();
     this.diceOverlay = new DiceRollOverlay(this.container);
     this.syncSoundButton();
+    // One subscription drives both surfaces: the hover chip and the card sheet
+    // are two renderings of the same arbiter state, so they can never disagree
+    // about who owns the screen.
+    this.overlays.subscribe(state => this.paintOverlays(state));
     this.bindPresenter(presenter);
   }
 
@@ -130,6 +143,7 @@ export class BoardGameHUD {
     this.unsubNotice?.();
     this.closePayload();
     this.closeAbout();
+    this.overlays.closeAll();
     this.container.querySelector('#card-sheet-layer')?.remove();
     // Switching fixtures must not treat the new board as "rooms discovered".
     this.knownRooms = undefined;
@@ -304,10 +318,25 @@ export class BoardGameHUD {
   /**
    * Lightweight hover chip for the 3D board: shows what the cursor is over and
    * what a click will do, without stealing focus from the action dock.
+   *
+   * The chip is the arbiter's `peek` slot, so it cannot displace a sheet the
+   * player deliberately opened, and it disappears the moment one opens.
    */
-  public showHoverHint(
-    hint: { title: string; detail?: string; art?: string } | null
-  ): void {
+  public showHoverHint(view: UiDetailView | null): void {
+    if (!view) {
+      this.overlays.close('peek');
+      return;
+    }
+    this.overlays.open({ owner: 'hud.hover', mode: 'peek', view });
+  }
+
+  /** Paint both overlay surfaces from the one authoritative state. */
+  private paintOverlays(state: OverlayState): void {
+    this.paintHover(state.peek);
+    this.paintSheet(state.modal ?? state.pinned);
+  }
+
+  private paintHover(entry?: OverlayEntry): void {
     let el = this.container.querySelector('#hover-hint') as HTMLElement | null;
     if (!el) {
       el = document.createElement('div');
@@ -315,19 +344,13 @@ export class BoardGameHUD {
       el.className = 'hover-hint';
       this.container.appendChild(el);
     }
-    if (!hint) {
+    if (!entry) {
       el.classList.remove('on');
       el.classList.remove('with-art');
       return;
     }
-    // A new hover invalidates an open sheet for a previous card: keeping it up
-    // would show one card's detail beside another card's preview.
-    const sheetLayer = this.container.querySelector('#card-sheet-layer');
-    if (sheetLayer?.classList.contains('open')) {
-      sheetLayer.classList.remove('open', 'is-reveal');
-      sheetLayer.innerHTML = '';
-    }
-    const signature = `${hint.title}|${hint.detail ?? ''}|${hint.art ?? ''}`;
+    const hint = entry.view;
+    const signature = `${hint.title}|${hint.desc ?? ''}|${hint.art ?? ''}`;
     if (el.dataset.signature === signature) {
       el.classList.add('on');
       return;
@@ -338,7 +361,7 @@ export class BoardGameHUD {
     el.classList.toggle('with-art', !!hint.art);
     el.innerHTML =
       (hint.art ? `<img class="hh-art" src="${escapeAttr(hint.art)}" alt="${escapeAttr(hint.title)}" />` : '') +
-      `<span class="hh-body"><b>${hint.title}</b>${hint.detail ? `<span>${hint.detail}</span>` : ''}</span>`;
+      `<span class="hh-body"><b>${escHtml(hint.title)}</b>${hint.desc ? `<span>${escHtml(hint.desc)}</span>` : ''}</span>`;
     el.classList.add('on');
   }
 
@@ -636,8 +659,8 @@ export class BoardGameHUD {
       this.showAnnouncement(notice.title, notice.durationMs ?? 1800);
       return;
     }
-    if (notice.card) {
-      this.showCardSheet(notice.card);
+    if (notice.view) {
+      this.showCardSheet(notice.view);
       return;
     }
     this.pushToast(notice.icon, notice.title, notice.durationMs ?? 3200, notice.detail);
@@ -700,14 +723,23 @@ export class BoardGameHUD {
   }
 
   /**
-   * Framed card detail sheet in the mansion's own visual language: aged
-   * parchment, a suit-coloured header ribbon, and a wax seal for omens.
+   * Framed detail sheet for one subject.
+   *
+   * The plate is neutral: the game only supplies the category band text
+   * (`view.badge`), an opaque tone token and an optional seal glyph, so a new
+   * fixture gets the same sheet without teaching the HUD its vocabulary.
    */
-  public showCardSheet(card: UiCardDetail, options: { reveal?: boolean; footer?: string } = {}): void {
-    // The sheet supersedes the hover preview: both describe the same card, and
-    // leaving the little preview up next to the full sheet reads as two
-    // different cards (the tooltip sits behind the sheet's corner).
-    this.showHoverHint(null);
+  public showCardSheet(view: UiDetailView, options: { reveal?: boolean; footer?: string } = {}): void {
+    this.overlays.open({
+      owner: 'hud.sheet',
+      mode: options.reveal ? 'modal' : 'pinned',
+      view,
+      footer: options.footer,
+      reveal: options.reveal
+    });
+  }
+
+  private paintSheet(entry?: OverlayEntry): void {
     let layer = this.container.querySelector('#card-sheet-layer') as HTMLElement | null;
     if (!layer) {
       layer = document.createElement('div');
@@ -715,50 +747,59 @@ export class BoardGameHUD {
       layer.className = 'card-sheet-layer';
       this.container.appendChild(layer);
     }
-
+    // A repaint that keeps the same entry must not restart the dismiss timer or
+    // replay the entrance animation.
+    if (entry && entry.stamp === this.paintedSheetStamp) return;
+    if (this.sheetTimer) {
+      window.clearTimeout(this.sheetTimer);
+      this.sheetTimer = null;
+    }
+    if (!entry) {
+      this.paintedSheetStamp = 0;
+      layer.classList.remove('open', 'is-reveal');
+      layer.innerHTML = '';
+      return;
+    }
+    this.paintedSheetStamp = entry.stamp;
+    const view = entry.view;
     // Ink is the *light* text on the dark plate; ribbon is the dark category band.
-    const palette: Record<string, { ink: string; ribbon: string; label: string; seal: string }> = {
-      OMEN: { ink: '#f2cfd8', ribbon: '#4a1020', label: '预兆 · OMEN', seal: '👁' },
-      ITEM: { ink: '#f0dfc2', ribbon: '#3f2c12', label: '遗物 · ITEM', seal: '◆' },
-      EVENT: { ink: '#dbe6f2', ribbon: '#1d2733', label: '事件 · EVENT', seal: '✦' },
-      ROOM: { ink: '#efdfc6', ribbon: '#33261a', label: '房间 · ROOM', seal: '⌂' }
-    };
-    const theme = palette[card.kind] ?? palette.ITEM;
-
-    const facts = (card.facts ?? [])
-      .map(row => `<li><span>${row.label}</span><b>${row.value}</b></li>`)
+    const theme = detailTone(view.tone);
+    const facts = (view.sections ?? [])
+      .map(row => `<li><span>${escHtml(row.label)}</span><b>${escHtml(row.value)}</b></li>`)
       .join('');
 
-    layer.classList.toggle('is-reveal', !!options.reveal);
+    layer.classList.toggle('is-reveal', !!entry.reveal);
     layer.innerHTML = `
-      <article class="card-sheet" data-kind="${card.kind}" style="--ink:${theme.ink};--ribbon:${theme.ribbon}">
+      <article class="card-sheet" data-tone="${escapeAttr(view.tone ?? 'neutral')}" style="--ink:${theme.ink};--ribbon:${theme.ribbon}">
         <button class="cs-close" type="button" aria-label="关闭">×</button>
-        <div class="cs-ribbon"><span>${theme.label}</span></div>
+        ${view.badge ? `<div class="cs-ribbon"><span>${escHtml(view.badge)}</span></div>` : ''}
         <div class="cs-body">
           <div class="cs-art">${
-            card.art
-              ? `<img class="cs-art-img" src="${escapeAttr(card.art)}" alt="${escapeAttr(card.title)}" />`
-              : cardArtSvg(card)
+            view.art
+              ? `<img class="cs-art-img" src="${escapeAttr(view.art)}" alt="${escapeAttr(view.title)}" />`
+              : cardArtSvg(view)
           }</div>
-          ${card.actions?.length ? `<div class="cs-actions">${card.actions
-            .map(action => `<button type="button" class="cs-action" data-card-action="${action.id}"><span>${action.icon}</span>${action.label}</button>`)
+          ${view.actions?.length ? `<div class="cs-actions">${view.actions
+            .map(
+              action =>
+                `<button type="button" class="cs-action" data-card-action="${escapeAttr(action.id)}"><span>${escHtml(
+                  action.icon
+                )}</span>${escHtml(action.label)}</button>`
+            )
             .join('')}</div>` : ''}
-          <div class="cs-seal">${theme.seal}</div>
-          <h2 class="cs-title">${card.title}</h2>
-          ${card.en ? `<div class="cs-en">${card.en}</div>` : ''}
+          ${view.seal ? `<div class="cs-seal">${escHtml(view.seal)}</div>` : ''}
+          <h2 class="cs-title">${escHtml(view.title)}</h2>
+          ${view.subtitle ? `<div class="cs-en">${escHtml(view.subtitle)}</div>` : ''}
           <div class="cs-rule"></div>
-          <p class="cs-desc">${card.desc}</p>
+          <p class="cs-desc">${escHtml(view.desc ?? '')}</p>
           ${facts ? `<ul class="cs-facts">${facts}</ul>` : ''}
         </div>
-        <div class="cs-foot">${options.footer ?? '点击牌堆或场景实体继续'}</div>
+        <div class="cs-foot">${escHtml(entry.footer ?? '点击牌堆或场景实体继续')}</div>
       </article>
     `;
     layer.classList.add('open');
 
-    const close = () => {
-      layer!.classList.remove('open', 'is-reveal');
-      layer!.innerHTML = '';
-    };
+    const close = () => this.overlays.close(entry.mode);
     layer.querySelector('.cs-close')?.addEventListener('click', close);
     layer.querySelectorAll<HTMLElement>('[data-card-action]').forEach(button => {
       button.addEventListener('click', event => {
@@ -768,11 +809,12 @@ export class BoardGameHUD {
         if (actionId) this.performAction(actionId);
       });
     });
-    layer.addEventListener('click', event => {
+    if (this.sheetBackdrop) layer.removeEventListener('click', this.sheetBackdrop);
+    this.sheetBackdrop = event => {
       if (event.target === layer) close();
-    });
-    if (this.sheetTimer) window.clearTimeout(this.sheetTimer);
-    this.sheetTimer = window.setTimeout(close, options.reveal ? 7000 : 9000);
+    };
+    layer.addEventListener('click', this.sheetBackdrop);
+    this.sheetTimer = window.setTimeout(close, entry.reveal ? 7000 : 9000);
   }
 
   /**
@@ -825,15 +867,17 @@ export class BoardGameHUD {
     this.pinnedRoomId = node.id;
     this.showCardSheet(
       {
+        key: nodeDetailKey(node.id),
         title: String(props.name ?? '房间'),
-        en: String(props.en ?? ''),
-        kind: 'ROOM',
+        subtitle: String(props.en ?? ''),
+        tone: 'place',
         desc: String(props.text ?? ''),
-        facts: [
+        sections: [
           { label: '楼层', value: floorLabel },
           { label: '已连通门位', value: doors.join(' · ') || '无' },
           { label: '符号', value: symbol }
-        ]
+        ],
+        actions: []
       },
       { reveal: true, footer: '新房间已加入洋馆布局' }
     );
