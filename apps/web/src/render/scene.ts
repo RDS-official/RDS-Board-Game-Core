@@ -4829,8 +4829,10 @@ export class BoardGameScene {
       // 「已准备」或「这一轮已经动作过」都算就位：亮淡绿灯。
       const acted = !!hand?.lastActions?.[seatId] && !hand?.folded?.includes(seatId);
       const settled = ready || acted;
-      material.color.setHex(turn ? 0xff3b2a : settled ? 0xa8e6a0 : 0xd6d9de);
-      material.opacity = turn ? pulse : settled ? 0.62 : 0.22;
+      // 弃牌 = 出局：灯压成近黑，和其他人一眼区分开。
+      const folded = !!hand?.folded?.includes(seatId);
+      material.color.setHex(folded ? 0x0a0a0a : turn ? 0xff3b2a : settled ? 0xa8e6a0 : 0xd6d9de);
+      material.opacity = folded ? 0.55 : turn ? pulse : settled ? 0.62 : 0.22;
     }
   }
   private renderLoop(): void {

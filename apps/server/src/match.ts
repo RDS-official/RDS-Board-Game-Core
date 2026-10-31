@@ -73,6 +73,8 @@ export class ServerMatch {
   /** AI 节奏泵的定时器与上一次出手时刻。 */
   private aiTimer?: ReturnType<typeof setInterval>;
   private lastAiAt = 0;
+  /** 结算开始的时刻：等满冷却就自动替全桌发下一手。 */
+  private settleAt = 0;
   private disposed = false;
 
   constructor(options: MatchOptions) {
@@ -291,18 +293,40 @@ export class ServerMatch {
     const delay = this.module.presentation?.aiActionDelayMs;
     if (!delay) return;
     const step = Math.max(100, Math.min(delay, 500));
+    // 结算兜底：一手结束后等满冷却仍有人没点「准备」，服务器就替全桌开下一手。
+    // 真人点准备仍照常提前开局；掉线/走开的玩家不再能把整张桌子卡死。
+    const settleGateMs = this.module.presentation?.actionCooldownMs?.START_HAND ?? 20000;
     this.aiTimer = setInterval(() => {
       if (this.disposed) return;
       const now = Date.now();
-      if (now - this.lastAiAt < delay) return;
       const engine = this.room.engine;
-      if (engine.getRawState().gameOver) return;
+      const state = engine.getRawState();
+      if (state.gameOver) return;
       const actor = engine.getActiveActorId();
-      if (!actor) return;
-      const pending = engine.getLegalActions(actor).find(action => action.type === 'AI_ACT');
-      if (!pending) return;
-      this.lastAiAt = now;
-      this.room.submitUnchecked(pending);
+      const pending = actor
+        ? engine.getLegalActions(actor).find(action => action.type === 'AI_ACT')
+        : undefined;
+      if (pending) {
+        if (now - this.lastAiAt < delay) return;
+        this.lastAiAt = now;
+        this.room.submitUnchecked(pending);
+        return;
+      }
+      // 没有 AI 要动：结算态且冷却已满就直接发下一手。
+      const hand = state.globalVars.hand as { street?: string } | undefined;
+      if (hand?.street !== 'COMPLETE') {
+        this.settleAt = 0;
+        return;
+      }
+      if (!this.settleAt) {
+        this.settleAt = now;
+        return;
+      }
+      if (now - this.settleAt < settleGateMs) return;
+      const seat = state.playerOrder.find(pid => Number(state.players[pid]?.customProps?.stack ?? 0) > 0);
+      if (!seat) return;
+      this.settleAt = 0;
+      engine.dispatch({ type: 'FORCE_START', playerId: seat });
     }, step);
     this.aiTimer.unref?.();
   }
