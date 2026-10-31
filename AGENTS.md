@@ -9,7 +9,7 @@
 - **项目定位**：通用桌游内核框架（Universal Board Game Kernel）及基于 Three.js + Rapier 3D 物理引擎的 Web 可视化调试模拟器。
 - **运行环境**：
   - Node.js ≥ 20（ESM 模块规范）
-  - pnpm 12.x（本机 pnpm 路径：`/home/zooter/.npm-global/bin/pnpm`，已锁定构建依赖 `esbuild`）
+  - pnpm（版本以 `package.json` 的 `devEngines` / `packageManager` 为准，勿手工指定路径）
   - TypeScript 7.x + Vite 8.x
 - **生产服务**：
   - 公网站点：`https://rdsbg.zooter.eu.org/`
@@ -231,4 +231,4 @@ node node_modules/typescript/bin/tsc --noEmit && pnpm run build
 4. **禁止重写公共历史**：`main` 与别人的 `users/*` 分支禁止 `git push --force` / `git reset --hard` 回滚；回滚必须走 §2.5 的 revert PR，禁止 `git revert -m 1 <merge-commit>`。
 5. **禁止将生成图提交至仓库**：`shots/` 目录属于临时验证生成物，已被 `.gitignore` 忽略，严禁强行 `git add -f shots/`。
 6. **禁止破坏状态纯粹性**：`GameState` 必须始终可进行 `JSON.stringify` 规范化序列化与 FNV-1a 哈希计算，严禁将类实例、回调函数存入状态中。
-7. **禁止修改 Webhook 鉴权核心配置**：除非有特定需求，严禁改动 AWS 部署脚本 `/home/ubuntu/deploy-webhook/deploy-rds.sh` 及 Caddy 中的 Webhook 路由转发规则。
+7. **禁止修改 Webhook 鉴权核心配置**：除非有特定需求，严禁改动生产服务器上的自动部署脚本及 Caddy 中的 Webhook 路由转发规则（具体路径属服务器内部信息，不入库）。
