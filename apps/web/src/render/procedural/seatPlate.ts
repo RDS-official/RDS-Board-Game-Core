@@ -355,15 +355,25 @@ export class SeatPlateBuilder {
       // 初始一律磨砂白；真正的灯态由场景每帧按牌局刷新（节点是增量复用的，
       // 建牌那一刻的状态不可靠）。
       const tone = 0xd6d9de;
-      const opacity = 0.14;
+      const opacity = 0.22;
       lamp = new THREE.Mesh(
-        new THREE.RingGeometry(SEAT_BASE.radius * 0.88, SEAT_BASE.radius * 0.99, 48, 1, Math.PI, Math.PI),
-        new THREE.MeshBasicMaterial({ color: tone, transparent: true, opacity })
+        new THREE.RingGeometry(SEAT_BASE.radius * 0.88, SEAT_BASE.radius * 0.99, 48, 1, 0, Math.PI),
+        new THREE.MeshBasicMaterial({
+          color: tone,
+          transparent: true,
+          opacity,
+          // 灯是贴在底座顶面上的平面：不开 polygonOffset 会与圆盘顶面共面打架
+          // （深度值几乎相同，画面上时有时无）。让它永远压过底座。
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -2,
+          polygonOffsetUnits: -2
+        })
       );
       // RingGeometry 画在 XY 平面；抬平后 +Y 指向 +Z。板身挡住的是 +Z 那半，
       // 所以取 PI..2PI 这半圈——正好落在相机看得见的那一侧（后缘）。
       lamp.rotation.x = Math.PI / 2;
-      lamp.position.y = SEAT_BASE.height + 0.001;
+      lamp.position.y = SEAT_BASE.height + 0.005;
       group.add(lamp);
     }
 

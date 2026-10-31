@@ -4808,7 +4808,7 @@ export class BoardGameScene {
       const turn = !!live && seatId === actor;
       const ready = !!live && seatReadyForPlay(live, hand, seatId);
       material.color.setHex(turn ? 0xff3b2a : ready ? 0xf4f7fb : 0xd6d9de);
-      material.opacity = turn ? pulse : ready ? 0.42 : 0.14;
+      material.opacity = turn ? pulse : ready ? 0.5 : 0.22;
     }
   }
   private renderLoop(): void {
