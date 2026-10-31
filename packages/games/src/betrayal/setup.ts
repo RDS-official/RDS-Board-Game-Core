@@ -236,9 +236,9 @@ export function setupBetrayal(seed: number = 42, roster: string[] = DEFAULT_ROST
           layerSpacing: 3
         },
         layers: [
-          { id: 'BASEMENT', name: '地下室', index: 0 },
-          { id: 'GROUND', name: '一楼', index: 1 },
-          { id: 'UPPER', name: '二楼', index: 2 }
+          { id: 'BASEMENT', name: '地下室', index: 0, tag: 'B' },
+          { id: 'GROUND', name: '一楼', index: 1, tag: '1F' },
+          { id: 'UPPER', name: '二楼', index: 2, tag: '2F' }
         ]
       }
     },
