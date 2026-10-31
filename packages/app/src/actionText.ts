@@ -445,8 +445,18 @@ function describeActionZh(
           tone: 'danger'
         };
       /* ---- 德州扑克 (Texas Hold'em) ------------------------------------- */
-      case 'START_HAND':
-        return { icon: POKER_ICONS.start, label: '发下一手', hint: '庄家顺时针移动 · 重新洗牌发底牌', tone: 'primary' };
+      case 'TAKE_SEAT':
+        return { icon: '🪑', label: '入座', hint: '在本桌坐下 · 坐下后可以点准备', tone: 'primary' };
+      case 'READY_UP':
+        return { icon: '✅', label: '准备', hint: '全员准备后自动开局发牌', tone: 'primary' };
+      case 'START_HAND': {
+        // 座位流程里第一次 START_HAND 是「开始游戏」，之后才是「发下一手」。
+        const seating = state.globalVars.seating as { started?: boolean } | undefined;
+        const firstStart = !!seating && !seating.started;
+        return firstStart
+          ? { icon: '🎬', label: '开始游戏', hint: '全员已准备 · 发牌并进入翻牌前', tone: 'primary' }
+          : { icon: POKER_ICONS.start, label: '发下一手', hint: '庄家顺时针移动 · 重新洗牌发底牌', tone: 'primary' };
+      }
       case 'FOLD':
         return { icon: POKER_ICONS.fold, label: '弃牌', hint: '放弃本手底牌 · 已下的注留在底池', tone: 'danger' };
       case 'CHECK':

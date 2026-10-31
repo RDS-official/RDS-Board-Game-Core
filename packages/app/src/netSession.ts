@@ -45,6 +45,7 @@ import {
   BoardPick,
   GamePresenter,
   GameSnapshot,
+  UiChipRank,
   UiDiscoveryView,
   UiHistoryEntry,
   UiNotice,
@@ -1064,6 +1065,7 @@ export class NetSession implements GamePresenter {
       },
       board: state,
 
+      chipRanking: this.buildChipRanking(state),
       gameOver: state.gameOver,
       winnerLabel: state.gameOver
         ? Array.isArray(state.winner)
@@ -1074,6 +1076,34 @@ export class NetSession implements GamePresenter {
         : '',
       winnerReason: state.gameOver ? state.winnerReason : undefined
     };
+  }
+
+  /** 筹码排行（德州扑克）——联机模式同样只读公开的筹码字段。 */
+  private buildChipRanking(state: ProjectedGameState): UiChipRank[] | undefined {
+    if (state.gameId !== 'poker') return undefined;
+    const seats = (state as unknown as GameState).globalVars?.seats as
+      | { playerId: string; isAi: boolean; aiTier?: string }[]
+      | undefined;
+    const seatOf = new Map((seats ?? []).map(seat => [seat.playerId, seat]));
+    const TIER_LABEL: Record<string, string> = { beginner: '初级', intermediate: '中级', advanced: '高级' };
+    const rows = state.playerOrder.map(playerId => {
+      const player = state.players[playerId];
+      const chips = Number(player?.customProps?.chips ?? 0);
+      const seat = seatOf.get(playerId);
+      const tier = seat?.aiTier;
+      return {
+        playerId,
+        name: player?.name ?? playerId,
+        chips,
+        share: 0,
+        isAi: !!seat?.isAi,
+        tierLabel: tier ? TIER_LABEL[tier] ?? tier : undefined
+      };
+    });
+    const total = rows.reduce((sum, row) => sum + row.chips, 0);
+    for (const row of rows) row.share = total > 0 ? row.chips / total : 0;
+    rows.sort((a, b) => b.chips - a.chips);
+    return rows;
   }
 
   private buildSpatial(state: ProjectedGameState, actor?: string): UiSpatialInfo | undefined {

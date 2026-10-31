@@ -12,6 +12,7 @@ import {
   GamePresenter,
   GameSnapshot,
   UiAction,
+  UiChipRank,
   UiDecision,
   UiDiscoveryView,
   UiHistoryEntry,
@@ -1009,6 +1010,7 @@ export class UniversalSession implements GamePresenter {
       },
       board: state,
 
+      chipRanking: this.buildChipRanking(state),
       gameOver: state.gameOver,
       winnerLabel: state.gameOver
         ? Array.isArray(state.winner)
@@ -1111,6 +1113,39 @@ export class UniversalSession implements GamePresenter {
 
 
 
+
+  /**
+   * 筹码排行（德州扑克）：按筹码占全桌总量的比例降序。
+   *
+   * 只用投影状态里的筹码字段（public 信息），不读牌堆或别人的底牌；
+   * 其他游戏没有筹码概念，返回 undefined 让 HUD 不渲染这个面板。
+   */
+  private buildChipRanking(state: ProjectedGameState): UiChipRank[] | undefined {
+    if (state.gameId !== 'poker') return undefined;
+    const seats = (state as unknown as GameState).globalVars?.seats as
+      | { playerId: string; isAi: boolean; aiTier?: string }[]
+      | undefined;
+    const seatOf = new Map((seats ?? []).map(seat => [seat.playerId, seat]));
+    const TIER_LABEL: Record<string, string> = { beginner: '初级', intermediate: '中级', advanced: '高级' };
+    const rows = state.playerOrder.map(playerId => {
+      const player = state.players[playerId];
+      const chips = Number(player?.customProps?.chips ?? 0);
+      const seat = seatOf.get(playerId);
+      const tier = seat?.aiTier;
+      return {
+        playerId,
+        name: player?.name ?? playerId,
+        chips,
+        share: 0,
+        isAi: !!seat?.isAi,
+        tierLabel: tier ? TIER_LABEL[tier] ?? tier : undefined
+      };
+    });
+    const total = rows.reduce((sum, row) => sum + row.chips, 0);
+    for (const row of rows) row.share = total > 0 ? row.chips / total : 0;
+    rows.sort((a, b) => b.chips - a.chips);
+    return rows;
+  }
 
   private buildSpatial(state: ProjectedGameState, actor?: string): UiSpatialInfo | undefined {    const floors = state.mapGraph.topology?.layers ?? [];
     if (floors.length === 0) return undefined;

@@ -53,6 +53,8 @@ export const GAMES: HubGameInfo[] = [
     durationMin: 30,
     accent: '#4ec9b0',
     variants: [
+      { id: 'ai_table_6', label: '1 真人 + 5 AI（入门桌）' },
+      { id: 'ai_table_10', label: '1 真人 + 9 AI（满桌）' },
       { id: 'seats_2', label: '单挑（2 人）' },
       { id: 'seats_4', label: '4 人桌' },
       { id: 'seats_6', label: '6 人桌' },
