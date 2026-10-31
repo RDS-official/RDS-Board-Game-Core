@@ -21,7 +21,13 @@ import { CANVAS_FONT_STACK } from '../fonts';
 
 export interface SeatPlateInfo {
   name: string;
+  /** Emoji fallback avatar (fixtures / AI seats). */
   avatar: string;
+  /**
+   * 联机身份的真头像（`/avatars/…`）。有图就把它画进铜圈，emoji 只当占位，
+   * 这样牌桌上的立牌和玩家卡是同一张脸。
+   */
+  avatarUrl?: string;
   /** Player accent colour (hex). */
   color: string;
   /** Second line: role, stack, status… */
@@ -111,6 +117,7 @@ export class SeatPlateBuilder {
     const key = [
       info.name,
       info.avatar,
+      info.avatarUrl ?? '',
       info.color,
       info.detail ?? '',
       info.marker ?? '',
@@ -278,8 +285,55 @@ export class SeatPlateBuilder {
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 4;
+    // 真头像异步到货：先拿 emoji 兜底把整块板画完，图片到了只重绘铜圈。
+    this.paintAvatarImage(ctx, info, texture, { x: coinX, y: coinY, r: coinR });
     this.faceCache.set(key, texture);
     return texture;
+  }
+
+  /**
+   * 把大厅头像画进铜圈。
+   *
+   * 立牌纹理是开局同步画好的，头像却要联网加载；所以先用 emoji 占位，图片到位
+   * 后只重绘铜圈那一块（圆形裁切 + cover 缩放）再 `needsUpdate`，不会整块闪白。
+   * 加载失败就保持 emoji，离线/无头像的座位照旧。
+   */
+  private static paintAvatarImage(
+    ctx: CanvasRenderingContext2D,
+    info: SeatPlateInfo,
+    texture: THREE.CanvasTexture,
+    coin: { x: number; y: number; r: number }
+  ): void {
+    const url = info.avatarUrl;
+    if (!url || typeof Image === 'undefined') return;
+    const wood = WOODS[info.wood ?? 'walnut'];
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = () => {
+      const sourceW = image.naturalWidth || image.width;
+      const sourceH = image.naturalHeight || image.height;
+      if (!sourceW || !sourceH) return;
+      const diameter = coin.r * 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(coin.x, coin.y, coin.r - 2, 0, Math.PI * 2);
+      ctx.clip();
+      if (info.muted) ctx.globalAlpha = 0.45;
+      // cover：短边铺满铜圈，长边居中裁掉。
+      const scale = Math.max(diameter / sourceW, diameter / sourceH);
+      const w = sourceW * scale;
+      const h = sourceH * scale;
+      ctx.drawImage(image, coin.x - w / 2, coin.y - h / 2, w, h);
+      ctx.restore();
+      // 重描铜圈，盖住圆形裁切的毛边。
+      ctx.strokeStyle = info.active ? BRASS : wood.inkSoft;
+      ctx.lineWidth = info.active ? 6 : 3;
+      ctx.beginPath();
+      ctx.arc(coin.x, coin.y, coin.r, 0, Math.PI * 2);
+      ctx.stroke();
+      texture.needsUpdate = true;
+    };
+    image.src = url;
   }
 
   /** Brushed black metal for the disc (concentric machining marks). */
