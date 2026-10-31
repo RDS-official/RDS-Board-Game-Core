@@ -2827,7 +2827,14 @@ body {
 }
 
 @media (max-width: 1024px) {
+  /* 不要 display:none —— 那会让 1024px 以下的用户彻底无法切换游戏。
+     改为横向可滚动的紧凑排布，页签仍然可达（见 layout-shell.css 的窄屏规则）。 */
   .game-switch {
+    flex: 1 1 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .game-switch::-webkit-scrollbar {
     display: none;
   }
   .player-rail {

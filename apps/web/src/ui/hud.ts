@@ -530,6 +530,14 @@ export class BoardGameHUD {
         actions.insertBefore(el, anchor);
       }
     }
+
+    // 顶栏可能因换行而变高：把真实高度写回 --topbar-h，侧栏/角色栏据此定位。
+    // 不占用额外的 ResizeObserver：布局变更本来就要过一次这里。
+    const bar = this.container.querySelector('.topbar') as HTMLElement | null;
+    if (bar) {
+      const h = Math.round(bar.getBoundingClientRect().height);
+      if (h > 0) this.container.style.setProperty('--topbar-h', h + 'px');
+    }
   }
 
   private openPayloadForm(action: UiAction): void {
