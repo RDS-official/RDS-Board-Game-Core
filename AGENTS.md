@@ -9,7 +9,7 @@
 - **项目定位**：通用桌游内核框架（Universal Board Game Kernel）及基于 Three.js + Rapier 3D 物理引擎的 Web 可视化调试模拟器。
 - **运行环境**：
   - Node.js ≥ 20（ESM 模块规范）
-  - pnpm 12.x（本机 pnpm 路径：`/home/zooter/.npm-global/bin/pnpm`，已锁定构建依赖 `esbuild`）
+  - pnpm（版本以 `package.json` 的 `devEngines` / `packageManager` 为准，勿手工指定路径）
   - TypeScript 7.x + Vite 8.x
 - **生产服务**：
   - 公网站点：`https://rdsbg.zooter.eu.org/`
@@ -19,45 +19,141 @@
 
 ## 2. 分支规范与 Git 工作流（CRITICAL）
 
-为保证生产环境与主分支的稳定，必须严格执行以下工作流：
+一条铁律：**`main` 只接受经由 PR 的 Squash 合并**。本地合并、直推、merge commit 三者任意一个出现，
+「可追溯」与「可回滚」同时失效。本节规则是为了让每次上线都能用一条 `git revert` 精确还原。
 
-### 2.1 分支命名规范
-- **禁止直接向 `main` 分支提交或推送代码**。
+### 2.1 分支命名与生命周期
+- **禁止直接向 `main` 分支提交或推送代码**（唯一例外见 §2.6 紧急流程）。
 - 每次开发任务，必须基于最新的 `origin/main` 检出专属开发分支：
   ```
   users/<name>/<feature-or-fix-description>
   ```
-  > 例如：`users/zooter/optimize-catan-ai`、`users/zooter/fix-betrayal-door-render`
+  > 例如：`users/zooter/optimize-catan-ai`、`users/xhopo/fix-poker-settle-timer`
+- `<task-name>` 用**小写连字符、单一意图**，禁止 `fix`、`wip`、`test`、`update` 这类无语义名。
+  一个分支只做一件事；想顺手重构，另开分支。
+- **寿命 ≤ 3 天，改动 ≤ 400 行**；契约类改动（§3.1 的公共文件）≤ 150 行。超出就拆成多个 PR。
+- 每天开工先 `git fetch --prune`，分支上 `git rebase origin/main`；
+  **禁止把 `main` 合并进功能分支**（`git merge origin/main` 会制造交叉历史，让 squash 回滚失效）。
+- 只有自己的 `users/*` 分支允许 `git push --force-with-lease` 改写历史；
+  `main` 与别人的分支**一律禁止强推**。
+- 提交身份必须唯一：`git config user.name` / `user.email` 固定为本人常用账号，不要在同一个仓库里
+  混用多个身份（否则 blame、CODEOWNERS、归属统计全部失真）。
 
 ### 2.2 开发与验证流程
-1. **拉取最新主分支代码**：
+1. **同步主分支**（只做快进，避免本地 main 漂移）：
    ```bash
-   git checkout main
-   git pull origin main
+   git switch main
+   git pull --ff-only
    ```
 2. **创建用户开发分支**：
    ```bash
-   git checkout -b users/<name>/<task-name>
+   git switch -c users/<name>/<task-name>
    ```
-3. **本地开发并进行全面自检**（参见第 3 节自检矩阵）。
+3. **本地开发并自检**（参见 §3.2 验证矩阵，提 PR 前必须 `pnpm verify:all` 全绿）。
 4. **提交并推送至开发分支**：
    ```bash
    git add <modified-files>
    git commit -m "feat/fix(scope): describe changes"
    git push -u origin users/<name>/<task-name>
    ```
-5. **创建 Pull Request 到 `main` 分支**：
+5. **创建 Pull Request 到 `main` 分支**，标题带类型前缀，正文至少写四项：改了什么 / 是否动了公共契约 /
+   跑过哪些闸门（贴命令）/ revert 这个 PR 是否安全：
    ```bash
-   gh pr create --base main --head users/<name>/<task-name> --title "..." --body "..."
+   gh pr create --base main --head users/<name>/<task-name> --title "fix(scope): ..." --body "..."
    ```
+6. **合并**：只用 §2.3 的标准动作，合并完立刻执行 §2.4 的清理。
 
-### 2.3 自动部署与上线机制 (CI/CD)
+### 2.3 合并方式：只允许 Squash Merge（唯一标准动作）
+
+- 仓库设置必须锁定为「只允许 Squash」：关闭 Merge commit 与 Rebase merge，开启合并后自动删分支。
+  管理员一次性执行（仓库名以 `git remote -v` 为准）：
+  ```bash
+  gh api -X PATCH repos/RDS-official/RDS-Board-Game-Core \
+    -f allow_squash_merge=true -f allow_merge_commit=false -f allow_rebase_merge=false \
+    -f delete_branch_on_merge=true -f allow_update_branch=true
+  ```
+- **唯一允许的合并命令**：
+  ```bash
+  gh pr merge <PR号> --squash --delete-branch
+  ```
+- **禁止** `gh pr merge --merge` / `--rebase`；**禁止**在本地 `git checkout main && git merge users/...`
+  之后 `git push`；**禁止**在 `main` 上手工制造 `Merge branch 'users/...' into main`
+  或 `Merge origin/main into main` 这类提交。
+- Squash 提交标题沿用 PR 标题，**必须带 PR 编号**：
+  ```
+  fix(poker): 结算幕布不再提前消失 (#96)
+  ```
+- 为什么只许 Squash：一个 PR 在 `main` 上恰好留下**一个** commit，于是
+  `git revert <sha>` 能精确撤销整件事、不多不少；历史是一条可读的直线，事故复盘时能顺着
+  PR 号直接找到当时的动机、审查与验证记录。Merge commit 模式下，回滚需要 `revert -m 1`，
+  一旦中间又合过别的分支就会连带回滚别人的代码。
+
+### 2.4 合并后清理分支（必做，不是可选）
+
+远端由 `gh pr merge --delete-branch` 与仓库级 `delete_branch_on_merge` 自动删除；本地手动收尾：
+
+```bash
+git switch main
+git pull --ff-only
+git branch -D users/<name>/<task-name>   # squash 后原 commit 不在 main 上，-d 会误报未合并，属正常
+git fetch --prune                        # 清掉远端已删分支留下的 tracking ref
+```
+
+- 删除前必须确认该 PR 已是 `MERGED`，未合并的分支**永远不许删**：
+  ```bash
+  gh pr view <PR号> --json state,mergedAt
+  ```
+- 一次性清账（列出所有「PR 已合并」的远端 `users/*` 分支，人工过目后再删）：
+  ```bash
+  comm -12 \
+    <(gh pr list --state merged --limit 500 --json headRefName --jq '.[].headRefName' | sort -u) \
+    <(git for-each-ref --format='%(refname:lstrip=3)' 'refs/remotes/origin/users/' | sort -u)
+  ```
+- 本地长期不用的分支同样清掉；`git branch` 里出现已合并分支即视为未完成收尾。
+
+### 2.5 可追溯与可还原（回滚）
+
+每个 PR 必须满足三条可还原性，缺一条就不许合并：
+
+1. **单一意图**：一个 squash commit 只做一件事。夹带顺手重构 = 事后无法只回滚其中一半。
+2. **标题带 PR 号**：出问题能 `gh pr view <PR号> --json title,body,reviews` 还原当时的决策。
+3. **正文写回滚影响面**：动到状态 schema、持久化文件、部署脚本、环境变量时，必须明确写
+   「revert 是否安全 / 需要配套的数据迁移吗」；写不清就说明自己也没把握，先别合。
+
+**回滚也走 PR**（保住 CI 与追溯链，回滚本身同样是可追溯的一次变更）：
+
+```bash
+git switch main && git pull --ff-only
+git switch -c users/<name>/revert-<原PR号>
+git revert --no-edit <squash-commit-sha>
+pnpm verify:changed
+git push -u origin users/<name>/revert-<原PR号>
+gh pr create --base main --title "revert: 撤销 #<原PR号>（原因）" --body "..."
+gh pr merge <新PR号> --squash --delete-branch
+```
+
+- **线上还原不需要登录服务器**：两条部署链路都监听 `main` 的 push（见 `docs/DEPLOY.md`），
+  回滚 PR 合入后自动重新部署回退态；AWS 侧执行的是 `git reset --hard origin/main`，
+  服务器工作区会自己对齐。
+- **禁止**用 `git reset --hard` + 强推 `main` 回滚：会重写公共历史，所有人的分支与 PR 全部失联。
+- **禁止**直接 `git revert -m 1 <merge-commit>`：这正是 §2.3 只允许 Squash 的原因之一。
+
+### 2.6 紧急流程（唯一可以绕开评审的场景）
+
+- 仅限**生产已经故障**且**CI 本身也在挂**：允许直接 push `main` 修复，但必须
+  在 30 分钟内向团队说明「原因 / 影响面 / 后续补测动作」，并补一个说明性 PR 或 issue 留档。
+- 故障恢复后立即回到 §2.3 的正常流程，不得把直推当成常态。
+- 涉及凭据、鉴权的线上问题时，优先**降级而非硬修**（参照 §4 第 7 条）。
+
+### 2.7 自动部署与上线机制 (CI/CD)
 - 生产环境配置了 **GitHub Webhook 自动化流水线**：
   - 目标端点：`https://rdsbg.zooter.eu.org/api/github-webhook`
 - **自动触发条件**：
-  - 只有当 PR 被审核合并（或直接 push）到 **`main` 分支** 时，AWS 服务器才会触发自动化拉取与部署。
+  - 只有当变更**经由 §2.3 的 Squash 合并进入 `main`** 时，AWS 服务器才会触发自动化拉取与部署。
+    直接 push `main` 仅在 §2.6 紧急流程下允许，同样会触发部署。
   - 服务器会自动执行：`git reset --hard origin/main` -> `pnpm install` -> `pnpm run build` -> `pm2 reload rds-board-core` -> `sudo systemctl reload caddy`。
   - 用户专属分支（`users/*`）的提交不会干扰生产环境运行。
+- 因此**合并即上线**：PR 里的「回滚方式」一栏不是形式主义，是线上事故时唯一能照抄的步骤。
 
 ---
 
@@ -129,7 +225,10 @@ node node_modules/typescript/bin/tsc --noEmit && pnpm run build
 
 ## 4. 禁止事项（Anti-Hallucination & Safety）
 
-1. **禁止直接操作 `main` 分支**：严禁 `git commit` 或 `git push` 直接打在 `main` 上，所有代码必须经由 `users/<name>/xxxx` 分支提 PR。
-2. **禁止将生成图提交至仓库**：`shots/` 目录属于临时验证生成物，已被 `.gitignore` 忽略，严禁强行 `git add -f shots/`。
-3. **禁止破坏状态纯粹性**：`GameState` 必须始终可进行 `JSON.stringify` 规范化序列化与 FNV-1a 哈希计算，严禁将类实例、回调函数存入状态中。
-4. **禁止修改 Webhook 鉴权核心配置**：除非有特定需求，严禁改动 AWS 部署脚本 `/home/ubuntu/deploy-webhook/deploy-rds.sh` 及 Caddy 中的 Webhook 路由转发规则。
+1. **禁止直接操作 `main` 分支**：严禁 `git commit` 或 `git push` 直接打在 `main` 上，所有代码必须经由 `users/<name>/xxxx` 分支提 PR（紧急场景见 §2.6）。
+2. **禁止非 Squash 的合并方式**：禁止 `gh pr merge --merge` / `--rebase`、禁止本地 `git merge users/...` 后推 `main`、禁止在 `main` 上制造 `Merge branch 'users/...' into main` 或 `Merge origin/main into main`。唯一标准动作是 §2.3 的 `gh pr merge <PR号> --squash --delete-branch`。
+3. **禁止合并后不清理分支**：PR 合并即删分支（远端 + 本地 + `git fetch --prune`）。未确认 `MERGED` 的分支一律不许删；确认已合并的分支一律不许留。
+4. **禁止重写公共历史**：`main` 与别人的 `users/*` 分支禁止 `git push --force` / `git reset --hard` 回滚；回滚必须走 §2.5 的 revert PR，禁止 `git revert -m 1 <merge-commit>`。
+5. **禁止将生成图提交至仓库**：`shots/` 目录属于临时验证生成物，已被 `.gitignore` 忽略，严禁强行 `git add -f shots/`。
+6. **禁止破坏状态纯粹性**：`GameState` 必须始终可进行 `JSON.stringify` 规范化序列化与 FNV-1a 哈希计算，严禁将类实例、回调函数存入状态中。
+7. **禁止修改 Webhook 鉴权核心配置**：除非有特定需求，严禁改动生产服务器上的自动部署脚本及 Caddy 中的 Webhook 路由转发规则（具体路径属服务器内部信息，不入库）。
