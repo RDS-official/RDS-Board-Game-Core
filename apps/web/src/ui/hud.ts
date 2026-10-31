@@ -37,14 +37,6 @@ const PLAYER_CARD_HEIGHT = 104;
 /** Arbiter owner id for the enlarged seat plaque window. */
 const SEAT_PEEK_OWNER = 'hud.seat';
 
-/** Short trait key → character-sheet abbreviation used by the pip ladder. */
-const HUD_TRAIT_SHORT: Record<string, string> = {
-  speed: '速',
-  might: '力',
-  sanity: '智',
-  knowledge: '识'
-};
-
 export interface HUDOptions {
   onSwitchGame: (gameId: string) => void;
   /** Restart the current game at a named scenario ('' = plain setup). */
@@ -103,11 +95,11 @@ export class BoardGameHUD {
   private sheetBackdrop?: (event: Event) => void;
   /** Single owner of every subject overlay: hover preview, sheet, modal. */
   private readonly overlays = new OverlayArbiter();
-  /** Haunt id whose overture has already played. */
-  private lastHauntId?: string;
+  /** Key of the game-declared moment whose curtain has already played. */
+  private lastMomentKey?: string;
   /** False until the first snapshot has been observed. */
-  private hauntArmed = false;
-  private hauntTimer: number | null = null;
+  private momentArmed = false;
+  private momentTimer: number | null = null;
   /** Activity feed starts open and remembers the player's choice. */
   private historyCollapsed = false;
   /** Active isolated floor in the 3D scene ('ALL' displays all floors). */
@@ -170,8 +162,8 @@ export class BoardGameHUD {
     const roomCard = this.container.querySelector('#room-card') as HTMLElement | null;
     if (roomCard) roomCard.style.display = 'none';
     this.lastActorRoomId = undefined;
-    this.lastHauntId = undefined;
-    this.hauntArmed = false;
+    this.lastMomentKey = undefined;
+    this.momentArmed = false;
     this.selectedFloor = 'ALL';
     this.presenter = presenter;
     this.bindPresenter(presenter);
@@ -778,9 +770,8 @@ export class BoardGameHUD {
       void card.offsetWidth;
       card.classList.add(loss ? 'trait-hit' : 'trait-heal');
 
-      const short = HUD_TRAIT_SHORT[change.traitKey] ?? '';
       card.querySelectorAll<HTMLElement>('.trait-row').forEach(row => {
-        if ((row.querySelector('.trait-key')?.textContent ?? '').trim() !== short) return;
+        if (row.dataset.traitKey !== change.traitKey) return;
         row.classList.remove('flash-down', 'flash-up');
         void row.offsetWidth;
         row.classList.add(loss ? 'flash-down' : 'flash-up');
@@ -955,52 +946,49 @@ export class BoardGameHUD {
   }
 
   /**
-   * Full-screen haunt overture. The rules already flip `hauntTriggered` and
-   * write a role-filtered objective into `mission`; this is pure presentation.
+   * Full-screen curtain for a game-declared moment (a reveal, a finale, a vote).
+   *
+   * The HUD keeps only the “already played” bookmark and paints neutral lines: what
+   * counts as a new moment, and every word on the curtain, come from
+   * GamePresentationHints.describeMoment. A game that declares no moment never
+   * gets a curtain, and cannot inherit another game's.
    */
-  private maybeShowHaunt(snapshot: GameSnapshot): void {
-    const vars = (snapshot.board.globalVars ?? {}) as Record<string, unknown>;
-    const haunt = vars.haunt as
-      | { id?: string; number?: number; title?: string; intro?: string; traitorId?: string }
-      | null
-      | undefined;
-    if (!vars.hauntTriggered || !haunt?.id) {
-      this.hauntArmed = true;
+  private maybeShowMoment(): void {
+    const moment = this.presenter.moment?.() ?? null;
+    if (!moment) {
+      this.momentArmed = true;
       return;
     }
-    if (!this.hauntArmed) {
-      // Scenario jumps can open straight into a haunt; do not replay the
-      // overture for a board the player just loaded.
-      this.hauntArmed = true;
-      this.lastHauntId = haunt.id;
+    if (!this.momentArmed) {
+      // Loading a board mid-moment must not replay the curtain.
+      this.momentArmed = true;
+      this.lastMomentKey = moment.key;
       return;
     }
-    if (this.lastHauntId === haunt.id) return;
-    this.lastHauntId = haunt.id;
+    if (this.lastMomentKey === moment.key) return;
+    this.lastMomentKey = moment.key;
 
-    const traitor = haunt.traitorId ? snapshot.board.players[haunt.traitorId] : undefined;
-    let layer = this.container.querySelector('#haunt-cine') as HTMLElement | null;
+    let layer = this.container.querySelector('#moment-cine') as HTMLElement | null;
     if (!layer) {
       layer = document.createElement('div');
-      layer.id = 'haunt-cine';
-      layer.className = 'haunt-cine';
+      layer.id = 'moment-cine';
+      layer.className = 'moment-cine';
       this.container.appendChild(layer);
     }
+    const cast = (moment.cast ?? [])
+      .map(entry => `<div class="mc-cast">${escHtml(entry.label)} · <b>${escHtml(entry.name)}</b></div>`)
+      .join('');
     layer.innerHTML = `
-      <div class="hc-vignette"></div>
-      <div class="hc-inner">
-        <div class="hc-kicker">作祟开始 · THE HAUNT BEGINS</div>
-        <div class="hc-number">HAUNT No.${String(haunt.number ?? '?').padStart(2, '0')}</div>
-        <h1 class="hc-title">${String(haunt.title ?? '未知作祟')}</h1>
-        <div class="hc-rule"></div>
-        ${haunt.intro ? `<p class="hc-story">${haunt.intro}</p>` : ''}
-        ${
-          traitor
-            ? `<div class="hc-traitor">背叛者 · <b>${traitor.name}</b></div>`
-            : '<div class="hc-traitor">背叛者尚未现身</div>'
-        }
-        <p class="hc-objective">${snapshot.mission ?? ''}</p>
-        <div class="hc-hint">点击任意处继续</div>
+      <div class="mc-vignette"></div>
+      <div class="mc-inner">
+        ${moment.kicker ? `<div class="mc-kicker">${escHtml(moment.kicker)}</div>` : ''}
+        ${moment.caption ? `<div class="mc-caption">${escHtml(moment.caption)}</div>` : ''}
+        <h1 class="mc-title">${escHtml(moment.title)}</h1>
+        <div class="mc-rule"></div>
+        ${moment.story ? `<p class="mc-story">${escHtml(moment.story)}</p>` : ''}
+        ${cast}
+        ${moment.objective ? `<p class="mc-objective">${escHtml(moment.objective)}</p>` : ''}
+        <div class="mc-hint">点击任意处继续</div>
       </div>
     `;
     layer.classList.add('open');
@@ -1011,8 +999,8 @@ export class BoardGameHUD {
       layer!.removeEventListener('click', close);
     };
     layer.addEventListener('click', close);
-    if (this.hauntTimer) window.clearTimeout(this.hauntTimer);
-    this.hauntTimer = window.setTimeout(close, 9000);
+    if (this.momentTimer) window.clearTimeout(this.momentTimer);
+    this.momentTimer = window.setTimeout(close, moment.durationMs ?? 9000);
   }
 
   private syncSoundButton(): void {
@@ -1215,7 +1203,7 @@ export class BoardGameHUD {
     this.renderHistory(snapshot);
     this.renderDock(snapshot);
     this.maybeRevealNode(snapshot);
-    this.maybeShowHaunt(snapshot);
+    this.maybeShowMoment();
   }
 
   /**
@@ -1370,7 +1358,7 @@ export class BoardGameHUD {
 
   /**
    * Recent activity feed: newest event on top, grouped by kind colour so a
-   * glance separates damage from movement, cards and haunt beats.
+   * glance separates damage from movement, cards and story beats.
    */
   /**
    * Animate a fresh trait check. `lastRoll` persists between snapshots, so the
@@ -1644,8 +1632,9 @@ export class BoardGameHUD {
 
     const ppl = occupants
       .map(p => {
-        const role = p.role === 'TRAITOR' ? '叛徒' : p.role === 'HERO' ? '英雄' : '探索者';
-        return `<span class="rc-chip" style="--chip:${escHtml(p.color)}"><i></i>${escHtml(p.name)} · ${role}</span>`;
+        const role = this.presenter.roleLabel?.(String(p.role ?? '')) ?? '';
+        const tag = role ? ` · ${escHtml(role)}` : '';
+        return `<span class="rc-chip" style="--chip:${escHtml(p.color)}"><i></i>${escHtml(p.name)}${tag}</span>`;
       })
       .join('');
     const mobs = monsters
@@ -1828,7 +1817,7 @@ export class BoardGameHUD {
                   bonus === 0
                     ? ''
                     : `<span class="trait-mod ${bonus > 0 ? 'up' : 'down'}" title="携带物品加成">${bonus > 0 ? '+' : ''}${bonus}</span>`;
-                return `<div class="trait-row ${player.alive ? '' : 'dead'}" style="--trait-color:${pip.color}" title="${pip.label}">
+                return `<div class="trait-row ${player.alive ? '' : 'dead'}" style="--trait-color:${pip.color}" title="${pip.label}" data-trait-key="${escapeAttr(pip.key ?? '')}">
                   <span class="trait-key">${pip.short ?? ''}</span>
                   <span class="trait-track">${segs}</span>
                   <span class="trait-val">${pip.value}</span>${bonusChip}

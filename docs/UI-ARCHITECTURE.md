@@ -301,7 +301,7 @@ apps/web/src/ui/
 | 类别 | 处数 | 位置 | 每次快照重建？ | 有持久状态吗 |
 | --- | --- | --- | --- | --- |
 | **常驻面板** | 7 | `renderMinimap` `renderHistory` `renderRoomCard`×2 `renderPlayers` `renderDock`×3 | **是** | **有**：滚动位置、悬停、焦点、展开态 |
-| 临时浮层 | 10 | `openPayloadForm`×2 `showCardSheet`×2 `maybeShowHaunt`×2 `openActionDetail`×2 `closePayload` | 否（按需重建） | 无 |
+| 临时浮层 | 10 | `openPayloadForm`×2 `showCardSheet`×2 `maybeShowMoment`×2 `openActionDetail`×2 `closePayload` | 否（按需重建） | 无 |
 | 小型注入 | 6 | `pushToast` `showAnnouncement` `showHoverHint` `renderViewerSelect` `renderScenarioSelect` `renderSkeleton` | 部分 | 基本无 |
 
 **结论**：真正的问题是「常驻面板每次快照整段重建」——它把滚动位置、悬停态、键盘焦点一起冲掉。临时浮层重建没有代价，不需要组件化。

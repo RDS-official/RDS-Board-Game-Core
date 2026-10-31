@@ -128,6 +128,8 @@ export interface UiPlayer {
     start?: number;
     /** Standing bonus from carried cards, shown next to the value. */
     modifier?: number;
+    /** Opaque trait key, so the HUD can flash a row without a label table. */
+    key?: string;
   }[];
   hp?: { current: number; max: number };
 }
@@ -477,6 +479,23 @@ export interface UiDiscoveryView {
   reveal?: boolean;
 }
 
+/**
+ * A full-screen beat the game declares through presentation.describeMoment
+ * (a haunt starting, a finale, a vote result).
+ *
+ * The HUD keeps no vocabulary of its own: it bookmarks the last `key` it played
+ * and paints these lines. A game that declares no moment never gets a curtain.
+ */
+export interface UiMoment {
+  key: string;
+  kicker?: string;
+  caption?: string;
+  title: string;
+  story?: string;
+  cast?: { label: string; name: string }[];
+  objective?: string;
+  durationMs?: number;
+}
 /** Structured trait movement attached to notices so the UI can animate it. */
 export interface UiTraitChange {
   playerId: string;
@@ -561,6 +580,13 @@ export interface GamePresenter {
    * hints. Null when the game has nothing to say about that node.
    */
   nodeDetail?(nodeId: string): UiDiscoveryView | null;
+  /**
+   * Full-screen beat to announce once, resolved from the game presentation
+   * hints. Null when the game declares nothing to announce.
+   */
+  moment?(): UiMoment | null;
+  /** Localised role name, or null when the game does not know that role. */
+  roleLabel?(role: string): string | null;
 
   /** Rotate / confirm a preloaded room tile without opening a modal. */
   rotatePlacement(direction?: 1 | -1): void;

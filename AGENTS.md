@@ -72,13 +72,15 @@ packages/games/src/*   六款夹具，仅实现 setup / legalActions / reduce / 
 apps/web/src/render    Three.js 表现层，负责几何体渲染与物理演算，不直接修改核心逻辑状态
 ```
 
-**能力优先于身份**：通用层（`packages/app`、`apps/web`)不得用 `meta.id === '<gameId>'` 或某款游戏的专有术语来决定表现；需要差异化时由游戏在 `GameModule.presentation`（`packages/kernel/src/module.ts` 的 `GamePresentationHints`：`cardPreviewOnHover` / `cardFacts` / `cardStyle` / `describeNode`）里声明能力，框架给默认实现；声明统一用 `definePresentation()` 写，键的类型错误在加载时就抛 `TypeError`。回归守卫在 `packages/harness/src/suites/presentation.ts`。
+**能力优先于身份**：通用层（`packages/app`、`apps/web`)不得用 `meta.id === '<gameId>'` 或某款游戏的专有术语来决定表现；需要差异化时由游戏在 `GameModule.presentation`（`packages/kernel/src/module.ts` 的 `GamePresentationHints`：`cardPreviewOnHover` / `cardFacts` / `cardStyle` / `describeNode` / `describeTrait` / `traits` / `describeMoment` / `roleLabel`）里声明能力，框架给默认实现；声明统一用 `definePresentation()` 写，键的类型错误在加载时就抛 `TypeError`。回归守卫在 `packages/harness/src/suites/presentation.ts`。
 
 **详情视图是中性结构**：`packages/app/src/contracts.ts` 的 `UiDetailView`（`key` / `title` / `subtitle` / `badge` / `tone` / `seal` / `desc` / `art` / `sections` / `actions`）不认识任何游戏词汇：类别文本走 `badge`（游戏本地化）、配色走不透明的 `tone` token（`danger` / `treasure` / `event` / `place`，由 `apps/web/src/ui/detailView.ts` 映射成 `--ink` / `--ribbon`）、装饰 glyph 走 `seal`、事实行走 `sections`（来自 `GamePresentationHints.cardFacts`）。新增表现一律加字段/加能力，不加 `if (gameId)`。
 
 **浮层唯一仲裁**：`apps/web/src/ui/overlay.ts` 的 `OverlayArbiter` 是悬浮芯片（`peek`）与详情大卡（`pinned` / `modal`）的唯一状态源，两个通道都只向它申请、都只从它绘制。三条不变量：①同一 `key`（`entityDetailKey` / `nodeDetailKey` / `fixedDetailKey`）在屏上只有一个视图；②强度序 `peek < pinned < modal`，弱条目永不能驱逐强条目（指针漂移不能顶掉玩家点开的卡）；③条目只因显式关闭或更强条目接管而消失。新增任何浮层都要走 `arbiter.open()`，不要再直接操作 `#hover-hint` / `#card-sheet-layer` 的 DOM。
 
 **发现时刻由游戏声明**：地图上新出现一个节点时，通用层只能判断「有新的 `node.id`」这一件事（`apps/web/src/ui/hud.ts` 的 `maybeRevealNode`：首帧只登记布局，之后把新 id 交给 `presenter.nodeDetail(nodeId)`）。给玩家看什么——房间档案的标题、副标题、事实行、脚注、是否全屏揭示——全部来自游戏的 `GamePresentationHints.describeNode`，经 `packages/app/src/inspect.ts` 的 `buildNodeDiscoveryView` 变成中性 `UiDetailView`。没声明 `describeNode` 的游戏不会弹任何过场，也不会因为没有房间概念而报错。
+
+**数值阶梯与过场也由游戏声明**：角色卡上的四条阶梯、身份名、全屏过场都不是通用层知识。①`describeTrait(traitKey)` 给出一个阶梯的显示名、pip 简称、颜色、格数与伤害性质（`damageKind: 'MENTAL' | 'PHYSICAL'`，决定这一格掉的是神智还是体力）；②`traits(custom)` 从玩家自己的 `customProps` 里枚举出阶梯键值，通用层不再知道 `traitIndex` 这种字段名；③`describeMoment(state)` 把一个投影切片（`globalVars` + `mission` + 玩家名/身份）变成过场幕布（`key` / `kicker` / `caption` / `title` / `story` / `cast` / `objective` / `durationMs`），HUD 只按 `key` 记住「已经播过」，没声明就没有过场；④`roleLabel(role)` 把身份 token 变成中文名，角色卡与玩家栏共用。`apps/web/src/ui/hud.ts` 因此不含任何阶梯简称表、身份名或过场文案，pip 闪烁按不透明的 `pip.key`（`data-trait-key`）定位行。
 
 ### 3.2 必跑验证矩阵
 
@@ -98,7 +100,7 @@ pnpm verify:all       # core + matrix + overlap + lint + tsc/build + docs + UI�
 单条闸门（需要单独定位时）：
 
 ```bash
-# 1. 必跑：内核 247 项一致性测试与架构边界静态检查（分片并行：CORE_SHARDS，默认 3）
+# 1. 必跑：内核 257 项一致性测试与架构边界静态检查（分片并行：CORE_SHARDS，默认 3）
 pnpm test:core:parallel
 
 # 2. 动了 packages/kernel/src 或 packages/games/src/* 时必跑：黑盒随机对局与回放哈希（按模块并行）
@@ -116,7 +118,7 @@ pnpm test:ui
 # 6. 必跑：文档路径有效性（旧 src/ 布局引用 / 失效链接）
 pnpm docs:check
 
-# 7. 必跑：Biome lint（0 error；当前基线 231 warning / 130 info 不阻断）
+# 7. 必跑：Biome lint（0 error；当前基线 231 warning / 131 info 不阻断）
 pnpm lint
 
 # 8. 必跑：TypeScript 类型检查与生产编译构建

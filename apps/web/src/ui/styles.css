@@ -3587,7 +3587,7 @@ select.pf-control {
 /* ============================================================
    Haunt overture — the moment the betrayal is revealed.
    ============================================================ */
-.haunt-cine {
+.moment-cine {
   position: absolute;
   inset: 0;
   z-index: 80;
@@ -3596,11 +3596,11 @@ select.pf-control {
   cursor: pointer;
 }
 
-.haunt-cine.open {
+.moment-cine.open {
   display: grid;
 }
 
-.hc-vignette {
+.mc-vignette {
   position: absolute;
   inset: 0;
   background:
@@ -3615,7 +3615,7 @@ select.pf-control {
   }
 }
 
-.hc-inner {
+.mc-inner {
   position: relative;
   width: min(720px, 78vw);
   text-align: center;
@@ -3632,7 +3632,7 @@ select.pf-control {
   }
 }
 
-.hc-kicker {
+.mc-kicker {
   font-size: var(--type-xs);
   letter-spacing: 0.52em;
   text-transform: uppercase;
@@ -3646,7 +3646,7 @@ select.pf-control {
   52% { opacity: 0.95; }
 }
 
-.hc-number {
+.mc-caption {
   margin-top: 18px;
   font-size: var(--type-xs);
   letter-spacing: 0.32em;
@@ -3654,7 +3654,7 @@ select.pf-control {
   font-variant-numeric: tabular-nums;
 }
 
-.hc-title {
+.mc-title {
   margin: 10px 0 0;
   font-family: var(--font-display);
   font-size: clamp(38px, 6.4vw, 72px);
@@ -3666,7 +3666,7 @@ select.pf-control {
     0 6px 34px rgba(0, 0, 0, 0.8);
 }
 
-.hc-rule {
+.mc-rule {
   width: 190px;
   height: 1px;
   margin: 22px auto 18px;
@@ -3674,7 +3674,7 @@ select.pf-control {
   position: relative;
 }
 
-.hc-rule::after {
+.mc-rule::after {
   content: '◆';
   position: absolute;
   left: 50%;
@@ -3686,19 +3686,19 @@ select.pf-control {
   padding: 0 6px;
 }
 
-.hc-traitor {
+.mc-cast {
   font-size: var(--type-sm);
   letter-spacing: 0.18em;
   color: rgba(224, 96, 78, 0.92);
 }
 
-.hc-traitor b {
+.mc-cast b {
   color: #ffd9c4;
   font-weight: 700;
   letter-spacing: 0.08em;
 }
 
-.hc-story {
+.mc-story {
   margin: 14px auto 0;
   max-width: 520px;
   font-family: "Songti SC", "Noto Serif SC", Georgia, serif;
@@ -3709,7 +3709,7 @@ select.pf-control {
   text-shadow: 0 2px 18px rgba(0, 0, 0, 0.8);
 }
 
-.hc-objective {
+.mc-objective {
   margin: 16px auto 0;
   max-width: 560px;
   font-size: var(--type-xs);
@@ -3717,7 +3717,7 @@ select.pf-control {
   color: rgba(236, 226, 206, 0.8);
 }
 
-.hc-hint {
+.mc-hint {
   margin-top: 28px;
   font-size: var(--type-xs);
   letter-spacing: 0.26em;

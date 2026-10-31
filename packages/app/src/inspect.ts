@@ -9,12 +9,13 @@
  * Nothing here may know a game id: card vocabulary, category band and the
  * hover-preview policy come from GameModule.presentation hints declared by the
  * game itself. The same rule governs map nodes: the discovery sheet for a newly
- * explored room is built from the describeNode hints, never from the HUD.
+ * explored room is built from the describeNode hints, never from the HUD. Full-screen
+ * beats (a haunt starting) follow the same rule through describeMoment.
  */
 import type { GameModule } from '@rds/kernel/module';
 import type { Entity, MapGraphNode } from '@rds/kernel/types';
 import { actorDetailKey, entityDetailKey, nodeDetailKey } from './contracts';
-import type { GameSnapshot, UiDetailView, UiDiscoveryView, UiNotice } from './contracts';
+import type { GameSnapshot, UiDetailView, UiDiscoveryView, UiMoment, UiNotice } from './contracts';
 
 /** A projected entity as the view layer receives it (kernel ProjectedGameState). */
 export type InspectableEntity = Partial<Entity> & { isMasked?: boolean };
@@ -156,5 +157,42 @@ export function buildNodeDiscoveryView(
     },
     footer: hints.footer,
     reveal: hints.reveal
+  };
+}
+
+export interface MomentInspectContext {
+  module: GameModule;
+}
+
+/**
+ * Build the neutral curtain for a game-declared beat, or null.
+ *
+ * The HUD keeps the “already played” bookmark by `key` and paints the returned
+ * lines; nothing here knows what a haunt is. The projection is trimmed to the
+ * slice the declaration may read, so a moment rule cannot walk the whole state.
+ */
+export function buildMoment(
+  board: { globalVars?: Record<string, unknown>; players?: Record<string, { name: string; role?: string; alive?: boolean } | undefined> },
+  mission: string | undefined,
+  context: MomentInspectContext
+): UiMoment | null {
+  const describe = context.module.presentation?.describeMoment;
+  if (!describe) return null;
+  const players: Record<string, { name: string; role?: string; alive?: boolean }> = {};
+  for (const [id, player] of Object.entries(board.players ?? {})) {
+    if (!player) continue;
+    players[id] = { name: player.name, role: player.role, alive: player.alive };
+  }
+  const moment = describe({ globalVars: board.globalVars ?? {}, mission, players });
+  if (!moment) return null;
+  return {
+    key: moment.key,
+    kicker: moment.kicker,
+    caption: moment.caption,
+    title: moment.title,
+    story: moment.story,
+    cast: moment.cast,
+    objective: moment.objective,
+    durationMs: moment.durationMs
   };
 }

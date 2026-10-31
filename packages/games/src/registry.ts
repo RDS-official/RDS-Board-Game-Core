@@ -1,7 +1,15 @@
 import { defineGame, definePresentation, GameModule } from '@rds/kernel/module';
 import { GameOutcome } from '@rds/kernel/types';
 import { BETRAYAL_HOOKS } from './betrayal/hooks';
-import { betrayalCardFacts, betrayalCardStyle, betrayalDescribeNode } from './betrayal/presentation';
+import {
+  betrayalCardFacts,
+  betrayalCardStyle,
+  betrayalDescribeMoment,
+  betrayalDescribeNode,
+  betrayalDescribeTrait,
+  betrayalRoleLabel,
+  betrayalTraits
+} from './betrayal/presentation';
 import { BetrayalRules } from './betrayal/rules';
 import { BETRAYAL_SCENARIOS } from './betrayal/scenarios';
 import { BETRAYAL_SPATIAL } from './betrayal/spatial';
@@ -16,6 +24,7 @@ import { PokerRules } from './poker/rules';
 import { pokerScenario, setupPoker } from './poker/setup';
 import { POKER_TABLE } from './poker/seating';
 import { SANGUOSHA_HOOKS } from './sanguosha/hooks';
+import { sanguoshaRoleLabel } from './sanguosha/presentation';
 import { SanguoshaRules } from './sanguosha/rules';
 import { setupSanguosha } from './sanguosha/setup';
 import { SplendorRules } from './splendor/rules';
@@ -141,6 +150,8 @@ export const sanguoshaModule: GameModule = defineGame({
       topologySpec: { kind: 'ring', adjacency: 'neighbors', geometry: 'ring' },
     }
   },
+  // 身份 token（主公/忠臣/反贼/内奸）是本包词汇，通用层只显示字符串。
+  presentation: definePresentation({ roleLabel: sanguoshaRoleLabel }),
   hooks: SANGUOSHA_HOOKS,
   project: {
     player: (player, viewer, state) => {
@@ -304,11 +315,16 @@ export const betrayalModule: GameModule = defineGame({
       },
     }
   },
-  // 山屋的卡牌词汇（武器/护甲/预兆…）、派生的详情行与新房间档案都由本包声明。
+  // 山屋的卡牌词汇（武器/护甲/预兆…）、派生的详情行、新房间档案、四条数值阶梯、
+  // 身份名与作祟序曲都由本包声明；通用层只负责摆放。
   presentation: definePresentation({
     cardFacts: betrayalCardFacts,
     cardStyle: betrayalCardStyle,
-    describeNode: betrayalDescribeNode
+    describeNode: betrayalDescribeNode,
+    describeTrait: betrayalDescribeTrait,
+    traits: betrayalTraits,
+    describeMoment: betrayalDescribeMoment,
+    roleLabel: betrayalRoleLabel
   }),
   hooks: BETRAYAL_HOOKS,
   timing: { decision: 6, response: 4 },

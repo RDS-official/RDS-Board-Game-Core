@@ -6,7 +6,7 @@ import { OccupancyIndex } from '@rds/kernel/occupancy';
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { UniversalSession } from '@rds/app/session';
-import { buildEntityInspectNotice, buildNodeDiscoveryView } from '@rds/app/inspect';
+import { buildEntityInspectNotice, buildMoment, buildNodeDiscoveryView } from '@rds/app/inspect';
 import { entityDetailKey, nodeDetailKey } from '@rds/app/contracts';
 import type { UiDetailView, UiNotice } from '@rds/app/contracts';
 import { OverlayArbiter } from '@rds/web/ui/overlay';
@@ -585,4 +585,88 @@ test('presentation: the HUD holds no room vocabulary, the game package does', ()
   const betrayal = read('../../../games/src/betrayal/presentation.ts');
   assert(betrayal.includes('已连通门位'), 'the room vocabulary lives with the game');
   assert(betrayal.includes('betrayalDescribeNode'), 'the game exports its node description');
+});
+
+test('presentation: the trait ladders are declared by the game, not by the shell', () => {
+  const betrayal = GAME_REGISTRY.betrayal.presentation;
+  const sanity = betrayal?.describeTrait?.('sanity');
+  assert(!!sanity, 'betrayal describes its ladders');
+  assertEqual(sanity!.label, '神智', 'the printed name is the game word');
+  assertEqual(sanity!.short, '智', 'the pip abbreviation too');
+  assertEqual(sanity!.damageKind, 'MENTAL', 'mental damage is a game claim, not a HUD guess');
+  assertEqual(sanity!.max, 8, 'the track length is the printed one');
+  assertEqual(betrayal?.describeTrait?.('might')?.damageKind, 'PHYSICAL', 'might still hits the body');
+  assertEqual(betrayal?.describeTrait?.('luck'), null, 'a foreign key is not invented');
+
+  // Enumerating a player's ladders is also the game's call: the shell has no
+  // idea that trait values live under `traitIndex`.
+  assertEqual(
+    JSON.stringify(betrayal?.traits?.({ traitIndex: { speed: 4, might: 3 } })),
+    JSON.stringify({ speed: 4, might: 3 }),
+    'the ladder read out of custom props'
+  );
+  assertEqual(betrayal?.traits?.({}), null, 'no ladder bag, no pips');
+  assertEqual(GAME_REGISTRY.splendor.presentation?.describeTrait, undefined, 'splendor has no ladders');
+  assertEqual(GAME_REGISTRY.sanguosha.presentation?.describeTrait, undefined, 'neither does sanguosha');
+});
+
+test('presentation: the overture is a moment the game declares', () => {
+  const board = {
+    globalVars: {
+      hauntTriggered: true,
+      haunt: { id: 'haunt_mummy', number: 3, title: '木乃伊苏醒', intro: '沙尘里有什么东西站起来了。', traitorId: 'p2' }
+    },
+    players: { p1: { name: '甲' }, p2: { name: '乙', role: 'TRAITOR' } }
+  };
+  const moment = buildMoment(board, '英雄目标：找出出口。', { module: GAME_REGISTRY.betrayal });
+  assert(!!moment, 'betrayal declares the haunt curtain');
+  assertEqual(moment!.key, 'haunt_mummy', 'the bookmark key is the haunt id, so it replays once');
+  assertEqual(moment!.kicker, '作祟开始 · THE HAUNT BEGINS', 'every word on the curtain is the game word');
+  assertEqual(moment!.caption, 'HAUNT No.03', 'the haunt number is padded by the game');
+  assertEqual(moment!.title, '木乃伊苏醒', 'the haunt title');
+  assertEqual(moment!.story, '沙尘里有什么东西站起来了。', 'the overture text');
+  assertEqual(moment!.cast?.length, 1, 'one traitor is named');
+  assertEqual(moment!.cast?.[0].label, '背叛者', 'the cast label is game vocabulary');
+  assertEqual(moment!.cast?.[0].name, '乙', 'the cast name is resolved from the projection');
+  assertEqual(moment!.objective, '英雄目标：找出出口。', 'the objective is the projected mission line');
+  assertEqual(moment!.durationMs, 9000, 'the game picks how long the table stares at it');
+
+  // Nothing is staged before the haunt actually starts.
+  assertEqual(
+    buildMoment(
+      { globalVars: { haunt: { id: 'haunt_mummy' } }, players: {} },
+      undefined,
+      { module: GAME_REGISTRY.betrayal }
+    ),
+    null,
+    'an unpacked haunt has no curtain'
+  );
+  assertEqual(buildMoment(board, undefined, { module: counterModule }), null, 'no hints, no curtain');
+  assertEqual(buildMoment(board, undefined, { module: GAME_REGISTRY.splendor }), null, 'splendor never inherits it');
+});
+
+test('presentation: the HUD holds no trait tables, role names or overture copy', () => {
+  const read = (relative: string) =>
+    readFileSync(new URL(relative, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const hud = read('../../../../apps/web/src/ui/hud.ts');
+  for (const word of ['HUD_TRAIT_SHORT', '叛徒', '英雄', '探索者', '作祟', 'HAUNT No.', 'THE HAUNT BEGINS']) {
+    assert(!hud.includes(word), `generic HUD still spells out ${word}`);
+  }
+  assert(hud.includes('maybeShowMoment('), 'the HUD reacts to a declared moment');
+  assert(hud.includes('presenter.moment?.('), 'the curtain is asked from the presenter');
+  assert(hud.includes('presenter.roleLabel?.'), 'role names are asked from the presenter');
+  assert(hud.includes('dataset.traitKey'), 'the pip flash addresses rows by opaque key');
+
+  const betrayal = read('../../../games/src/betrayal/presentation.ts');
+  for (const word of ['作祟开始', '叛徒', '神智', 'traitIndex']) {
+    assert(betrayal.includes(word), `the game package owns ${word}`);
+  }
+  assert(betrayal.includes('betrayalDescribeMoment'), 'the game exports its overture');
+  assert(betrayal.includes('betrayalDescribeTrait'), 'the game exports its ladder metadata');
+
+  const sanguosha = read('../../../games/src/sanguosha/presentation.ts');
+  assert(sanguosha.includes('主公'), 'the identity tokens live with sanguosha');
+  const session = read('../../../app/src/session.ts');
+  assert(!session.includes('LOYALIST'), 'the shared layer no longer holds identity tables');
+  assert(!session.includes('TRAIT_LABEL'), 'nor trait label tables');
 });

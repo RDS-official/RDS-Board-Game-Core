@@ -1,4 +1,9 @@
-import type { NodePresentationHints } from '@rds/kernel/module';
+import type {
+  MomentPresentationHints,
+  MomentPresentationState,
+  NodePresentationHints,
+  TraitPresentationHints
+} from '@rds/kernel/module';
 import type { MapGraphNode } from '@rds/kernel/types';
 
 /**
@@ -90,5 +95,64 @@ export function betrayalDescribeNode(node: MapGraphNode): NodePresentationHints 
     ],
     footer: '新房间已加入洋馆布局',
     reveal: true
+  };
+}
+
+/** The four printed trait ladders. */
+const TRAIT_META: Record<string, TraitPresentationHints> = {
+  speed: { label: '速度', short: '速', color: '#6aa6f5', max: 8, damageKind: 'PHYSICAL' },
+  might: { label: '力量', short: '力', color: '#e0604e', max: 8, damageKind: 'PHYSICAL' },
+  sanity: { label: '神智', short: '智', color: '#57c08b', max: 8, damageKind: 'MENTAL' },
+  knowledge: { label: '知识', short: '识', color: '#b07bf0', max: 8, damageKind: 'MENTAL' }
+};
+
+/** Display metadata for one trait ladder key, or null for a foreign key. */
+export function betrayalDescribeTrait(traitKey: string): TraitPresentationHints | null {
+  return TRAIT_META[traitKey] ?? null;
+}
+
+/** Current trait values for one player, read out of the `traitIndex` bag. */
+export function betrayalTraits(custom: Record<string, unknown>): Record<string, number> | null {
+  const index = custom.traitIndex;
+  if (!index || typeof index !== 'object') return null;
+  return index as Record<string, number>;
+}
+
+/** Role tokens printed on the character cards. */
+export function betrayalRoleLabel(role: string): string | null {
+  if (role === 'TRAITOR') return '叛徒';
+  if (role === 'HERO') return '英雄';
+  if (role === 'EXPLORER') return '探索者';
+  return null;
+}
+
+interface BetrayalHauntState {
+  id?: string;
+  number?: number;
+  title?: string;
+  intro?: string;
+  traitorId?: string;
+}
+
+/**
+ * The haunt overture.
+ *
+ * The rules already flip `hauntTriggered` and write the role-filtered objective
+ * into the mission line; this turns that state into the curtain the table sees.
+ * The projection slice carries no rules objects, so a haunt cannot leak state.
+ */
+export function betrayalDescribeMoment(state: MomentPresentationState): MomentPresentationHints | null {
+  const haunt = state.globalVars.haunt as BetrayalHauntState | null | undefined;
+  if (!state.globalVars.hauntTriggered || !haunt?.id) return null;
+  const traitor = haunt.traitorId ? state.players[haunt.traitorId] : undefined;
+  return {
+    key: String(haunt.id),
+    kicker: '作祟开始 · THE HAUNT BEGINS',
+    caption: `HAUNT No.${String(haunt.number ?? '?').padStart(2, '0')}`,
+    title: String(haunt.title ?? '未知作祟'),
+    story: haunt.intro ? String(haunt.intro) : undefined,
+    cast: [{ label: '背叛者', name: traitor?.name ?? '尚未现身' }],
+    objective: state.mission,
+    durationMs: 9000
   };
 }
