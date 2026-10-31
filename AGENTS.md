@@ -76,7 +76,7 @@ apps/web/src/render    Three.js 表现层，负责几何体渲染与物理演算
 在提交代码或提 PR 前，必须在终端执行以下检查确保全绿：
 
 ```bash
-# 1. 必跑：内核 206 项一致性测试与架构边界静态检查
+# 1. 必跑：内核 239 项一致性测试与架构边界静态检查
 pnpm test
 
 # 2. 动了 packages/kernel/src 或 packages/games/src/* 时必跑：黑盒随机对局与回放哈希一致性测试
@@ -94,7 +94,7 @@ pnpm test:ui
 # 6. 必跑：文档路径有效性（旧 src/ 布局引用 / 失效链接）
 pnpm docs:check
 
-# 7. 必跑：Biome lint（0 error；当前基线 179 warning / 92 info 不阻断）
+# 7. 必跑：Biome lint（0 error；当前基线 231 warning / 130 info 不阻断）
 pnpm lint
 
 # 8. 必跑：TypeScript 类型检查与生产编译构建

@@ -3,7 +3,7 @@
 > 本文描述 **当前代码快照** 的实际实现，而不是规划稿。
 > 形式化契约、扩展步骤与测试说明见 [CORE.md](./CORE.md)；本文侧重分层、模块职责、调用链与实现细节。
 >
-> 当前基线：`206 passed / 0 failed / 0 boundary violations`，`tsc --noEmit` 通过，`vite build` 通过。
+> 当前基线：`239 passed / 0 failed / 0 boundary violations`，`tsc --noEmit` 通过，`vite build` 通过。
 > 山屋专项的规则覆盖与缺陷评估见 [BETRAYAL.md](BETRAYAL.md)。
 
 ---
@@ -1237,7 +1237,7 @@ pnpm build
 ### 12.2 当前结果
 
 ```text
-206 passed, 0 failed, 206 cases, 0 boundary violations
+239 passed, 0 failed, 239 cases, 0 boundary violations
 ```
 
 构成：
