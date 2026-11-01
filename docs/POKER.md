@@ -562,3 +562,14 @@ node node_modules/typescript/bin/tsc --noEmit && pnpm run build
 - 内核内联模式（`autoAi: true`，测试与夹具默认）走同一个 `choosePokerAction` +
   `applyHuman`，所以两种模式的状态序列一致；`EngineOptions.autoAi` 现在会透传到
   `setup` 与场景。
+
+### 16.3 座位编制必须按座位号排列（2026-11-01 线上事故）
+
+`globalVars.seats[i]` **必须**就是 `playerOrder[i]` 那一座的编制。开局洗座之后
+`playerOrder` 是洗过的，而 `seats` 当时还是「编制顺序」，两者一错位：
+
+- 补位 AI / 观察者回桌按座位号替换 `seats[seat]`，会把「谁是 AI」整体挪一位；
+- `isAiSeat` 于是对真正的 AI 返回 false（或对真人返回 true）——驱动方以为该座位
+  是真人，AI 管线当场停摆；观察者刚回桌就卡在「轮到我但没有任何动作」。
+- 现在 `setupPoker` 直接写 `seats: dealt.result.map(entry => entry.assignment)`，
+  与 `playerOrder` 同序；回归用例覆盖「破产补位 + 观察者回桌后 seats 仍逐座对齐」。
