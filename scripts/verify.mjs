@@ -117,7 +117,7 @@ if (selected.core) {
 
 // 2. Server Self-test (when server files are touched)
 if (selected.server) {
-  add('server', 'server selftest', 'npx', ['tsx', 'apps/server/src/selftest.ts']);
+  add('server', 'server selftest', process.execPath, ['node_modules/tsx/dist/cli.mjs', 'apps/server/src/selftest.ts']);
 }
 
 // 3. Matrix Replay

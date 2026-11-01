@@ -413,10 +413,11 @@ export interface UiChipRank {
  * 公开信息（余额、战绩），不含任何隐藏牌面。
  */
 export interface UiAccountRank {
-  /** 账号 id（服务端 userId）；用于打开详情。 */
+  /** 账号 id（服务端 userId 或 AI 专属 id 如 ai:hero:...）；用于打开详情。 */
   userId: string;
   name: string;
   avatarUrl?: string;
+  isAi?: boolean;
   /** 余额 + 正在桌上的筹码。 */
   chips: number;
   /** 其中还没兑换成桌上筹码的部分。 */

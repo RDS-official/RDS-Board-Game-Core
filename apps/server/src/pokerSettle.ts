@@ -53,11 +53,21 @@ export function settleHand(
     const account = accountOf(userId);
     // 同一房间已经记过这一手（或更靠后的手数）：重连 / 重放不重复计数。
     if (Number(account.settledHands?.[roomId] ?? 0) >= handNo) continue;
-    updateAccount(userId, current => ({
-      ...current,
-      career: foldPokerFact(current.career, fact, now),
-      settledHands: { ...current.settledHands, [roomId]: handNo }
-    }));
+    const netChange = fact.wonAmount - fact.invested;
+    updateAccount(userId, current => {
+      // 如果是在桌上押了筹码的账号（真人或AI），同步更新 atTable 中的筹码
+      let atTable = current.atTable;
+      if (atTable && atTable[roomId] !== undefined) {
+        const updatedTableChips = Math.max(0, atTable[roomId] + netChange);
+        atTable = { ...atTable, [roomId]: updatedTableChips };
+      }
+      return {
+        ...current,
+        atTable,
+        career: foldPokerFact(current.career, fact, now),
+        settledHands: { ...current.settledHands, [roomId]: handNo }
+      };
+    });
     settled.push(userId);
   }
   return { handKey, settled };

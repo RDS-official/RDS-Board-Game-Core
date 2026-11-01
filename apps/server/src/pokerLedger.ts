@@ -21,6 +21,8 @@ import { DATA_DIR } from './config.ts';
 /** 一名账号的扑克账本。 */
 export interface PokerAccount {
   userId: string;
+  name?: string;
+  isAi?: boolean;
   /** 可带上桌的筹码余额；全局只此一份，桌上筹码是它的「已兑换」部分。 */
   chips: number;
   /** 生涯峰值余额，排行榜上作为资历展示。 */
@@ -36,12 +38,17 @@ export interface PokerAccount {
    * 重连）不能二次扣款；房间真正释放时才按这张表退款并清空。
    */
   atTable?: Record<string, number>;
+  /** AI 领取低保历史记录（时间戳毫秒数列表，用于计算半小时内领取次数）。 */
+  reliefTimestamps?: number[];
 }
 
 export interface PokerLedgerShape {
   version: 1;
   accounts: Record<string, PokerAccount>;
 }
+
+/** 上桌买入的下限，避免 0 筹码账号占着座位。 */
+export const MIN_BUY_IN = 100;
 
 /** 新账号的默认筹码：够玩几轮标准买入，又不至于让排行榜全是同一个数。 */
 export const STARTING_BANKROLL = 5000;
@@ -69,13 +76,16 @@ function normalize(raw: unknown): PokerLedgerShape {
     if (!record || typeof record !== 'object' || !userId) continue;
     accounts[userId] = {
       userId,
+      name: typeof record.name === 'string' ? record.name : undefined,
+      isAi: !!record.isAi,
       chips: Number.isFinite(Number(record.chips)) ? Math.max(0, Math.round(Number(record.chips))) : STARTING_BANKROLL,
       peakChips: Number.isFinite(Number(record.peakChips))
         ? Math.max(0, Math.round(Number(record.peakChips)))
         : STARTING_BANKROLL,
       career: { ...EMPTY_POKER_CAREER, ...(record.career ?? {}) },
       settledHands: record.settledHands && typeof record.settledHands === 'object' ? { ...record.settledHands } : {},
-      atTable: record.atTable && typeof record.atTable === 'object' ? { ...record.atTable } : {}
+      atTable: record.atTable && typeof record.atTable === 'object' ? { ...record.atTable } : {},
+      reliefTimestamps: Array.isArray(record.reliefTimestamps) ? record.reliefTimestamps.filter(t => typeof t === 'number') : []
     };
   }
   return { version: 1, accounts };
@@ -121,6 +131,39 @@ export function accountOf(userId: string): PokerAccount {
   ledger.accounts[userId] = created;
   save();
   return created;
+}
+
+/** 救济金金额与半小时限制规则 */
+export const RELIEF_AMOUNT = 1000;
+export const RELIEF_WINDOW_MS = 30 * 60 * 1000; // 30 分钟
+export const MAX_RELIEF_PER_WINDOW = 2; // 最多 2 次
+
+/**
+ * 尝试为筹码不足的 AI 发放救济金。
+ * 规则：半小时内最多领取 2 次，每次发放 1000 筹码。
+ * 返回是否成功领取救济金以及当前筹码。
+ */
+export function tryGrantAiRelief(userId: string, now = Date.now()): { granted: boolean; chips: number } {
+  let granted = false;
+  let finalChips = 0;
+  updateAccount(userId, current => {
+    const history = (current.reliefTimestamps ?? []).filter(t => now - t < RELIEF_WINDOW_MS);
+    if (history.length >= MAX_RELIEF_PER_WINDOW) {
+      finalChips = current.chips;
+      return { ...current, reliefTimestamps: history };
+    }
+    // 允许领取救济金
+    granted = true;
+    const newChips = current.chips + RELIEF_AMOUNT;
+    finalChips = newChips;
+    return {
+      ...current,
+      chips: newChips,
+      peakChips: Math.max(current.peakChips, newChips),
+      reliefTimestamps: [...history, now]
+    };
+  });
+  return { granted, chips: finalChips };
 }
 
 /** 只读查询：没有记录时返回默认账本，但**不写盘**（排行榜轮询走这条路径）。 */

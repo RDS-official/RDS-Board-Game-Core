@@ -1,5 +1,5 @@
 import type { HubGameInfo, HubRoomInfo } from '@rds/room-protocol';
-import { getGames, getRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoom, me, setReady, kickPlayer, transferHost, setAiSeats, updateDisplayName, changeMyPassword, uploadAvatar, UserProfile } from './api.ts';
+import { getGames, getRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoom, me, setReady, kickPlayer, transferHost, setAiSeats, updateDisplayName, changeMyPassword, uploadAvatar, UserProfile, getPokerLeaderboard, PokerLeaderboardResponse } from './api.ts';
 import { showToast } from './toast.ts';
 import { localToken, stripNetParamsFromUrl } from '../entryRoute.ts';
 
@@ -56,6 +56,9 @@ let roomsLoaded = false;
 let onlineIds: string[] = [];
 let roomTimer: ReturnType<typeof setInterval> | null = null;
 let roomsTimer: ReturnType<typeof setInterval> | null = null;
+let leaderboardTimer: ReturnType<typeof setInterval> | null = null;
+let pokerLeaderboardData: PokerLeaderboardResponse | null = null;
+let selectedLeaderboardUserId: string | null = null;
 let rootEl: HTMLElement | null = null;
 let onEnterGame: ((p: EnterGameParams) => void) | null = null;
 let visibilityHandler: (() => void) | null = null;
@@ -211,6 +214,10 @@ function stopTimer(which: 'room' | 'list'): void {
   const t = which === 'room' ? roomTimer : roomsTimer;
   if (t) clearInterval(t);
   if (which === 'room') roomTimer = null; else roomsTimer = null;
+  if (which === 'list' && leaderboardTimer) {
+    clearInterval(leaderboardTimer);
+    leaderboardTimer = null;
+  }
 }
 
 function render(): void {
@@ -254,6 +261,113 @@ function authHtml() {
   </div>`;
 }
 
+function leaderboardHtml(): string {
+  const rows = pokerLeaderboardData?.rows ?? [];
+  return `
+    <div class="lob-card lob-leaderboard-card">
+      <div class="lob-lb-head">
+        <div class="lob-lb-title">
+          <span class="lob-lb-icon">♠</span>
+          <b>德州扑克风云榜</b>
+        </div>
+        <span class="lob-muted" style="font-size:12px">${pokerLeaderboardData?.rooms ?? 0} 桌对局中</span>
+      </div>
+      <div class="lob-lb-list" id="poker-leaderboard-list">
+        ${
+          rows.length === 0
+            ? '<div class="lob-empty" style="padding:16px 0; font-size:12px">加载排行榜中…</div>'
+            : rows
+                .map((row, index) => {
+                  const percent = (row.share * 100).toFixed(1);
+                  const isAi = !!row.isAi;
+                  const tag = isAi
+                    ? '<span class="lob-tag ai">AI 名将</span>'
+                    : '<span class="lob-tag human">真人</span>';
+                  const playing = row.roomId
+                    ? '<span class="lob-tag playing" title="正在对局">在桌</span>'
+                    : '';
+                  const rankClass = index === 0 ? 'top1' : index === 1 ? 'top2' : index === 2 ? 'top3' : '';
+                  const avatarHtml = row.avatarUrl
+                    ? `<img class="lob-lb-avatar" src="${esc(row.avatarUrl)}" alt="" loading="lazy" />`
+                    : `<span class="lob-lb-avatar ${isAi ? 'ai-avatar' : ''}">${esc(row.name.slice(0, 1))}</span>`;
+                  return `
+                    <div class="lob-lb-row" data-rank-user="${esc(row.userId)}" title="${esc(row.name)} · 点击查看生涯战绩">
+                      <span class="lob-lb-rank ${rankClass}">${index + 1}</span>
+                      <span class="lob-lb-name">
+                        ${avatarHtml}
+                        <span class="lob-lb-text">${esc(row.name)}</span>
+                        ${tag}${playing}
+                      </span>
+                      <span class="lob-lb-chips">${row.chips}</span>
+                      <span class="lob-lb-pct">${percent}%</span>
+                    </div>
+                  `;
+                })
+                .join('')
+        }
+      </div>
+      <div class="lob-lb-foot">
+        <span>AI 每半小时可领 2 次救济金 · 筹码不足不上桌</span>
+      </div>
+    </div>
+  `;
+}
+
+function accountDetailModalHtml(): string {
+  if (!selectedLeaderboardUserId || !pokerLeaderboardData) return '';
+  const row = pokerLeaderboardData.rows.find(r => r.userId === selectedLeaderboardUserId);
+  if (!row) return '';
+  const percent = (v: number) => `${(v * 100).toFixed(1)}%`;
+  const stat = (label: string, val: string, hint?: string) => `
+    <div class="lob-ad-stat" ${hint ? `title="${esc(hint)}"` : ''}>
+      <span class="lob-ad-stat-k">${esc(label)}</span>
+      <span class="lob-ad-stat-v">${esc(val)}</span>
+    </div>
+  `;
+
+  return `
+    <div class="lob-modal-backdrop" id="leaderboard-account-modal">
+      <div class="lob-card lob-modal lob-account-modal">
+        <div class="lob-ad-head">
+          <div class="lob-ad-avatar-wrap">
+            ${
+              row.avatarUrl
+                ? `<img class="lob-ad-avatar" src="${esc(row.avatarUrl)}" alt="" />`
+                : `<span class="lob-ad-avatar ${row.isAi ? 'ai' : ''}">${esc(row.name.slice(0, 1))}</span>`
+            }
+          </div>
+          <div>
+            <div class="lob-ad-name">${esc(row.name)} ${row.isAi ? '<span class="lob-tag ai">三国名将</span>' : ''}</div>
+            <div class="lob-muted" style="font-size:12px">${row.roomId ? `正在牌桌 · ${esc(row.roomId)}` : '当前不在牌桌'}</div>
+          </div>
+        </div>
+
+        <div class="lob-ad-hero">
+          <span class="lob-ad-hero-val">${row.chips}</span>
+          <span class="lob-ad-hero-lbl">总筹码</span>
+          <span class="lob-ad-hero-sub">余额 ${row.bankroll} · 在桌 ${row.onTable}</span>
+        </div>
+
+        <div class="lob-ad-stats">
+          ${stat('总手数', String(row.stats.hands), '参与过的手牌总数')}
+          ${stat('胜率', percent(row.stats.winRate), '赢下至少一个底池的手数占比')}
+          ${stat('入池率', percent(row.stats.vpipRate), '翻前自愿投钱率')}
+          ${stat('看翻牌', percent(row.stats.sawFlopRate), '看到翻牌的手数占比')}
+          ${stat('摊牌率', percent(row.stats.showdownRate), '坚持到摊牌的手数占比')}
+          ${stat('摊牌胜率', percent(row.stats.showdownWinRate), '摊牌赢率')}
+          ${stat('净输赢', `${row.stats.netChips >= 0 ? '+' : ''}${row.stats.netChips}`, '赢回与投入的净差值')}
+          ${stat('最大底池', String(row.stats.bestPot), '单手赢得的最大底池')}
+          ${stat('峰值筹码', String(row.peakChips), '历史最高筹码')}
+        </div>
+
+        <div class="lob-row" style="justify-content: flex-end; margin-top: 14px;">
+          <button id="lob-ad-close" class="lob-primary-btn">关闭</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // ---------------- 首页：货架 + 快速加入 ----------------
 
 function lobbyHtml() {
@@ -283,13 +397,14 @@ function lobbyHtml() {
       <div id="rooms" class="lob-quick">${roomsLoaded ? roomsHtml(roomsCache) : '加载中…'}</div>
     </section>
     <aside class="lob-side">
+      ${leaderboardHtml()}
       <div class="lob-card">
         <b>联机说明</b>
         <p class="lob-muted">对局由服务器统一裁决：牌局状态保存在服务端，任何玩家掉线都不影响其他人。全员就绪后由房主开局。</p>
       </div>
     </aside>
   </div>
-  ${createModalHtml()}`;
+  ${createModalHtml()}${accountDetailModalHtml()}`;
 }
 
 function shelfCard(g: HubGameInfo) {
@@ -361,6 +476,50 @@ async function refreshRooms() {
     const shelf = document.getElementById('shelf');
     if (shelf) shelf.innerHTML = games.map(shelfCard).join('');
   } catch (e: any) { el.innerHTML = '<span class="lob-error">' + esc(e.message) + '</span>'; }
+}
+
+async function refreshLeaderboard() {
+  if (!lobbyVisible() || !user || currentRoom) return;
+  try {
+    const data = await getPokerLeaderboard();
+    pokerLeaderboardData = data;
+    const listEl = document.getElementById('poker-leaderboard-list');
+    if (listEl) {
+      const rows = data.rows ?? [];
+      if (rows.length === 0) {
+        listEl.innerHTML = '<div class="lob-empty" style="padding:16px 0; font-size:12px">暂无排行数据</div>';
+      } else {
+        listEl.innerHTML = rows
+          .map((row, index) => {
+            const percent = (row.share * 100).toFixed(1);
+            const isAi = !!row.isAi;
+            const tag = isAi
+              ? '<span class="lob-tag ai">AI 名将</span>'
+              : '<span class="lob-tag human">真人</span>';
+            const playing = row.roomId
+              ? '<span class="lob-tag playing" title="正在对局">在桌</span>'
+              : '';
+            const rankClass = index === 0 ? 'top1' : index === 1 ? 'top2' : index === 2 ? 'top3' : '';
+            const avatarHtml = row.avatarUrl
+              ? `<img class="lob-lb-avatar" src="${esc(row.avatarUrl)}" alt="" loading="lazy" />`
+              : `<span class="lob-lb-avatar ${isAi ? 'ai-avatar' : ''}">${esc(row.name.slice(0, 1))}</span>`;
+            return `
+              <div class="lob-lb-row" data-rank-user="${esc(row.userId)}" title="${esc(row.name)} · 点击查看生涯战绩">
+                <span class="lob-lb-rank ${rankClass}">${index + 1}</span>
+                <span class="lob-lb-name">
+                  ${avatarHtml}
+                  <span class="lob-lb-text">${esc(row.name)}</span>
+                  ${tag}${playing}
+                </span>
+                <span class="lob-lb-chips">${row.chips}</span>
+                <span class="lob-lb-pct">${percent}%</span>
+              </div>
+            `;
+          })
+          .join('');
+      }
+    }
+  } catch {}
 }
 
 /** 阶段一：个人资料弹窗（render 时对所有已登录视图追加，含房间页头部入口）。 */
@@ -760,9 +919,31 @@ function bind() {
     catch (e: any) { showToast(e.message, 'error'); }
   });
 
+  // 排行榜点击单项查看战绩详情
+  $('poker-leaderboard-list')?.addEventListener('click', (ev) => {
+    const row = (ev.target as HTMLElement).closest<HTMLElement>('[data-rank-user]');
+    if (!row?.dataset.rankUser) return;
+    selectedLeaderboardUserId = row.dataset.rankUser;
+    render();
+  });
+
+  // 战绩详情弹窗关闭
+  $('lob-ad-close')?.addEventListener('click', () => {
+    selectedLeaderboardUserId = null;
+    render();
+  });
+  $('leaderboard-account-modal')?.addEventListener('click', (ev) => {
+    if (ev.target === $('leaderboard-account-modal')) {
+      selectedLeaderboardUserId = null;
+      render();
+    }
+  });
+
   refreshRooms();
+  void refreshLeaderboard();
   stopTimer('list');
   roomsTimer = setInterval(refreshRooms, wsHealthy ? 10000 : 5000);
+  leaderboardTimer = setInterval(refreshLeaderboard, 15000);
 }
 
 /** 创建模态：选中游戏 → 联动人数滑条与变体 */

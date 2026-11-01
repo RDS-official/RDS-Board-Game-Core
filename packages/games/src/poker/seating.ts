@@ -38,6 +38,36 @@ export const POKER_AI_ROSTER: readonly PokerAiTier[] = [
 /** 编制校验：1 初级 + 4 中级 + 5 高级，合计 10。 */
 export const POKER_AI_MIX = { beginner: 1, intermediate: 4, advanced: 5 } as const;
 
+/** 三国杀名将池：内置 AI 与补位 AI 的专属名字库。 */
+export const POKER_AI_NAMES: readonly string[] = [
+  '诸葛亮',
+  '曹操',
+  '周瑜',
+  '关羽',
+  '张飞',
+  '赵云',
+  '司马懿',
+  '吕布',
+  '孙权',
+  '刘备',
+  '陆逊',
+  '郭嘉',
+  '黄月英',
+  '甄姬',
+  '大乔',
+  '孙尚香',
+  '甘宁',
+  '张辽',
+  '马超',
+  '夏侯惇'
+];
+
+/** 根据 AI 序号或索引获取三国杀武将名字 */
+export function getAiHeroName(index: number): string {
+  const normalized = Math.max(0, Math.floor(index));
+  return POKER_AI_NAMES[normalized % POKER_AI_NAMES.length];
+}
+
 /** AI 按等级取的不同风格参数（越大越激进）。 */
 export const AI_PROFILE: Record<PokerAiTier, { label: string; aggression: number; looseness: number }> = {
   beginner: { label: '初级', aggression: 0.18, looseness: 0.62 },
