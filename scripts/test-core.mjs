@@ -14,6 +14,12 @@ import { gate, startMemoryWatch } from './lib/gates.mjs';
  */
 const startedAt = Date.now();
 const memory = startMemoryWatch();
+
+const filterArg = process.argv.slice(2).find(arg => !arg.startsWith('-'));
+if (filterArg && !process.env.CORE_MATCH) {
+  process.env.CORE_MATCH = filterArg;
+}
+
 const server = await createServer({
   server: { middlewareMode: true },
   appType: 'custom',
@@ -74,8 +80,9 @@ try {
   const shardTotal = Number(process.env.SUITE_SHARDS ?? 1) || 1;
   const shardIndex = Number(process.env.SUITE_SHARD ?? 0) || 0;
   const shardLabel = shardTotal > 1 ? ` [shard ${shardIndex + 1}/${shardTotal}]` : '';
+  const filterLabel = process.env.CORE_MATCH ? ` (filter: "${process.env.CORE_MATCH}")` : '';
 
-  console.log(`\nUniversal Board Game Kernel — conformance suite${shardLabel}\n`);
+  console.log(`\nUniversal Board Game Kernel — conformance suite${shardLabel}${filterLabel}\n`);
 
   for (const testCase of result.cases) {
     const mark = testCase.ok ? '\u2713' : '\u2717';

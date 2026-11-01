@@ -557,14 +557,16 @@ for (const game of GAMES) {
     tasks.push({ label, run: browser => runScreen(browser, game, scenario) });
   }
 }
-for (const [label, run] of [
-  ['betrayal:rotation-flow', runRotationFlow],
-  ['betrayal:drag-settle-flow', runDragSettle],
-  ['betrayal:discard-settle', runDiscardSettle],
-  ['betrayal:card-sheet-actions', runCardSheet]
-]) {
-  if (ONLY && !ONLY.test(label)) continue;
-  tasks.push({ label, run });
+if (!SMOKE || ONLY) {
+  for (const [label, run] of [
+    ['betrayal:rotation-flow', runRotationFlow],
+    ['betrayal:drag-settle-flow', runDragSettle],
+    ['betrayal:discard-settle', runDiscardSettle],
+    ['betrayal:card-sheet-actions', runCardSheet]
+  ]) {
+    if (ONLY && !ONLY.test(label)) continue;
+    tasks.push({ label, run });
+  }
 }
 
 const browser = await launchChromium();

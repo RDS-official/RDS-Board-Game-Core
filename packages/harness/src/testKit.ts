@@ -56,16 +56,20 @@ const SHARD_INDEX = Math.min(
   Math.max(0, Math.floor(Number(process.env.SUITE_SHARD ?? 0)) || 0)
 );
 
+const MATCH_PATTERN = process.env.CORE_MATCH ?? process.env.TEST_MATCH;
+const MATCH_REGEX = MATCH_PATTERN ? new RegExp(MATCH_PATTERN, 'i') : null;
+
 export function suiteShard(): { index: number; total: number } {
   return { index: SHARD_INDEX, total: SHARD_TOTAL };
 }
 
 export async function runCoreSuite(): Promise<SuiteResult> {
   const results: SuiteCaseResult[] = [];
+  const eligibleCases = MATCH_REGEX ? cases.filter(c => MATCH_REGEX.test(c.name)) : cases;
 
-  for (let index = 0; index < cases.length; index++) {
+  for (let index = 0; index < eligibleCases.length; index++) {
     if (index % SHARD_TOTAL !== SHARD_INDEX) continue;
-    const testCase = cases[index];
+    const testCase = eligibleCases[index];
     const started = Date.now();
     try {
       await testCase.fn();

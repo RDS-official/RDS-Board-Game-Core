@@ -180,33 +180,39 @@ apps/web/src/render    Three.js 表现层，负责几何体渲染与物理演算
 
 ### 3.2 必跑验证矩阵
 
-**日常内循环**（改完就测；耗时随改动面差异极大，见下表）：
+**日常内循环（秒级极速反馈）**：
+
+开发过程中高频自测，避免每次等待数分钟：
 
 ```bash
-pnpm verify:changed   # 只跑本次 diff 可能影响的闸门，并发执行
+pnpm verify:fast      # 极速内循环：当前改动的类型检查 + lint + 核心单测/服务端自检（跳过重量级浏览器与黑盒矩阵，~10-30 秒）
+pnpm test <gameId>    # 单游戏极速单测：例如 pnpm test poker / pnpm test catan（~1-3 秒）
+```
+
+**提交前增量自检**：
+
+```bash
+pnpm verify:changed   # 智能增量闸门：根据 diff 自动定向（单游戏自动收敛 core/matrix/ui，矩阵单种子提速）
 pnpm test:ui          # 需要完整 UI 矩阵时显式跑（全量 21 屏 + 卡面 overlay 探针）
 ```
 
-`verify:changed` 按改动面选闸门，实测（6 核开发机）：
+优化后的 `verify:changed` 耗时对照（6 核开发机）：
 
 | 改动 | 触发闸门 | 实测耗时 |
 | --- | --- | --- |
 | 只动 `.md` | docs | **~0.1s** |
-| 只动 `.css` | ui(smoke) + lint + docs | **~4 分钟** |
-| 动 `apps/web` / `packages/app` | core + ui(smoke) + lint + structure + types + docs | **~4.5 分钟** |
-| 动 `packages/kernel` / `packages/games` / `packages/harness` | core + matrix + lint + structure + types + docs | **~1.5 分钟** |
-| 动 `apps/server` / `scripts` | core + lint + structure + types + docs | **~40 秒** |
+| 单游戏修改（如 `poker`） | core(定向) + matrix(单种子定向) + ui(smoke 定向) + lint/types | **~25 秒**（原 ~4.5 分钟） |
+| 只动 `apps/server` | server(selftest) + lint + types | **~8 秒**（原 ~40 秒，不误测前端 core） |
+| 动 `apps/web` / `packages/app` | core + ui(smoke 首屏) + lint + structure + types + docs | **~50 秒**（原 ~4.5 分钟） |
+| 动 `packages/kernel` 公共逻辑 | core + matrix(fast) + lint + structure + types + docs | **~40 秒**（原 ~1.5 分钟） |
 
-- 内循环的 UI 闸门跑 **smoke 模式**（每游戏首屏，`UI_SMOKE=1`），不是全量 21 屏；
-  已经能抓到启动崩溃与首屏报错。要全量走 `pnpm verify:all`。
-- 只想验一屏时用 `UI_ONLY=<正则>`，例如
-  `UI_ONLY='betrayal:discard-settle' node scripts/test-ui-matrix.mjs`（~30 秒）。
-- `.css` 不再触发 33 秒的核心一致性套件：样式改不动内核行为。
+- `UI_SMOKE=1` 专注每游戏首屏启动与首屏交互崩溃检测，耗时的 3D 深度交互 flow 保留在 `verify:all` 全量矩阵中。
+- 单模块定位：`node scripts/test-core.mjs <关键字>`（支持正则）随时只验某个游戏或用例。
 
-**提交前 / 提 PR 前**（全绿，实测 ~10 分钟；8 个闸门并发抢 CPU，UI 矩阵最慢）：
+**提 PR 前（全量全绿，质量兜底）**：
 
 ```bash
-pnpm verify:all       # core + matrix + overlap + lint/structure + tsc/build + docs + UI 全量 + card-overlay
+pnpm verify:all       # 8 闸门全量：core + matrix(全种子) + overlap + lint/structure + tsc/build + docs + UI 全量 21 屏 + card-overlay
 ```
 
 单条闸门（需要单独定位时）：

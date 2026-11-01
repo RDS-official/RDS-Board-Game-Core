@@ -6,8 +6,9 @@
  *
  *   node scripts/verify.mjs            # everything except the Playwright UI matrix
  *   node scripts/verify.mjs --ui       # + the UI matrix (the long pole)
- *   node scripts/verify.mjs --changed  # only what the current diff can affect
- *   node scripts/verify.mjs --all      # --ui and --changed together are ignored; this is the full sweep
+ *   node scripts/verify.mjs --changed  # only what the current diff can affect (smart targeted mode)
+ *   node scripts/verify.mjs --fast     # ultra-fast dev loop: types + lint + core/server, no browser/matrix
+ *   node scripts/verify.mjs --all      # full sweep across all 8 gates (used for PR & CI)
  *
  * Timeouts and memory ceilings live in `scripts/lib/gates.mjs`; the individual
  * suites enforce them, so a slow or leaky run fails here without any extra logic.
@@ -21,10 +22,13 @@ import process from 'node:process';
 
 const argv = new Set(process.argv.slice(2));
 const WANT_UI = argv.has('--ui') || argv.has('--all');
-const CHANGED = argv.has('--changed') && !argv.has('--all');
+const CHANGED = (argv.has('--changed') || argv.has('--fast') || argv.has('--quick')) && !argv.has('--all');
+const FAST = (argv.has('--fast') || argv.has('--quick') || process.env.FAST === '1') && !argv.has('--all');
 
 const LOG_DIR = join(process.env.TEMP ?? process.env.TMPDIR ?? '.', 'rds-verify');
 mkdirSync(LOG_DIR, { recursive: true });
+
+const DEFAULT_COREPACK_HOME = process.env.COREPACK_HOME ?? join(process.env.TEMP ?? process.env.TMPDIR ?? '/tmp', 'corepack');
 
 /** Files this branch or working tree touches, relative to the repo root. */
 function changedFiles() {
@@ -48,23 +52,35 @@ function changedFiles() {
 const files = CHANGED ? changedFiles() : [];
 const touches = pattern => files.some(file => pattern.test(file));
 
+/** Targeted game detection: if diff only touches one game and no common kernel/web core, narrow gates to it. */
+const changedGames = new Set();
+for (const file of files) {
+  const m = file.match(/(?:packages\/games\/src\/|apps\/web\/src\/render\/fixtures\/)([a-z0-9_]+)/);
+  if (m) changedGames.add(m[1]);
+}
+const touchedCommonKernel = touches(/^packages\/kernel\//);
+const touchedCommonApp = touches(/^packages\/app\//);
+const touchedCommonWeb = touches(/^apps\/web\/src\/(?:ui|render\/(?!fixtures\/)|main\.ts)/);
+const singleGame = changedGames.size === 1 && !touchedCommonKernel && !touchedCommonApp && !touchedCommonWeb
+  ? [...changedGames][0]
+  : null;
+
+const serverOnly = files.length > 0 && files.every(f => f.startsWith('apps/server/') || f === 'package.json');
+
 /**
  * Which gates the diff can affect.
  *
  * Mirrors the matrix in AGENTS.md §3.2, so a docs-only change does not pay for a
  * Playwright run and a kernel change still gets the replay matrix.
- *
- * Granularity notes (measured on the dev box):
- *  - a stylesheet cannot change kernel behaviour, so `.css` no longer pulls in
- *    the 33s core suite; it only pulls in the UI matrix;
- *  - the inner loop runs the UI matrix in smoke mode (`UI_SMOKE=1`, one screen
- *    per game) instead of the full 21-screen sweep: 224s instead of 356s. Pass
- *    `--ui`/`--all` for the full sweep, or `UI_ONLY=<regex>` to narrow further.
  */
 const selected = (() => {
   if (!CHANGED || files.length === 0) {
-    return { core: true, matrix: true, overlap: true, ui: WANT_UI, uiSmoke: false, lint: true, types: true, docs: true };
+    return { core: true, matrix: true, overlap: true, ui: WANT_UI, uiSmoke: false, lint: true, types: true, docs: true, server: false };
   }
+  if (serverOnly) {
+    return { core: false, matrix: false, overlap: false, ui: false, uiSmoke: false, lint: true, types: true, docs: false, server: true };
+  }
+
   // Executable sources only: a `.css` edit cannot affect a kernel test.
   const code = touches(/\.(ts|tsx|mjs|cjs|js)$/);
   const styles = touches(/\.css$/);
@@ -72,46 +88,68 @@ const selected = (() => {
   const kernelish = touches(/^packages\/(kernel|games|harness)\//);
   const uish = touches(/^(apps\/web|packages\/app)\//);
   const geometry = touches(/roomTile\.ts$|render\/procedural\//);
+
   return {
-    core: code || kernelish,
-    matrix: kernelish,
-    overlap: geometry,
-    ui: WANT_UI || (uish && (code || styles)),
+    core: (code || kernelish) && !serverOnly,
+    matrix: kernelish && !FAST,
+    overlap: geometry && !FAST,
+    ui: !FAST && (WANT_UI || (uish && (code || styles))),
     // `--changed` is the inner loop: one screen per game is enough to catch a
     // broken boot, and the full sweep still runs in `verify:all`.
     uiSmoke: !WANT_UI,
     lint: code,
     types: code,
-    docs: docs || code
+    docs: docs || code,
+    server: touches(/^apps\/server\//)
   };
 })();
 
 const gates = [];
 const add = (id, label, command, args, env = {}) =>
-  gates.push({ id, label, command, args, env });
+  gates.push({ id, label, command, args, env: { COREPACK_HOME: DEFAULT_COREPACK_HOME, ...env } });
 
-// Every gate that boots a browser gets its own port: verify runs them at the
-// same time, and two gates sharing a solo server means one of them shuts it down
-// under the other.
-if (selected.core) add('core', 'core suite (3 shards)', process.execPath, ['scripts/test-core-parallel.mjs']);
-if (selected.matrix)
-  add('matrix', 'fixture matrix (3 at a time)', process.execPath, ['scripts/test-matrix-parallel.mjs']);
-if (selected.overlap)
+// 1. Core Conformance Suite
+if (selected.core) {
+  const coreEnv = singleGame ? { CORE_MATCH: singleGame } : {};
+  const label = singleGame ? `core suite (target: ${singleGame})` : 'core suite (3 shards)';
+  add('core', label, process.execPath, ['scripts/test-core-parallel.mjs'], coreEnv);
+}
+
+// 2. Server Self-test (when server files are touched)
+if (selected.server) {
+  add('server', 'server selftest', 'npx', ['tsx', 'apps/server/src/selftest.ts']);
+}
+
+// 3. Matrix Replay
+if (selected.matrix) {
+  const matrixEnv = {
+    ...(CHANGED ? { MATRIX_FAST: '1' } : {}),
+    ...(singleGame ? { MATRIX_PARALLEL_MODULES: singleGame } : {})
+  };
+  const label = singleGame ? `fixture matrix (target: ${singleGame})` : (CHANGED ? 'fixture matrix (fast dev)' : 'fixture matrix (3 at a time)');
+  add('matrix', label, process.execPath, ['scripts/test-matrix-parallel.mjs'], matrixEnv);
+}
+
+// 4. Overlap & Geometry
+if (selected.overlap) {
   add('overlap', 'probe:overlap', process.execPath, ['scripts/probe-overlap.mjs'], { SOLO_PORT: '5182' });
-if (selected.ui)
-  // The overlay probe runs after the matrix inside test:ui: two concurrent
-  // solo servers + Chromium pools starve the CPU-parallel core shards past
-  // their time budgets, so the browser gates share one port in sequence.
-  // `--changed` runs only the smoke matrix (one screen per game, no overlay
-  // probe); `verify:all` still runs the full sweep.
+}
+
+// 5. UI Matrix
+if (selected.ui) {
+  const uiEnv = {
+    SOLO_PORT: '5180',
+    ...(singleGame ? { UI_ONLY: singleGame } : {})
+  };
   if (selected.uiSmoke) {
-    add('ui', 'UI matrix (smoke)', process.execPath, ['scripts/test-ui-matrix.mjs'], {
-      SOLO_PORT: '5180',
-      UI_SMOKE: '1'
-    });
+    const label = singleGame ? `UI matrix (smoke, target: ${singleGame})` : 'UI matrix (smoke)';
+    add('ui', label, process.execPath, ['scripts/test-ui-matrix.mjs'], { ...uiEnv, UI_SMOKE: '1' });
   } else {
-    add('ui', 'UI matrix + card-overlay', 'pnpm', ['test:ui'], { SOLO_PORT: '5180' });
+    add('ui', 'UI matrix + card-overlay', 'pnpm', ['test:ui'], uiEnv);
   }
+}
+
+// 6. Lint, Structure, Types, Docs
 if (selected.lint) add('lint', 'biome lint', 'pnpm', ['lint']);
 if (selected.lint) add('structure', 'structure budget', process.execPath, ['scripts/check-structure.mjs']);
 if (selected.types) add('types', 'tsc + build', process.execPath, ['scripts/verify-types.mjs']);
@@ -122,7 +160,13 @@ if (gates.length === 0) {
   process.exit(0);
 }
 
-console.log(`verify: ${gates.map(gate => gate.id).join(' + ')}${CHANGED ? ` (changed: ${files.length} files)` : ''}\n`);
+const modeInfo = [
+  CHANGED ? `changed: ${files.length} files` : null,
+  FAST ? 'mode: fast-loop' : null,
+  singleGame ? `target: ${singleGame}` : null
+].filter(Boolean).join(', ');
+
+console.log(`verify: ${gates.map(gate => gate.id).join(' + ')}${modeInfo ? ` (${modeInfo})` : ''}\n`);
 
 const startedAt = Date.now();
 const results = await Promise.all(
@@ -134,7 +178,7 @@ const results = await Promise.all(
         const child = spawn(gate.command, gate.args, {
           env: { ...process.env, NO_COLOR: '1', ...gate.env },
           stdio: ['ignore', out, out],
-          shell: process.platform === 'win32' && gate.command === 'pnpm'
+          shell: process.platform === 'win32'
         });
         child.on('exit', code => {
           closeSync(out);
@@ -149,7 +193,7 @@ let failed = 0;
 for (const result of results) {
   const ok = result.code === 0;
   if (!ok) failed++;
-  console.log(`  ${ok ? '✓' : '✗'} ${result.label.padEnd(30)} ${ok ? 'ok' : `exit ${result.code}`}`);
+  console.log(`  ${ok ? '✓' : '✗'} ${result.label.padEnd(36)} ${ok ? 'ok' : `exit ${result.code}`}`);
   if (!ok) {
     const tail = readFileSync(result.logPath, 'utf8')
       .split('\n')
