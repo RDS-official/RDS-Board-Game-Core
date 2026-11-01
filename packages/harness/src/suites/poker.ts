@@ -11,6 +11,7 @@ import type { Card, Suit } from '@rds/games/poker/cards';
 import { evaluateSeven } from '@rds/games/poker/handEval';
 import { chipShares } from '@rds/games/poker/ai';
 import { setupPoker } from '@rds/games/poker/setup';
+import { isAiSeat } from '@rds/games/poker/seating';
 import type { PokerHandState } from '@rds/games/poker/rules';
 import { assert, assertEqual, test } from '../testKit';
 
@@ -396,6 +397,23 @@ test('poker: a busted seat becomes an observer and the AI refills the chair', ()
     refill,
     'the standee on that seat shows the AI'
   );
+
+  // 观察者回桌：顶替一个 AI 座位之后，`seats[]` 必须仍然按座位号对齐，
+  // 否则 isAiSeat 会整体错位——AI 管线会因此停摆（2026-11-01 线上事故）。
+  const tick = engine.dispatch({
+    type: 'OBSERVER_TICK',
+    playerId: 'p4',
+    payload: { seconds: 60 }
+  });
+  assert(tick.ok, `the stipend tick is accepted: ${tick.error ?? ''}`);
+  const rejoin = engine.dispatch({ type: 'OBSERVER_REJOIN', playerId: 'p4' });
+  assert(rejoin.ok, `the rejoin is accepted: ${rejoin.error ?? ''}`);
+  const seated = engine.getRawState();
+  const plan = seated.globalVars.seats as { playerId: string; isAi: boolean }[];
+  seated.playerOrder.forEach((pid, index) => {
+    assertEqual(plan[index]?.playerId, pid, `seat ${index} plan follows the occupant`);
+    assertEqual(!!plan[index]?.isAi, isAiSeat(seated, pid), `seat ${index} AI flag stays truthful`);
+  });
 });
 
 test('poker: the opening seat order is shuffled but stable per seed', () => {
@@ -739,7 +757,12 @@ test('poker: the default table is a human plus enough AI to fill six seats', () 
   assertEqual(seats.filter(seat => seat.isAi).length, 5, 'five AI seats fill the rest');
   assert(state.npcs === undefined, 'AI seats are players, not kernel NPCs');
   // 编制从弱到强：人少时先坐初级与中级，不会一上来全是高级。
-  assertEqual(seats[1].aiTier, 'beginner', 'the first AI seat is the beginner');
+  // 开局洗座后 seats[] 是「按座位号」排列的，所以按身份找人，不按数组下标。
+  assertEqual(
+    seats.find(seat => seat.playerId === 'p2')?.aiTier,
+    'beginner',
+    'the first AI seat is the beginner'
+  );
   assert(
     seats.some(seat => seat.aiTier === 'intermediate'),
     'intermediate AI are present'
@@ -850,10 +873,18 @@ test('poker: lobby AI seats are added on top of the human seats', () => {
     humans: 2,
     aiSeats: 4
   } as never);
-  const twoSeats = two.getRawState().globalVars.seats as { isAi: boolean }[];
+  const twoSeats = two.getRawState().globalVars.seats as { playerId: string; isAi: boolean }[];
   assertEqual(two.getRawState().playerOrder.length, 6, 'two humans plus four AI seats six');
   assertEqual(twoSeats.filter(seat => !seat.isAi).length, 2, 'two human seats');
-  assertEqual(twoSeats.slice(0, 2).every(seat => !seat.isAi), true, 'humans take the first seats');
+  assertEqual(
+    twoSeats
+      .filter(seat => !seat.isAi)
+      .map(seat => seat.playerId)
+      .sort()
+      .join(','),
+    'p1,p2',
+    'the human seats are p1 and p2'
+  );
 });
 
 /* -------------------------------------------------------------------------- */

@@ -222,10 +222,11 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
     globalVars: {
       config: { startingStack, smallBlind, bigBlind, autoAi: config.autoAi ?? true },
       /**
-       * 座位编制（真人 / 内置 AI 与等级）。固定进 globalVars，随序列化与
-       * replay 一起走，因此 AI 座位在回放里也是确定的。
+       * 座位编制（真人 / 内置 AI 与等级），**按座位序号排列**：
+       * `seats[i]` 就是 `playerOrder[i]` 那一座的编制。补位 AI / 观察者回桌都按
+       * 座位号替换这一项，顺序错了会把「谁是 AI」整体错位（AI 管线就会停摆）。
        */
-      seats: assignments,
+      seats: dealt.result.map(entry => entry.assignment),
       /**
        * 「入座 → 准备 → 开局」状态。只有开启 seatingFlow 时才约束开局，
        * 旧对局（无 seating）默认已入座已准备，保持历史行为。
