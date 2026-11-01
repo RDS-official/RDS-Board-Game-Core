@@ -529,7 +529,15 @@ class BoardGameSimulatorApp {
       // 的默认视角」。切回上帝视角不动镜头（保留玩家自己选的角度）。
       if (snapshot.viewer !== this.lastViewer) {
         this.lastViewer = snapshot.viewer;
-        if (snapshot.viewer !== 'GOD' && this.fontsReady) this.applySeatView(snapshot.viewer);
+        // 换了视角就重新对齐座位：下面的座位检查会立刻把镜头摆过去。
+        this.lastSeatKey = '';
+      }
+      // 座位变了（观察者回桌、补位 AI 换座、入座）也跟着换机位；同一座位不重复动，
+      // 免得普通状态更新把玩家自己拖出来的角度一直拽回去。
+      const seatKey = this.seatViewKey(snapshot);
+      if (snapshot.viewer !== 'GOD' && seatKey !== null && seatKey !== this.lastSeatKey) {
+        this.lastSeatKey = seatKey;
+        if (this.fontsReady) this.applySeatView(snapshot.viewer);
       }
 
       // Dynamic situational ambient soundscape & music update
@@ -769,6 +777,22 @@ class BoardGameSimulatorApp {
   }
 
   /**
+   * 当前视角对应的座位标识：自己在桌上就用座位号，观察者用原来坐过的那一侧。
+   * 没有座位概念（或其他游戏没有 SEAT 节点）时返回 null，镜头不动。
+   */
+  private seatViewKey(snapshot: GameSnapshot): string | null {
+    const viewer = snapshot.viewer;
+    if (!viewer || viewer === 'GOD') return null;
+    const seat = Object.values(snapshot.board.mapGraph.nodes).find(
+      node => node.type === 'SEAT' && String(node.props?.playerId ?? '') === viewer
+    );
+    if (seat) return `${viewer}@${String(seat.props?.seatIndex ?? '')}`;
+    const watching = snapshot.observers?.find(entry => entry.playerId === viewer);
+    if (watching?.seatIndex !== undefined) return `${viewer}@obs${watching.seatIndex}`;
+    return null;
+  }
+
+  /**
    * 「座位」按钮：自己在桌上就看自己的座位，上帝视角则逐个座位轮着看，
    * 方便检查每名玩家看到的牌桌。换座、补位 AI 之后座位节点会跟着变，这里
    * 每次重新查，不缓存座位号。
@@ -804,6 +828,8 @@ class BoardGameSimulatorApp {
   private seatViewCursor = 0;
   /** 上一次的认知滤镜视角：切换玩家时把镜头一起挪过去。 */
   private lastViewer = '';
+  /** 上一次镜头对准的座位（`座位号` 或 `观察席:原座位`）：座位变了才重新取景。 */
+  private lastSeatKey: string | null = null;
 
   private handleBoardPick(data: InteractiveObjectData): void {
     // Clicking a seat nameplate opens that player's sheet: the plaque is the
