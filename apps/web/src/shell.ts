@@ -4,7 +4,7 @@ import { canEnterNetGame, netEntryOf, stripNetParamsFromUrl } from './entryRoute
 
 /**
  * 统一外壳（unified shell）：单一 SPA 同时承载「联机大厅」、「后台管理」与「游戏本体」。
- * 启动二态探测：同源 /healthz 在 500ms 内应答 → 大厅/管理模式；否则 → 本地单机模式。
+ * 启动二态探测：同源 /healthz 在 2500ms 内应答 → 大厅/管理模式；否则 → 本地单机模式。
  *
  * 入口顺序固定为「登录页 → 选择游戏/加入房间 → 牌桌」：
  * URL 带网络对局参数只表示「想深链进桌」，进桌前还必须验证参数里的会话真的
@@ -19,7 +19,7 @@ function isAdminRoute(): boolean {
 async function hubAlive(): Promise<boolean> {
   try {
     const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 500);
+    const t = setTimeout(() => ctl.abort(), 2500);
     const res = await fetch('/healthz', { signal: ctl.signal });
     clearTimeout(t);
     if (!res.ok) return false;
