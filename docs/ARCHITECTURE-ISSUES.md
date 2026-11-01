@@ -1,6 +1,98 @@
 # 架构问题与合并优化清单
 
 > 持续更新。原则：先修规则/投影边界，再合并重复的表现逻辑；不在 core 里写 UI 特例。
+>
+> **2026-11 全量审查**：第 0 节是 AR-1…AR-49 台账（问题报告见 [ARCHITECTURE-REVIEW-2026-11.md](ARCHITECTURE-REVIEW-2026-11.md)，形式化失效分析见 [KERNEL-CHARTER.md](KERNEL-CHARTER.md)）。
+
+## 0. 2026-11 全量审查台账（AR-1 … AR-49）
+
+> 来源：[ARCHITECTURE-REVIEW-2026-11.md](ARCHITECTURE-REVIEW-2026-11.md)（问题清单）+ [KERNEL-CHARTER.md](KERNEL-CHARTER.md)（形式化失效分析）。
+> 本节按严重度排列，**已实现**的条目在合并修复后应移入 §1 并把「状态」改为「已修复」。
+> 状态取值：`待修` / `进行中` / `已修复` / `已登记偏离`（在 [RULES-DEVIATIONS.md](RULES-DEVIATIONS.md) 中登记理由与到期日）。
+
+### 0.1 S0 · 正确性 / 安全致命
+
+| ID | 问题 | 证据 | 建议 | 状态 |
+| --- | --- | --- | --- | --- |
+| AR-1 | 中心模式虚拟别名未加密钥，隐藏实体 id 可被穷举还原 | `packages/kernel/src/observer.ts` 的 `getVirtualAlias()`（53-59 行）缺省走 FNV-1a 32 位；`packages/app/src/netSession.ts:221` 是唯一 `setAliasSecret` 调用点（仅 P2P 房主侧）；`apps/server/src/match.ts` 构造 `GameRoom` 时未设置 | `ServerMatch` 构造后 `this.room.engine.setAliasSecret(crypto.randomBytes(32).toString('hex'))`；补"中心模式别名必须是 HMAC 形式"的回归测试 | 待修 |
+| AR-2 | 德扑 AI 从权威 raw state 决策，与真人不在同一信息通道 | `packages/games/src/poker/rules.ts:478` 传 `state` 给 `choosePokerAction`；`packages/games/src/poker/ai.ts:44` 的 `strengthOf()` 读 raw state | AI 入参改为 `ProjectedGameState`；补"AI 可见信息 ⊆ 投影信息"断言 | 待修 |
+| AR-3 | 认证态存 localStorage + Bearer，token 还会进入 URL 查询串 | `apps/web/src/lobby/lobby.ts:749` 写 localStorage、`lobby.ts:1062` 把 token 放进 `gameQuery`；`apps/web/src/lobby/api.ts:3` | 短期 token 移出 URL（一次性 ticket + postMessage）；中期换 `HttpOnly; Secure; SameSite=Lax` cookie | 待修 |
+| AR-4 | 状态变更接口无 CSRF / Origin 防护 | `apps/server/src/index.ts` 的 `/api/rooms/:id/{join,status,ready,kick,host,ai}` 只校验 Bearer | `/api/*` 非 GET 请求加 `Sec-Fetch-Site` / `Origin` 白名单中间件 | 待修 |
+
+### 0.2 S1 · 严重
+
+| ID | 问题 | 证据 | 建议 | 状态 |
+| --- | --- | --- | --- | --- |
+| AR-5 | 内核 / 游戏层与 Node 平台耦合 | `tsconfig.json` 用绝对 `paths`；`packages/games/src/splendor/pokemonData.json` 内嵌 2777 行资源；`apps/server/src/storage.ts` / `config.ts` 的 `node:fs` / `process.env` 经 registry 反向侵入 games 包 | kernel 只允许 `import type` + 自研纯函数；资源外置 `data/`；`tsconfig` 改相对 paths 或拆包级 `package.json` | 待修 |
+| AR-6 | 持久化是全量 JSON 同步写，用户与房间共用 `hub.json` | `apps/server/src/storage.ts` 每次 `update()` 都 `JSON.stringify` 整个 DB 并 `writeFileSync`；`ecosystem.config.cjs` 写死 `instances:1` | SQLite（`better-sqlite3` / `node:sqlite`）单表 upsert；过渡期拆文件 + 异步写队列 + fsync | 待修 |
+| AR-7 | `hub.json` 解析失败直接 `process.exit(1)` | `apps/server/src/storage.ts` 的 `load()` catch 分支 | 备份后进只读模式 + 健康检查 / 恢复入口；原子写保证不出现半截 JSON | 待修 |
+| AR-8 | 登录限速非原子，且 `scryptSync` 阻塞事件循环 | `apps/server/src/index.ts` 的 `loginFails`（读→`login()`→写回），`storage.ts` / `auth.ts` 的 `scryptSync` | `crypto.scrypt` 异步版；限速改令牌桶 + LRU；Per-IP 登录并发闸 | 待修 |
+| AR-9 | `ServerMatch` 直接改写权威状态（昵称 / 头像） | `apps/server/src/match.ts:155` 的 `target.name = ...` | 改走 `globalVars.roster` 或独立展示层，在投影阶段合成 | 待修 |
+| AR-10 | 扑克账本无事务（扣款 → 构造 → 失败补偿） | `apps/server/src/match.ts` 的 `MatchManager.ensure()` / `fundSeats()` / `refundBuyIns()`，`ServerMatch.dispose()` 的 `refundTableStakes()` | append-only ledger + 幂等 key（roomId + seat + handNo + kind），启动对账 | 待修 |
+
+### 0.3 S2 · 中等
+
+| ID | 问题 | 证据 | 建议 | 状态 |
+| --- | --- | --- | --- | --- |
+| AR-11 | 内核 invariant 对 `globalVars` / `custom` 全盲，61 条检查码全是结构一致性 | `packages/kernel/src/invariants.ts`（`grep -c chip` 为 0） | 新增 `GameModule.checkInvariants?`，strict 模式统一调用（宪章 C-6） | 待修 |
+| AR-12 | `advanceClock` 有未文档化的 16 次级联上限，超限静默退出 | `packages/kernel/src/engine.ts` 的 `advanceClock()` | 改可配置预算 + 超限 `fail()` + 结构化事件 | 待修 |
+| AR-13 | `exportLog()` 每次全量重放只为取 head hash | `packages/kernel/src/engine.ts` 的 `exportLog()` | 直接 `hashState(this.state)`；每 50 步存检查点 | 待修 |
+| AR-14 | `replayTo` 无检查点，时间机器是 O(N) | `packages/kernel/src/engine.ts` 的 `replayState()` / `replayTo()` | 同上（检查点表） | 待修 |
+| AR-15 | 动作合法性每次都全量 `canonicalize` 比较 | `packages/kernel/src/engine.ts` 的 `isLegal()` | 结构化比较先做 O(1) 索引，深比较仅兜底 | 待修 |
+| AR-16 | 钩子 handler 异常被静默吞掉，strict 下规则静默失效 | `packages/kernel/src/aop.ts` 的 `safeHandler()` | strict 模式升级为 dispatch 失败并上报 | 待修 |
+| AR-17 | `GameRoom.setCurrentViewer` 用可变字段传参（隐式并发） | `packages/net/src/room.ts` 的 `submit()` + `apps/server/src/match.ts` 的 `submit()` | `submit(action, viewer)` 显式传参，删除 `setCurrentViewer` | 待修 |
+| AR-18 | 投影对 players / npcs / effects 做深拷贝 | `packages/kernel/src/observer.ts` 的 `projectState()` | 结构化共享 + 只拷脱敏字段 | 待修 |
+| AR-19 | 座位数推导有 3 份实现 | `apps/server/src/rooms.ts` 的 `fixtureSeats()` / `seatsSupport()`、`apps/server/src/match.ts` 的 `ServerMatch`、`packages/app/src/netSession.ts` | `meta.seatRange` 声明式契约，三处统一读取 | 待修 |
+| AR-20 | 渲染层每次动作全量重建 3D 场景 | `apps/web/src/render/scene.ts` 的 `syncState()` 用 `actionLog.length` 作 boardKey | 按实体 id 增量 reconcile（`dom/keyed.ts` 的 3D 版） | 待修 |
+| AR-21 | 65 处 `innerHTML`，转义函数复制 4 份 | `apps/web/src/ui/hud.ts`、`lobby/lobby.ts`、`admin/admin.ts`、`main.ts` 各有 `esc*` | 抽 `html` tagged-template；CI grep 禁止裸 `innerHTML =` | 待修 |
+| AR-22 | `session.ts` God Object（`rebuild()` 一个函数做 7 件事） | `packages/app/src/session.ts` 的 `rebuild()`（约 1091 行起） | 拆为纯 builder 库 + 薄壳，`netSession` 复用 | 待修 |
+| AR-23 | `patch` 协议声明 `move/copy/test` 但未实现 | `packages/room-protocol/src/index.ts` 的 `PatchOp` vs `packages/net/src/patch.ts` | 协议收敛到实现子集，或补齐实现并加类型-实现一致性校验 | 待修 |
+| AR-24 | 客户端不校验 `baseRevision`，乱序 delta 会打错基线 | `packages/net/src/server-transport.ts` | 校验 `baseRevision === this.revision`，否则请求快照 | 待修 |
+| AR-25 | 应用层重复实现"是否需要 tick" | `apps/server/src/match.ts` 的 `needsClock()` vs 内核 `stampDeadlines()` | 内核暴露 `needsClock()`，驱动方只读 | 待修 |
+| AR-26 | 每个对局两个 `setInterval`（tick + AI pump） | `apps/server/src/match.ts` 的 `startClock()` / `startAiPump()` | 全局时间轮 + 单一定时器 | 待修 |
+| AR-27 | 每帧每快照调用 `presentation.describeMoment` / `cardFacts` | `packages/app/src/session.ts` 的 `rebuild()` | 按 revision memo | 待修 |
+
+### 0.4 S3 · 工程债
+
+| ID | 问题 | 证据 | 建议 | 状态 |
+| --- | --- | --- | --- | --- |
+| AR-28 | 单 `package.json` 冒充 monorepo，无 workspace、无包级依赖声明 | `find -name package.json` 只有根 | `pnpm-workspace.yaml` + 每包 `package.json` | 待修 |
+| AR-29 | 包名拼写错误 | `package.json` 的 `"name": "borad_game"` | 改 `rds-board-core` | 待修 |
+| AR-30 | `lucide` 依赖未被使用 | 全仓无 import | 删除依赖 | 待修 |
+| AR-31 | 构建期执行 `git` 且失败回退硬编码贡献者列表 | `vite.config.ts` 的 `gitInfo` IIFE | 移到构建脚本产物；回退显式写 `unknown` | 待修 |
+| AR-32 | `HUB_SECRET` / `ADMIN_PASSWORD` 多处弱默认值，`.env.example` 写了真实口令 | `ecosystem.config.cjs`、`Dockerfile`、`apps/server/src/config.ts`、`.env.example` | 生产环境无默认值，配置缺失硬拒启；示例文件只写占位符 | 待修 |
+| AR-33 | 自检脚本断言默认口令可登录 | `apps/server/src/selftest.ts` | 用随机生成口令做自检 | 待修 |
+| AR-34 | `SignalHub` 顶掉旧连接时不清理 `MatchBroker` 订阅 | `apps/server/src/signal.ts` 的 `accept()` + `matchBroker.attach()` | 统一 `ConnectionRegistry` 管理连接生命周期 | 待修 |
+| AR-35 | 诊断指纹全局共享而非按 IP 分桶，`includes` O(128) | `apps/server/src/index.ts` 的 `DIAG_FINGERPRINTS` | Map + 按 IP 分桶 | 待修 |
+| AR-36 | 扑克排行未鉴权即可枚举账号昵称 | `apps/server/src/index.ts` 的 `/api/poker/leaderboard` | 加登录要求或分页脱敏 | 待修 |
+| AR-37 | 中心模式下仍生成 `hostSeed` / `aliasSecret`，并 bootstrap 固定 seed=42 占位引擎 | `packages/app/src/netSession.ts:193-245` | 分支收敛，删死代码 | 待修 |
+| AR-38 | 50 个脚本，`probe/verify/shoot/test` 四套前缀职责重叠 | `scripts/` | 收敛为统一 CLI（如 `pnpm qa --gate=...`） | 待修 |
+| AR-39 | 显式 `any`：server 56 / web 49 / games 29 / app 21 | `rg '\bany\b'` 统计 | `noExplicitAny` 从 warn 升 error，逐包清零 | 待修 |
+| AR-40 | CSS 5427 行且关闭了 `noDescendingSpecificity` / `noImportantStyles` | `biome.json` | 至少 `apps/web/src/ui/tokens/*.css` 保留检查 | 待修 |
+| AR-41 | 大厅可达游戏 5 个，`GAME_REGISTRY` 有 6 个（`dune_mahjong` 未上架） | `packages/games/src/registry.ts` vs `apps/server/src/games.ts` | 由 registry 生成 `GAMES` 清单，消除两份真相 | 待修 |
+| AR-42 | 注释密度高且混入历史决策记录（"审查报告 Sx / AI-xx"），代码与注释双轨 | 全仓 | 历史决策迁到本文档，代码注释只留"为什么" | 待修 |
+
+### 0.5 M · 多模组形式化失效（宪章落地项）
+
+> 完整论证见 [KERNEL-CHARTER.md](KERNEL-CHARTER.md)。这些是**架构改造**，不按 bug 修，按阶段推进。
+
+| ID | 问题 | 证据 | 建议 | 状态 |
+| --- | --- | --- | --- | --- |
+| AR-43 | 只有 1/6 模组用全了内核五类原语，规则逻辑下沉到 47 个 `globalVars` key | `KERNEL-CHARTER.md` §1.1 / §1.2 的使用率矩阵 | 引入 `meta.stateSchema` 登记 key 集合；CI 输出使用率矩阵（宪章 C-9、阶段 0） | 待修 |
+| AR-44 | `𝒯` 是万能函数，一次 `reduce` 可含 8~64 次逻辑转移 | `packages/games/src/poker/rules.ts:605` 的 `advanceAi()`（内部 `for … < 64`）、同文件 `settle()` 的 `for … < 8` | 宪章 C-2 单步转移；阶段 2 引入 `transition(state, actions[], ctx)` | 待修 |
+| AR-45 | 并发被降维成串行，多人同时决策顺序敏感 | `Action` 单 actor；`packages/kernel/src/engine.ts` 的 `resolveOpenDecision()` 串行 `reduce` | 宪章 C-3，新增 `SIMULTANEOUS` 决策策略，`𝒯` 接受动作多重集 | 待修 |
+| AR-46 | 随机源未收口，模组可绕过 `ctx.roll()` | `packages/games/src/betrayal/helpers.ts` 的 `drawRoomCandidate()`、`packages/games/src/poker/ai.ts` 的 `noise()` | 宪章 C-4，`reduce` 不再注入 PRNG 静态方法，随机只能走 `ctx.roll()` | 待修 |
+| AR-47 | `ℛ` 与 `𝒯` 完全耦合，收益事后反推、无法审计 | `packages/games/src/poker/rules.ts` 的 `showdown()` 直接 `setChips()`；`packages/games/src/catan/rules.ts` 建造直接加分 | 宪章 C-7，`ctx.reward()` + append-only `state.rewards` | 待修 |
+| AR-48 | `capabilities` 四个布尔位在全仓只被 UI 读取，内核从不消费 | `apps/web/src/ui/mathInspector.ts:329-332` 是唯一读取点 | 要么让内核真正消费（调度 / 校验分支），要么从 `GameMeta` 移除并放入 `presentation` | 待修 |
+| AR-49 | 钩子机制被绕开：`bagua_armor` 的 handler 只返回一句提示 | `packages/games/src/sanguosha/hooks.ts`；真正的判定手写在 `packages/games/src/sanguosha/rules.ts` 的 `JUDGE_BAGUA` 分支 | 宪章 C-8 `𝒦` 分区；阶段 3 把 haunt / 技能改造成声明式规则表 + 通用解释器 | 待修 |
+
+### 0.6 实施顺序（与审查报告 §10 一致）
+
+1. **一周内止血**：AR-1、AR-2、AR-4、AR-3（部分）、AR-32、AR-8、AR-12。
+2. **一至两月结构**：AR-20、AR-21、AR-13、AR-6、AR-19、AR-17、AR-28、AR-11（宪章阶段 1）。
+3. **一季以上架构**：AR-44 / AR-45 / AR-47 / AR-49（宪章阶段 2–3）、运行时状态外置、AR-48。
+
+---
 
 ## 1. 已确认并修复
 
