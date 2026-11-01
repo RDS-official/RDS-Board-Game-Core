@@ -376,11 +376,15 @@
   bottom: 12px;
   margin-left: 0;
   margin-right: 0;
-  transform: translateX(var(--fan-x, 0px)) translateY(calc(var(--fan-lift, 0) * -8px))
-    scale(var(--fan-scale, 1));
+  /* 水平位置走独立的 `translate` 属性，抬升与缩放走 `transform`。
+     这样任何 hover / 主题 / 无障碍规则改 `transform`（甚至 `transform: none`）
+     都不会把牌横向弹走——曾经就是这样把悬停牌弹回行首，指针立刻离开、
+     hover 失效、牌又弹回来，形成约 12Hz 的自激闪烁。 */
+  translate: var(--fan-x, 0) 0;
+  transform: translateY(calc(var(--fan-lift, 0) * -8px)) scale(var(--fan-scale, 1));
   transform-origin: 50% 100%;
-  transition: transform 0.12s ease-out;
-  will-change: transform;
+  transition: translate 0.12s ease-out, transform 0.12s ease-out;
+  will-change: translate, transform;
 }
 
 /* 指针在动的时候关掉位移过渡：每帧重设 --fan-x 会把 120ms 过渡反复打断，
@@ -407,8 +411,7 @@
    layout, so this only adds lift. */
 .dock-fan .act:hover,
 .dock-fan .act:focus-visible {
-  transform: translateX(var(--fan-x, 0px)) translateY(calc(var(--fan-lift, 0) * -8px - 6px))
-    scale(var(--fan-scale, 1));
+  transform: translateY(calc(var(--fan-lift, 0) * -8px - 6px)) scale(var(--fan-scale, 1));
   margin-left: 0;
   margin-right: 0;
   z-index: 999;

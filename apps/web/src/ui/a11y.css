@@ -54,9 +54,12 @@
     transition: none !important;
   }
 
+  /* 不能用 `transform: none`：牌的水平位置在 `translate` 属性上（见 dock-fan.css），
+     而 transform 只负责抬升与缩放。抹掉 transform 会让悬停牌瞬间缩回原尺寸，
+     在指针下弹一下；位置本身不再依赖 transform，所以这里只取消抬升。 */
   .dock-fan .act:hover,
   .dock-fan .act:focus-visible {
-    transform: none !important;
+    transform: scale(var(--fan-scale, 1)) !important;
   }
 }
 
