@@ -161,3 +161,21 @@ UI 矩阵的三个提速点（都不是砍覆盖）：
 - 预算是实测值的 ~2 倍，机器噪声不会误伤；真正的回归（多了一层 O(n²)、每次用例重新加载夹具、引擎泄漏）会立刻被抓到。
 - 覆盖：`GATE_SCALE=2` 整体放宽（慢 CI），或 `GATE_UI_MS` / `GATE_CORE_MB` 等单项覆盖。
 - 内核套件还支持 `SUITE_SHARDS`/`SUITE_SHARD` 分片；矩阵支持 `MATRIX_MODULES`、`MATRIX_SEEDS`、`MATRIX_FAST=1`；UI 支持 `UI_ONLY=<regex>`、`UI_SMOKE=1`、`UI_TIMING=1`（打印每屏 boot/交互耗时）。
+
+## 10. 现场排查：操作栏抖动（2026-11-01）
+
+动作栏（`#action-dock`）的抖动只在特定显示器（高 DPI、120Hz）上肉眼可见，靠看代码
+猜不出来，所以留了一条可带走的证据链：
+
+- URL 加 `?docktrace=1`：左下角常驻计数器，每 0.5s 刷新
+  `render / layout / shape / cards / move` 五类事件每秒发生多少次，以及鱼眼容器的
+  `cw`（宽度）和 `span`（牌排实际跨度）。抖的时候看一眼：
+  - `cards/shape` 在跳 → 是 DOM 在被反复重建（键控/顺序问题）；
+  - `layout` 在跳而 `move` 不动 → 是布局输入在变（宽度/焦点被别的东西改了）；
+  - 全部接近 0 但画面仍在闪 → 是合成层/过渡问题（CSS），不在 DOM。
+- 控制台：`__dockTrace()` 直接取时间线（最近 160 条 + 计数器）。
+- 「⤓ 导出诊断日志」里也带 `dock` 段：把 JSON 发回来即可定位。
+
+同时做了三处硬化：指针移动期间关掉卡片位移过渡（`markFanMoving`，避免 120Hz 下
+每次 pointermove 都打断 120ms 过渡）、`--fan-x` 半像素对齐、布局结果未变时不再写
+样式（`data-fan-layout` 签名）。
