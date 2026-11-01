@@ -57,17 +57,21 @@ export function localToken(): string | null {
   }
 }
 
-async function getJson<T>(path: string, token: string, timeoutMs = 2500): Promise<T | null> {
-  try {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), timeoutMs);
-    const res = await fetch(path, { headers: { Authorization: `Bearer ${token}` }, signal: ctl.signal });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
+async function getJson<T>(path: string, token: string, timeoutMs = 6000): Promise<T | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), timeoutMs);
+      const res = await fetch(path, { headers: { Authorization: `Bearer ${token}` }, signal: ctl.signal });
+      clearTimeout(timer);
+      if (res.ok) {
+        return (await res.json()) as T;
+      }
+    } catch {
+      if (attempt === 0) await new Promise(r => setTimeout(r, 300));
+    }
   }
+  return null;
 }
 
 interface MeBody { id?: unknown }

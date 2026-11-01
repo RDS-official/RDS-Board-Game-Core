@@ -22,19 +22,28 @@ function isExplicitDevGameRoute(): boolean {
   return p.has('game') && !p.has('hub');
 }
 
-async function hubAlive(timeoutMs = 3000): Promise<boolean> {
-  try {
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), timeoutMs);
-    const res = await fetch('/healthz', { signal: ctl.signal });
-    clearTimeout(t);
-    if (!res.ok) return false;
-    // SPA fallback（如 vite dev）会对任意路径回 200 HTML——必须验证 JSON 体
-    const type = res.headers.get('content-type') ?? '';
-    if (!type.includes('application/json')) return false;
-    const body = await res.json();
-    return body?.ok === true;
-  } catch { return false; }
+async function hubAlive(timeoutMs = 6000, retries = 2): Promise<boolean> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), timeoutMs);
+      const res = await fetch('/healthz', { signal: ctl.signal });
+      clearTimeout(t);
+      if (res.ok) {
+        const type = res.headers.get('content-type') ?? '';
+        if (type.includes('application/json')) {
+          const body = await res.json();
+          if (body?.ok === true) return true;
+        }
+      }
+    } catch {
+      // 失败后等待 300ms 再重试下一轮
+      if (attempt < retries) {
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+  }
+  return false;
 }
 
 let retryOverlayEl: HTMLElement | null = null;
@@ -210,7 +219,7 @@ async function boot(): Promise<void> {
     if (app) app.style.display = 'none';
 
     showServerConnectingOverlay(async () => {
-      const ok = await hubAlive(4000);
+      const ok = await hubAlive(6000, 1);
       if (ok) {
         hideServerConnectingOverlay();
         stripNetParamsFromUrl();
@@ -220,13 +229,13 @@ async function boot(): Promise<void> {
 
     // 轮询自动重试连接
     retryTimer = window.setInterval(async () => {
-      const ok = await hubAlive(2500);
+      const ok = await hubAlive(4000, 1);
       if (ok) {
         hideServerConnectingOverlay();
         stripNetParamsFromUrl();
         void enterLobbyView();
       }
-    }, 3000);
+    }, 2500);
     return;
   }
 
