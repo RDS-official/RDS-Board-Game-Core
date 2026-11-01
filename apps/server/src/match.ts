@@ -2,7 +2,10 @@ import crypto from 'node:crypto';
 import { GameRoom, RoomUpdate } from '@rds/net/room';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { GameModule } from '@rds/kernel/module';
-import { Action, DispatchResult, PlayerId } from '@rds/kernel/types';
+import { Action, DispatchResult, GameState, PlayerId } from '@rds/kernel/types';
+import type { PokerHandResult } from '@rds/games/poker/rules';
+import { leaveSeat, settleHand, takeSeat } from './pokerSettle.ts';
+import { peekAccount } from './pokerLedger.ts';
 
 /**
  * 服务端权威对局（中心模式）。
@@ -42,6 +45,13 @@ export interface MatchOptions {
    */
   aiSeats?: number;
   seed?: number;
+  /**
+   * 每个真人座位的买入（顺序同 `players`）。缺省 = 夹具的标准买入。
+   *
+   * 由 `MatchManager` 按账号余额决定并**先扣款**，因此引擎的初始筹码与账本
+   * 一次对齐：桌上的筹码就是账号已经兑换出来的部分，下桌时按剩余退回。
+   */
+  stacks?: number[];
 }
 
 export interface MatchSeatInfo {
@@ -53,6 +63,11 @@ export interface MatchSeatInfo {
 }
 
 const MAX_SEATS = 10;
+
+/** 标准买入：与夹具默认 1000 一致；余额不足时按余额买（`MIN_BUY_IN` 以下不截断）。 */
+const POKER_BUY_IN = 1000;
+/** 上桌的最低买入，防止 0 筹码账号占住座位。 */
+const MIN_BUY_IN = 100;
 
 function randomSeed32(): number {
   return crypto.randomBytes(4).readUInt32BE(0);
@@ -87,6 +102,10 @@ export class ServerMatch {
     this.gameId = options.gameId;
     this.scenario = options.scenario;
     this.seed = options.seed ?? randomSeed32();
+    // 真人座位按账号余额买入；AI 补位座位不在 stacks 数组里，由夹具补标准买入。
+    const buyIns = (options.stacks ?? []).slice(0, Math.max(1, options.seats ?? 0)).map(amount =>
+      Math.max(0, Math.round(Number(amount) || 0))
+    );
     this.room = new GameRoom(
       module,
       this.seed,
@@ -104,7 +123,10 @@ export class ServerMatch {
               // 其余按等级编制填入内置 AI（见 poker/seating.ts）。
               seats: Math.min(options.seats + (options.aiSeats ?? 0), MAX_SEATS),
               humans: options.seats,
-              aiSeats: options.aiSeats ?? 0
+              aiSeats: options.aiSeats ?? 0,
+              // 真人座位的买入来自账号余额（见 MatchManager）；AI 补位不传，
+              // 由夹具按标准买入填。
+              ...(buyIns.length > 0 ? { stacks: buyIns } : {})
             }),
         // AI 交给房间按游戏声明的节奏驱动，真人才能看清每一步。
         ...(module.presentation?.aiActionDelayMs ? { autoAi: false } : {})
@@ -134,6 +156,9 @@ export class ServerMatch {
     });
 
     this.room.onChange(() => {
+      // 每手结束先把事实记进账号账本，再推给订阅者：客户端看到结算画面的同一刻，
+      // 账本已经是这一手之后的状态，刷新排行榜不会读到旧数据。
+      this.settleLatestHand();
       for (const listener of this.listeners) {
         try {
           listener();
@@ -146,8 +171,41 @@ export class ServerMatch {
     this.startClock();
   }
 
+  /**
+   * 把最新一手的结果记进账号账本。
+   *
+   * 去重交给 `settleHand`（房间 + 手数），这里只负责把座位翻译成账号——
+   * 内置 AI / 补位 AI 没有账号，自然被跳过。非扑克玩法没有 `lastHand`，
+   * 调用会在类型判断处直接返回。
+   */
+  private settleLatestHand(): void {
+    if (this.module.meta.id !== 'poker') return;
+    const raw = this.room.engine.getRawState();
+    const lastHand = raw.globalVars.lastHand as PokerHandResult | undefined;
+    if (!lastHand?.players?.length) return;
+    settleHand(this.roomId, lastHand.handNo, lastHand.players, seat => this.userOf(seat));
+  }
+
+  /** 座位 → 账号 id（内置 AI 座位没有账号，返回 undefined）。 */
+  public userOf(seat: string): string | undefined {
+    for (const [userId, claimed] of this.seats) {
+      if (claimed === seat) return userId;
+    }
+    return undefined;
+  }
+
   public get moduleId(): string {
     return this.module.meta.id;
+  }
+
+  /**
+   * 权威状态的只读快照。
+   *
+   * 只给服务端内部记账用（筹码排行、下桌退余额）。**不要**把它塞进任何发给
+   * 客户端的消息：投影仍走 `snapshotFor` / `deltaFor`，隐藏信息不外泄。
+   */
+  public rawState(): GameState {
+    return this.room.engine.getRawState();
   }
 
   public seatOf(userId: string): PlayerId | undefined {
@@ -253,6 +311,9 @@ export class ServerMatch {
   public dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    // 对局结束 = 下桌：把每个账号还留在桌上的筹码退回余额。放在清理定时器之前，
+    // 这样即使后面的清理抛错，账本也已经结平（余额不会凭空蒸发）。
+    this.refundTableStakes();
     if (this.tickTimer) {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
@@ -264,6 +325,30 @@ export class ServerMatch {
     this.listeners.clear();
     this.attached.clear();
     this.room.dispose();
+  }
+
+  /**
+   * 下桌退款：把每个真人座位当前的桌上筹码退回账号余额。
+   *
+   * 只在整局释放时调用一次（房间关闭 / 重开 / 进程退出前的清理），
+   * 不跟着断线走——断线重连的玩家还坐在那张桌上，筹码不该被退两次。
+   */
+  private refundTableStakes(): void {
+    if (this.module.meta.id !== 'poker') return;
+    let raw: GameState;
+    try {
+      raw = this.room.engine.getRawState();
+    } catch {
+      return; // 引擎已经不可读（异常关闭路径）：没有可退的账
+    }
+    const seen = new Set<string>();
+    for (const [userId, seat] of this.seats) {
+      const chips = Number(raw.players?.[seat]?.customProps?.chips);
+      if (!Number.isFinite(chips) || chips <= 0) continue;
+      seen.add(userId);
+      leaveSeat(userId, chips, this.roomId);
+    }
+    this.seats.clear();
   }
 
   private reject(error: string): DispatchResult {
@@ -398,22 +483,70 @@ export class MatchManager {
     return this.matches.get(roomId);
   }
 
-  /** 取得已有对局；不存在则按房间玩家顺序创建（中心模式不需要房主在场）。 */
+  /**
+   * 取得已有对局；不存在则按房间玩家顺序创建（中心模式不需要房主在场）。
+   *
+   * 扑克房间的真人座位在这里**按账号余额兑换买入**：`takeSeat` 先扣款，
+   * 再把扣到的金额作为初始筹码交给引擎。余额不足时扣到 0——账号上不了桌的
+   * 情况由 `takeSeat` 返回 0 表达，房间侧拿到 0 筹码座位会立刻转观察者，
+   * 不会凭空造出「借钱入座」的牌局。
+   */
   public ensure(options: MatchOptions): ServerMatch {
     const existing = this.matches.get(options.roomId);
     if (existing) {
       // 开局前（尚无任何真实跃迁）玩家名单可能仍在变化：按最新座位表重建，
       // 避免先进入的玩家把后来者挡在座位表外。一旦产生 revision 就不再重建。
       if (existing.revision === 0 && !sameSeats(existing, options)) {
+        // 旧对局作废：它扣掉的买入要退回，玩家不能因为「换了个座位」被扣两次钱。
         existing.dispose();
         this.matches.delete(options.roomId);
       } else {
         return existing;
       }
     }
-    const match = new ServerMatch(options);
+    const funded = this.fundSeats(options, options.stacks);
+    let match: ServerMatch;
+    try {
+      match = new ServerMatch(funded);
+    } catch (error) {
+      // 开局失败（座位数不符、夹具拒绝等）必须把刚扣的买入退回去：否则每次
+      // 失败的进入都会静默吞掉一笔筹码，而且账本上看不出发生过什么。
+      this.refundBuyIns(funded);
+      throw error;
+    }
     this.matches.set(options.roomId, match);
     return match;
+  }
+
+  /**
+   * 给真人座位备好买入：按账号余额扣款，返回带 `stacks` 的 MatchOptions。
+   *
+   * 只在扑克房间发生——其它玩法座位的「分数」是玩法内的资源，不是账号货币。
+   * 调用方已经给了 `stacks`（测试 / 自检）时原样返回，不碰账本。
+   */
+  private fundSeats(options: MatchOptions, provided: number[] | undefined): MatchOptions {
+    const module = GAME_REGISTRY[options.gameId];
+    if (module?.meta.id !== 'poker') return options;
+    if (provided) return options;
+    // `takeSeat` 按房间幂等：房间重建（重启 / 换人数）不会二次扣款，
+    // 已押在桌上的买入原样沿用，余额不会再被扣一次。
+    const stacks = options.players.slice(0, MAX_SEATS).map(player => {
+      const account = peekAccount(player.userId);
+      const funded = Math.max(0, Math.round(Number(account.atTable?.[options.roomId] ?? 0)));
+      if (funded > 0) return takeSeat(player.userId, funded, options.roomId);
+      const wanted = Math.min(account.chips, Math.max(MIN_BUY_IN, Math.min(account.chips, POKER_BUY_IN)));
+      return takeSeat(player.userId, wanted, options.roomId);
+    });
+    return stacks.length > 0 ? { ...options, stacks } : options;
+  }
+
+  /** 开局失败时退掉已扣的买入（按 `funded.stacks` 与玩家顺序一一对应）。 */
+  private refundBuyIns(funded: MatchOptions): void {
+    if (!funded.stacks?.length) return;
+    funded.players.slice(0, MAX_SEATS).forEach((player, index) => {
+      const charged = Number(funded.stacks?.[index] ?? 0);
+      if (charged > 0) leaveSeat(player.userId, charged, funded.roomId);
+    });
   }
 
   public close(roomId: string): boolean {
@@ -431,5 +564,10 @@ export class MatchManager {
 
   public get size(): number {
     return this.matches.size;
+  }
+
+  /** 正在托管的对局（排行聚合、运维观察用；只读遍历）。 */
+  public list(): ServerMatch[] {
+    return [...this.matches.values()];
   }
 }

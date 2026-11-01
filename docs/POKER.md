@@ -620,3 +620,72 @@ node node_modules/typescript/bin/tsc --noEmit && pnpm run build
 幕布声明 `hold: true`：结算停留在玩家按下按钮为止，不像作祟过场那样自己淡出
 （`durationMs` 只用于非 hold 的幕布）。同一个 `key` 也会重绘，因为按钮会随冷却从灰
 变亮——旧实现只在 `key` 变化时重画，按钮会永远停在第一次渲染的样子。
+
+---
+
+## 18. 账号账本与全服排行（2026-11-01）
+
+### 18.1 两个排行回答两个问题
+
+牌桌右上角的面板分两个页签，**不合成一张表**：
+
+| 页签 | 数据源 | 回答的问题 |
+| --- | --- | --- |
+| 本桌 | 引擎投影 `player.customProps.chips` | 这一桌现在谁筹码多 |
+| 全服 | 服务端账本 `apps/server/src/pokerLedger.ts` | 这个账号一共还有多少、打得怎么样 |
+
+单机 / P2P 模式没有账号体系：`GamePresenter.fetchAccountRanking` 不实现或返回
+`undefined`，HUD 只留「本桌」页签，不会出现一个永远空着的全服页。
+
+点「全服」里的任意一行弹出生涯战绩卡（手数 / 胜率 / 入池率 / 看翻牌 / 摊牌率 /
+摊牌胜率 / 净输赢 / 最大底池 / 峰值筹码）。
+
+### 18.2 筹码口径：余额 + 桌上
+
+- 账号余额 `chips` = **还能带上桌的筹码**，新账号默认 5000。
+- 上桌买入由余额扣款，扣到的金额就是桌上初始筹码（不被夹具的 1000 覆盖）。
+- 下桌（房间关闭 / 对局释放）按桌上剩余退款，账本不会凭空生钱也不会丢钱。
+- 全服排行 `chips = 余额 + 桌上筹码`，与「本桌」面板同一批数字。
+- **幂等**：`takeSeat(userId, amount, roomId)` 按房间去重。服务端重启会重建对局，
+  同一房间重复扣款会让玩家白掉一笔筹码，因此账本记录 `atTable[roomId]`，
+  重入时沿用已押金额；`leaveSeat` 同样幂等，重复释放不会退两次钱。
+  开局失败（座位数不符等）必须退款——`MatchManager.ensure` 抓异常后调用
+  `refundBuyIns`，自检覆盖这条路径。
+
+### 18.3 逐手事实由规则层写、生涯折叠由服务端做
+
+规则层（`packages/games/src/poker/stats.ts`）只写清**这一手**：
+
+```ts
+hand.dealt             // 本手真的被发到牌的座位（观察者不在其中）
+hand.preflopVoluntary  // 翻前自愿投钱（跟注/加注/全押，下盲注不算）
+hand.sawFlop           // 翻牌发出时仍在牌局里
+lastHand.players[]     // 每座位的 PokerHandFact
+```
+
+`lastHand.players` 随状态序列化与回放一起走，所以服务端读到的和回放算出来的完全一致。
+服务端 `apps/server/src/pokerSettle.ts` 负责跨手那一半：
+
+- 折叠成生涯累计 `PokerCareer`（纯函数 `foldPokerFact`）；
+- 按「房间 + 手数」去重：`ServerMatch` 在重连 / 快照重放时会多次看到同一个
+  `lastHand`，账本只认第一次，否则胜率与余额都会虚增；
+- 内置 AI / 补位 AI 座位没有账号，自然被跳过。
+
+口径（弹窗脚注同文）：
+
+- **入池率 VPIP** = 翻前自愿投钱手数 / 参与手数（盲注不算）；
+- **胜率** = 赢下至少一个底池的手数 / 参与手数；
+- **摊牌胜率** = 摊牌中赢下的手数 / 摊牌手数。
+
+### 18.4 每次买入都是初始位置的一部分
+
+`GameSetupOptions.stacks`（→ `PokerConfig.stacks` → `setupPoker`）让每个座位带自己的
+买入开局。它和 `seats` 一样属于**初始位置**：`exportLog` / `loadLog` / `replayState`
+都带上 `stacks`，否则买入不同的两局会重放成同一手。`pokerScenario` 也透传它——
+剧本曾经只转发 `autoAi`，换人买入会被静默退回 1000。
+
+### 18.5 账本落盘
+
+`DATA_DIR/poker-ledger.json`，与 `hub.json` 分开：账本每手都写，混进房间表会让
+整份房间列表反复落盘；损坏时只重置战绩、不阻断开服（先备份为 `.corrupt.<ts>`）。
+删除账号时 `removeAccount` 一并清账，同名新账号不会继承旧战绩。

@@ -48,6 +48,8 @@ export interface GameRoomOptions {
   humans?: number;
   /** How many built-in AI seats to add on top of `humans`. */
   aiSeats?: number;
+  /** 每个座位的起始筹码（账号余额买入）；缺省由夹具自己决定。 */
+  stacks?: number[];
   /** 交给房间按游戏声明的节奏驱动 AI（配合 `presentation.aiActionDelayMs`）。 */
   autoAi?: boolean;
 }
@@ -97,6 +99,7 @@ export class GameRoom implements RoomTransport {
       ...(options.seats === undefined ? {} : { seats: options.seats }),
       ...(options.humans === undefined ? {} : { humans: options.humans }),
       ...(options.aiSeats === undefined ? {} : { aiSeats: options.aiSeats }),
+      ...(options.stacks === undefined ? {} : { stacks: options.stacks }),
       ...(options.autoAi === undefined ? {} : { autoAi: options.autoAi })
     };
     this.engine =

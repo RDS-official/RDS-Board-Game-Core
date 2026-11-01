@@ -1157,3 +1157,92 @@ test('poker: the continue button resolves against the actions legal right now', 
   );
   session.dispose();
 });
+
+/* -------------------------------------------------------------------------- */
+/* 生涯统计的逐手事实                                                          */
+/* -------------------------------------------------------------------------- */
+
+test('poker: a settled hand records what each dealt seat actually did', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 101, { scenario: 'seats_4' });
+  startHand(engine);
+
+  // p4 / p1 / p2 弃牌，p3 白拿底池：这手结束得早，只有下盲注的投入。
+  act(engine, 'FOLD');
+  act(engine, 'FOLD');
+  act(engine, 'FOLD');
+
+  const raw = engine.getRawState();
+  const last = raw.globalVars.lastHand as {
+    endedBy: string;
+    players: { playerId: string; vpip: boolean; sawFlop: boolean; wentToShowdown: boolean; won: boolean; invested: number }[];
+  };
+  assertEqual(last.endedBy, 'FOLD', 'the hand ended by folds');
+  assertEqual(last.players.length, raw.playerOrder.length, 'every dealt seat is accounted for');
+  const winner = last.players.filter(fact => fact.won);
+  assertEqual(winner.length, 1, 'exactly one seat won the pot');
+  assert(winner[0].invested >= 0, 'the winner has an invested figure');
+  for (const fact of last.players) {
+    assertEqual(fact.sawFlop, false, `${fact.playerId} never saw a flop`);
+    assertEqual(fact.wentToShowdown, false, `${fact.playerId} never showed down`);
+  }
+  // 只有下盲注的座位投过钱，而下盲注不算「自愿入池」。
+  assertEqual(
+    last.players.filter(fact => fact.vpip).length,
+    0,
+    'posting blinds alone is not a voluntary pre-flop investment'
+  );
+});
+
+test('poker: calling pre-flop counts as a voluntary investment, checking does not', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 102, {
+    scenario: 'seats_2',
+    autoAi: false
+  });
+  engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
+
+  const raw = engine.getRawState();
+  const handState = hand(raw);
+  assertEqual(handState.street, 'PREFLOP', 'the hand is live');
+  // 单挑时按钮位（小盲）先说话；跟注补齐大盲 = 翻前自愿投钱。
+  const actor = engine.getActiveActorId();
+  const call = engine.getLegalActions(actor).find(action => action.type === 'CALL');
+  assert(!!call, `${actor} may call pre-flop`);
+  act(engine, 'CALL', call!.payload as Record<string, unknown>);
+  assert(
+    hand(engine.getRawState()).preflopVoluntary.includes(actor),
+    `${actor} counts as a voluntary pre-flop investor`
+  );
+});
+
+test('poker: a showdown records the survivors and their pots', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 103, { scenario: 'seats_2' });
+  startHand(engine);
+  for (let street = 0; street < 4; street++) callAround(engine, 2);
+
+  const last = engine.getRawState().globalVars.lastHand as {
+    endedBy: string;
+    players: { playerId: string; sawFlop: boolean; wentToShowdown: boolean; wonAmount: number; invested: number }[];
+  };
+  assertEqual(last.endedBy, 'SHOWDOWN', 'the hand reached showdown');
+  for (const fact of last.players) {
+    assertEqual(fact.sawFlop, true, `${fact.playerId} saw a flop`);
+    assertEqual(fact.wentToShowdown, true, `${fact.playerId} went to showdown`);
+    assert(fact.invested > 0, `${fact.playerId} put chips in`);
+  }
+  const paid = last.players.reduce((sum, fact) => sum + fact.wonAmount, 0);
+  assert(paid > 0, 'the pot was paid out to at least one seat');
+});
+
+test('poker: the per-seat buy-in reaches setup and replays with the log', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 104, {
+    scenario: 'seats_4',
+    stacks: [2000, 1500, 800, 400]
+  } as never);
+  const state = engine.getRawState();
+  assertEqual(state.players.p1.customProps.chips, 2000, 'seat 1 bought in for its own stack');
+  assertEqual(state.players.p4.customProps.chips, 400, 'seat 4 bought in short');
+  startHand(engine);
+  act(engine, 'FOLD');
+  const report = engine.verifyReplay();
+  assert(report.ok, `replay matches with per-seat stacks: ${report.errors.join('; ')}`);
+});

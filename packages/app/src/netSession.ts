@@ -45,8 +45,10 @@ import {
   BoardPick,
   GamePresenter,
   GameSnapshot,
+  UiAccountRank,
   UiChipRank,
   UiDiscoveryView,
+  UiPokerRanking,
   UiHistoryEntry,
   UiMoment,
   UiNotice,
@@ -616,6 +618,45 @@ export class NetSession implements GamePresenter {
     if (this.isLocalAuthority) return this.session!.rejoinTable(playerId);
     if (playerId !== this.viewer) return { ok: false, error: '只能替自己申请重新上桌' };
     return this.submitAction({ type: 'OBSERVER_REJOIN', playerId });
+  }
+
+  /**
+   * 全服账号排行（德州扑克）。
+   *
+   * 排行是服务端的跨房间聚合，不在 `room-update` 里逐帧推送：打开面板时拉一次。
+   * P2P 模式没有权威服务器（也没有账号账本），返回 undefined，HUD 只留本桌排行。
+   */
+  public async fetchAccountRanking(): Promise<UiPokerRanking | undefined> {
+    if (this.authority !== 'server') return undefined;
+    // `hub` 在 URL 里是 ws:// 或 wss://；REST 走同一个 origin。
+    const base = this.options.hub.replace(/^ws/, 'http').replace(/\/ws\/?$/, '').replace(/\/$/, '');
+    const headers = { Authorization: `Bearer ${this.options.token}` };
+    /**
+     * 先试同源相对路径，再退回 Hub 绝对地址。
+     *
+     * 生产环境客户端与 Hub 同域（相对路径即对）；开发环境 `/api` 由 vite 代理到
+     * Hub（同样是相对路径）；只有跨域部署才必须走绝对地址，而那种部署需要 Hub
+     * 自己开 CORS。所以顺序是「相对 → 绝对」，而不是按 origin 猜。
+     */
+    const attempts = ['/api/poker/leaderboard', `${base}/api/poker/leaderboard`];
+    try {
+      let body: { rows?: UiAccountRank[]; rooms?: number; updatedAt?: number } | undefined;
+      for (const url of attempts) {
+        const res = await fetch(url, { headers }).catch(() => undefined);
+        if (!res?.ok) continue;
+        body = (await res.json().catch(() => undefined)) as typeof body;
+        if (body) break;
+      }
+      if (!body) return undefined;
+      return {
+        accounts: Array.isArray(body.rows) ? body.rows : [],
+        rooms: Number(body.rooms ?? 0),
+        updatedAt: Number(body.updatedAt ?? Date.now())
+      };
+    } catch {
+      // 断线 / 大厅不可达：返回 undefined，面板退回本桌排行。排行榜不是关键路径。
+      return undefined;
+    }
   }
 
   public perform(

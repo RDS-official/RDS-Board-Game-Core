@@ -17,6 +17,7 @@ import {
   UiHistoryEntry,
   UiNotice,
   UiObserver,
+  UiPokerRanking,
   UiTraitChange,
   UiPlayer
 } from '@rds/app/contracts';
@@ -125,6 +126,15 @@ export class BoardGameHUD {
   private dockTraceLastSig = '';
   private dockTraceLastLayout = { cw: 0, span: 0 };
 
+  /** 德州扑克排行榜：当前页签与最近一次拉到的全服数据。 */
+  private rankingTab: 'table' | 'global' = 'table';
+  private accountRanking?: UiPokerRanking;
+  private accountRankingPending = false;
+  /** presenter 是否声明了全服数据源（决定「全服」页签出不出现）。 */
+  private hasAccountRanking = false;
+  /** 已绑定过一次的排行榜点击处理（面板重绘不重复挂监听）。 */
+  private rankingBound = false;
+
   /** Stamp of the sheet currently painted, so a repaint does not restart its timer. */
   private paintedSheetStamp = 0;
   /** The layer outlives a repaint, so its backdrop handler must be replaced, not added again. */
@@ -182,7 +192,37 @@ export class BoardGameHUD {
     // are two renderings of the same arbiter state, so they can never disagree
     // about who owns the screen.
     this.overlays.subscribe(state => this.paintOverlays(state));
+    this.bindRankingPanel();
     this.bindPresenter(presenter);
+  }
+
+  /**
+   * 排行榜面板的点击处理：切页签、点账号开生涯战绩。
+   *
+   * 面板每手都会重绘，所以监听挂在容器上（一次），用 `closest` 找目标——
+   * 给每行单独挂监听会在重建时泄漏。
+   */
+  private bindRankingPanel(): void {
+    if (this.rankingBound) return;
+    this.rankingBound = true;
+    const panel = this.container.querySelector('#chip-ranking') as HTMLElement | null;
+    if (!panel) return;
+    panel.addEventListener('click', event => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      const tabButton = target.closest<HTMLElement>('[data-rank-tab]');
+      if (tabButton) {
+        const tab = tabButton.dataset.rankTab === 'global' ? 'global' : 'table';
+        // 点已选中的「全服」= 重试拉取：断线恢复后不用切走再切回来。
+        if (tab === this.rankingTab && !(tab === 'global' && !this.accountRanking)) return;
+        this.rankingTab = tab;
+        if (tab === 'global') this.refreshAccountRanking();
+        if (this.latest) this.renderChipRanking(this.latest);
+        return;
+      }
+      const row = target.closest<HTMLElement>('[data-rank-user]');
+      if (row?.dataset.rankUser) this.openAccountDetail(row.dataset.rankUser);
+    });
   }
 
   public setPresenter(presenter: GamePresenter): void {
@@ -190,6 +230,11 @@ export class BoardGameHUD {
     this.unsubNotice?.();
     this.closePayload();
     this.closeAbout();
+    this.closeAccountDetail();
+    this.accountRanking = undefined;
+    this.accountRankingPending = false;
+    this.hasAccountRanking = false;
+    this.rankingTab = 'table';
     this.overlays.closeAll();
     this.container.querySelector('#card-sheet-layer')?.remove();
     // Switching fixtures must not treat the new board as "already discovered".
@@ -369,6 +414,87 @@ export class BoardGameHUD {
     const opener = this.container.querySelector('#btn-about') as HTMLElement | null;
     layer.remove();
     opener?.focus();
+  }
+
+  /**
+   * 账号生涯战绩弹窗（德州扑克 · 全服排行）。
+   *
+   * 数据全部来自服务端账本（`UiAccountRank`），这里只排版：比率已经在
+   * presenter / 服务端算好，界面不做除法，也不认识「入池率」该怎么算——
+   * 口径写在弹窗脚注里，改口径只改一处。
+   */
+  public openAccountDetail(userId: string): void {
+    const row = this.accountRanking?.accounts.find(entry => entry.userId === userId);
+    if (!row) return;
+    this.closeAccountDetail();
+
+    const percent = (value: number): string => `${(value * 100).toFixed(1)}%`;
+    const stat = (label: string, value: string, hint?: string): string => `
+      <div class="ad-stat"${hint ? ` title="${escapeAttr(hint)}"` : ''}>
+        <span class="ad-stat-k">${escHtml(label)}</span>
+        <span class="ad-stat-v">${escHtml(value)}</span>
+      </div>`;
+
+    const layer = document.createElement('div');
+    layer.className = 'about-layer account-detail-layer';
+    layer.id = 'account-detail-layer';
+    layer.innerHTML = `
+      <div class="about-backdrop" data-account-close></div>
+      <div class="about-card account-detail" role="dialog" aria-modal="true" aria-label="账号生涯战绩">
+        <div class="pf-head">
+          <div class="pf-ico">${
+            row.avatarUrl
+              ? `<img class="ad-avatar" src="${escapeAttr(row.avatarUrl)}" alt="" />`
+              : escHtml(row.name.slice(0, 1).toUpperCase())
+          }</div>
+          <div>
+            <div class="pf-title">${escHtml(row.name)}</div>
+            <div class="pf-hint">${row.roomId
+              ? `正在对局 · ${escHtml(row.roomId)} · ${escHtml(row.seat ?? '')} 座位`
+              : '当前不在牌桌'}</div>
+          </div>
+        </div>
+        <div class="ad-hero">
+          <span class="ad-hero-v">${row.chips}</span>
+          <span class="ad-hero-k">总筹码</span>
+          <span class="ad-hero-split">余额 ${row.bankroll} · 在桌 ${row.onTable}</span>
+        </div>
+        <div class="ad-stats">
+          ${stat('手数', String(row.stats.hands), '参与过的手牌总数（不含旁观）')}
+          ${stat('胜率', percent(row.stats.winRate), '赢下至少一个底池的手数 / 参与手数')}
+          ${stat('入池率', percent(row.stats.vpipRate), '翻前自愿投钱（跟注 / 加注 / 全押）的手数占比，盲注不算')}
+          ${stat('看翻牌', percent(row.stats.sawFlopRate), '翻牌发出时仍在牌局里的手数占比')}
+          ${stat('摊牌率', percent(row.stats.showdownRate), '走到摊牌的手数占比')}
+          ${stat('摊牌胜率', percent(row.stats.showdownWinRate), '摊牌中赢下底池的手数 / 摊牌手数')}
+          ${stat('净输赢', `${row.stats.netChips >= 0 ? '+' : ''}${row.stats.netChips}`, '赢回 - 投入的累计筹码')}
+          ${stat('最大底池', String(row.stats.bestPot), '单手提走的最大底池')}
+          ${stat('峰值筹码', String(row.peakChips), '生涯最高总筹码')}
+        </div>
+        <div class="ad-foot">
+          入池率 = 翻前自愿投钱手数 / 参与手数 · 胜率 = 赢下底池手数 / 参与手数
+        </div>
+        <div class="pf-foot">
+          <button class="pf-btn primary account-close" data-account-close>关闭</button>
+        </div>
+      </div>
+    `;
+    this.container.appendChild(layer);
+
+    const close = (): void => this.closeAccountDetail();
+    layer.addEventListener('click', event => {
+      if ((event.target as HTMLElement).closest('[data-account-close]')) close();
+    });
+    layer.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        close();
+      }
+    });
+    (layer.querySelector('.account-close') as HTMLElement | null)?.focus();
+  }
+
+  public closeAccountDetail(): void {
+    this.container.querySelector('#account-detail-layer')?.remove();
   }
 
   /** Reflect the renderer's camera state without owning the camera. */
@@ -1346,6 +1472,8 @@ export class BoardGameHUD {
     this.renderRoomCard(snapshot);
     this.renderMinimap(snapshot);
     this.renderChipRanking(snapshot);
+    // 首次进入扑克桌面时先拉一次全服数据：页签要能立刻切，不用等点击。
+    if (snapshot.chipRanking?.length && !this.accountRanking) this.refreshAccountRanking();
     this.renderObservers(snapshot);
     this.renderHistory(snapshot);
     this.renderDock(snapshot);
@@ -1544,8 +1672,15 @@ export class BoardGameHUD {
   }
 
   /**
-   * 筹码排行面板（德州扑克）。按筹码占全桌比例排序，展示玩家/等级/筹码/占比条。
-   * 其他游戏 `chipRanking` 为 undefined，面板整体隐藏。
+   * 筹码排行面板（德州扑克）。
+   *
+   * 两个页签回答两个不同的问题，所以不合成一张表：
+   *  - **本桌**：这一桌谁筹码多（引擎投影，逐手刷新）；
+   *  - **全服**：每个账号一共还有多少筹码、打得怎么样（服务端账本）。
+   *
+   * 全服数据不在快照里逐帧推送：打开面板、或点页签时才向 presenter 拉一次，
+   * 结果缓存在 `accountRanking`。单机模式拿不到（presenter 返回 undefined），
+   * 于是只剩本桌页签——不出现一个永远空着的「全服」。
    */
   private renderChipRanking(snapshot: GameSnapshot): void {
     const panel = this.container.querySelector('#chip-ranking') as HTMLElement | null;
@@ -1558,12 +1693,19 @@ export class BoardGameHUD {
     }
     panel.style.display = '';
 
-    const signature = rows.map(row => `${row.playerId}:${row.chips}`).join('|');
+    // 页签存在与否只看「这个会话有没有全服数据源」，不看这一次拉取成没成功：
+    // 断线时拉取会失败，但玩家仍应能切到「全服」看到说明并重试。
+    const hasGlobal = this.accountRanking !== undefined || this.hasAccountRanking;
+    const accounts = this.accountRanking?.accounts ?? [];
+    const tab = hasGlobal ? this.rankingTab : 'table';
+    const signature = `${tab}|${hasGlobal ? 1 : 0}|${rows
+      .map(row => `${row.playerId}:${row.chips}`)
+      .join('|')}|${this.accountRanking?.updatedAt ?? ''}`;
     if (panel.dataset.signature === signature) return;
     panel.dataset.signature = signature;
 
     const total = rows.reduce((sum, row) => sum + row.chips, 0);
-    const body = rows
+    const tableBody = rows
       .map((row, index) => {
         const percent = (row.share * 100).toFixed(1);
         const isSelf = row.playerId === snapshot.viewer;
@@ -1581,14 +1723,75 @@ export class BoardGameHUD {
       })
       .join('');
 
+    const accountBody = accounts
+      .map((row, index) => {
+        const percent = (row.share * 100).toFixed(1);
+        const playing = row.roomId
+          ? `<span class="cr-tag human" title="正在 ${escHtml(row.roomId)} 的 ${escHtml(row.seat ?? '')} 座位">在桌</span>`
+          : '';
+        const parts = row.avatarUrl
+          ? `<img class="ar-avatar" src="${escapeAttr(row.avatarUrl)}" alt="" loading="lazy" />`
+          : `<span class="ar-avatar ar-avatar-fallback">${escHtml(row.name.slice(0, 1).toUpperCase())}</span>`;
+        return `
+          <button type="button" class="cr-row ar-row" data-rank-user="${escapeAttr(row.userId)}" title="${escHtml(row.name)} · 点开生涯战绩">
+            <span class="cr-rank">${index + 1}</span>
+            <span class="cr-name">${parts}${escHtml(row.name)}${playing}</span>
+            <span class="cr-chips">${row.chips}</span>
+            <span class="cr-pct">${percent}%</span>
+            <span class="cr-bar"><i style="width:${Math.max(2, row.share * 100).toFixed(1)}%"></i></span>
+          </button>`;
+      })
+      .join('');
+
+    const tabs = hasGlobal
+        ? `<div class="cr-tabs" role="tablist">
+             <button type="button" class="cr-tab${tab === 'table' ? ' on' : ''}" data-rank-tab="table" role="tab" aria-selected="${tab === 'table'}">本桌</button>
+             <button type="button" class="cr-tab${tab === 'global' ? ' on' : ''}" data-rank-tab="global" role="tab" aria-selected="${tab === 'global'}">全服</button>
+           </div>`
+        : '';
+
     panel.innerHTML = `
       <div class="cr-head">
         <span class="cr-title">筹码排行</span>
-        <span class="cr-total">${total}</span>
+        <span class="cr-total">${tab === 'table' ? total : this.accountRanking?.rooms ?? 0} ${
+          tab === 'table' ? '' : '桌'
+        }</span>
       </div>
-      <div class="cr-body">${body}</div>
-      <div class="cr-foot">占比 = 该玩家筹码 / 全桌总筹码</div>
+      ${tabs}
+      <div class="cr-body">${
+        tab === 'table'
+          ? tableBody
+          : accountBody ||
+            `<div class="cr-empty">${this.accountRanking ? '还没有账号战绩' : '读取全服排行失败 · 点「全服」重试'}</div>`
+      }</div>
+      <div class="cr-foot">${
+        tab === 'table'
+          ? '占比 = 该玩家筹码 / 全桌总筹码'
+          : '占比 = 该账号筹码 / 全服总筹码 · 点击查看生涯战绩'
+      }</div>
     `;
+  }
+
+  /** 打开全服页签时拉一次数据；失败就沉默保留本桌视图。 */
+  private refreshAccountRanking(): void {
+    const fetchRanking = this.presenter.fetchAccountRanking;
+    this.hasAccountRanking = !!fetchRanking;
+    if (!fetchRanking) return;
+    if (this.accountRankingPending) return;
+    this.accountRankingPending = true;
+    void fetchRanking
+      .call(this.presenter)
+      .then(ranking => {
+        this.accountRanking = ranking;
+        // 数据到货后强制重画：签名里带着 updatedAt，无需手动清空。
+        if (this.latest) this.renderChipRanking(this.latest);
+      })
+      .catch(() => {
+        this.accountRanking = undefined;
+      })
+      .finally(() => {
+        this.accountRankingPending = false;
+      });
   }
 
   /**

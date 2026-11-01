@@ -13,6 +13,9 @@ const {
 const { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo } = await import('./rooms.ts');
 const { GAMES } = await import('./games.ts');
 const { MatchManager } = await import('./match.ts');
+const { settleHand, takeSeat, leaveSeat } = await import('./pokerSettle.ts');
+const { accountOf, peekAccount } = await import('./pokerLedger.ts');
+const { rankAccounts } = await import('./pokerLeaderboard.ts');
 
 let failed = 0;
 const ok = (cond: boolean, name: string) => { if (!cond) { failed++; console.error('FAIL', name); } else console.log('ok -', name); };
@@ -233,6 +236,94 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
   joinRoom(other.user.id, pokerRoom.id);
   const pokerStart: any = setRoomStatus(reg.user.id, pokerRoom.id, 'playing');
   ok(pokerStart.status === 'playing', 'lobby starts a two-player poker room');
+}
+
+// ---- 德州扑克账号账本：买入扣款、每手结算去重、全服排行 ----
+{
+  const matches = new MatchManager();
+  const a = reg.user.id;
+  const b = other.user.id;
+
+  // 上桌 = 从余额扣买入；扣到的金额就是桌上筹码，账本不会凭空生钱。
+  const before = peekAccount(a).chips;
+  const charged = takeSeat(a, 1000, 'r_selftest_seat');
+  ok(charged === 1000 && peekAccount(a).chips === before - 1000, 'taking a seat charges the buy-in from the bankroll');
+  // 透支用独立房间与独立账号，避免前一步的押注让「扣到 0」测不出来。
+  const broke = other.user.id;
+  const brokeBefore = peekAccount(broke).chips;
+  const overdraw = takeSeat(broke, 10 ** 9, 'r_selftest_overdraw');
+  ok(overdraw === brokeBefore && peekAccount(broke).chips === 0, 'a buy-in larger than the balance stops at zero');
+  leaveSeat(broke, overdraw, 'r_selftest_overdraw');
+  ok(peekAccount(broke).chips === brokeBefore, 'leaving the table returns the remaining stack');
+
+  // 每手结算按「房间 + 手数」去重：重连 / 重放不会重复计数。
+  const fact = (playerId: string, over: Record<string, unknown> = {}) => ({
+    playerId, seatIndex: 0, vpip: true, sawFlop: true, wentToShowdown: true,
+    wonAmount: 200, invested: 100, won: true, ...over
+  });
+  const seats = new Map([[a, 'p1'], [b, 'p2']]);
+  const seatOf = (seat: string) => [...seats].find(([, claimed]) => claimed === seat)?.[0];
+  const facts = [fact('p1'), fact('p2', { wonAmount: 0, won: false, wentToShowdown: false })];
+  const first = settleHand('r_selftest', 1, facts, seatOf, Date.now());
+  ok(first.settled.length === 2, 'both human seats fold into the ledger');
+  const afterFirst = peekAccount(a).career;
+  ok(afterFirst.hands === 1 && afterFirst.won === 1, 'a won hand counts towards hands and wins');
+  ok(afterFirst.vpip === 1 && afterFirst.showdowns === 1, 'VPIP and showdown are recorded');
+  ok(afterFirst.netChips === 100, 'net chips are winnings minus investment');
+
+  settleHand('r_selftest', 1, facts, seatOf, Date.now());
+  ok(peekAccount(a).career.hands === 1, 'replaying the same hand does not double-count');
+
+  settleHand('r_selftest', 2, [fact('p1', { wonAmount: 0, won: false })], seatOf, Date.now());
+  ok(peekAccount(a).career.hands === 2, 'the next hand is recorded separately');
+
+  // 内置 AI 座位没有账号，不能被记进任何人的生涯。
+  const aiSettle = settleHand('r_selftest', 3, [fact('p9')], seatOf, Date.now());
+  ok(aiSettle.settled.length === 0, 'built-in AI seats never enter the ledger');
+
+  // 全服排行：余额 + 桌上筹码，按筹码降序。
+  takeSeat(b, 250, 'r_selftest_seat');
+  const board = rankAccounts(matches, [a, b]);
+  ok(board.length === 2, 'the leaderboard lists every account');
+  ok(board[0].chips >= board[1].chips, 'the leaderboard is sorted by chips');
+  ok(board.every(row => row.bankroll + row.onTable === row.chips), 'bankroll plus table stakes equals the ranked total');
+  matches.closeAll();
+
+  // 房间重建 / 服务端重启：同一房间重复买入不能二次扣款。
+  {
+    const bank = peekAccount(a).chips;
+    const again = takeSeat(a, 1000, 'r_selftest_seat');
+    ok(again === 1000 && peekAccount(a).chips === bank, 're-entering the same room reuses the committed buy-in');
+    const other = takeSeat(a, 800, 'r_selftest_other');
+    ok(other === 800 && peekAccount(a).chips === bank - 800, 'a different room charges its own buy-in');
+    leaveSeat(a, 800, 'r_selftest_other');
+    ok(peekAccount(a).chips === bank, 'leaving the second room refunds exactly its stake');
+    leaveSeat(a, 800, 'r_selftest_other');
+    ok(peekAccount(a).chips === bank, 'a repeated leave refunds nothing twice');
+  }
+
+  // 开局失败必须退款：否则每次「座位数不符」的进入都会静默吞掉一笔买入。
+  {
+    const bankBefore = peekAccount(a).chips;
+    let threw = false;
+    try {
+      // 扑克固定 6 座，1 人房间会被夹具拒绝——这正是最常见的失败路径。
+      matches.ensure({
+        roomId: 'r_refund_probe',
+        gameId: 'poker',
+        players: [{ userId: a, name: '测试员1' }],
+        seats: 1,
+        scenario: 'seats_2'
+      });
+    } catch {
+      threw = true;
+    }
+    ok(threw, 'a mismatched poker table is refused');
+    ok(peekAccount(a).chips === bankBefore, 'a refused table refunds the buy-in it had already charged');
+  }
+
+  // 排名数据不含隐藏信息：字段只有余额与统计。
+  ok(!('entities' in board[0]) && !('hand' in board[0]), 'the leaderboard carries no hidden game state');
 }
 
 // 测试用户删除
