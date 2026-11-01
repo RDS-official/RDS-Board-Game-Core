@@ -304,9 +304,9 @@ export class ServerMatch {
   /**
    * 内置 AI 的节奏泵。
    *
-   * 房间用 `autoAi: false` 建引擎时，AI 只会给出 `AI_ACT`，由这里按
-   * `presentation.aiActionDelayMs`（德州 = 5s）逐个派发：真人能看清 AI 的每一次
-   * 跟注/加注，而不是一瞬间跳过整轮。
+   * 房间用 `autoAi: false` 建引擎时，`isAutomated` 标出 AI 座位，具体动作来自它
+   * 自己的合法动作表，由这里按 `presentation.aiActionDelayMs`（德州 = 5s）逐个
+   * 派发：真人能看清 AI 的每一次跟注/加注，而不是一瞬间跳过整轮。
    */
   private startAiPump(): void {
     const delay = this.module.presentation?.aiActionDelayMs;
@@ -322,13 +322,14 @@ export class ServerMatch {
       const state = engine.getRawState();
       if (state.gameOver) return;
       const actor = engine.getActiveActorId();
-      const pending = actor
-        ? engine.getLegalActions(actor).find(action => action.type === 'AI_ACT')
-        : undefined;
-      if (pending) {
+      // AI 与真人同一条管线：`isAutomated` 说出谁由机器控制，具体动作直接来自
+      // 它自己的合法动作表（结算阶段就是「开下一手」），因此全桌 AI 也能继续打。
+      const automated = !!actor && !!this.module.isAutomated?.(state, actor);
+      const action = automated && actor ? engine.getLegalActions(actor)[0] : undefined;
+      if (action) {
         if (now - this.lastAiAt < delay) return;
         this.lastAiAt = now;
-        this.room.submitUnchecked(pending);
+        this.room.submitUnchecked(action);
         return;
       }
       // 没有 AI 要动：结算态且冷却已满就直接发下一手。

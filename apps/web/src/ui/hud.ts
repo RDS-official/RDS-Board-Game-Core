@@ -124,8 +124,7 @@ export class BoardGameHUD {
   private dockTraceTimer: number | null = null;
   private dockTraceLastSig = '';
   private dockTraceLastLayout = { cw: 0, span: 0 };
-  /** 指针移动期间临时关掉卡片位移过渡，见 `layoutActionFan`。 */
-  private fanLiveTimer: number | null = null;
+
   /** Stamp of the sheet currently painted, so a repaint does not restart its timer. */
   private paintedSheetStamp = 0;
   /** The layer outlives a repaint, so its backdrop handler must be replaced, not added again. */
@@ -218,10 +217,7 @@ export class BoardGameHUD {
       window.clearInterval(this.dockTraceTimer);
       this.dockTraceTimer = null;
     }
-    if (this.fanLiveTimer !== null) {
-      window.clearTimeout(this.fanLiveTimer);
-      this.fanLiveTimer = null;
-    }
+
     this.dockTraceOverlay?.remove();
     this.dockTraceOverlay = null;
   }
@@ -2560,7 +2556,7 @@ export class BoardGameHUD {
       // The card is left-anchored at 0, so shift by centre minus half a card.
       // Snap to half pixels: at 175% display scaling a sub-pixel x is re-rounded
       // by the compositor every layout, which is visible as the row shimmering.
-      const x = Math.round((card.x - card.width / 2 + centreOffset) * 2) / 2;
+      const x = Number((card.x - card.width / 2 + centreOffset).toFixed(1));
       const sig = `${x}|${card.scale.toFixed(3)}|${card.lift.toFixed(2)}|${card.z}`;
       if (el.dataset.fanLayout === sig) return;
       el.dataset.fanLayout = sig;
@@ -2585,21 +2581,7 @@ export class BoardGameHUD {
     }
   }
 
-  /**
-   * 指针移动期间临时关掉卡片位移过渡。
-   *
-   * 每次 pointermove 都会重算 `--fan-x`；`transition: transform .12s` 于是每帧都被
-   * 打断重来，卡片永远停在旧位置与新位置之间——120Hz 指针下看起来就是整排在抖。
-   * 停手 180ms 后恢复过渡，入场/离场仍有动画。
-   */
-  private markFanMoving(fan: HTMLElement): void {
-    fan.classList.add('live');
-    if (this.fanLiveTimer !== null) window.clearTimeout(this.fanLiveTimer);
-    this.fanLiveTimer = window.setTimeout(() => {
-      this.fanLiveTimer = null;
-      fan.classList.remove('live');
-    }, 180);
-  }
+
 
   /**
    * Dock listeners, bound once with the skeleton.
@@ -2795,7 +2777,6 @@ export class BoardGameHUD {
       this.fanFocusX = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
       this.fanFocusStrength = 1;
       this.dockTraceCounters.move += 1;
-      this.markFanMoving(fan);
       if (fanFrame) return;
       fanFrame = requestAnimationFrame(() => {
         fanFrame = 0;

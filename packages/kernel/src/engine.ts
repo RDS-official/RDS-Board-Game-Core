@@ -60,6 +60,11 @@ export interface EngineOptions {
   /** How many built-in AI seats to add on top of the human seats. */
   aiSeats?: number;
   /**
+   * 让游戏自己内联推进 AI（夹具默认）。驱动方要按节奏逐步派发时传 `false`，
+   * 由驱动方代 `isAutomated` 的角色派发具体动作。原样透传给 `setup` / 场景。
+   */
+  autoAi?: boolean;
+  /**
    * Maximum automatic follow-ups in one chain (root action excluded).
    * Defaults to {@link DEFAULT_MAX_FOLLOW_UP_ACTIONS}.
    */
@@ -138,6 +143,8 @@ export class UniversalGameEngine {
   private seats?: number;
   private humans?: number;
   private aiSeats?: number;
+  /** `false` 时不让游戏内联推进 AI，交给驱动方按节奏派发。 */
+  private autoAi?: boolean;
   /** Full accepted action history (survives time-machine rewinds). */
   private history: Action[] = [];
   private currentViewer: PlayerId | 'GOD' = 'GOD';
@@ -168,6 +175,7 @@ export class UniversalGameEngine {
     this.seats = options.seats;
     this.humans = options.humans;
     this.aiSeats = options.aiSeats;
+    this.autoAi = options.autoAi;
 
     const initial = this.initialState(
       seed,
@@ -192,10 +200,12 @@ export class UniversalGameEngine {
     humans?: number,
     aiSeats?: number
   ): GameState {
-    const setupOptions =
-      seats === undefined && humans === undefined && aiSeats === undefined
-        ? undefined
-        : { seats, humans, aiSeats };
+    const setupOptions = {
+      ...(seats === undefined ? {} : { seats }),
+      ...(humans === undefined ? {} : { humans }),
+      ...(aiSeats === undefined ? {} : { aiSeats }),
+      ...(this.autoAi === undefined ? {} : { autoAi: this.autoAi })
+    };
     if (!scenario) return this.module.setup(seed, setupOptions);
     const factory = this.module.scenarios?.[scenario];
     if (!factory) {

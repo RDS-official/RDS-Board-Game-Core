@@ -88,6 +88,18 @@ async function openScreen(page, url) {
   if (await page.locator('#boot-enter').count()) {
     await page.click('#boot-enter').catch(() => {});
   }
+  // 首帧会把相机 fit 到桌面；镜头还在补间时投影出来的屏幕坐标是错的，拖拽类
+  // 用例会因此把牌放到别的位置（机器越慢越容易踩到）。等镜头停稳再交还控制权。
+  await page
+    .waitForFunction(
+      () => {
+        const scene = window.__boardGameApp?.scene;
+        return !scene || (!scene.cameraTween && scene.controls?.enabled !== false);
+      },
+      null,
+      { timeout: 8000, polling: 50 }
+    )
+    .catch(() => {});
 }
 
 /** Current session revision, or -1 when the app is not up yet. */

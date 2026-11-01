@@ -368,6 +368,14 @@ export interface GameModule {
    * 严格模式下的合法性校验按声明放行；面向客户端的入口必须拒绝这些类型。
    */
   driverActions?: readonly string[];
+  /**
+   * 由机器控制的角色（AI 座位）。
+   *
+   * 驱动方（app / server）据此按 `presentation.aiActionDelayMs` 代它派发动作。
+   * AI 与真人走同一条 `legalActions → dispatch` 管线：`legalActions` 直接给出它
+   * 这一步要做的具体动作，因此结算阶段（准备 / 开下一手）也不会漏。
+   */
+  isAutomated?: (state: GameState, actorId: ActorId) => boolean;
   setup: (seed: number, options?: GameSetupOptions) => GameState;
   legalActions: (state: GameState, actorId: ActorId) => Action[];
   reduce: (state: GameState, action: Action, ctx: ReduceContext) => GameState;

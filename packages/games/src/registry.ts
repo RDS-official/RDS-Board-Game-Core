@@ -28,7 +28,7 @@ import { setupDuneMahjong } from './dune_mahjong/setup';
 import { PokerRules } from './poker/rules';
 import { pokerScenario, setupPoker } from './poker/setup';
 import { pokerSettlementMoment } from './poker/presentation';
-import { POKER_TABLE } from './poker/seating';
+import { isAiSeat, POKER_TABLE } from './poker/seating';
 import { SANGUOSHA_HOOKS } from './sanguosha/hooks';
 import { sanguoshaRoleLabel } from './sanguosha/presentation';
 import { SanguoshaRules } from './sanguosha/rules';
@@ -608,11 +608,21 @@ export const pokerModule: GameModule = defineGame({
     /** 默认桌：1 名真人 + 5 个内置 AI（入门桌）/ 1 真人 + 9 AI（满桌）。 */
     ai_table_6: {
       description: '1 真人 + 5 AI（入门桌）',
-      setup: (seed: number) => setupPoker(seed, { seats: 6, humans: 1 })
+      setup: (seed: number, options?: { autoAi?: boolean }) =>
+        setupPoker(seed, {
+          seats: 6,
+          humans: 1,
+          ...(options?.autoAi === undefined ? {} : { autoAi: options.autoAi })
+        })
     },
     ai_table_10: {
       description: '1 真人 + 9 AI（满桌）',
-      setup: (seed: number) => setupPoker(seed, { seats: 10, humans: 1 })
+      setup: (seed: number, options?: { autoAi?: boolean }) =>
+        setupPoker(seed, {
+          seats: 10,
+          humans: 1,
+          ...(options?.autoAi === undefined ? {} : { autoAi: options.autoAi })
+        })
     }
   },
   /**
@@ -633,6 +643,11 @@ export const pokerModule: GameModule = defineGame({
   /** 只由驱动方心跳派发的动作：玩家永远看不到，客户端入口也会拒绝。 */
   driverActions: ['OBSERVER_TICK'],
   /**
+   * 内置 AI 座位。驱动方按 `aiActionDelayMs` 代它们派发动作；`legalActions`
+   * 直接给出具体动作，AI 和真人因此走的是同一条管线（结算阶段也一样）。
+   */
+  isAutomated: (state, actorId) => isAiSeat(state, actorId),
+  /**
    * 观察者低保心跳：内核没有时钟，驱动方（app / server）每 20 秒派一拍，
    * PokerRules 把这些秒数累计成「满 60 秒 +10 筹码」。桌上没有观察者时不派发。
    */
@@ -652,7 +667,7 @@ export const pokerModule: GameModule = defineGame({
   presentation: definePresentation({
     // 结算幕布：每手结束播一次（key 含手数与结束方式，天然去重）。
     describeMoment: state => pokerSettlementMoment(state),
-    // 内置 AI 每步至少 5 秒，真人跟得上牌桌；驱动方据此逐步派发 AI_ACT。
+    // 内置 AI 每步至少 5 秒，真人跟得上牌桌；驱动方据此逐步派发它的具体动作。
     aiActionDelayMs: 5000,
     // 一手刚结束，先让牌桌读完结算，20 秒后才允许开下一手。
     actionCooldownMs: { START_HAND: 20000 }
