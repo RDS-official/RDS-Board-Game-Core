@@ -14,6 +14,8 @@
     "test:matrix:parallel": "node scripts/test-matrix-parallel.mjs",
     "test:ui": "node scripts/test-ui-matrix.mjs && node scripts/probe-card-overlay.mjs",
     "verify": "node scripts/verify.mjs",
+    "verify:fast": "node scripts/verify.mjs --fast",
+    "verify:quick": "node scripts/verify.mjs --quick",
     "verify:changed": "node scripts/verify.mjs --changed",
     "verify:all": "node scripts/verify.mjs --all",
     "verify:types": "node scripts/verify-types.mjs",

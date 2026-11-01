@@ -17,6 +17,8 @@ import { join } from 'node:path';
 import process from 'node:process';
 
 const SHARDS = Math.max(1, Number(process.env.CORE_SHARDS ?? 3) || 3);
+const filterArg = process.argv.slice(2).find(arg => !arg.startsWith('-'));
+const coreMatch = process.env.CORE_MATCH ?? filterArg;
 const LOG_DIR = join(process.env.TEMP ?? process.env.TMPDIR ?? '.', 'rds-verify');
 mkdirSync(LOG_DIR, { recursive: true });
 
@@ -27,7 +29,13 @@ function runShard(index) {
     const logPath = join(LOG_DIR, `core-shard-${index}.log`);
     const out = openSync(logPath, 'w');
     const child = spawn(process.execPath, ['scripts/test-core.mjs'], {
-      env: { ...process.env, SUITE_SHARDS: String(SHARDS), SUITE_SHARD: String(index), NO_COLOR: '1' },
+      env: {
+        ...process.env,
+        SUITE_SHARDS: String(SHARDS),
+        SUITE_SHARD: String(index),
+        NO_COLOR: '1',
+        ...(coreMatch ? { CORE_MATCH: coreMatch } : {})
+      },
       stdio: ['ignore', out, out]
     });
     child.on('exit', code => {
