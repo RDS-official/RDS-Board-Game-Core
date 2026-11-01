@@ -576,3 +576,47 @@ node node_modules/typescript/bin/tsc --noEmit && pnpm run build
   是真人，AI 管线当场停摆；观察者刚回桌就卡在「轮到我但没有任何动作」。
 - 现在 `setupPoker` 直接写 `seats: dealt.result.map(entry => entry.assignment)`，
   与 `playerOrder` 同序；回归用例覆盖「破产补位 + 观察者回桌后 seats 仍逐座对齐」。
+---
+
+## 17. 结算界面（2026-11-01）
+
+### 17.1 需求与落位
+
+一手结束后牌桌要能「读完成绩」：每名玩家的**手牌**、**最大牌型**、**输赢筹码**，
+以及两个按钮——**继续下一局** / **退出牌桌**。
+
+这不是德州专属结构，所以按既有分层拆成三层，通用层不认识任何扑克词汇：
+
+| 层 | 变的东西 | 文件 |
+| --- | --- | --- |
+| 内核契约 | 幕布可带 `ledger`（每人一行）与 `actions`（按钮能力）；`MomentPresentationState` 增 `seats` / `viewer` | `packages/kernel/src/module.ts` |
+| 应用 | `UiMomentRow` / `UiMomentAction`；`buildMoment` 把投影里的座位、可见底牌、合法动作喂给游戏声明；`GamePresenter.performMomentAction(id)` | `packages/app/src/{contracts,inspect,session,netSession}.ts` |
+| 游戏 | 账本内容与按钮含义（读哪几张牌、算净输赢、按钮派发什么） | `packages/games/src/poker/presentation.ts` |
+| 视图 | 按中性 DTO 画幕布、账本、按钮；点击只上报按钮 id | `apps/web/src/ui/hud.ts`、`styles.css` |
+
+### 17.2 账本只显示「投影允许看到」的牌
+
+`seats[].cards` 来自 `projectedHandOf(state, playerId)`——投影里被掩码的牌不会出现，
+只以 `hidden` 张数出现。于是：
+
+- **摊牌**：全员存活手牌已经被规则层设成 PUBLIC，账本显示两家（或 N 家）的底牌 + 牌型；
+- **弃牌结束**：底牌进暗弃区（`HIDDEN`），账本不显示任何手牌，只写「已弃牌 / 未亮牌」，
+  赢家按规则可以选择明牌（`SHOW`）后才亮出来；
+- 任何视角都拿不到别人的暗牌，结算画面因此不会成为泄漏通道（`poker: a settlement
+  offers continue and leave, and never leaks a folded hand` 用例守着）。
+
+输赢筹码是**净变化**：`赢得的边池总额 − 本手累计投入`（`hand.handBets`），不是余额。
+
+### 17.3 两个按钮是「能力」，不是文案
+
+- **继续下一局**：声明 `actionTypes: ['READY', 'START_HAND', 'FORCE_START']`，由
+  presenter 取**当前合法**的第一个派发。全员已就位时是直接发牌；有人没准备时退回到
+  「替自己准备」；最后才是「不等了」。没得按时按钮置灰并显示提示（通常会提示 20 秒
+  冷却），绝不发一个会被内核拒掉的动作。
+- **退出牌桌**：`leave: true`。离开牌桌不是内核动作，而是**宿主能力**——
+  `UniversalSession` / `NetSession` 的 `setLeaveTableHandler()` 由装配根注入：
+  联机回大厅（房主顺手关房），单机回入口页。规则层因此仍然不认识大厅与 URL。
+
+幕布声明 `hold: true`：结算停留在玩家按下按钮为止，不像作祟过场那样自己淡出
+（`durationMs` 只用于非 hold 的幕布）。同一个 `key` 也会重绘，因为按钮会随冷却从灰
+变亮——旧实现只在 `key` 变化时重画，按钮会永远停在第一次渲染的样子。

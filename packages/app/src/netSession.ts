@@ -68,7 +68,10 @@ import {
   buildStackView,
   focusActorsOf,
   missionLineOf,
-  phaseLabelOf
+  phaseLabelOf,
+  projectedHandOf,
+  resolveMomentButtons,
+  takeMomentButton
 } from './session';
 
 /** Cryptographically-random 32-bit helpers (S5/S6). */
@@ -152,6 +155,8 @@ export class NetSession implements GamePresenter {
   private readonly listeners = new Set<(snapshot: GameSnapshot) => void>();
   private readonly noticeListeners = new Set<(notice: UiNotice) => void>();
   private readonly visualListeners = new Set<(events: VisualTraceEvent[]) => void>();
+  /** 宿主提供的「离开牌桌」收尾（回大厅 / 回入口页），规则层不认识大厅。 */
+  private onLeaveTable?: () => void;
   // --- host state ---
   private readonly session?: UniversalSession;
   private room?: GameRoom;
@@ -503,7 +508,34 @@ export class NetSession implements GamePresenter {
   public moment(): UiMoment | null {
     if (this.isLocalAuthority) return this.session?.moment() ?? null;
     const state = this.state;
-    return state ? buildMoment(state, missionLineOf(state), { module: this.module }) : null;
+    if (!state) return null;
+    const moment = buildMoment(state, missionLineOf(state), {
+      module: this.module,
+      viewer: this.viewer,
+      handOf: playerId => projectedHandOf(state, playerId)
+    });
+    return moment ? this.resolveMomentActions(moment) : null;
+  }
+
+  /** 宿主的「退出牌桌」：联机回大厅，单机回入口页，谁装配谁决定。 */
+  public setLeaveTableHandler(handler: () => void): void {
+    this.onLeaveTable = handler;
+    if (this.isLocalAuthority) this.session?.setLeaveTableHandler(handler);
+  }
+
+  /**
+   * 幕布按钮落到具体能力：先找当前合法的内核动作，再退到宿主的「离开牌桌」。
+   * 没有可用的合法动作就拒绝，绝不派发一个会被服务端打回的动作。
+   */
+  public performMomentAction(id: string): { ok: boolean; error?: string } {
+    if (this.isLocalAuthority) return this.session!.performMomentAction(id);
+    const button = this.moment()?.actions?.find(action => action.id === id);
+    return takeMomentButton(button, this.bound, this.onLeaveTable, actionId => this.perform(actionId));
+  }
+
+  /** 把游戏声明的按钮与当前合法动作对齐（见 `resolveMomentButtons`）。 */
+  private resolveMomentActions(moment: UiMoment): UiMoment {
+    return resolveMomentButtons(moment, this.bound);
   }
 
   /** Localised role name from the game, or null when it has no such role. */

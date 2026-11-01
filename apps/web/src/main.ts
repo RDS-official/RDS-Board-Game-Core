@@ -118,27 +118,15 @@ class BoardGameSimulatorApp {
       onClose: () => this.hud.setInspectorActive(false)
     });
 
+    // 「退出牌桌」由装配根决定去哪：联机回大厅（房主负责关房），单机回入口页。
+    // 规则层只认识「离开」这个能力，不认识大厅或 URL。
+    this.bindLeaveTable();
+
     // 阶段二：联机对局顶栏「退出对局」——房主退出=结束全局（关房+全员回大厅），房客退出=仅自己离开，对局继续。
     if (this.netOptions) {
       const exitBtn = document.getElementById('btn-exit-net');
       if (exitBtn) exitBtn.hidden = false;
-      exitBtn?.addEventListener('click', async () => {
-        const opts = this.netOptions!;
-        const isHost = opts.role === 'host';
-        const msg = isHost ? '确定结束对局吗？全员将被送回大厅。' : '确定退出对局吗？对局将继续进行。';
-        if (!window.confirm(msg)) return;
-        try { (this.session as NetSession).dispose?.(); } catch { /* 尽力断开 */ }
-        if (isHost) {
-          try {
-            await fetch('/api/rooms/' + opts.roomId + '/status', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + opts.token },
-              body: JSON.stringify({ status: 'closed' })
-            });
-          } catch { /* 关房失败也允许返回，大厅轮询兑底 */ }
-        }
-        location.href = location.pathname;
-      });
+      exitBtn?.addEventListener('click', () => { void this.leaveTable(); });
     }
 
     document.addEventListener('click', event => {
@@ -464,6 +452,42 @@ class BoardGameSimulatorApp {
     this.hideNetWait();
   }
 
+  /**
+   * 离开牌桌：联机回大厅（房主顺手关房），单机回入口页。
+   *
+   * 结算幕布的「退出牌桌」与顶栏「退出对局」是同一件事，所以两条入口共用这里，
+   * 确认文案按身份区分。规则层只提供「离开」这个能力，导航留在装配根。
+   */
+  private async leaveTable(): Promise<void> {
+    if (!this.netOptions) {
+      // 单机：清空地址栏对局参数，让统一外壳重新走「入口页 → 牌桌」。
+      location.href = location.pathname;
+      return;
+    }
+    const opts = this.netOptions;
+    const isHost = opts.role === 'host';
+    const msg = isHost ? '确定结束对局吗？全员将被送回大厅。' : '确定退出对局吗？对局将继续进行。';
+    if (!window.confirm(msg)) return;
+    try { (this.session as NetSession).dispose?.(); } catch { /* 尽力断开 */ }
+    if (isHost) {
+      try {
+        await fetch('/api/rooms/' + opts.roomId + '/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + opts.token },
+          body: JSON.stringify({ status: 'closed' })
+        });
+      } catch { /* 关房失败也允许返回，大厅轮询兑底 */ }
+    }
+    location.href = location.pathname;
+  }
+
+  /** 把「离开牌桌」交给会话：结算幕布的按钮据此回调到 `leaveTable`。 */
+  private bindLeaveTable(): void {
+    (this.session as { setLeaveTableHandler?: (handler: () => void) => void }).setLeaveTableHandler?.(() => {
+      void this.leaveTable();
+    });
+  }
+
   private createSession(gameId: string, scenario?: string): UniversalSession | NetSession {
     const module = GAME_REGISTRY[gameId];
     if (!module) throw new Error(`Unknown game module: ${gameId}`);
@@ -681,6 +705,7 @@ class BoardGameSimulatorApp {
     this.hud.setPresenter(this.session);
     this.inspector.setPresenter(this.session);
     this.bindSession(this.session);
+    this.bindLeaveTable();
 
     this.scene.setHighlight(null, false);
     const snapshot = this.session.getSnapshot();
@@ -725,6 +750,7 @@ class BoardGameSimulatorApp {
     this.hud.setPresenter(this.session);
     this.inspector.setPresenter(this.session);
     this.bindSession(this.session);
+    this.bindLeaveTable();
 
     this.scene.setHighlight(null, false);
     const snapshot = this.session.getSnapshot();

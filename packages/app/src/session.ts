@@ -20,6 +20,7 @@ import {
   UiHistoryKind,
   UiHook,
   UiMoment,
+  UiMomentAction,
   UiNotice,
   UiNpc,
   UiPlacement,
@@ -167,6 +168,11 @@ export class UniversalSession implements GamePresenter {
   private listeners = new Set<(snapshot: GameSnapshot) => void>();
   private noticeListeners = new Set<(notice: UiNotice) => void>();
   private visualListeners = new Set<(events: VisualTraceEvent[]) => void>();
+  /**
+   * 离开牌桌的收尾工作由装配根提供（回到大厅 / 回到登录入口）。规则层不认识
+   * 「大厅」，所以幕布上的「退出牌桌」按钮只是把这件事交给宿主。
+   */
+  private onLeaveTable?: () => void;
 
   /** Newest-first activity feed; trimmed to HISTORY_LIMIT. */
   private history: UiHistoryEntry[] = [];
@@ -247,7 +253,44 @@ export class UniversalSession implements GamePresenter {
 
   /** Full-screen beat declared by the game (a haunt starting), or null. */
   public moment(): UiMoment | null {
-    return buildMoment(this.snapshot.board, this.snapshot.mission, { module: this.module });
+    // The snapshot's board is already the viewer's projection, so the curtain
+    // reads the same masked cards the table shows — no second projection pass.
+    const state = this.snapshot.board;
+    const moment = buildMoment(state, this.snapshot.mission, {
+      module: this.module,
+      viewer: this.snapshot.viewer,
+      handOf: playerId => projectedHandOf(state, playerId)
+    });
+    return moment ? this.resolveMomentActions(moment) : null;
+  }
+
+  /** 宿主接管「退出牌桌」：单机是回到入口页，联机是回到大厅。 */
+  public setLeaveTableHandler(handler: () => void): void {
+    this.onLeaveTable = handler;
+  }
+
+  /**
+   * 幕布按钮落到具体能力。
+   *
+   * `actionTypes` 是内核动作类型，取**当前合法**的第一个派发；一个都不合法时
+   * 按钮置灰并显示冷却提示，绝不发一个会被拒的动作。`leave` 交给宿主。
+   */
+  public performMomentAction(id: string): { ok: boolean; error?: string } {
+    const button = this.moment()?.actions?.find(action => action.id === id);
+    return this.takeMomentButton(button, this.onLeaveTable);
+  }
+
+  /** 按钮 → 能力（见 `takeMomentButton`）。 */
+  private takeMomentButton(
+    button: UiMomentAction | undefined,
+    leave: (() => void) | undefined
+  ): { ok: boolean; error?: string } {
+    return takeMomentButton(button, this.bound, leave, id => this.perform(id));
+  }
+
+  /** 把游戏声明的按钮与当前合法动作对齐（见 `resolveMomentButtons`）。 */
+  private resolveMomentActions(moment: UiMoment): UiMoment {
+    return resolveMomentButtons(moment, this.bound);
   }
 
   /** Localised role name from the game, or null when it has no such role. */
@@ -2098,6 +2141,84 @@ export function buildPlacementView(
       entryDir: pending.dir,
       connections
     };
+}
+
+/**
+ * What a viewer may read in one player's hand zone.
+ *
+ * Readable faces come from the *projection*, so a card the viewer may not see is
+ * simply not there; the count of those is reported separately so a settlement can
+ * paint card backs instead of pretending the seat is empty-handed.
+ */
+export function projectedHandOf(
+  state: ProjectedGameState,
+  playerId: string
+): { cards: string[]; hidden: number } {
+  const zone = state.zones[`zone_hand_${playerId}`];
+  if (!zone) return { cards: [], hidden: 0 };
+  const cards: string[] = [];
+  let hidden = 0;
+  for (const id of zone.orderedEntities) {
+    const entity = state.entities[id];
+    const title = entity?.components?.cardFace?.title;
+    if (entity && entity.isMasked !== true && typeof title === 'string' && title) cards.push(title);
+    else hidden += 1;
+  }
+  return { cards, hidden };
+}
+
+/**
+ * Resolve one pressed moment button into a capability.
+ *
+ * The curtain only reports an id; this is where it becomes either a kernel
+ * action (the first of the button's `actionTypes` that is legal now) or the
+ * host's "leave the table". Anything else is refused rather than guessed.
+ */
+export function takeMomentButton(
+  button: UiMomentAction | undefined,
+  bound: readonly BoundAction[],
+  leave: (() => void) | undefined,
+  dispatch: (actionId: string) => { ok: boolean; error?: string }
+): { ok: boolean; error?: string } {
+  if (!button) return { ok: false, error: '未知的结算按钮' };
+  if (!button.enabled) return { ok: false, error: button.hint ?? '现在还不能这么做' };
+  const target = bound.find(candidate =>
+    (button.actionTypes ?? []).includes(String(candidate.ui.actionType ?? candidate.action?.type ?? ''))
+  );
+  if (target) return dispatch(target.ui.id);
+  if (button.leave) {
+    if (!leave) return { ok: false, error: '当前入口不支持离开牌桌' };
+    leave();
+    return { ok: true };
+  }
+  return { ok: false, error: '该动作现在不可用' };
+}
+
+/**
+ * Align a moment's declared buttons with the actions that are legal right now.
+ *
+ * Both sessions do the same thing, and the rule is small but easy to get wrong:
+ * an action button is only live when one of its `actionTypes` is in the current
+ * action table *and* that entry is not cooling down; a `leave` button needs no
+ * kernel action at all — it is the host's capability, so it is always live.
+ */
+export function resolveMomentButtons(moment: UiMoment, bound: readonly BoundAction[]): UiMoment {
+  if (!moment.actions?.length) return moment;
+  return {
+    ...moment,
+    actions: moment.actions.map(button => {
+      if (button.leave) return { ...button, enabled: true };
+      const legal = bound.find(candidate =>
+        (button.actionTypes ?? []).includes(String(candidate.ui.actionType ?? candidate.action?.type ?? ''))
+      );
+      const cooling = legal?.ui.cooldownMs && legal.ui.cooldownMs > 0 ? legal.ui.cooldownMs : 0;
+      return {
+        ...button,
+        enabled: !!legal && cooling === 0,
+        hint: !legal ? button.hint : cooling > 0 ? `冷却中 · ${Math.ceil(cooling / 1000)} 秒` : undefined
+      };
+    })
+  };
 }
 
 /** Focus set P(s) computed from a (projected) state alone — no engine needed. */
