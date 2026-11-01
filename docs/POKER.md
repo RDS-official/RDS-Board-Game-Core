@@ -534,3 +534,31 @@ node node_modules/typescript/bin/tsc --noEmit && pnpm run build
 2. **M2 夹具接入**：`setup/rules/registry` + `pnpm test`、`pnpm test:matrix` 全绿。
 3. **M3 表现层**：app DTO + scene 牌桌/底池 + `pnpm test:ui` 全绿。
 4. **M4 收尾**：`docs/POKER.md` 定稿、`ARCHITECTURE.md` 夹具表更新、`lint`/`tsc`/`build` 全绿，开 PR。
+
+---
+
+## 16. AI 与真人同一条动作管线（2026-11-01）
+
+### 16.1 为什么改
+
+旧实现里 AI 有一条专用通道 `AI_ACT`：驱动方只认这一个类型，而结算阶段（准备 /
+开下一手）给的是 `READY` / `START_HAND`，于是：
+
+- 全桌都是 AI（真人都进了观察席）时，没有任何人派发 `START_HAND`，牌局停摆，
+  观察者也就等不到「本轮结束」再回桌；
+- `EngineOptions` 里没有 `autoAi` 字段，`UniversalSession` / `ServerMatch` 传的
+  `autoAi: false` 被静默丢弃，场景（`seats_6` 等房间变体）里 AI 仍然由内核一次性
+  打完整条街——这就是「AI 动作太快、5 秒延迟不生效」的根因。
+
+### 16.2 现在的规则
+
+- `GameModule.isAutomated(state, actorId)` 声明谁由机器控制（德州 = `isAiSeat`）。
+- AI 的 `legalActions` **直接给出它这一步要做的具体动作**（`choosePokerAction`），
+  和真人完全同构；结算阶段给 `START_HAND`（全员就位时）或不给（等真人准备）。
+- 驱动方（`UniversalSession.scheduleAiTurn` / `ServerMatch.startAiPump`）只做三件事：
+  问「当前行动者是不是机器」→ 取它的第一个合法动作 → 按
+  `presentation.aiActionDelayMs`（德州 5000ms）派发。AI 的每一次跟注、加注、开下一手
+  都间隔 5 秒。
+- 内核内联模式（`autoAi: true`，测试与夹具默认）走同一个 `choosePokerAction` +
+  `applyHuman`，所以两种模式的状态序列一致；`EngineOptions.autoAi` 现在会透传到
+  `setup` 与场景。

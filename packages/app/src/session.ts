@@ -153,7 +153,7 @@ export class UniversalSession implements GamePresenter {
   private revision = 0;
   private snapshot!: GameSnapshot;
   private bound: BoundAction[] = [];
-  /** 内置 AI 的下一步定时器：按游戏声明的节奏逐步派发 AI_ACT。 */
+  /** 内置 AI 的下一步定时器：按游戏声明的节奏逐步派发它的具体动作。 */
   private aiTimer: ReturnType<typeof setTimeout> | null = null;
   /** 周期性规则（观察者低保）的驱动定时器；内核本身无时钟。 */
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -833,9 +833,9 @@ export class UniversalSession implements GamePresenter {
   /**
    * 让内置 AI 按游戏声明的节奏出手。
    *
-   * 内核在 `autoAi: false` 下只暴露 `AI_ACT`，一次派发只走一步；这里每次状态变化
-   * 后重排一个定时器，于是 AI 与 AI 之间的间隔正好是 `aiActionDelayMs`，真人看得清
-   * 每一步：谁跟注、谁加注都不再是一瞬间跳过去的结果。
+   * AI 与真人同一条管线：`legalActions` 直接给出它这一步要做的具体动作，这里
+   * 只按 `aiActionDelayMs` 的节奏派发。每次状态变化后重排定时器，于是 AI 与 AI
+   * 之间的间隔正好是 5 秒，真人看得清每一步。
    */
   private scheduleAiTurn(): void {
     if (this.aiTimer !== null) {
@@ -844,13 +844,22 @@ export class UniversalSession implements GamePresenter {
     }
     const delay = this.module.presentation?.aiActionDelayMs;
     if (!delay) return;
+    const state = this.engine.getRawState();
     const actor = this.engine.getActiveActorId();
-    if (!actor) return;
-    const pending = this.engine.getLegalActions(actor).find(action => action.type === 'AI_ACT');
-    if (!pending) return;
+    if (!actor || !this.module.isAutomated?.(state, actor)) return;
+    if (this.engine.getLegalActions(actor).length === 0) return;
     this.aiTimer = setTimeout(() => {
       this.aiTimer = null;
-      this.engine.dispatch(pending);
+      // 这 5 秒里状态可能已经变了（真人先手、换座、牌局结束），到点重新问一次。
+      const live = this.engine.getRawState();
+      const liveActor = this.engine.getActiveActorId();
+      if (!liveActor || !this.module.isAutomated?.(live, liveActor)) {
+        this.scheduleAiTurn();
+        return;
+      }
+      const action = this.engine.getLegalActions(liveActor)[0];
+      if (!action) return;
+      this.engine.dispatch(action);
       this.scheduleAiTurn();
     }, delay);
   }

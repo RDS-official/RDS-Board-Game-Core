@@ -906,15 +906,15 @@ test('poker: a showdown keeps the surviving hands face up', () => {
   }
 });
 
-test('poker: the AI is stepped one action at a time when the driver asks for it', () => {
+test('poker: an AI seat offers its concrete action through the normal pipeline', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 73, {
     scenario: 'seats_4',
     autoAi: false
-  } as never);
+  });
   engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
   engine.dispatch({ type: 'START_HAND', playerId: 'p1' });
 
-  // 把 p4/p1/p2 三个真人座位弃掉，轮到 AI 时必须只给出 AI_ACT。
+  // 把真人座位依次弃掉，轮到 AI 时它必须给出「具体动作」，而不是 AI 专用标记。
   const seatOf = engine.getRawState().globalVars.seats as { playerId: string; isAi: boolean }[];
   const humans = seatOf.filter(seat => !seat.isAi).map(seat => seat.playerId);
   let guard = 0;
@@ -931,14 +931,50 @@ test('poker: the AI is stepped one action at a time when the driver asks for it'
   const aiActor = engine.getActiveActorId();
   const isAi = !!seatOf.find(seat => seat.playerId === aiActor)?.isAi;
   if (isAi) {
-    const offered = engine.getLegalActions(aiActor).map(action => action.type);
-    assertEqual(offered.join(','), 'AI_ACT', 'an AI seat only offers one step at a time');
-    const before = engine.getActiveActorId();
-    const step = engine.dispatch({ type: 'AI_ACT', playerId: aiActor });
-    assert(step.ok, `AI_ACT accepted: ${'$'}{step.error ?? ''}`);
-    assert(engine.getRawState().turn > 0, 'the step advanced the turn');
-    assert(before !== undefined, 'the AI had a seat');
+    const offered = engine.getLegalActions(aiActor);
+    assertEqual(offered.length, 1, 'an AI seat offers exactly one action at a time');
+    const action = offered[0];
+    assert(
+      ['FOLD', 'CHECK', 'CALL', 'RAISE', 'ALL_IN'].includes(action.type),
+      `the AI offers a concrete betting action, got ${action.type}`
+    );
+    const turnBefore = engine.getRawState().turn;
+    const step = engine.dispatch(action);
+    assert(step.ok, `the AI action is accepted: ${'$'}{step.error ?? ''}`);
+    assert(engine.getRawState().turn > turnBefore, 'the step advanced the turn');
   }
+});
+
+test('poker: an all-AI table keeps dealing after a hand', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 91, {
+    scenario: 'seats_4',
+    autoAi: false
+  });
+  const raw = engine.getRawState();
+  // 整桌都变成 AI——等价于所有真人都进了观察席。
+  raw.globalVars.seats = (raw.globalVars.seats as { playerId: string; isAi: boolean }[]).map(
+    seat => ({ ...seat, isAi: true })
+  );
+  raw.globalVars.hand = {
+    ...(raw.globalVars.hand as Record<string, unknown>),
+    street: 'COMPLETE',
+    readyForNext: [...raw.playerOrder]
+  };
+  const ai = raw.playerOrder[0];
+  const offered = engine.getLegalActions(ai).map(action => action.type);
+  assert(offered.includes('START_HAND'), `an AI can deal the next hand: ${offered.join(',')}`);
+  const dealt = engine.dispatch({ type: 'START_HAND', playerId: ai });
+  assert(dealt.ok, `START_HAND accepted: ${'$'}{dealt.error ?? ''}`);
+  assertEqual(engine.getRawState().phase, 'PREFLOP', 'the next hand is dealt');
+});
+
+test('poker: a scenario honours the driver autoAi:false switch', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 5, {
+    scenario: 'ai_table_6',
+    autoAi: false
+  });
+  const config = engine.getRawState().globalVars.config as { autoAi: boolean };
+  assertEqual(config.autoAi, false, 'the scenario passes autoAi through to the table');
 });
 
 test('poker: AI seats never block the next deal, and a human ready deals it', () => {

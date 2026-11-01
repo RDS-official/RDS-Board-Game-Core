@@ -36,7 +36,7 @@ export interface PokerConfig {
   /** 是否开启「入座 → 准备 → 开局」流程（缺省 false，保持旧测试行为）。 */
   seatingFlow?: boolean;
   /**
-   * false 时内核不再内联推进 AI，改由驱动方按节奏派发 `AI_ACT`（app/server 用）。
+   * false 时内核不再内联推进 AI，改由驱动方按节奏派发它的具体动作（app/server 用）。
    * 缺省 true，测试与回放保持「一次 reduce 走完 AI 回合」的旧行为。
    */
   autoAi?: boolean;
@@ -339,5 +339,13 @@ export function setupPoker(seed = 42, config: PokerConfig = { seats: 4 }): GameS
  */
 export function pokerScenario(seats: number, overrides: Partial<PokerConfig> = {}) {
   // 剧本是测试与探针的固定座次夹具：默认关掉开局洗座，断言才能精确到号位。
-  return (seed: number): GameState => setupPoker(seed, { shuffleSeats: false, ...overrides, seats });
+  // `options.autoAi` 必须透传：联机房间用剧本当房间变体（seats_6 等），以前
+  // 场景忽略了这个开关，AI 一直在内核里一次性打完整条街。
+  return (seed: number, options?: { autoAi?: boolean }): GameState =>
+    setupPoker(seed, {
+      shuffleSeats: false,
+      ...overrides,
+      seats,
+      ...(options?.autoAi === undefined ? {} : { autoAi: options.autoAi })
+    });
 }

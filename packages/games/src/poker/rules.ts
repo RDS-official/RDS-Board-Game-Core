@@ -87,7 +87,7 @@ export interface PokerConfigValues {
   smallBlind: number;
   bigBlind: number;
   /**
-   * 由内核内联推进 AI（默认）。app/server 设为 false 时改为逐步派发 `AI_ACT`，
+   * 由内核内联推进 AI（默认）。app/server 设为 false 时改由驱动方逐步派发具体动作，
    * 每个 AI 动作之间才有可感知的停顿。
    */
   autoAi: boolean;
@@ -445,16 +445,6 @@ export class PokerRules {
     // 对真人永远不提供合法动作，避免玩家代替 AI 出牌。
     if (isAiSeat(state, playerId) && playerId !== state.activePlayerId) return [];
 
-    // 外部驱动模式（app/server）：AI 座位每步只走一个动作，由驱动方按节奏派发
-    // `AI_ACT`。内核内联推进会让一桌 AI 在一个 reduce 里瞬间打完，真人根本看不清。
-    // 外部驱动模式下，AI 座位额外提供一个「走一步」给驱动方；但不独占，否则
-    // 调试用的上帝视角会看到一份空动作表，没法替 AI 出牌。
-    const aiStep: Action[] = [];
-    if (!configOf(state).autoAi) {
-      const actor = state.activeActorId ?? state.activePlayerId;
-      if (isAiSeat(state, playerId) && playerId === actor) aiStep.push({ type: 'AI_ACT', playerId });
-    }
-
     // 「入座 → 准备 → 开局」：真人座位需要先后完成入座与准备。
     // AI 座位开局即入座就绪，因此不提供任何操作。
     const seating = seatingOf(state);
@@ -466,10 +456,22 @@ export class PokerRules {
     }
 
     if (hand.street === 'COMPLETE') {
+      // 机器座位在结算阶段只做一件事：全员就位就发下一手，别替真人抢开。
+      // 全桌都成了 AI（真人都进了观察席）时，牌局正是靠这一步继续下去的。
+      if (isAiSeat(state, playerId)) {
+        return this.everyoneReady(state, hand) ? [{ type: 'START_HAND', playerId }] : [];
+      }
       return this.settlementActions(state, playerId, hand);
     }
     if (playerId !== state.activePlayerId) return [];
     if (hand.folded.includes(playerId) || hand.allIn.includes(playerId)) return [];
+
+    // AI 与真人走同一条管线：直接给出它这一步要做的具体动作，驱动方原样派发，
+    // 结算、准备、开下一手也走同一张动作表，不再有「AI 专用」的 AI_ACT。
+    if (isAiSeat(state, playerId)) {
+      const decided = choosePokerAction(state, playerId);
+      return decided ? [decided] : [];
+    }
 
     const chips = chipsOf(state, playerId);
     const owed = toCall(hand, playerId);
@@ -505,7 +507,7 @@ export class PokerRules {
       actions.push({ type: 'ALL_IN', playerId });
     }
 
-    return [...aiStep, ...actions];
+    return actions;
   }
 
   /**
@@ -602,7 +604,7 @@ export class PokerRules {
    * 由 `choosePokerAction` 保证，内核仍会再校验一次。
    */
   private static advanceAi(state: GameState, ctx: ReduceContext): GameState {
-    // 外部驱动模式下每个 AI 动作由驱动方单独派发（AI_ACT），内核不再内联推进。
+    // 外部驱动模式下每个 AI 动作由驱动方单独派发，内核不再内联推进。
     if (!configOf(state).autoAi) return state;
     let next = state;
     for (let guard = 0; guard < 64; guard++) {
@@ -732,16 +734,6 @@ export class PokerRules {
       };
     }
 
-    if (action.type === 'AI_ACT') {
-      const actor = state.activeActorId ?? state.activePlayerId;
-      if (!actor || !isAiSeat(state, actor) || action.playerId !== actor) return state;
-      const decided = choosePokerAction(state, actor);
-      if (!decided) return state;
-      const stepped = this.applyBet(state, decided, ctx);
-      if (stepped === state) return state;
-      const settled = this.settle(stepped, ctx);
-      return { ...settled, turn: state.turn + 1 };
-    }
 
     if (hand.street === 'COMPLETE') return state;
     if (action.playerId !== state.activePlayerId) return state;

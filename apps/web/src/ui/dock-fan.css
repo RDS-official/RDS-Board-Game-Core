@@ -387,11 +387,6 @@
   will-change: translate, transform;
 }
 
-/* 指针在动的时候关掉位移过渡：每帧重设 --fan-x 会把 120ms 过渡反复打断，
-   120Hz 下看起来就是整排在抖（见 hud.ts 的 markFanMoving）。 */
-.dock-fan.live .act {
-  transition: none;
-}
 
 .dock-fan .act:hover,
 .dock-fan .act:focus-visible {
