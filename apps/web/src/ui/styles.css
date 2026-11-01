@@ -3733,6 +3733,180 @@ select.pf-control {
 }
 
 /* ============================================================
+   Moment ledger + buttons — a settlement reads every seat.
+   ============================================================ */
+.mc-ledger {
+  margin: 22px auto 0;
+  width: min(680px, 86vw);
+  max-height: min(42vh, 340px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(201, 162, 74, 0.22);
+  background: linear-gradient(180deg, rgba(14, 12, 10, 0.82), rgba(8, 6, 5, 0.9));
+  box-shadow: inset 0 1px 0 rgba(255, 226, 170, 0.05);
+  text-align: left;
+}
+
+.mc-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 1.1fr) auto minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: var(--type-xs);
+  font-variant-numeric: tabular-nums;
+  color: rgba(236, 226, 206, 0.82);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.mc-row.gain {
+  background: linear-gradient(90deg, rgba(52, 120, 74, 0.22), transparent 72%);
+}
+
+.mc-row.loss {
+  background: linear-gradient(90deg, rgba(140, 40, 38, 0.18), transparent 72%);
+}
+
+.mc-row.self {
+  box-shadow: inset 0 0 0 1px rgba(217, 180, 91, 0.45);
+}
+
+.mc-who {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mc-who b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f4e8cf;
+}
+
+.mc-tag {
+  flex: none;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #1a1408;
+  background: rgba(217, 180, 91, 0.85);
+}
+
+.mc-row.loss .mc-tag {
+  background: rgba(200, 120, 110, 0.6);
+  color: #24100e;
+}
+
+.mc-cards {
+  display: flex;
+  gap: 3px;
+  flex: none;
+}
+
+.mc-card {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: #f2eddc;
+  color: #15161a;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.mc-card.back {
+  background: rgba(60, 26, 26, 0.9);
+  color: rgba(240, 210, 210, 0.62);
+  box-shadow: inset 0 0 0 1px rgba(200, 150, 140, 0.35);
+}
+
+.mc-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(214, 195, 162, 0.72);
+}
+
+.mc-value {
+  justify-self: end;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.mc-row.gain .mc-value {
+  color: #7fe0a2;
+}
+
+.mc-row.loss .mc-value {
+  color: #f08b7f;
+}
+
+.mc-actions {
+  margin-top: 26px;
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.mc-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 132px;
+  padding: 11px 26px;
+  border-radius: 999px;
+  border: 1px solid rgba(214, 178, 108, 0.55);
+  background: rgba(24, 19, 14, 0.86);
+  color: #f4e8cf;
+  font-family: inherit;
+  font-size: var(--type-sm);
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.mc-btn small {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: rgba(236, 226, 206, 0.55);
+}
+
+.mc-btn.primary {
+  border-color: rgba(217, 180, 91, 0.9);
+  background: linear-gradient(160deg, rgba(246, 220, 156, 0.24), rgba(217, 180, 91, 0.14));
+  color: #ffeec4;
+}
+
+.mc-btn.danger {
+  border-color: rgba(200, 96, 88, 0.6);
+  color: #f6d3cd;
+}
+
+.mc-btn:not([disabled]):hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 226, 170, 0.95);
+}
+
+.mc-btn[disabled] {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* ============================================================
    Recent activity feed
    ============================================================ */
 .activity-feed {

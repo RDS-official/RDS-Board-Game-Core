@@ -173,7 +173,79 @@ export interface MomentPresentationState {
   globalVars: Record<string, unknown>;
   /** The persistent objective line currently shown to the player. */
   mission?: string;
+  /**
+   * Whose eyes this moment is built for ('GOD' on the full-information seat).
+   * A settlement screen needs it to decide whether a folded hand may be shown.
+   */
+  viewer?: string;
+  /**
+   * Every seat in table order, including the ones that are no longer in the
+   * hand (observers, busted seats). A settlement lists the whole table, not
+   * just the survivors.
+   */
+  seats?: MomentSeat[];
   players: Record<string, { name: string; role?: string; alive?: boolean }>;
+}
+
+/**
+ * One seat of the table as a moment declaration reads it.
+ *
+ * Kept separate from `players` because a settlement needs things a name does
+ * not carry: what the seat is worth now, whether it folded, and which cards it
+ * is allowed to show. All of it is public information — the projection has
+ * already masked anything the viewer may not read.
+ */
+export interface MomentSeat {
+  playerId: string;
+  name: string;
+  /** The kernel score (chips, points, coins — whatever the game counts). */
+  score: number;
+  /** Cards this seat may show right now, already printed by the game. */
+  cards?: string[];
+  /** Cards the seat still holds but is not allowed to show (a face-down hand). */
+  hidden?: number;
+}
+
+export interface MomentLedgerRow {
+  /** Stable id for reconcile; a row without one falls back to its index. */
+  key?: string;
+  /** The seat (or pot) this row is about. */
+  name: string;
+  /** Small marker painted beside the name (庄家 / 赢家 / 观察席). */
+  tag?: string;
+  /** Cards to paint in the row, already localised by the game. */
+  cards?: string[];
+  /** Number of face-down cards to paint after the visible ones. */
+  hidden?: number;
+  /** Secondary line under the name, e.g. the made hand. */
+  detail?: string;
+  /** Right-hand number (net chips, points won, …). */
+  value?: string;
+  /** Which way the number reads; unknown tokens paint neutral. */
+  tone?: 'gain' | 'loss' | 'neutral';
+}
+
+/**
+ * A button painted on a moment's curtain.
+ *
+ * `actionTypes` names kernel actions the curtain may take, most preferred
+ * first. The view dispatches the first one that is legal *now*, so a button can
+ * never send an illegal action; when none is legal it stays disabled and shows
+ * `unavailableHint` (a cooldown, usually).
+ *
+ * `leave` is the other capability, and it is deliberately not an action: asking
+ * to leave the table is host vocabulary (back to the lobby, or back to the entry
+ * screen) and belongs to whoever composed the presenter, not to the rules.
+ */
+export interface MomentActionHints {
+  id: string;
+  label: string;
+  actionTypes?: string[];
+  /** Ask the host to take this viewer away from the table. */
+  leave?: boolean;
+  tone?: 'primary' | 'normal' | 'danger';
+  /** Painted on the button while nothing in `actionTypes` is legal. */
+  unavailableHint?: string;
 }
 
 /** A full-screen beat the game wants announced once. */
@@ -191,11 +263,18 @@ export interface MomentPresentationHints {
   cast?: { label: string; name: string }[];
   /** Objective line shown at the bottom. */
   objective?: string;
+  /**
+   * A per-seat table under the story (a settlement, a scoreboard, a vote).
+   * The game decides the columns' words and order; the curtain only paints.
+   */
+  ledger?: MomentLedgerRow[];
+  /** Buttons under the ledger. A moment without any keeps the plain curtain. */
+  actions?: MomentActionHints[];
   /** How long the curtain stays up. */
   durationMs?: number;
   /**
    * 幕布不自动消失：由游戏在状态变化时撤下（例如结算画面要等所有人准备）。
-   * 点击仍然可以手动关闭。
+   * 点击仍然可以手动关闭——点幕布本身关闭，点按钮执行对应能力。
    */
   hold?: boolean;
 }

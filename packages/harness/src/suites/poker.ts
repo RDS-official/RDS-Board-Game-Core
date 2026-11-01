@@ -13,6 +13,8 @@ import { chipShares } from '@rds/games/poker/ai';
 import { setupPoker } from '@rds/games/poker/setup';
 import { isAiSeat } from '@rds/games/poker/seating';
 import type { PokerHandState } from '@rds/games/poker/rules';
+import { buildMoment } from '@rds/app/inspect';
+import { projectedHandOf } from '@rds/app/session';
 import { assert, assertEqual, test } from '../testKit';
 
 /* -------------------------------------------------------------------------- */
@@ -1064,4 +1066,94 @@ test('poker: an AI seat never blocks the table, and anyone can force the next de
   const forced = engine.dispatch({ type: 'FORCE_START', playerId: 'p1' });
   assert(forced.ok, 'force start is accepted');
   assertEqual(street(), 'PREFLOP', 'the next hand was dealt immediately');
+});
+
+/* -------------------------------------------------------------------------- */
+/* 结算界面：每个座位的手牌 / 最大牌型 / 输赢筹码 + 两个按钮                     */
+/* -------------------------------------------------------------------------- */
+
+/** 结算幕布按查看者的投影生成（隐藏的牌必须仍然是隐藏的）。 */
+function settleMoment(engine: UniversalGameEngine, viewer: string) {
+  const state = engine.getProjectedStateFor(viewer);
+  return buildMoment(state, undefined, {
+    module: GAME_REGISTRY.poker,
+    viewer,
+    handOf: playerId => projectedHandOf(state, playerId)
+  });
+}
+
+test('poker: settlement lists every seat\'s cards, made hand and net chips', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 72, { scenario: 'seats_2' });
+  startHand(engine);
+  for (let street = 0; street < 4; street++) callAround(engine, 2);
+
+  const moment = settleMoment(engine, 'GOD');
+  assert(!!moment, 'a settled hand declares a settlement moment');
+  assertEqual(moment!.key, 'poker:settle:1:SHOWDOWN', 'the key carries the hand number');
+  const ledger = moment!.ledger ?? [];
+  assertEqual(ledger.length, 2, 'one row per seat');
+  const winner = ledger.find(row => row.tag === '赢家');
+  assert(!!winner, 'the winner is tagged');
+  assertEqual(winner!.cards?.length, 2, 'the winner shows both hole cards');
+  // 牌型就是裁决里写的那一条：结算画面和摊牌结果不能各说各话。
+  const result = engine.getRawState().globalVars.lastHand as {
+    showdown: { playerId: string; label: string }[];
+  };
+  const judged = result.showdown.find(line => line.playerId === winner!.key);
+  assertEqual(winner!.detail, judged?.label, 'the row carries the made hand');
+  assertEqual(winner!.value, '+10', 'the row carries net chips');
+  assertEqual(winner!.tone, 'gain', 'a win is painted as a gain');
+  const loser = ledger.find(row => row.tag !== '赢家' && row.tone === 'loss');
+  assertEqual(loser?.value, '-10', 'the loser pays for the same chips');
+  // 输的人也在结算里，和桌面（摊牌后全公开）一致。
+  assertEqual(loser?.cards?.length, 2, 'a called hand stays face up at showdown');
+});
+
+test('poker: a settlement offers continue and leave, and never leaks a folded hand', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 71, { scenario: 'seats_4' });
+  startHand(engine);
+  for (let index = 0; index < 3; index++) act(engine, 'FOLD');
+
+  // 用仍坐着的座位看结算：弃牌的人牌进暗弃区，任何视角都不该再亮出来。
+  const moment = settleMoment(engine, engine.getRawState().playerOrder[2]);
+  assert(!!moment, 'the fold-ended hand declares a settlement moment');
+  assertEqual(moment!.key, 'poker:settle:1:FOLD', 'a fold finish is its own key');
+  for (const row of moment!.ledger ?? []) {
+    assert(!(row.cards?.length ?? 0), `folded seat ${row.name} shows no cards`);
+  }
+  const folded = (moment!.ledger ?? []).find(row => row.tag === '弃牌');
+  assertEqual(folded?.detail, '已弃牌', 'a folded seat says why it has no cards');
+  const winnerRow = (moment!.ledger ?? []).find(row => row.tag === '赢家');
+  assertEqual(winnerRow?.detail, '未亮牌', 'a winner that has not shown says so instead of drawing blanks');
+
+  const ids = (moment!.actions ?? []).map(action => action.id);
+  assertEqual(ids.join(','), 'next-hand,leave-table', 'the curtain offers continue and leave');
+  assertEqual(moment!.hold, true, 'the settlement waits for the player instead of fading out');
+});
+
+test('poker: the continue button resolves against the actions legal right now', async () => {
+  const { UniversalSession } = await import('@rds/app/session');
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 71, { scenario: 'seats_4' });
+  startHand(engine);
+  for (let index = 0; index < 3; index++) act(engine, 'FOLD');
+
+  const session = new UniversalSession(GAME_REGISTRY.poker, 71, 'seats_4', engine);
+  session.setViewer(engine.getRawState().playerOrder[2]);
+  const next = session.moment()?.actions?.find(action => action.id === 'next-hand');
+  assert(!!next?.enabled, 'a settled hand can always continue');
+
+  let left = false;
+  session.setLeaveTableHandler(() => {
+    left = true;
+  });
+  assert(session.performMomentAction('leave-table').ok, 'leave is accepted');
+  assert(left, 'leave reached the host handler');
+
+  assert(session.performMomentAction('next-hand').ok, 'continue is accepted');
+  assertEqual(
+    (engine.getRawState().globalVars.hand as PokerHandState).street,
+    'PREFLOP',
+    'continue dealt the next hand'
+  );
+  session.dispose();
 });

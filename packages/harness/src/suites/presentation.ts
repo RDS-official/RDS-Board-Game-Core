@@ -46,6 +46,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { itemSlotId } from '@rds/games/betrayal/helpers';
 import { layoutRoom, hashString as layoutHash } from '@rds/web/render/procedural/roomLayout';
 import { PROPS } from '@rds/web/render/procedural/props';
+import { definePresentation } from '@rds/kernel/module';
 import { test, assert, assertEqual } from '../testKit';
 import { counterModule } from '../suiteHelpers';
 
@@ -673,6 +674,54 @@ test('presentation: the overture is a moment the game declares', () => {
   );
   assertEqual(buildMoment(board, undefined, { module: counterModule }), null, 'no hints, no curtain');
   assertEqual(buildMoment(board, undefined, { module: GAME_REGISTRY.splendor }), null, 'splendor never inherits it');
+});
+
+test('presentation: a ledger and its buttons travel from the game to the curtain', () => {
+  // The curtain knows no game vocabulary: it forwards the table rows and the
+  // buttons verbatim, and the presenter — not the HUD — decides what a press
+  // means. This is the contract a settlement screen rides on.
+  const board = {
+    globalVars: {},
+    playerOrder: ['p1', 'p2'],
+    players: {
+      p1: { name: '甲', score: 1010 },
+      p2: { name: '乙', score: 990 }
+    }
+  };
+  const module = {
+    ...counterModule,
+    presentation: definePresentation({
+      describeMoment: state => ({
+        key: 'ledger-demo',
+        title: '结算',
+        ledger: [
+          { key: 'p1', name: state.seats?.[0]?.name ?? '?', value: '+10', tone: 'gain' as const, cards: ['A♠'] },
+          { key: 'p2', name: '乙', value: '-10', tone: 'loss' as const }
+        ],
+        actions: [
+          { id: 'go', label: '继续', actionTypes: ['END_TURN'] },
+          { id: 'out', label: '离开', leave: true }
+        ]
+      })
+    })
+  };
+  const moment = buildMoment(board, undefined, {
+    module,
+    viewer: 'p1',
+    handOf: () => ({ cards: ['A♠', 'K♥'], hidden: 0 })
+  });
+  assert(!!moment, 'the declaration produced a curtain');
+  assertEqual(moment!.ledger?.length, 2, 'both rows survive the trip');
+  assertEqual(moment!.ledger?.[0].cards?.join(''), 'A♠', 'the game decides the card faces');
+  assertEqual(moment!.ledger?.[0].self, true, 'the own row is marked');
+  assertEqual(moment!.ledger?.[1].self, false, 'other rows are not');
+  const actions = moment!.actions ?? [];
+  assertEqual(actions.map(action => action.id).join(','), 'go,out', 'button order comes from the game');
+  assertEqual(actions[0].enabled, false, 'an action button is disabled until the presenter resolves it');
+  assertEqual(actions[1].enabled, true, 'a leave button needs no kernel action');
+  assertEqual(actions[1].leave, true, 'the leave capability travels with the button');
+  // The seat slice a declaration may read is trimmed to public table facts.
+  assertEqual((moment!.ledger?.[0].name ?? '') !== '?', true, 'the declaration sees the seat names');
 });
 
 test('presentation: the HUD holds no trait tables, role names or overture copy', () => {

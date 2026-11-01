@@ -520,9 +520,49 @@ export interface UiMoment {
   story?: string;
   cast?: { label: string; name: string }[];
   objective?: string;
+  /** Per-seat table under the story (settlements, scoreboards, vote tallies). */
+  ledger?: UiMomentRow[];
+  /** Buttons under the ledger; the curtain stays inert without them. */
+  actions?: UiMomentAction[];
   durationMs?: number;
   /** 幕布不自动消失，等游戏撤下（状态变化）或玩家点击。 */
   hold?: boolean;
+}
+
+/** One line of a moment's ledger, as the view layer receives it. */
+export interface UiMomentRow {
+  key?: string;
+  name: string;
+  tag?: string;
+  cards?: string[];
+  hidden?: number;
+  detail?: string;
+  value?: string;
+  tone?: 'gain' | 'loss' | 'neutral';
+  /** This row belongs to the viewer (painted brighter). */
+  self?: boolean;
+}
+
+/**
+ * A button on the moment curtain.
+ *
+ * `id` is resolved by the presenter: the view never decides what "下一局" means,
+ * it only reports which button was pressed. The action types / leave capability
+ * travel with it so a presenter can re-resolve the button against the actions
+ * legal *now* — a settlement button that went stale (someone else dealt the next
+ * hand) must not fire into a state that no longer accepts it.
+ *
+ * `enabled=false` paints it disabled with `hint` (a cooldown, usually) instead
+ * of hiding it.
+ */
+export interface UiMomentAction {
+  id: string;
+  label: string;
+  enabled: boolean;
+  hint?: string;
+  tone?: 'primary' | 'normal' | 'danger';
+  actionTypes?: string[];
+  leave?: boolean;
 }
 /** Structured trait movement attached to notices so the UI can animate it. */
 export interface UiTraitChange {
@@ -615,6 +655,14 @@ export interface GamePresenter {
    * hints. Null when the game declares nothing to announce.
    */
   moment?(): UiMoment | null;
+  /**
+   * Take one of the moment curtain's buttons.
+   *
+   * The curtain reports the button's `id`; what it means — dispatch a kernel
+   * action, or walk away from the table — is the presenter's call, so the view
+   * layer never learns a game's action names or the host's navigation.
+   */
+  performMomentAction?(id: string): { ok: boolean; error?: string };
   /** Localised role name, or null when the game does not know that role. */
   roleLabel?(role: string): string | null;
   /** The map node a player stands on, or null when the game has no such notion. */

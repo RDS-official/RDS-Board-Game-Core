@@ -1006,12 +1006,18 @@ export class BoardGameHUD {
   }
 
   /**
-   * Full-screen curtain for a game-declared moment (a reveal, a finale, a vote).
+   * Full-screen curtain for a game-declared moment (a reveal, a finale, a vote,
+   * a settlement).
    *
    * The HUD keeps only the “already played” bookmark and paints neutral lines: what
    * counts as a new moment, and every word on the curtain, come from
    * GamePresentationHints.describeMoment. A game that declares no moment never
    * gets a curtain, and cannot inherit another game's.
+   *
+   * A moment may also carry a ledger (one row per seat: cards, made hand, net
+   * chips) and buttons. The buttons are capabilities, not vocabulary: the HUD
+   * reports which one was pressed to the presenter, and paints it disabled with
+   * the presenter's own reason while it is unavailable.
    */
   private maybeShowMoment(): void {
     const moment = this.presenter.moment?.() ?? null;
@@ -1032,8 +1038,13 @@ export class BoardGameHUD {
       this.lastMomentKey = moment.key;
       return;
     }
-    if (this.lastMomentKey === moment.key) return;
-    this.lastMomentKey = moment.key;
+    // 同一个 key 也要重绘：账本里的「继续下一局」会随冷却从灰变亮，
+    // 只在 key 变了才画会让按钮永远停在第一次渲染的样子。
+    const signature = `${moment.key}:${(moment.actions ?? [])
+      .map(action => `${action.id}${action.enabled ? '1' : '0'}`)
+      .join(',')}`;
+    if (this.lastMomentKey === signature) return;
+    this.lastMomentKey = signature;
 
     let layer = this.container.querySelector('#moment-cine') as HTMLElement | null;
     if (!layer) {
@@ -1045,6 +1056,41 @@ export class BoardGameHUD {
     const cast = (moment.cast ?? [])
       .map(entry => `<div class="mc-cast">${escHtml(entry.label)} · <b>${escHtml(entry.name)}</b></div>`)
       .join('');
+    const ledger = moment.ledger?.length
+      ? `<div class="mc-ledger">${moment.ledger
+          .map(row => {
+            const cards = (row.cards ?? [])
+              .map(card => `<span class="mc-card">${escHtml(card)}</span>`)
+              .join('');
+            const backs = Array.from(
+              { length: Math.max(0, row.hidden ?? 0) },
+              () => '<span class="mc-card back">🂠</span>'
+            ).join('');
+            return `
+              <div class="mc-row ${escHtml(row.tone ?? 'neutral')}${row.self ? ' self' : ''}">
+                <span class="mc-who">
+                  <b>${escHtml(row.name)}</b>
+                  ${row.tag ? `<i class="mc-tag">${escHtml(row.tag)}</i>` : ''}
+                </span>
+                <span class="mc-cards">${cards}${backs}</span>
+                <span class="mc-detail">${escHtml(row.detail ?? '')}</span>
+                <span class="mc-value">${escHtml(row.value ?? '')}</span>
+              </div>`;
+          })
+          .join('')}</div>`
+      : '';
+    const buttons = moment.actions?.length
+      ? `<div class="mc-actions">${moment.actions
+          .map(
+            action => `
+          <button type="button" class="mc-btn ${escHtml(action.tone ?? 'normal')}"
+                  data-moment-action="${escapeAttr(action.id)}"${action.enabled ? '' : ' disabled'}
+                  title="${escapeAttr(action.hint ?? action.label)}">
+            ${escHtml(action.label)}${action.enabled ? '' : `<small>${escHtml(action.hint ?? '')}</small>`}
+          </button>`
+          )
+          .join('')}</div>`
+      : '';
     layer.innerHTML = `
       <div class="mc-vignette"></div>
       <div class="mc-inner">
@@ -1054,8 +1100,9 @@ export class BoardGameHUD {
         <div class="mc-rule"></div>
         ${moment.story ? `<p class="mc-story">${escHtml(moment.story)}</p>` : ''}
         ${cast}
+        ${ledger}
         ${moment.objective ? `<p class="mc-objective">${escHtml(moment.objective)}</p>` : ''}
-        <div class="mc-hint">点击任意处继续</div>
+        ${buttons || '<div class="mc-hint">点击任意处继续</div>'}
       </div>
     `;
     layer.classList.add('open');
@@ -1063,9 +1110,23 @@ export class BoardGameHUD {
     const close = () => {
       layer!.classList.remove('open');
       layer!.innerHTML = '';
-      layer!.removeEventListener('click', close);
+      layer!.removeEventListener('click', onLayerClick);
     };
-    layer.addEventListener('click', close);
+    const onLayerClick = (event: Event) => {
+      const button = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-moment-action]');
+      if (button) {
+        // 按钮自己派发能力；点空白处仍然只是收起幕布。
+        event.stopPropagation();
+        if (button.hasAttribute('disabled')) return;
+        const result = this.presenter.performMomentAction?.(button.dataset.momentAction ?? '');
+        if (result && !result.ok) {
+          this.pushToast('⚠️', result.error ?? '该动作现在不可用');
+          return;
+        }
+      }
+      close();
+    };
+    layer.addEventListener('click', onLayerClick);
     if (this.momentTimer) window.clearTimeout(this.momentTimer);
     // hold 的幕布不自动消失：等游戏自己撤下，或玩家点一下。
     if (!moment.hold) this.momentTimer = window.setTimeout(close, moment.durationMs ?? 9000);

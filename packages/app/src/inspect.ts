@@ -15,7 +15,7 @@
 import type { GameModule } from '@rds/kernel/module';
 import type { Entity, MapGraphNode } from '@rds/kernel/types';
 import { actorDetailKey, entityDetailKey, nodeDetailKey } from './contracts';
-import type { GameSnapshot, UiDetailView, UiDiscoveryView, UiMoment, UiNotice } from './contracts';
+import type { GameSnapshot, UiDetailView, UiDiscoveryView, UiMoment, UiNotice, ViewerId } from './contracts';
 
 /** A projected entity as the view layer receives it (kernel ProjectedGameState). */
 export type InspectableEntity = Partial<Entity> & { isMasked?: boolean };
@@ -162,6 +162,27 @@ export function buildNodeDiscoveryView(
 
 export interface MomentInspectContext {
   module: GameModule;
+  /**
+   * The viewer the moment is built for. `undefined` means nobody in particular
+   * (the full-information seat), which is also what older call sites want.
+   */
+  viewer?: ViewerId;
+  /**
+   * What the viewer may currently see in one player's hand, already localised.
+   *
+   * A settlement has to show every seat's cards, and only the projection knows
+   * whether a given hand is still face down. Handing the resolved faces in keeps
+   * that decision out of the game declaration: a card the viewer may not read
+   * simply never appears here, so a moment cannot leak it.
+   */
+  handOf?: (playerId: string) => { cards: string[]; hidden: number };
+}
+
+/** The board slice a moment may read (a projected state satisfies it). */
+export interface MomentBoard {
+  globalVars?: Record<string, unknown>;
+  players?: Record<string, { name?: string; role?: string; alive?: boolean; score?: number } | undefined>;
+  playerOrder?: string[];
 }
 
 /**
@@ -172,18 +193,37 @@ export interface MomentInspectContext {
  * slice the declaration may read, so a moment rule cannot walk the whole state.
  */
 export function buildMoment(
-  board: { globalVars?: Record<string, unknown>; players?: Record<string, { name: string; role?: string; alive?: boolean } | undefined> },
+  board: MomentBoard,
   mission: string | undefined,
   context: MomentInspectContext
 ): UiMoment | null {
   const describe = context.module.presentation?.describeMoment;
   if (!describe) return null;
+  const viewer = context.viewer;
   const players: Record<string, { name: string; role?: string; alive?: boolean }> = {};
   for (const [id, player] of Object.entries(board.players ?? {})) {
     if (!player) continue;
-    players[id] = { name: player.name, role: player.role, alive: player.alive };
+    players[id] = { name: player.name ?? id, role: player.role, alive: player.alive };
   }
-  const moment = describe({ globalVars: board.globalVars ?? {}, mission, players });
+  // Table order, including the seats no longer in the hand: a settlement lists
+  // the whole table, and the declaration should not have to guess the order.
+  const order = board.playerOrder?.length
+    ? [...board.playerOrder]
+    : Object.keys(board.players ?? {});
+  const seats = order.flatMap(playerId => {
+    const player = board.players?.[playerId];
+    if (!player) return [];
+    const hand = context.handOf?.(playerId);
+    return [{
+      playerId,
+      name: player.name ?? playerId,
+      score: Number(player.score ?? 0),
+      cards: hand?.cards,
+      hidden: hand?.hidden
+    }];
+  });
+
+  const moment = describe({ globalVars: board.globalVars ?? {}, mission, viewer, seats, players });
   if (!moment) return null;
   return {
     key: moment.key,
@@ -193,6 +233,19 @@ export function buildMoment(
     story: moment.story,
     cast: moment.cast,
     objective: moment.objective,
-    durationMs: moment.durationMs
+    ledger: moment.ledger?.map(row => ({ ...row, self: !!viewer && row.key === viewer })),
+    actions: moment.actions?.map(action => ({
+      id: action.id,
+      label: action.label,
+      tone: action.tone,
+      actionTypes: action.actionTypes,
+      leave: action.leave,
+      // Resolution against the legal actions is the presenter's job; until then
+      // the button claims nothing (a leave button never needs an action).
+      enabled: !!action.leave,
+      hint: action.unavailableHint
+    })),
+    durationMs: moment.durationMs,
+    hold: moment.hold
   };
 }
