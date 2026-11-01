@@ -32,6 +32,20 @@
 - `roster` / `owners`（座位 → 昵称 / hub userId）继续透传，中心模式用于 seats 展示与 presence。
 - `seats`（可选）：单机/演示时显式指定桌面人数；联机时以**房间里的真人数量**为准。
 
+### 入口顺序：登录页 → 选择首页 → 牌桌
+
+地址栏参数只表示「想深链进桌」，**不是**进桌许可。统一外壳（`apps/web/src/shell.ts`）
+在 `enterGameView` 之前先过 `apps/web/src/entryRoute.ts` 的 `canEnterNetGame`，四条全中才放行：
+
+1. 本浏览器已登录（`localStorage.token` 非空）；
+2. 地址栏 `token` 与本机持有的会话**完全一致**（挡住转发出去的链接带着别人的 token）；
+3. `/api/me` 仍认这个会话（账号被删、被禁用、改密后的旧 token 签名依旧有效，只有服务端能判死）；
+4. `/api/rooms/:id` 显示房间未关闭且当前账号仍在 `players` 里（挡住收藏夹里早散了的对局）。
+
+任一条不满足 → `stripNetParamsFromUrl()` 清掉网络参数，退回大厅入口；未登录时即登录页。
+所以「首次进入 = 登录页，登录后 = 选择游戏 / 快速加入」由入口守卫保证，而不是靠大厅自己兜底。
+登录成功与登出都会清一次地址栏参数，避免刷新时又被当成深链弹进牌桌。
+
 ### 座位数 = 房间人数（S9 延伸）
 
 桌面只摆真实存在的座位：`MatchBroker` 把 `room.players.length` 作为 `seats` 透传给
@@ -91,7 +105,8 @@ P2P 兼容路径的旧边界仍然成立（房主是信任对等体），仅在�
 - `node scripts/verify-centre-mode.mjs`：真实服务端 + 两条 WebSocket，验证座位分配、
   双端独立投影、伪造 actor / 控制通道拒绝、动作跨客户端传播、房间关闭释放对局。
 - `node scripts/verify-centre-mode-browser.mjs`：两个真实浏览器标签页按大厅 URL 契约加入
-  同一房间，验证两端渲染、浏览器动作推进**服务端** revision、关掉房主标签页后客机不受影响。
+  同一房间（各用独立 context 预置自己的会话 token，以通过入口守卫），验证两端渲染、
+  浏览器动作推进**服务端** revision、关掉房主标签页后客机不受影响。
 - `node scripts/net-transport.mjs` / `node scripts/net-session.mjs`：P2P 兼容路径回归
   （显式 `authority: 'p2p'`）。
 - `node ./node_modules/tsx/dist/cli.mjs apps/server/src/selftest.ts`：服务端单元自检

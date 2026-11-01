@@ -137,9 +137,20 @@ async function main() {
   };
 
   const browser = await launchChromium();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
-  const hostPage = await context.newPage();
-  const guestPage = await context.newPage();
+  // 每个玩家一个独立 context：两个账号的会话 token 各自存在自己的 localStorage
+  // 里，深链进桌的入口守卫（apps/web/src/entryRoute.ts）要求地址栏 token 与
+  // 本机持有的会话一致，共用 context 会让其中一个账号冒充另一个。
+  const hostContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const guestContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  // 先种会话再导航：入口守卫在首帧读取 localStorage，晚一步就退回登录页。
+  const seedSession = (context, token) =>
+    context.addInitScript(value => {
+      try { localStorage.setItem('token', value); } catch { /* 隐私模式忽略 */ }
+    }, token);
+  await seedSession(hostContext, tokenHost);
+  await seedSession(guestContext, tokenGuest);
+  const hostPage = await hostContext.newPage();
+  const guestPage = await guestContext.newPage();
   const hostErrors = [];
   const guestErrors = [];
   hostPage.on('pageerror', e => hostErrors.push(e.message));

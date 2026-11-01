@@ -1,6 +1,7 @@
 import type { HubGameInfo, HubRoomInfo } from '@rds/room-protocol';
 import { getGames, getRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoom, me, setReady, kickPlayer, transferHost, setAiSeats, updateDisplayName, changeMyPassword, uploadAvatar, UserProfile } from './api.ts';
 import { showToast } from './toast.ts';
+import { localToken, stripNetParamsFromUrl } from '../entryRoute.ts';
 
 /**
  * 大厅 2.0（Phase B）：游戏货架 + 快速加入 + 创建模态 + 座位/就绪/聊天 + ws 实时。
@@ -49,8 +50,8 @@ let games: HubGameInfo[] = [];
 let currentRoom: HubRoomInfo | null = null;
 let roomsCache: HubRoomInfo[] = [];
 let roomsCacheSig = '';
-/** 首屏房间列表是否已经渲染过（空列表的签名也是 ''，不能只靠签名判断）。 */
-let roomsRendered = false;
+/** 房间列表是否已经成功拉取过一次（决定首页给「加载中…」还是空态文案）。 */
+let roomsLoaded = false;
 /** 阶段二：当前房间在线的 userId 列表（信令 presence 推送） */
 let onlineIds: string[] = [];
 let roomTimer: ReturnType<typeof setInterval> | null = null;
@@ -137,7 +138,6 @@ function onRoomUpdated(room: HubRoomInfo): void {
     return;
   }
   roomsCacheSig = '';
-  roomsRendered = false;
   void refreshRooms();
 }
 
@@ -202,7 +202,7 @@ export async function startLobby(
       if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler);
       if (rootEl) rootEl.innerHTML = '';
       rootEl = null; onEnterGame = null; onAdmin = null; currentRoom = null; lastRoomSig = '';
-      roomsCacheSig = ''; roomsRendered = false; onlineIds = [];
+      roomsCacheSig = ''; roomsLoaded = false; onlineIds = [];
     }
   };
 }
@@ -279,9 +279,9 @@ function lobbyHtml() {
       </div>
       <div class="lob-section-head">
         <h2>快速加入</h2>
-        <span class="lob-muted" id="rooms-hint"></span>
+        <span class="lob-muted" id="rooms-hint">${roomsLoaded ? roomsHintText(roomsCache) : ''}</span>
       </div>
-      <div id="rooms" class="lob-quick">加载中…</div>
+      <div id="rooms" class="lob-quick">${roomsLoaded ? roomsHtml(roomsCache) : '加载中…'}</div>
     </section>
     <aside class="lob-side">
       <div class="lob-card lob-solo">
@@ -325,6 +325,29 @@ function quickRow(r: HubRoomInfo) {
   </div>`;
 }
 
+/**
+ * 房间列表的 HTML，直接从内存缓存 `roomsCache` 生成。
+ *
+ * 首页渲染时先按缓存画出当前已知的房间，拉取回来再覆盖一次——渲染与数据
+ * 谁先到都不影响结果，不必依赖「首次拉取一定落地」这类时序约定。
+ */
+function roomsHtml(rooms: HubRoomInfo[]): string {
+  // 阶段二：列表同时展示对局中的房间（不可加入，仅展示状态）
+  const openRooms = rooms.filter(r => r.status === 'open' && r.players.length < r.maxPlayers)
+    .sort((a, b) => b.players.length - a.players.length);
+  const playingRooms = rooms.filter(r => r.status === 'playing')
+    .sort((a, b) => b.createdAt - a.createdAt);
+  return openRooms.map(quickRow).join('') + playingRooms.map(quickRow).join('') ||
+    '<div class="lob-empty">暂无可加入的房间——从上面选个游戏开一桌吧。</div>';
+}
+
+function roomsHintText(rooms: HubRoomInfo[]): string {
+  if (!rooms.length) return '';
+  const openCount = rooms.filter(r => r.status === 'open' && r.players.length < r.maxPlayers).length;
+  const playingCount = rooms.filter(r => r.status === 'playing').length;
+  return '（' + openCount + ' 个可加入' + (playingCount ? '，' + playingCount + ' 个对局中' : '') + '）';
+}
+
 async function refreshRooms() {
   const el = document.getElementById('rooms');
   if (!el || !lobbyVisible() || !user) return;
@@ -332,25 +355,17 @@ async function refreshRooms() {
     const rooms = await getRooms();
     const sig = rooms.map(r => r.id + r.status + r.players.length + (r.isPrivate ? 1 : 0)).join('|');
     roomsCache = rooms;
-    // 空列表的签名是 ''，与初始值相同——若只按「签名变化」重绘，房间为空时
-    // 首屏会永远停在「加载中…」。用 rendered 标记保证首次成功拉取一定落地。
-    if (sig !== roomsCacheSig || !roomsRendered) {
-      roomsCacheSig = sig;
-      roomsRendered = true;
-      // 阶段二：列表同时展示对局中的房间（不可加入，仅展示状态）
-      const openRooms = rooms.filter(r => r.status === 'open' && r.players.length < r.maxPlayers)
-        .sort((a, b) => b.players.length - a.players.length);
-      const playingRooms = rooms.filter(r => r.status === 'playing')
-        .sort((a, b) => b.createdAt - a.createdAt);
-      const rows = openRooms.map(quickRow).join('') + playingRooms.map(quickRow).join('');
-      el.innerHTML = rows
-        ? rows
-        : '<div class="lob-empty">暂无可加入的房间——从上面选个游戏开一桌吧。</div>';
-      const hint = document.getElementById('rooms-hint');
-      if (hint) hint.textContent = rooms.length ? '（' + openRooms.length + ' 个可加入' + (playingRooms.length ? '，' + playingRooms.length + ' 个对局中' : '') + '）' : '';
-      const shelf = document.getElementById('shelf');
-      if (shelf) shelf.innerHTML = games.map(shelfCard).join('');
-    }
+    // 首个成功拉取必须落地（空列表的签名也是 ''，与初始值相同，只比签名会漏掉
+    // 这一次，首页会永远停在「加载中…」）；之后签名没变就不重写 DOM，保住 hover/focus。
+    const firstLoad = !roomsLoaded;
+    roomsLoaded = true;
+    if (sig === roomsCacheSig && !firstLoad) return;
+    roomsCacheSig = sig;
+    el.innerHTML = roomsHtml(rooms);
+    const hint = document.getElementById('rooms-hint');
+    if (hint) hint.textContent = roomsHintText(rooms);
+    const shelf = document.getElementById('shelf');
+    if (shelf) shelf.innerHTML = games.map(shelfCard).join('');
   } catch (e: any) { el.innerHTML = '<span class="lob-error">' + esc(e.message) + '</span>'; }
 }
 
@@ -579,6 +594,11 @@ function bind() {
         const body = await res.json();
         if (!res.ok) return err(body.error);
         localStorage.setItem('token', body.token);
+        // 登录成功一律落在「选择游戏 / 快速加入」首页：清掉可能的过期房间与
+        // 地址栏里上一次对局残留的深链参数，避免登录后被直接弹进牌桌。
+        currentRoom = null;
+        lastRoomSig = '';
+        stripNetParamsFromUrl();
         await boot();
       } catch (e: any) { err(e.message); }
     };
@@ -636,7 +656,6 @@ function bind() {
       // 房间页 seat 卡与大厅列表里的展示名即时刷新
       if (currentRoom) { try { currentRoom = await getRoom(currentRoom.id); } catch { /* 忽略 */ } }
       roomsCacheSig = '';
-      roomsRendered = false;
       render();
       showToast('资料已更新', 'success');
     } catch (e: any) { showToast(e.message, 'error'); }
@@ -679,7 +698,14 @@ function bind() {
     }
   });
 
-  $('logout')?.addEventListener('click', () => { localStorage.removeItem('token'); user = null; currentRoom = null; closeWs(); render(); });
+  $('logout')?.addEventListener('click', () => {
+    localStorage.removeItem('token');
+    user = null; currentRoom = null; closeWs();
+    // 登出后地址栏不能留下上一次对局的深链参数，否则刷新会带着已失效的
+    // token 去撞入口校验（虽然会被拦下，但没必要让用户看到那张死桌）。
+    stripNetParamsFromUrl();
+    render();
+  });
   $('solo')?.addEventListener('click', () => onEnterGame?.({ query: '' }));
   $('solo2')?.addEventListener('click', () => onEnterGame?.({ query: '' }));
 
@@ -884,12 +910,16 @@ function gameQuery(r: HubRoomInfo, role: 'host' | 'guest'): string {
 
 async function boot() {
   games = await getGames();
-  const token = localStorage.getItem('token');
+  const token = localToken();
   if (token) {
     try {
       const p: UserProfile = await me();
       user = { sub: p.id, name: p.name, displayName: p.displayName, avatarUrl: p.avatarUrl, role: p.role };
-    } catch { localStorage.removeItem('token'); }
+    } catch {
+      // token 过期/账号被删：清掉本地会话，落到登录页而不是半登录状态。
+      localStorage.removeItem('token');
+      user = null;
+    }
   }
   if (user) { wsWanted = true; openWs(); }
   render();

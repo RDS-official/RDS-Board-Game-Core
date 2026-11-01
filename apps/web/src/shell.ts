@@ -1,17 +1,15 @@
 import './lobby/lobby.css';
 import { showGameLoading } from './gameLoading';
+import { canEnterNetGame, netEntryOf, stripNetParamsFromUrl } from './entryRoute.ts';
 
 /**
  * 统一外壳（unified shell）：单一 SPA 同时承载「联机大厅」、「后台管理」与「游戏本体」。
  * 启动二态探测：同源 /healthz 在 500ms 内应答 → 大厅/管理模式；否则 → 本地单机模式。
- * URL 已带网络对局参数（hub/roomId/token/playerId）→ 跳过大厅直接进对局。
+ *
+ * 入口顺序固定为「登录页 → 选择游戏/加入房间 → 牌桌」：
+ * URL 带网络对局参数只表示「想深链进桌」，进桌前还必须验证参数里的会话真的
+ * 有效（`entryRoute.ts`）；验证不过就清掉参数退回登录页，绝不跳过登录。
  */
-const NET_KEYS = ['hub', 'roomId', 'token', 'playerId'] as const;
-
-function hasNetParams(): boolean {
-  const p = new URLSearchParams(location.search);
-  return NET_KEYS.every(k => p.get(k));
-}
 
 function isAdminRoute(): boolean {
   const p = new URLSearchParams(location.search);
@@ -111,8 +109,14 @@ async function enterLobbyView(): Promise<void> {
 }
 
 async function boot(): Promise<void> {
-  // 1) 已带网络对局参数：直接进对局（Hub 房间页 / 旧 /games 入口兼容）
-  if (hasNetParams()) return enterGameView(location.search);
+  // 1) 深链进桌：参数齐全且会话确实有效才放行；否则清掉参数，走正常登录入口。
+  //    这里不能用「有参数就直接进」——过期/伪造 token，或上一次对局残留在
+  //    地址栏里的参数，都会把玩家塞进一张死桌，登录页被整个跳过。
+  const net = netEntryOf(location.search);
+  if (net) {
+    if (await canEnterNetGame(net)) return enterGameView(net.query);
+    stripNetParamsFromUrl();
+  }
 
   // 2) 同源探测 Hub
   const alive = await hubAlive();
@@ -126,7 +130,8 @@ async function boot(): Promise<void> {
     return enterAdminView();
   }
 
-  // 4) 默认大厅模式
+  // 4) 默认大厅模式：未登录先给登录页，登录成功由 lobby 自己落到首页
+  stripNetParamsFromUrl();
   return enterLobbyView();
 }
 
