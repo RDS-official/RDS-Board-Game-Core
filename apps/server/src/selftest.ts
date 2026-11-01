@@ -281,12 +281,26 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
   const aiSettle = settleHand('r_selftest', 3, [fact('p9')], seatOf, Date.now());
   ok(aiSettle.settled.length === 0, 'built-in AI seats never enter the ledger');
 
-  // 全服排行：余额 + 桌上筹码，按筹码降序。
+  // 测试 AI 救济金发放机制（半小时内最多 2 次，每次 1000 筹码）
+  const testAiId = 'ai:hero:测试名将';
+  const { tryGrantAiRelief } = await import('./pokerLedger.ts');
+  const now = Date.now();
+  const r1 = tryGrantAiRelief(testAiId, now);
+  ok(r1.granted && r1.chips === 6000, 'first relief granted');
+  const r2 = tryGrantAiRelief(testAiId, now + 1000);
+  ok(r2.granted && r2.chips === 7000, 'second relief granted');
+  const r3 = tryGrantAiRelief(testAiId, now + 2000);
+  ok(!r3.granted && r3.chips === 7000, 'third relief within 30 min rejected');
+  const r4 = tryGrantAiRelief(testAiId, now + 31 * 60 * 1000);
+  ok(r4.granted && r4.chips === 8000, 'relief granted again after 30 min window expires');
+
+  // 全服排行：余额 + 桌上筹码，按筹码降序。包含真人与内置名将 AI。
   takeSeat(b, 250, 'r_selftest_seat');
   const board = rankAccounts(matches, [a, b]);
-  ok(board.length === 2, 'the leaderboard lists every account');
+  ok(board.length >= 2, 'the leaderboard lists accounts and ai');
   ok(board[0].chips >= board[1].chips, 'the leaderboard is sorted by chips');
   ok(board.every(row => row.bankroll + row.onTable === row.chips), 'bankroll plus table stakes equals the ranked total');
+  ok(board.some(row => row.isAi), 'the leaderboard includes AI heroes');
   matches.closeAll();
 
   // 房间重建 / 服务端重启：同一房间重复买入不能二次扣款。

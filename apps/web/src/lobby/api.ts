@@ -50,3 +50,40 @@ export const transferHost = (id: string, target: string) =>
 /** 房主增删内置 AI 补位座位（德州扑克等支持 AI 的玩法）。 */
 export const setAiSeats = (id: string, aiSeats: number) =>
   api<HubRoomInfo>('/api/rooms/' + id + '/ai', { method: 'POST', body: JSON.stringify({ aiSeats }) });
+
+export interface PokerLeaderboardResponse {
+  rows: Array<{
+    userId: string;
+    name: string;
+    avatarUrl?: string;
+    isAi?: boolean;
+    chips: number;
+    bankroll: number;
+    onTable: number;
+    peakChips: number;
+    share: number;
+    roomId?: string;
+    seat?: string;
+    stats: {
+      hands: number;
+      won: number;
+      vpip: number;
+      sawFlop: number;
+      showdowns: number;
+      showdownWins: number;
+      netChips: number;
+      bestPot: number;
+      updatedAt: number;
+      winRate: number;
+      vpipRate: number;
+      sawFlopRate: number;
+      showdownRate: number;
+      showdownWinRate: number;
+    };
+  }>;
+  rooms: number;
+  updatedAt: number;
+}
+
+export const getPokerLeaderboard = () => api<PokerLeaderboardResponse>('/api/poker/leaderboard');
+export const getPokerAccount = (userId: string) => api<PokerLeaderboardResponse['rows'][0]>('/api/poker/account/' + encodeURIComponent(userId));

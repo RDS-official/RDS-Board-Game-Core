@@ -3,7 +3,7 @@ import { DeterministicPRNG } from '@rds/kernel/prng';
 import type { GameSetupOptions } from '@rds/kernel/module';
 import type { GameState, Player } from '@rds/kernel/types';
 import { deckEntity, fullDeck } from './cards';
-import { AI_PROFILE, planSeats, type PokerAiTier, type SeatAssignment } from './seating';
+import { AI_PROFILE, getAiHeroName, planSeats, type PokerAiTier, type SeatAssignment } from './seating';
 import { POKER_OBSERVER } from './observers';
 
 /**
@@ -112,9 +112,11 @@ export function createSeatPlayer(
   const tierLabel = assignment?.aiTier ? AI_PROFILE[assignment.aiTier].label : '';
   // 名字跟着身份（p3 = 「玩家 3」），不跟座位：开局洗座之后座位号会变，名字不能变。
   const ordinal = Number((playerId.match(/\d+/) ?? ['1'])[0]) || seatIndex + 1;
+  const heroName = isAi ? getAiHeroName(ordinal - 1) : '';
+  const defaultAiName = heroName ? `${tierLabel} AI · ${heroName}` : `${tierLabel} AI ${ordinal}`;
   return {
     id,
-    name: name ?? (isAi ? `${tierLabel} AI ${ordinal}` : `玩家 ${ordinal}`),
+    name: name ?? (isAi ? defaultAiName : `玩家 ${ordinal}`),
     color: SEAT_COLORS[seatIndex % SEAT_COLORS.length],
     avatar: SEAT_AVATARS[seatIndex % SEAT_AVATARS.length],
     score: stack,

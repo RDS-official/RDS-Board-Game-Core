@@ -15,7 +15,7 @@ import {
 import { cardOfEntity, cardText, holeCards, type Card } from './cards';
 import { compareHands, evaluateSeven, type HandValue } from './handEval';
 import { choosePokerAction } from './ai';
-import { AI_PROFILE, POKER_AI_ROSTER, isAiSeat, seatingOf, type SeatAssignment, type SeatingState } from './seating';
+import { AI_PROFILE, POKER_AI_ROSTER, getAiHeroName, isAiSeat, seatingOf, type SeatAssignment, type SeatingState } from './seating';
 import { observerOf, observerStateOf, POKER_OBSERVER, pickAiSeat, withObserverState, type PokerObserver } from './observers';
 import { buildHandFacts, type PokerHandFact } from './stats';
 import { createSeatPlayer, POKER_DEFAULTS, seatPosition } from './setup';
@@ -302,13 +302,14 @@ function refillBustedSeats(state: GameState): GameState {
     aiSerial += 1;
     const aiId = replacementAiId(pid, aiSerial);
     const tier = POKER_AI_ROSTER[(aiSerial - 1) % POKER_AI_ROSTER.length];
+    const heroName = getAiHeroName(aiSerial + 5);
     const assignment: SeatAssignment = {
       playerId: aiId,
       isAi: true,
       aiTier: tier,
       aiLabel: `${AI_PROFILE[tier].label} AI`
     };
-    const aiName = `${AI_PROFILE[tier].label} AI 补位 ${aiSerial}`;
+    const aiName = `${AI_PROFILE[tier].label} AI · ${heroName} (补位)`;
     const aiPlayer = createSeatPlayer(aiId, seat, config.startingStack, assignment, aiName);
     const players = { ...next.players, [aiId]: aiPlayer };
     if (wasAi) delete players[pid];

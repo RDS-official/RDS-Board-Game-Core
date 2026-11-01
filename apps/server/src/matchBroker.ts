@@ -246,7 +246,7 @@ export class MatchBroker {
    * 找不到账号返回 undefined——由路由转 404，不静默回一行空数据。
    */
   public pokerAccount(userId: string): GlobalPokerRow | undefined {
-    if (!users.byId(userId)) return undefined;
+    if (!users.byId(userId) && !userId.startsWith('ai:')) return undefined;
     return rankAccount(this.matches, userId);
   }
 

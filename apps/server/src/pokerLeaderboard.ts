@@ -12,14 +12,16 @@
 import type { PokerCareer } from '@rds/games/poker/stats';
 import { ratio } from '@rds/games/poker/stats';
 import type { MatchManager, ServerMatch } from './match.ts';
-import { accountOf, peekAccount, type PokerAccount } from './pokerLedger.ts';
+import { accountOf, allAccounts, peekAccount, type PokerAccount } from './pokerLedger.ts';
 import { profileOf } from './auth.ts';
+import { POKER_AI_NAMES } from '@rds/games/poker/seating';
 
 /** 排行榜一行（全服）。 */
 export interface GlobalPokerRow {
   userId: string;
   name: string;
   avatarUrl?: string;
+  isAi?: boolean;
   /** 余额 + 桌上筹码。 */
   chips: number;
   /** 其中还没兑换成桌上筹码的部分。 */
@@ -48,7 +50,16 @@ function tableStakes(matches: MatchManager, userId: string): { chips: number; ro
   let roomId: string | undefined;
   let seat: string | undefined;
   for (const room of matches.list()) {
-    const claimed = room.seatOf(userId);
+    let claimed = room.seatOf(userId);
+    // 如果是 AI 账号，反向通过 userOf 找到它在房间里的座位
+    if (!claimed && userId.startsWith('ai:')) {
+      for (const s of room.seatList()) {
+        if (room.userOf(s.seat) === userId) {
+          claimed = s.seat;
+          break;
+        }
+      }
+    }
     if (!claimed) continue;
     const row = tableChipsOf(room, claimed);
     if (row === undefined) continue;
@@ -85,10 +96,13 @@ function rowOf(matches: MatchManager, account: PokerAccount, total: number): Glo
   const profile = profileOf(account.userId);
   const stakes = tableStakes(matches, account.userId);
   const chips = Math.max(0, account.chips + stakes.chips);
+  const isAi = account.isAi || account.userId.startsWith('ai:');
+  const name = account.name ?? profile?.displayName ?? profile?.name ?? account.userId;
   return {
     userId: account.userId,
-    name: profile?.displayName ?? profile?.name ?? account.userId,
+    name,
     avatarUrl: profile?.avatarUrl,
+    isAi,
     chips,
     bankroll: account.chips,
     onTable: stakes.chips,
@@ -101,13 +115,35 @@ function rowOf(matches: MatchManager, account: PokerAccount, total: number): Glo
 }
 
 /**
- * 全服排行。
+ * 全服排行：包括所有注册账号与内置 AI。
  *
- * `userIds` 是要参与排行的账号（通常是全部注册账号）。没有账本记录的账号
- * 按默认余额展示——排行榜不该因为「没打过牌」就把人藏起来，那是大厅名单的事。
+ * `userIds` 是真人账号列表。内置名将 AI 也会统一纳入排行。
  */
 export function rankAccounts(matches: MatchManager, userIds: readonly string[]): GlobalPokerRow[] {
-  const accounts = userIds.map(userId => peekAccount(userId));
+  // 1. 真人账号
+  const humanIds = new Set(userIds);
+  const accounts: PokerAccount[] = userIds.map(userId => peekAccount(userId));
+
+  // 2. 内置 AI：确保三国杀名将均有 AI 账本记录，并读入
+  for (const hero of POKER_AI_NAMES) {
+    const aiId = `ai:hero:${hero}`;
+    if (!humanIds.has(aiId)) {
+      const acct = accountOf(aiId);
+      if (!acct.name) {
+        acct.name = `${hero} (AI)`;
+        acct.isAi = true;
+      }
+      accounts.push(acct);
+    }
+  }
+
+  // 3. 账本里可能已经存在其他历史 AI
+  for (const acct of allAccounts()) {
+    if (acct.isAi && !accounts.some(a => a.userId === acct.userId)) {
+      accounts.push(acct);
+    }
+  }
+
   const total = accounts.reduce((sum, account) => {
     const stakes = tableStakes(matches, account.userId);
     return sum + Math.max(0, account.chips + stakes.chips);
@@ -119,8 +155,8 @@ export function rankAccounts(matches: MatchManager, userIds: readonly string[]):
 
 /** 单名账号的行（弹窗详情用；不打牌的人也能查到自己的档案）。 */
 export function rankAccount(matches: MatchManager, userId: string): GlobalPokerRow | undefined {
-  const ids = [userId];
-  return rankAccounts(matches, ids)[0];
+  const acct = peekAccount(userId);
+  return rowOf(matches, acct, 0);
 }
 
 /** 确保账号有账本记录（第一次看排行榜 / 第一次上桌时开档）。 */

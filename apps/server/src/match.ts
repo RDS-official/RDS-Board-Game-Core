@@ -5,7 +5,8 @@ import { GameModule } from '@rds/kernel/module';
 import { Action, DispatchResult, GameState, PlayerId } from '@rds/kernel/types';
 import type { PokerHandResult } from '@rds/games/poker/rules';
 import { leaveSeat, settleHand, takeSeat } from './pokerSettle.ts';
-import { peekAccount } from './pokerLedger.ts';
+import { peekAccount, tryGrantAiRelief } from './pokerLedger.ts';
+import { POKER_AI_NAMES, getAiHeroName } from '@rds/games/poker/seating';
 
 /**
  * 服务端权威对局（中心模式）。
@@ -186,10 +187,24 @@ export class ServerMatch {
     settleHand(this.roomId, lastHand.handNo, lastHand.players, seat => this.userOf(seat));
   }
 
-  /** 座位 → 账号 id（内置 AI 座位没有账号，返回 undefined）。 */
+  /** 座位 → 账号 id（内置 AI 座位映射到其专属 AI 账号，如 ai:hero:...）。 */
   public userOf(seat: string): string | undefined {
     for (const [userId, claimed] of this.seats) {
       if (claimed === seat) return userId;
+    }
+    // 检查是否为 AI 座位
+    if (this.module.meta.id === 'poker') {
+      const raw = this.room.engine.getRawState();
+      const aiSeats = (raw.globalVars.seats as { playerId: string; isAi: boolean }[] | undefined) ?? [];
+      const matchAi = aiSeats.find(s => s.playerId === seat && s.isAi);
+      if (matchAi) {
+        const actorName = this.room.engine.getActorName(seat);
+        // 从名称中提取武将名字，例如 "初级 AI · 诸葛亮" -> "诸葛亮"
+        const hero = POKER_AI_NAMES.find(h => actorName.includes(h));
+        if (hero) return `ai:hero:${hero}`;
+        const ordinal = Number((seat.match(/\d+/) ?? ['1'])[0]) || 1;
+        return `ai:hero:${getAiHeroName(ordinal - 1)}`;
+      }
     }
     return undefined;
   }
@@ -328,7 +343,7 @@ export class ServerMatch {
   }
 
   /**
-   * 下桌退款：把每个真人座位当前的桌上筹码退回账号余额。
+   * 下桌退款：把每个座位当前的桌上筹码退回账号余额（真人与 AI）。
    *
    * 只在整局释放时调用一次（房间关闭 / 重开 / 进程退出前的清理），
    * 不跟着断线走——断线重连的玩家还坐在那张桌上，筹码不该被退两次。
@@ -342,11 +357,23 @@ export class ServerMatch {
       return; // 引擎已经不可读（异常关闭路径）：没有可退的账
     }
     const seen = new Set<string>();
+    // 1. 真人座位退款
     for (const [userId, seat] of this.seats) {
       const chips = Number(raw.players?.[seat]?.customProps?.chips);
       if (!Number.isFinite(chips) || chips <= 0) continue;
       seen.add(userId);
       leaveSeat(userId, chips, this.roomId);
+    }
+    // 2. AI 座位退款
+    const aiSeats = (raw.globalVars.seats as { playerId: string; isAi: boolean }[] | undefined) ?? [];
+    for (const ai of aiSeats) {
+      if (!ai.isAi) continue;
+      const aiUserId = this.userOf(ai.playerId);
+      if (!aiUserId || seen.has(aiUserId)) continue;
+      seen.add(aiUserId);
+      const chips = Number(raw.players?.[ai.playerId]?.customProps?.chips);
+      if (!Number.isFinite(chips) || chips <= 0) continue;
+      leaveSeat(aiUserId, chips, this.roomId);
     }
     this.seats.clear();
   }
@@ -519,34 +546,76 @@ export class MatchManager {
   }
 
   /**
-   * 给真人座位备好买入：按账号余额扣款，返回带 `stacks` 的 MatchOptions。
+   * 给座位备好买入：真人按账号余额扣款，AI 检查救济金与买入资格。
    *
-   * 只在扑克房间发生——其它玩法座位的「分数」是玩法内的资源，不是账号货币。
-   * 调用方已经给了 `stacks`（测试 / 自检）时原样返回，不碰账本。
+   * 筹码不足（低于 MIN_BUY_IN 100）的 AI 不加入对局。
    */
   private fundSeats(options: MatchOptions, provided: number[] | undefined): MatchOptions {
     const module = GAME_REGISTRY[options.gameId];
     if (module?.meta.id !== 'poker') return options;
     if (provided) return options;
-    // `takeSeat` 按房间幂等：房间重建（重启 / 换人数）不会二次扣款，
-    // 已押在桌上的买入原样沿用，余额不会再被扣一次。
-    const stacks = options.players.slice(0, MAX_SEATS).map(player => {
+
+    const humans = options.players.length;
+    const requestedAi = options.aiSeats ?? 0;
+    let allowedAi = 0;
+    const aiStacks: number[] = [];
+
+    // 检查并扣减 AI 补位筹码
+    for (let i = 0; i < requestedAi; i++) {
+      const hero = getAiHeroName(humans + i);
+      const aiUserId = `ai:hero:${hero}`;
+      let acct = peekAccount(aiUserId);
+
+      // 如果筹码不足 MIN_BUY_IN，尝试领取救济金（半小时最多 2 次）
+      if (acct.chips < MIN_BUY_IN) {
+        tryGrantAiRelief(aiUserId);
+        acct = peekAccount(aiUserId);
+      }
+
+      // 如果仍不足 MIN_BUY_IN，则不加入对局
+      if (acct.chips < MIN_BUY_IN) {
+        continue;
+      }
+
+      allowedAi++;
+      const wanted = Math.min(acct.chips, POKER_BUY_IN);
+      const funded = Math.max(0, Math.round(Number(acct.atTable?.[options.roomId] ?? 0)));
+      const charged = funded > 0 ? takeSeat(aiUserId, funded, options.roomId) : takeSeat(aiUserId, wanted, options.roomId);
+      aiStacks.push(charged);
+    }
+
+    const humanStacks = options.players.slice(0, MAX_SEATS).map(player => {
       const account = peekAccount(player.userId);
       const funded = Math.max(0, Math.round(Number(account.atTable?.[options.roomId] ?? 0)));
       if (funded > 0) return takeSeat(player.userId, funded, options.roomId);
       const wanted = Math.min(account.chips, Math.max(MIN_BUY_IN, Math.min(account.chips, POKER_BUY_IN)));
       return takeSeat(player.userId, wanted, options.roomId);
     });
-    return stacks.length > 0 ? { ...options, stacks } : options;
+
+    const stacks = [...humanStacks, ...aiStacks];
+    return {
+      ...options,
+      aiSeats: allowedAi,
+      stacks
+    };
   }
 
-  /** 开局失败时退掉已扣的买入（按 `funded.stacks` 与玩家顺序一一对应）。 */
+  /** 开局失败时退掉已扣的买入（按 `funded.stacks` 退还真人与 AI）。 */
   private refundBuyIns(funded: MatchOptions): void {
     if (!funded.stacks?.length) return;
+    const humans = funded.players.length;
     funded.players.slice(0, MAX_SEATS).forEach((player, index) => {
       const charged = Number(funded.stacks?.[index] ?? 0);
       if (charged > 0) leaveSeat(player.userId, charged, funded.roomId);
     });
+    // 退还 AI
+    const aiCount = funded.aiSeats ?? 0;
+    for (let i = 0; i < aiCount; i++) {
+      const hero = getAiHeroName(humans + i);
+      const aiUserId = `ai:hero:${hero}`;
+      const charged = Number(funded.stacks?.[humans + i] ?? 0);
+      if (charged > 0) leaveSeat(aiUserId, charged, funded.roomId);
+    }
   }
 
   public close(roomId: string): boolean {

@@ -66,7 +66,7 @@
 
 /* ---------- 首页布局 ---------- */
 .lob-main { max-width: 1060px; margin: 24px auto; padding: 0 20px; display: grid; gap: 16px; }
-.lob-home { grid-template-columns: 1fr 280px; align-items: start; }
+.lob-home { grid-template-columns: 1fr 340px; align-items: start; }
 .lob-primary { display: grid; gap: 14px; min-width: 0; }
 .lob-side { display: grid; gap: 14px; }
 .lob-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
@@ -201,4 +201,228 @@
   background: rgba(88, 166, 255, 0.18);
   border-color: rgba(88, 166, 255, 0.5);
   font-size: 18px;
+}
+
+/* ---------- 德州扑克大厅排行榜 ---------- */
+.lob-leaderboard-card {
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lob-lb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.lob-lb-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  color: var(--gold);
+}
+.lob-lb-icon {
+  font-size: 16px;
+}
+.lob-lb-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 480px;
+  overflow-y: auto;
+}
+.lob-lb-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto 42px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-s);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.12s;
+}
+.lob-lb-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(217, 180, 91, 0.3);
+  transform: translateX(2px);
+}
+.lob-lb-rank {
+  font-weight: 700;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+.lob-lb-rank.top1 { color: #f59e0b; }
+.lob-lb-rank.top2 { color: #94a3b8; }
+.lob-lb-rank.top3 { color: #b45309; }
+.lob-lb-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  min-width: 0;
+}
+.lob-lb-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.lob-lb-avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  background: linear-gradient(135deg, #3d4a5f, #232c3a);
+  font-size: 10px;
+  font-weight: 700;
+  color: #d8dee9;
+}
+.lob-lb-avatar.ai-avatar {
+  background: linear-gradient(135deg, #1e3a8a, #1e293b);
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.4);
+}
+.lob-lb-chips {
+  font-weight: 600;
+  color: #f3f4f6;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.lob-lb-pct {
+  color: var(--muted);
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.lob-tag {
+  font-size: 10px;
+  line-height: 1.2;
+  padding: 1px 5px;
+  border-radius: 999px;
+  flex: none;
+  font-weight: 500;
+}
+.lob-tag.ai {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+.lob-tag.human {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.lob-tag.playing {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+.lob-lb-foot {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* 战绩详情弹窗 */
+.lob-account-modal {
+  width: min(440px, 94vw);
+}
+.lob-ad-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.lob-ad-avatar-wrap {
+  width: 44px;
+  height: 44px;
+  flex: none;
+}
+.lob-ad-avatar {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #3d4a5f, #232c3a);
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--gold);
+}
+.lob-ad-avatar.ai {
+  background: linear-gradient(135deg, #1e3a8a, #1e293b);
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.5);
+}
+.lob-ad-name {
+  font-size: 17px;
+  font-weight: 700;
+  color: #f3f4f6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lob-ad-hero {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 10px 0 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(217, 180, 91, 0.25);
+  background: rgba(217, 180, 91, 0.08);
+}
+.lob-ad-hero-val {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.lob-ad-hero-lbl {
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: rgba(217, 180, 91, 0.75);
+}
+.lob-ad-hero-sub {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--muted);
+}
+.lob-ad-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.lob-ad-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--card2);
+}
+.lob-ad-stat-k {
+  font-size: 11px;
+  color: var(--muted);
+}
+.lob-ad-stat-v {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f3f4f6;
+  font-variant-numeric: tabular-nums;
 }

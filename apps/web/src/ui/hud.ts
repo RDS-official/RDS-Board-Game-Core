@@ -1726,16 +1726,19 @@ export class BoardGameHUD {
     const accountBody = accounts
       .map((row, index) => {
         const percent = (row.share * 100).toFixed(1);
+        const tag = row.isAi
+          ? `<span class="cr-tag ai">AI 名将</span>`
+          : `<span class="cr-tag human">真人</span>`;
         const playing = row.roomId
           ? `<span class="cr-tag human" title="正在 ${escHtml(row.roomId)} 的 ${escHtml(row.seat ?? '')} 座位">在桌</span>`
           : '';
         const parts = row.avatarUrl
           ? `<img class="ar-avatar" src="${escapeAttr(row.avatarUrl)}" alt="" loading="lazy" />`
-          : `<span class="ar-avatar ar-avatar-fallback">${escHtml(row.name.slice(0, 1).toUpperCase())}</span>`;
+          : `<span class="ar-avatar ${row.isAi ? 'ar-avatar-ai' : 'ar-avatar-fallback'}">${escHtml(row.name.slice(0, 1).toUpperCase())}</span>`;
         return `
           <button type="button" class="cr-row ar-row" data-rank-user="${escapeAttr(row.userId)}" title="${escHtml(row.name)} · 点开生涯战绩">
             <span class="cr-rank">${index + 1}</span>
-            <span class="cr-name">${parts}${escHtml(row.name)}${playing}</span>
+            <span class="cr-name">${parts}${escHtml(row.name)}${tag}${playing}</span>
             <span class="cr-chips">${row.chips}</span>
             <span class="cr-pct">${percent}%</span>
             <span class="cr-bar"><i style="width:${Math.max(2, row.share * 100).toFixed(1)}%"></i></span>
