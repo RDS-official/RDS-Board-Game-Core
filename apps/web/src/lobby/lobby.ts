@@ -262,7 +262,6 @@ function lobbyHtml() {
   <header class="lob-header">
     <div class="lob-brand"><span class="lob-brand-dot"></span>RDS Board<span class="lob-muted lob-brand-sub">联机大厅</span></div>
     <div class="lob-row">
-      <button id="solo" class="lob-secondary">本地单机</button>
       ${isAdmin ? '<button id="admin-open" class="lob-secondary" style="color: var(--gold); border-color: rgba(217, 180, 91, 0.4);">⚙ 管理后台</button>' : ''}
       <button id="profile-open" class="lob-userchip lob-userchip-btn" title="个人资料">${avatarChipHtml(user)}<span>${esc(displayNameOf(user))}</span></button>
       <button id="logout" class="lob-secondary">退出</button>
@@ -284,11 +283,6 @@ function lobbyHtml() {
       <div id="rooms" class="lob-quick">${roomsLoaded ? roomsHtml(roomsCache) : '加载中…'}</div>
     </section>
     <aside class="lob-side">
-      <div class="lob-card lob-solo">
-        <b>单机模式</b>
-        <p class="lob-muted">不想联机？直接开一桌本地对局，与联机同一内核。</p>
-        <button id="solo2" class="lob-secondary">本地单机</button>
-      </div>
       <div class="lob-card">
         <b>联机说明</b>
         <p class="lob-muted">对局由服务器统一裁决：牌局状态保存在服务端，任何玩家掉线都不影响其他人。全员就绪后由房主开局。</p>
@@ -706,8 +700,6 @@ function bind() {
     stripNetParamsFromUrl();
     render();
   });
-  $('solo')?.addEventListener('click', () => onEnterGame?.({ query: '' }));
-  $('solo2')?.addEventListener('click', () => onEnterGame?.({ query: '' }));
 
   if (currentRoom) { bindRoom(); return; }
 
