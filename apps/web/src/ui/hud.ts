@@ -30,6 +30,27 @@ const escHtml = (v: unknown) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
 
 /**
+ * 操作栏抖动排查的一行记录。
+ *
+ * `ev` 说明这一次到底是哪一类动作：`render` 快照重绘、`shape` 动作区整块换形、
+ * `cards` 卡片节点被替换/移动、`layout` 重新算了一次鱼眼位置。抖动时导出这串
+ * 事件就能看出是「DOM 一直被重建」还是「DOM 没动」。
+ */
+interface DockTraceEntry {
+  /** performance.now()（毫秒）。 */
+  t: number;
+  ev: 'render' | 'shape' | 'cards' | 'layout';
+  n?: number;
+  mode?: string;
+  open?: boolean;
+  cw?: number;
+  span?: number;
+  fx?: number;
+  fs?: number;
+  changed?: boolean;
+}
+
+/**
  * Base height of one player card in the rail, in px. The rail's fisheye uses it
  * as its "card width" so the compression matches the action dock's.
  */
@@ -92,6 +113,19 @@ export class BoardGameHUD {
   private railFrame = 0;
   /** 冷却角标的刷新定时器（dock 建好后启动一次）。 */
   private cooldownTimer: number | null = null;
+  /**
+   * 操作栏抖动排查：把「重绘 / 换形 / 重建卡片 / 布局」记成一条时间线。
+   * 诊断导出（⤓ 按钮）原样带出；`?docktrace=1` 时还会在左下角实时显示每秒次数，
+   * 用来区分「DOM 在被反复重建」和「DOM 没动、只是合成层在闪」。
+   */
+  private dockTrace: DockTraceEntry[] = [];
+  private dockTraceCounters = { render: 0, layout: 0, shape: 0, cards: 0, move: 0 };
+  private dockTraceOverlay: HTMLElement | null = null;
+  private dockTraceTimer: number | null = null;
+  private dockTraceLastSig = '';
+  private dockTraceLastLayout = { cw: 0, span: 0 };
+  /** 指针移动期间临时关掉卡片位移过渡，见 `layoutActionFan`。 */
+  private fanLiveTimer: number | null = null;
   /** Stamp of the sheet currently painted, so a repaint does not restart its timer. */
   private paintedSheetStamp = 0;
   /** The layer outlives a repaint, so its backdrop handler must be replaced, not added again. */
@@ -180,6 +214,16 @@ export class BoardGameHUD {
       window.clearInterval(this.observerTimer);
       this.observerTimer = null;
     }
+    if (this.dockTraceTimer !== null) {
+      window.clearInterval(this.dockTraceTimer);
+      this.dockTraceTimer = null;
+    }
+    if (this.fanLiveTimer !== null) {
+      window.clearTimeout(this.fanLiveTimer);
+      this.fanLiveTimer = null;
+    }
+    this.dockTraceOverlay?.remove();
+    this.dockTraceOverlay = null;
   }
 
   /** 观察席倒计时的本地刷新：只做减法，不动游戏状态。 */
@@ -2060,9 +2104,67 @@ export class BoardGameHUD {
     }
   }
 
+  /** 记一条操作栏事件（环形缓冲，最多 240 条）。 */
+  private traceDock(entry: Omit<DockTraceEntry, 't'>): void {
+    this.dockTrace.push({ t: Math.round(performance.now()), ...entry });
+    if (this.dockTrace.length > 240) this.dockTrace.splice(0, this.dockTrace.length - 240);
+    if (entry.ev === 'layout' || entry.ev === 'shape' || entry.ev === 'cards') {
+      this.dockTraceCounters[entry.ev] += 1;
+    }
+  }
+
+  /**
+   * 操作栏抖动的现场记录。诊断导出会带上它，排查时也可以直接
+   * `__dockTrace()` 在控制台里取。
+   */
+  public getDockTrace(): Record<string, unknown> {
+    return {
+      entries: this.dockTrace.slice(-160),
+      counters: { ...this.dockTraceCounters },
+      lastLayout: { ...this.dockTraceLastLayout },
+      fan: { focusX: Number(this.fanFocusX.toFixed(3)), strength: this.fanFocusStrength },
+      dockOpen: this.dockOpen,
+      actions: this.latest?.actions.length ?? 0,
+      viewport: {
+        w: window.innerWidth,
+        h: window.innerHeight,
+        dpr: window.devicePixelRatio,
+        reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      }
+    };
+  }
+
+  /**
+   * `?docktrace=1`：左下角常驻一个每秒计数的小面板。抖的时候看一眼就知道是
+   * 「每秒几十次重建」（DOM 问题）还是「重建 0 次但画面在闪」（合成层问题）。
+   */
+  private mountDockTrace(): void {
+    if (new URLSearchParams(window.location.search).get('docktrace') !== '1') return;
+    if (this.dockTraceOverlay) return;
+    const el = document.createElement('div');
+    el.id = 'dock-trace';
+    el.style.cssText =
+      'position:fixed;left:12px;bottom:12px;z-index:9999;font:11px/1.45 ui-monospace,monospace;' +
+      'color:#cfe3ff;background:rgba(8,10,14,.84);border:1px solid rgba(120,160,210,.35);' +
+      'border-radius:8px;padding:6px 9px;pointer-events:none;white-space:pre';
+    document.body.appendChild(el);
+    this.dockTraceOverlay = el;
+    let prev = { ...this.dockTraceCounters };
+    this.dockTraceTimer = window.setInterval(() => {
+      const cur = this.dockTraceCounters;
+      const perSec = (key: keyof typeof cur) => ((cur[key] - prev[key]) / 0.5).toFixed(1);
+      el.textContent =
+        `dock trace  render ${perSec('render')}/s  layout ${perSec('layout')}/s\n` +
+        `            shape ${perSec('shape')}/s  cards ${perSec('cards')}/s  move ${perSec('move')}/s\n` +
+        `            cw ${this.dockTraceLastLayout.cw}  span ${this.dockTraceLastLayout.span}`;
+      prev = { ...cur };
+    }, 500);
+  }
+
   private renderDock(snapshot: GameSnapshot): void {
     const dock = this.container.querySelector('#action-dock') as HTMLElement | null;
     if (!dock) return;
+    this.dockTraceCounters.render += 1;
 
     const alert = snapshot.decision
       ? `
@@ -2305,6 +2407,7 @@ export class BoardGameHUD {
 
     // ---- actions slot -------------------------------------------------
     const actionsSlot = slot('actions');
+    let dockMode = 'none';
     if (actionsSlot) {
       const mode = placement
         ? 'placement'
@@ -2318,11 +2421,13 @@ export class BoardGameHUD {
         snapshot.actions.length === 1 && (snapshot.actions[0]?.actionType ?? '') === 'END_TURN';
       const blockedReason = onlyEndTurn ? (snapshot.blockedReason ?? '') : '';
       const dockShape = onlyEndTurn ? `${mode}:only-end:${blockedReason}` : mode;
+      dockMode = mode;
 
       // Rebuilding is only correct when the dock changes shape. The hint text
       // differs between "actions available" and "only end turn", so that state is
       // part of the shape key.
       if (actionsSlot.dataset.shape !== dockShape) {
+        this.traceDock({ ev: 'shape', mode: dockShape, n: snapshot.actions.length });
         actionsSlot.dataset.shape = dockShape;
         actionsSlot.dataset.mode = mode;
         actionsSlot.removeAttribute('data-sig');
@@ -2354,7 +2459,7 @@ export class BoardGameHUD {
         if (fan) {
           const total = snapshot.actions.length;
           const mid = (total - 1) / 2;
-          reconcileKeyed(
+          const changedCards = reconcileKeyed(
             fan,
             snapshot.actions.map((action, index) => {
               const offset = index - mid;
@@ -2374,10 +2479,27 @@ export class BoardGameHUD {
               };
             })
           );
+          if (changedCards > 0) {
+            this.traceDock({ ev: 'cards', n: total, changed: true });
+          }
           this.layoutActionFan(fan);
         }
       }
     }
+
+    // 只在「形状」真的变了的时候记一条，避免每次快照都把环形缓冲刷满。
+    const sig = `${dockMode}|${snapshot.actions.length}|${this.dockOpen}|${actionsSlot?.clientWidth ?? 0}`;
+    if (sig !== this.dockTraceLastSig) {
+      this.dockTraceLastSig = sig;
+      this.traceDock({
+        ev: 'render',
+        n: snapshot.actions.length,
+        mode: dockMode,
+        open: this.dockOpen,
+        cw: actionsSlot?.clientWidth ?? 0
+      });
+    }
+    if (!this.dockTraceOverlay) this.mountDockTrace();
   }
 
   /**
@@ -2431,15 +2553,52 @@ export class BoardGameHUD {
     const span = layout.span || containerWidth;
     const centreOffset = padLeft + hoverInset + Math.max(0, (containerWidth - span) / 2);
 
+    let wrote = 0;
     layout.cards.forEach((card, index) => {
       const el = cards[index];
       if (!el) return;
       // The card is left-anchored at 0, so shift by centre minus half a card.
-      el.style.setProperty('--fan-x', `${(card.x - card.width / 2 + centreOffset).toFixed(1)}px`);
+      // Snap to half pixels: at 175% display scaling a sub-pixel x is re-rounded
+      // by the compositor every layout, which is visible as the row shimmering.
+      const x = Math.round((card.x - card.width / 2 + centreOffset) * 2) / 2;
+      const sig = `${x}|${card.scale.toFixed(3)}|${card.lift.toFixed(2)}|${card.z}`;
+      if (el.dataset.fanLayout === sig) return;
+      el.dataset.fanLayout = sig;
+      el.style.setProperty('--fan-x', `${x}px`);
       el.style.setProperty('--fan-scale', card.scale.toFixed(3));
       el.style.setProperty('--fan-lift', card.lift.toFixed(2));
       el.style.zIndex = String(card.z);
+      wrote += 1;
     });
+
+    this.dockTraceLastLayout = { cw: Math.round(containerWidth), span: Math.round(span) };
+    if (wrote > 0) {
+      this.traceDock({
+        ev: 'layout',
+        n: cards.length,
+        cw: Math.round(containerWidth),
+        span: Math.round(span),
+        fx: Number(this.fanFocusX.toFixed(2)),
+        fs: this.fanFocusStrength,
+        changed: true
+      });
+    }
+  }
+
+  /**
+   * 指针移动期间临时关掉卡片位移过渡。
+   *
+   * 每次 pointermove 都会重算 `--fan-x`；`transition: transform .12s` 于是每帧都被
+   * 打断重来，卡片永远停在旧位置与新位置之间——120Hz 指针下看起来就是整排在抖。
+   * 停手 180ms 后恢复过渡，入场/离场仍有动画。
+   */
+  private markFanMoving(fan: HTMLElement): void {
+    fan.classList.add('live');
+    if (this.fanLiveTimer !== null) window.clearTimeout(this.fanLiveTimer);
+    this.fanLiveTimer = window.setTimeout(() => {
+      this.fanLiveTimer = null;
+      fan.classList.remove('live');
+    }, 180);
   }
 
   /**
@@ -2635,6 +2794,8 @@ export class BoardGameHUD {
       if (rect.width <= 0) return;
       this.fanFocusX = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
       this.fanFocusStrength = 1;
+      this.dockTraceCounters.move += 1;
+      this.markFanMoving(fan);
       if (fanFrame) return;
       fanFrame = requestAnimationFrame(() => {
         fanFrame = 0;

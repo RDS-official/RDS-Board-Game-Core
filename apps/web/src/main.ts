@@ -342,6 +342,8 @@ class BoardGameSimulatorApp {
     // Available in every build: a small, read-only snapshot summary so diagnostic
     // exports from production can explain a stuck turn.
     (window as unknown as Record<string, unknown>).__rdsStateSummary = () => this.diagnosticSummary();
+    // 排查操作栏抖动：控制台里 `__dockTrace()` 直接取时间线，不必导出整包。
+    (window as unknown as Record<string, unknown>).__dockTrace = () => this.diagnosticSummary().dock;
   }
 
   /**
@@ -386,6 +388,8 @@ class BoardGameSimulatorApp {
       openDecisions: decisions
         .filter(entry => entry.status === 'OPEN')
         .map(entry => ({ participants: entry.participants, payload: entry.payload })),
+      // 操作栏抖动现场：重绘 / 换形 / 卡片重建 / 鱼眼布局的时间线。
+      dock: this.hud?.getDockTrace?.() ?? null,
       pendingDamage: globalVars.pendingDamage ?? null,
       pendingRoomPlacement: globalVars.pendingRoomPlacement
         ? { playerId: (globalVars.pendingRoomPlacement as { playerId?: string }).playerId }
