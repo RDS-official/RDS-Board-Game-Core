@@ -19,6 +19,7 @@ import { listRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoomInfo,
 import { GAMES } from './games.ts';
 import { SignalHub } from './signal.ts';
 import { MatchBroker } from './matchBroker.ts';
+import { removeAccount } from './pokerLedger.ts';
 import { log, saveDiagnostics, pruneLogs, recentLogs } from './log.ts';
 
 pruneLogs();
@@ -113,6 +114,8 @@ app.delete('/api/admin/users/:id', c => {
   if (!u) return c.json({ error: '未授权' }, 401);
   const id = c.req.param('id');
   const r = adminDeleteUser(id, u.sub);
+  // 账号删除后账本没有归属了：一并清掉，避免同名新账号继承旧战绩。
+  if (!('error' in r)) removeAccount(id);
   return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
 });
 
@@ -326,6 +329,28 @@ app.get('/api/match/stats', c => {
   const u = userFromAuthHeader(c.req.header('authorization'));
   if (!isAdminUser(u)) return c.json({ authority: 'server', matches: list.length });
   return c.json({ authority: 'server', matches: list.length, rooms: list.map(m => m.roomId) });
+});
+
+// ---- 德州扑克：全服排行与账号战绩 ----
+// 排行是公开展示（大厅与牌桌右上角都要读），因此不要求登录；
+// 但只暴露昵称与统计，登录名与账号 id 之外的敏感字段一律不出网关。
+app.get('/api/poker/leaderboard', c => {
+  const board = matchBroker.pokerLeaderboard();
+  return c.json({
+    rows: board.rows,
+    rooms: board.rooms,
+    updatedAt: board.updatedAt
+  });
+});
+
+// 单名账号的排行档案。`me` 是「当前登录账号」的快捷方式，弹窗详情用。
+app.get('/api/poker/account/:id', c => {
+  const id = c.req.param('id');
+  const userId = id === 'me' ? userFromAuthHeader(c.req.header('authorization'))?.sub : id;
+  if (!userId) return c.json({ error: '未登录' }, 401);
+  const row = matchBroker.pokerAccount(userId);
+  if (!row) return c.json({ error: '账号不存在' }, 404);
+  return c.json(row);
 });
 
 // ---- 游戏客户端静态托管（GAMES 目录挂载 RDS-Board-Core 构建产物 dist/ → /games/rds-board-core/） ----

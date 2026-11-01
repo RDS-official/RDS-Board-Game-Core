@@ -638,6 +638,8 @@ export const pokerModule: GameModule = defineGame({
       humans: options?.humans ?? options?.seats ?? 1,
       // 房主在大厅添加的 AI 补位数；缺省时由 planSeats 补到 6 人。
       ...(options?.aiSeats === undefined ? {} : { aiSeats: options.aiSeats }),
+      // 每个座位的买入：账号余额兑换筹码后按座位号传入（缺省 = 标准 1000）。
+      ...(options?.stacks === undefined ? {} : { stacks: options.stacks }),
       ...(options?.autoAi === undefined ? {} : { autoAi: options.autoAi })
     }),
   /** 只由驱动方心跳派发的动作：玩家永远看不到，客户端入口也会拒绝。 */

@@ -1,5 +1,6 @@
 import { ECSManager } from '@rds/kernel/ecs';
 import { DeterministicPRNG } from '@rds/kernel/prng';
+import type { GameSetupOptions } from '@rds/kernel/module';
 import type { GameState, Player } from '@rds/kernel/types';
 import { deckEntity, fullDeck } from './cards';
 import { AI_PROFILE, planSeats, type PokerAiTier, type SeatAssignment } from './seating';
@@ -342,11 +343,14 @@ export function pokerScenario(seats: number, overrides: Partial<PokerConfig> = {
   // 剧本是测试与探针的固定座次夹具：默认关掉开局洗座，断言才能精确到号位。
   // `options.autoAi` 必须透传：联机房间用剧本当房间变体（seats_6 等），以前
   // 场景忽略了这个开关，AI 一直在内核里一次性打完整条街。
-  return (seed: number, options?: { autoAi?: boolean }): GameState =>
+  // `options.stacks` 同理：账号余额买入是**初始位置**的一部分，剧本若把它丢掉，
+  // 换人时的买入就会静默退回 1000，回放也跟着错。
+  return (seed: number, options?: GameSetupOptions): GameState =>
     setupPoker(seed, {
       shuffleSeats: false,
       ...overrides,
       seats,
-      ...(options?.autoAi === undefined ? {} : { autoAi: options.autoAi })
+      ...(options?.autoAi === undefined ? {} : { autoAi: options.autoAi }),
+      ...(options?.stacks === undefined ? {} : { stacks: options.stacks })
     });
 }

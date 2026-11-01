@@ -79,6 +79,15 @@ export interface GameSetupOptions {
    * without AI ignore it.
    */
   aiSeats?: number;
+  /**
+   * 每个座位的起始筹码（按座位号索引，可以短于座位数）。只有筹码类玩法
+   * （德州扑克）读取它，其它夹具忽略。
+   *
+   * 这是**初始位置**的一部分，不是运行期补丁：同一 seed + 同一 stacks 必须
+   * 重放出同一状态。账号余额决定买入时因此不必改写引擎状态，`exportLog`
+   * 把 stacks 一起带走，回放逐位一致。
+   */
+  stacks?: number[];
 }
 
 /**

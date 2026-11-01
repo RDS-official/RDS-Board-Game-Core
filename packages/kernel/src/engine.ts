@@ -60,6 +60,11 @@ export interface EngineOptions {
   /** How many built-in AI seats to add on top of the human seats. */
   aiSeats?: number;
   /**
+   * 每个座位的起始筹码（按座位号索引）。只有筹码类玩法读取它；与 `seats`
+   * 一样属于初始位置，回放必须原样带上，否则买入手数不同的两局会重放成同一手。
+   */
+  stacks?: number[];
+  /**
    * 让游戏自己内联推进 AI（夹具默认）。驱动方要按节奏逐步派发时传 `false`，
    * 由驱动方代 `isAutomated` 的角色派发具体动作。原样透传给 `setup` / 场景。
    */
@@ -104,6 +109,8 @@ export interface ExportedLog {
   humans?: number;
   /** How many built-in AI seats were added on top of the human seats. */
   aiSeats?: number;
+  /** 每个座位的起始筹码，见 `GameSetupOptions.stacks`。 */
+  stacks?: number[];
   actions: Action[];
   stateHash: string;
   /** Absent on legacy logs; current logs always write both. */
@@ -143,6 +150,8 @@ export class UniversalGameEngine {
   private seats?: number;
   private humans?: number;
   private aiSeats?: number;
+  /** Per-seat starting stacks, kept for `exportLog` / replay. */
+  private stacks?: number[];
   /** `false` 时不让游戏内联推进 AI，交给驱动方按节奏派发。 */
   private autoAi?: boolean;
   /** Full accepted action history (survives time-machine rewinds). */
@@ -175,6 +184,7 @@ export class UniversalGameEngine {
     this.seats = options.seats;
     this.humans = options.humans;
     this.aiSeats = options.aiSeats;
+    this.stacks = options.stacks;
     this.autoAi = options.autoAi;
 
     const initial = this.initialState(
@@ -182,7 +192,8 @@ export class UniversalGameEngine {
       options.scenario,
       options.seats,
       options.humans,
-      options.aiSeats
+      options.aiSeats,
+      options.stacks
     );
     this.state = { ...initial, seed, seq: 0, clock: initial.clock ?? 0, gameId: module.meta.id };
 
@@ -198,12 +209,14 @@ export class UniversalGameEngine {
     scenario?: string,
     seats?: number,
     humans?: number,
-    aiSeats?: number
+    aiSeats?: number,
+    stacks?: number[]
   ): GameState {
     const setupOptions = {
       ...(seats === undefined ? {} : { seats }),
       ...(humans === undefined ? {} : { humans }),
       ...(aiSeats === undefined ? {} : { aiSeats }),
+      ...(stacks === undefined ? {} : { stacks }),
       ...(this.autoAi === undefined ? {} : { autoAi: this.autoAi })
     };
     if (!scenario) return this.module.setup(seed, setupOptions);
@@ -1207,6 +1220,7 @@ export class UniversalGameEngine {
       ...(this.seats === undefined ? {} : { seats: this.seats }),
       ...(this.humans === undefined ? {} : { humans: this.humans }),
       ...(this.aiSeats === undefined ? {} : { aiSeats: this.aiSeats }),
+      ...(this.stacks === undefined ? {} : { stacks: [...this.stacks] }),
       actions: [...this.history],
       stateHash: hashState(head),
       schemaVersion: this.module.meta.schemaVersion ?? 1,
@@ -1220,14 +1234,16 @@ export class UniversalGameEngine {
     scenario = this.scenario,
     seats = this.seats,
     humans = this.humans,
-    aiSeats = this.aiSeats
+    aiSeats = this.aiSeats,
+    stacks = this.stacks
   ): { state: GameState; errors: string[] } {
     const shadow = new UniversalGameEngine(this.module, seed, {
       strict: false,
       scenario,
       ...(seats === undefined ? {} : { seats }),
       ...(humans === undefined ? {} : { humans }),
-      ...(aiSeats === undefined ? {} : { aiSeats })
+      ...(aiSeats === undefined ? {} : { aiSeats }),
+      ...(stacks === undefined ? {} : { stacks })
     });
     shadow.silent = true;
     const errors: string[] = [];
@@ -1317,13 +1333,15 @@ export class UniversalGameEngine {
     this.seats = payload.seats;
     this.humans = payload.humans;
     this.aiSeats = payload.aiSeats;
+    this.stacks = payload.stacks;
     const { state, errors } = this.replayState(
       payload.actions,
       payload.seed,
       payload.scenario,
       payload.seats,
       payload.humans,
-      payload.aiSeats
+      payload.aiSeats,
+      payload.stacks
     );
     this.state = state;
     this.history = [...payload.actions];

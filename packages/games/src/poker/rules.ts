@@ -16,14 +16,8 @@ import { cardOfEntity, cardText, holeCards, type Card } from './cards';
 import { compareHands, evaluateSeven, type HandValue } from './handEval';
 import { choosePokerAction } from './ai';
 import { AI_PROFILE, POKER_AI_ROSTER, isAiSeat, seatingOf, type SeatAssignment, type SeatingState } from './seating';
-import {
-  observerOf,
-  observerStateOf,
-  POKER_OBSERVER,
-  pickAiSeat,
-  withObserverState,
-  type PokerObserver
-} from './observers';
+import { observerOf, observerStateOf, POKER_OBSERVER, pickAiSeat, withObserverState, type PokerObserver } from './observers';
+import { buildHandFacts, type PokerHandFact } from './stats';
 import { createSeatPlayer, POKER_DEFAULTS, seatPosition } from './setup';
 
 /**
@@ -67,6 +61,15 @@ export interface PokerHandState extends BettingState {
   revealed: string[];
   /** 已经点过「准备」的座位；全部存活座位都准备后才能开下一手。 */
   readyForNext: string[];
+  /**
+   * 本手实际被发到牌的座位。观察者与开局前就破产的座位不在其中——
+   * 生涯统计只算「真的参与过这一手」的人，不把旁观时间摊进入池率。
+   */
+  dealt: string[];
+  /** 翻前自愿投过钱的座位（跟注 / 加注 / 全押；下盲注不算）。 */
+  preflopVoluntary: string[];
+  /** 翻牌发出时仍在牌局里的座位（弃牌与旁观都不算）。 */
+  sawFlop: string[];
 }
 
 export interface PokerPotResult {
@@ -80,6 +83,8 @@ export interface PokerHandResult {
   endedBy: 'SHOWDOWN' | 'FOLD';
   pots: PokerPotResult[];
   showdown: { playerId: string; label: string; cards: string[] }[];
+  /** 逐座位的本手事实（交给账号生涯统计折叠，见 poker/stats.ts）。 */
+  players?: PokerHandFact[];
 }
 
 export interface PokerConfigValues {
@@ -841,6 +846,13 @@ export class PokerRules {
               ? `全押 ${streetBets[playerId]}`
               : `加注到 ${streetBets[playerId]}`;
 
+    // 入池口径：翻前**自愿**投钱才算 VPIP。跟注/加注/全押都要在 `spent > 0`
+    // 时才算数——零金额的过牌与跟注不变动作，不能把入池率算高。
+    const voluntary =
+      hand.street === 'PREFLOP' && spent > 0 && action.type !== 'FOLD'
+        ? [...new Set([...hand.preflopVoluntary, playerId])]
+        : hand.preflopVoluntary;
+
     const nextHand: PokerHandState = {
       ...hand,
       streetBets,
@@ -852,7 +864,8 @@ export class PokerRules {
       lastActions: { ...hand.lastActions, [playerId]: sign },
       currentBet: raised ? Math.max(hand.currentBet, streetBets[playerId]) : hand.currentBet,
       lastRaiseSize: fullRaise ? streetBets[playerId] - hand.currentBet : hand.lastRaiseSize,
-      lastAggressor: raised ? playerId : hand.lastAggressor
+      lastAggressor: raised ? playerId : hand.lastAggressor,
+      preflopVoluntary: voluntary
     };
 
     let next = setChips(state, playerId, remaining);
@@ -971,6 +984,13 @@ export class PokerRules {
       .join(' ');
 
     next = withHand(next, { ...handOf(next)!, community, street: nextStreet });
+    // 翻牌发出时还留在牌局里的座位，才算「看过翻牌」——弃牌的人已经不在其中。
+    if (nextStreet === 'FLOP') {
+      next = withHand(next, {
+        ...(handOf(next) as PokerHandState),
+        sawFlop: livePlayers(next)
+      });
+    }
     next = { ...next, phase: nextStreet };
     next = pushLog(next, `${STREET_LABEL[nextStreet]} · ${board}`);
     ctx.trace({
@@ -1046,7 +1066,11 @@ export class PokerRules {
       folded: [],
       allIn: [],
       community: [],
-      lastAggressor: null
+      lastAggressor: null,
+      // 生涯统计的逐手事实：谁被发了牌 / 翻前自愿投钱 / 看到翻牌。
+      dealt: [],
+      preflopVoluntary: [],
+      sawFlop: []
     };
     next = withHand(next, fresh);
     next = { ...next, phase: 'PREFLOP', round: handNo };
@@ -1079,6 +1103,9 @@ export class PokerRules {
         next = dealTo(next, `zone_hand_${pid}`, { type: 'OWNER_ONLY', ownerId: pid }).state;
       }
     }
+    // 被发牌的座位进了本手的统计口径；观察者（没座位 / 没牌）永远不在其中。
+    const dealtIds = dealingSeats.map(seat => order[seat]);
+    next = withHand(next, { ...(handOf(next) as PokerHandState), dealt: dealtIds });
 
     // 7. First to act: heads-up the button (small blind) leads pre-flop,
     //    otherwise the seat left of the big blind.
@@ -1144,6 +1171,7 @@ export class PokerRules {
 
     const pots = buildPots(hand.handBets, hand.folded);
     const results: PokerPotResult[] = [];
+    const awarded: Record<string, number> = {};
     for (const pot of pots) {
       const contenders = pot.eligible.filter(pid => values.has(pid));
       if (contenders.length === 0) continue;
@@ -1156,6 +1184,7 @@ export class PokerRules {
       const award = splitAmount(pot.amount, winners, next.playerOrder, hand.buttonSeat);
       for (const [pid, amount] of Object.entries(award)) {
         next = setChips(next, pid, chipsOf(next, pid) + amount);
+        awarded[pid] = (awarded[pid] ?? 0) + amount;
       }
       results.push({ amount: pot.amount, winners, label: best?.label ?? '' });
     }
@@ -1178,7 +1207,23 @@ export class PokerRules {
       // 走到摊牌就必须亮：牌面留在桌上，结算画面才看得清谁靠什么赢。
       revealed: [...live]
     });
-    next = this.writeHandResult(next, { handNo: hand.handNo, endedBy: 'SHOWDOWN', pots: results, showdown });
+    next = this.writeHandResult(next, {
+      handNo: hand.handNo,
+      endedBy: 'SHOWDOWN',
+      pots: results,
+      showdown,
+      players: buildHandFacts({
+        handNo: hand.handNo,
+        endedBy: 'SHOWDOWN',
+        order: next.playerOrder,
+        dealt: hand.dealt ?? next.playerOrder,
+        preflopVoluntary: hand.preflopVoluntary ?? [],
+        sawFlop: hand.sawFlop ?? [],
+        showdown: live,
+        handBets: hand.handBets,
+        awarded
+      }).players
+    });
     next = pushLog(
       next,
       `摊牌 · ${results
@@ -1219,7 +1264,18 @@ export class PokerRules {
         handNo: hand.handNo,
         endedBy: 'FOLD',
         pots: [{ amount: total, winners: [winnerId], label: '其余玩家弃牌' }],
-        showdown: []
+        showdown: [],
+        players: buildHandFacts({
+          handNo: hand.handNo,
+          endedBy: 'FOLD',
+          order: next.playerOrder,
+          dealt: hand.dealt ?? next.playerOrder,
+          preflopVoluntary: hand.preflopVoluntary ?? [],
+          sawFlop: hand.sawFlop ?? [],
+          showdown: [],
+          handBets: hand.handBets,
+          awarded: { [winnerId]: total }
+        }).players
       });
       next = pushLog(next, `${nameOf(next, winnerId)} 赢得底池 ${total}（其余玩家弃牌）`);
       ctx.trace({

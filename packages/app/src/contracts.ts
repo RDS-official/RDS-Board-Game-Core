@@ -367,6 +367,13 @@ export interface GameSnapshot {
    * 服务端权威模式下就是「全服」视角；离线单机时降级为本桌数据。
    */
   chipRanking?: UiChipRank[];
+  /**
+   * 全服账号排行（德州扑克，服务端权威模式才有）。
+   *
+   * 单机 / 离线没有账号体系，这里是 `undefined`：HUD 只显示本桌排行，
+   * 不会出现一个空的全服页签。
+   */
+  accountRanking?: UiPokerRanking;
 }
 
 /** 观察席上的一名牌手：输光后仍在房间里等低保 / 等换桌。 */
@@ -396,6 +403,67 @@ export interface UiChipRank {
   isAi: boolean;
   /** AI 等级标签（初级 / 中级 / 高级），真人座位为空。 */
   tierLabel?: string;
+}
+
+/**
+ * 全服排行的一行：一个**账号**的筹码与生涯战绩。
+ *
+ * 与本桌的 `UiChipRank` 分开，因为两者回答的不是同一个问题：本桌排行看「这手
+ * 谁筹码多」，全服排行看「这个账号一共还有多少、打得怎么样」。字段全部来自
+ * 公开信息（余额、战绩），不含任何隐藏牌面。
+ */
+export interface UiAccountRank {
+  /** 账号 id（服务端 userId）；用于打开详情。 */
+  userId: string;
+  name: string;
+  avatarUrl?: string;
+  /** 余额 + 正在桌上的筹码。 */
+  chips: number;
+  /** 其中还没兑换成桌上筹码的部分。 */
+  bankroll: number;
+  /** 其中正在桌上的部分。 */
+  onTable: number;
+  /** 生涯峰值。 */
+  peakChips: number;
+  /** 0..1，占全部账号筹码的比例。 */
+  share: number;
+  /** 正在哪个房间 / 哪个座位（没在玩则为空）。 */
+  roomId?: string;
+  seat?: string;
+  /** 生涯战绩（比率已算好，UI 不再做除法）。 */
+  stats: UiAccountStats;
+}
+
+/** 生涯战绩的一次快照；界面按 `hands` 为 0 显示「暂无记录」。 */
+export interface UiAccountStats {
+  hands: number;
+  won: number;
+  vpip: number;
+  sawFlop: number;
+  showdowns: number;
+  showdownWins: number;
+  netChips: number;
+  bestPot: number;
+  updatedAt: number;
+  winRate: number;
+  vpipRate: number;
+  sawFlopRate: number;
+  showdownRate: number;
+  showdownWinRate: number;
+}
+
+/**
+ * 全服排行面板的数据源。
+ *
+ * 单机 / 离线模式没有账号体系，`accounts` 为空，面板只显示本桌排行——
+ * HUD 因此不需要判断「有没有登录」，只看这里给没给数据。
+ */
+export interface UiPokerRanking {
+  accounts: UiAccountRank[];
+  /** 当前托管的牌桌数量（服务端权威模式）。 */
+  rooms: number;
+  /** 数据时间戳（毫秒）；用于显示「N 秒前」。 */
+  updatedAt: number;
 }
 
 /** One resolved dice roll, in the shape the UI needs to draw it. */
@@ -681,6 +749,14 @@ export interface GamePresenter {
    * 没有观察者概念的游戏不实现这个方法，HUD 也就不会画这张卡。
    */
   rejoinTable?(playerId: string): { ok: boolean; error?: string };
+
+  /**
+   * 拉取全服账号排行（德州扑克）。
+   *
+   * 排行在服务端权威模式下由服务器提供；单机 / P2P 模式没有账号体系，
+   * 实现方返回 `undefined`，HUD 只保留本桌面板。
+   */
+  fetchAccountRanking?(): Promise<UiPokerRanking | undefined>;
 
   /** Rotate / confirm a preloaded room tile without opening a modal. */
   rotatePlacement(direction?: 1 | -1): void;

@@ -3,7 +3,9 @@ import type { Action } from '@rds/kernel/types';
 import { MatchManager } from './match.ts';
 import type { ServerMatch } from './match.ts';
 import { profileOf } from './auth.ts';
-import { rooms } from './storage.ts';
+import { rooms, users } from './storage.ts';
+import { rankAccount, rankAccounts, type GlobalPokerRow } from './pokerLeaderboard.ts';
+import { forgetRoom } from './pokerSettle.ts';
 
 /**
  * 中心模式（服务器权威）的 WebSocket 通道。
@@ -216,11 +218,41 @@ export class MatchBroker {
     }
     this.roomSockets.delete(roomId);
     this.matches.close(roomId);
+    this.forgetRoomLedger(roomId);
   }
 
   public dispose(): void {
     this.matches.closeAll();
     this.roomSockets.clear();
+  }
+
+  /**
+   * 全服扑克排行：账号余额 + 正在桌上的筹码 + 生涯战绩。
+   *
+   * 只读账本与对局，不写入任何状态。排行榜是公开展示，因此只给昵称与统计，
+   * 不给登录名。
+   */
+  public pokerLeaderboard(): { rows: GlobalPokerRow[]; rooms: number; updatedAt: number } {
+    const rows = rankAccounts(
+      this.matches,
+      users.all().map(user => user.id)
+    );
+    return { rows, rooms: this.matches.size, updatedAt: Date.now() };
+  }
+
+  /**
+   * 单名账号的排行档案（弹窗详情用）。
+   *
+   * 找不到账号返回 undefined——由路由转 404，不静默回一行空数据。
+   */
+  public pokerAccount(userId: string): GlobalPokerRow | undefined {
+    if (!users.byId(userId)) return undefined;
+    return rankAccount(this.matches, userId);
+  }
+
+  /** 房间关闭时清掉该房间的去重账（手数记录已无意义，不能跟房间号一起长下去）。 */
+  public forgetRoomLedger(roomId: string): void {
+    forgetRoom(roomId);
   }
 
   /** 供自检/运维观察的服务端对局概况。 */
