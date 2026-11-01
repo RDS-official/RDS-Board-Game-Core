@@ -179,3 +179,31 @@ UI 矩阵的三个提速点（都不是砍覆盖）：
 同时做了三处硬化：指针移动期间关掉卡片位移过渡（`markFanMoving`，避免 120Hz 下
 每次 pointermove 都打断 120ms 过渡）、`--fan-x` 半像素对齐、布局结果未变时不再写
 样式（`data-fan-layout` 签名）。
+
+### 10.1 根因（2026-11-01 定位并修复）
+
+探针显示抖动时 `render / cards / shape` 几乎不增长（DOM 没有重建），`layout` 只在
+指针移动时增加——症状是**纯 CSS**：
+
+`a11y.css` 的 reduced-motion 块里有
+
+```css
+@media (prefers-reduced-motion: reduce) {
+  .dock-fan .act:hover, .dock-fan .act:focus-visible { transform: none !important; }
+}
+```
+
+而牌的水平位置当时正是靠 `transform: translateX(var(--fan-x))` 表达的。于是：
+悬停 → `transform: none` → 牌弹回行首（左移约 300px）→ 指针不在牌上 → hover 失效
+→ transform 恢复 → 牌弹回指针下 → 又悬停……约 **12Hz 的自激循环**，肉眼就是整排在
+闪。与 DPI、刷新率、窗口大小完全无关，所以此前「动画/亚像素」方向的修补都无效。
+
+修复两层：
+
+1. 牌的水平位置改走独立的 `translate` 属性（`translate: var(--fan-x) 0`），`transform`
+   只负责抬升与缩放——任何 hover / 主题 / 无障碍规则改 `transform` 都不会再影响位置；
+2. `a11y.css` 里那条规则改成 `transform: scale(var(--fan-scale, 1)) !important`：
+   减少动态效果只取消「抬升」，不再抹掉定位与缩放。
+
+复现/验收方法：把指针停在动作牌中央 1 秒，`mouseover / mouseout` 应各为 0 次，牌的
+`getBoundingClientRect().x` 不应跳变（修复前是 12Hz、±307px）。
