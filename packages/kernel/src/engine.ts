@@ -27,6 +27,7 @@ import {
   ActorId,
   DecisionWindow,
   DispatchResult,
+  RewardEntry,
   FollowUpFrame,
   GameState,
   Npc,
@@ -175,6 +176,8 @@ export class UniversalGameEngine {
    */
   private readonly charterViolations: CharterViolation[] = [];
   private static readonly MAX_CHARTER_VIOLATIONS = 200;
+  /** 收益流水的保留上限（C-7）；超出从头部裁剪。 */
+  private static readonly MAX_REWARD_ENTRIES = 500;
 
   private visualListeners: ((events: VisualTraceEvent[]) => void)[] = [];
   private stateChangeListeners: ((state: ProjectedGameState) => void)[] = [];
@@ -812,7 +815,14 @@ export class UniversalGameEngine {
     };
   }
 
-  private makeContext(nextSeq: number, events: VisualTraceEvent[]): ReduceContext {
+  /**
+   * 构造一次转移的 helper 上下文。
+   *
+   * `ledger` 收集本次 `ctx.reward()` 的记账条目：reduce 期间模组拿到的是
+   * 累积数组，而不是能直接改 `state` 的句柄 —— 否则"记账口"本身就成了新的
+   * 可变逃逸口。转移落地时由 `settleRewards()` 一次性写进 `state.rewards`。
+   */
+  private makeContext(nextSeq: number, events: VisualTraceEvent[], ledger?: RewardEntry[]): ReduceContext {
     let counter = 0;
     return {
       seq: nextSeq,
@@ -824,13 +834,34 @@ export class UniversalGameEngine {
           result: { spec, rolls: roll.rolls, total: roll.sum },
           nextSeed: roll.nextSeed
         };
+      },
+      reward: (actorId, kind, amount, reason) => {
+        if (!ledger) return;
+        if (!Number.isFinite(amount)) return;
+        ledger.push({ actorId, kind, amount, reason, seq: nextSeq });
       }
     };
   }
 
+  /**
+   * 宪章 C-7：把本次转移的记账条目追加进 `state.rewards`。
+   *
+   * 只追加、不重排。条目超过上限时从**头部**裁剪（保留最近的历史），
+   * 与 `charterViolations` 的策略一致。
+   */
+  private settleRewards(state: GameState, ledger: readonly RewardEntry[]): GameState {
+    if (ledger.length === 0) return state;
+    const merged = [...(state.rewards ?? []), ...ledger];
+    const capped = merged.length > UniversalGameEngine.MAX_REWARD_ENTRIES
+      ? merged.slice(merged.length - UniversalGameEngine.MAX_REWARD_ENTRIES)
+      : merged;
+    return { ...state, rewards: capped };
+  }
+
   private applyCore(action: Action, events: VisualTraceEvent[]): DispatchResult {
     const seq = this.state.seq + 1;
-    const ctx = this.makeContext(seq, events);
+    const ledger: RewardEntry[] = [];
+    const ctx = this.makeContext(seq, events, ledger);
 
     const { state: reduced, cancelled, error } = this.reduceWithPipeline(this.state, action, ctx, events);
     if (error) return this.fail(error, events);
@@ -842,7 +873,7 @@ export class UniversalGameEngine {
       return { ok: true, events, stateHash: this.getStateHash(), action };
     }
 
-    const finalized = this.finalizeTransition(reduced, seq, action, events, ctx);
+    const finalized = this.finalizeTransition(reduced, seq, action, events, ctx, ledger);
     if (!finalized.ok) return finalized.result;
     this.history.push(action);
     return { ok: true, events, stateHash: this.getStateHash(), action };
@@ -885,7 +916,8 @@ export class UniversalGameEngine {
     const ticks = Math.max(1, Math.min(100, Math.floor(Number.isFinite(rawTicks) ? rawTicks : 1)));
     const events: VisualTraceEvent[] = [];
     const seq = this.state.seq + 1;
-    const ctx = this.makeContext(seq, events);
+    const ledger: RewardEntry[] = [];
+    const ctx = this.makeContext(seq, events, ledger);
 
     let next = this.stampDeadlines({ ...this.state, clock: this.state.clock + ticks, seq });
 
@@ -1001,6 +1033,7 @@ export class UniversalGameEngine {
       }
     }
 
+    next = this.settleRewards(next, ledger);
     this.recordCharterViolations(next, tickAction);
 
     this.state = next;
@@ -1064,7 +1097,8 @@ export class UniversalGameEngine {
     seq: number,
     loggedAction: Action,
     events: VisualTraceEvent[],
-    ctx: ReduceContext
+    ctx: ReduceContext,
+    ledger: readonly RewardEntry[]
   ): { ok: true } | { ok: false; result: DispatchResult } {
     candidate = this.expireEffects(candidate);
     candidate = this.stampDeadlines(candidate);
@@ -1093,6 +1127,7 @@ export class UniversalGameEngine {
       }
     }
 
+    next = this.settleRewards(next, ledger);
     this.recordCharterViolations(next, loggedAction);
 
     this.observeTransitions(this.state, next, loggedAction.type, next.actionLog.length - this.state.actionLog.length - 1);
@@ -1128,7 +1163,8 @@ export class UniversalGameEngine {
     if (!submission.accepted) return this.fail(submission.error ?? 'submission rejected', events);
 
     const seq = this.state.seq + 1;
-    const ctx = this.makeContext(seq, events);
+    const ledger: RewardEntry[] = [];
+    const ctx = this.makeContext(seq, events, ledger);
 
     let next = submission.state;
     const secretDecision = submission.window?.secret ?? decision.secret;
@@ -1169,6 +1205,7 @@ export class UniversalGameEngine {
       }
     }
 
+    next = this.settleRewards(next, ledger);
     this.recordCharterViolations(next, action);
 
     this.state = next;
@@ -1249,7 +1286,8 @@ export class UniversalGameEngine {
     const submission = InterruptStackManager.submitResponse(this.state, frame.id, actorId, responsePayload);
 
     const seq = this.state.seq + 1;
-    const ctx = this.makeContext(seq, events);
+    const ledger: RewardEntry[] = [];
+    const ctx = this.makeContext(seq, events, ledger);
 
     let next = submission.state;
     events.push(
@@ -1305,6 +1343,7 @@ export class UniversalGameEngine {
       }
     }
 
+    next = this.settleRewards(next, ledger);
     this.recordCharterViolations(next, action);
 
     this.state = next;

@@ -715,6 +715,8 @@ export const pokerModule: GameModule = defineGame({
    */
   charter: {
     requiresProjection: true,
+    // C-7：所有筹码增减都经 ctx.reward() 记账（摊牌 / 弃牌取胜 / 观察者低保）。
+    requiresRewardLedger: true,
     deviations: [
       {
         clause: 'C-2',

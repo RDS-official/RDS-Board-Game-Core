@@ -134,6 +134,29 @@ export function checkCharter(
     }
   }
 
+  /* C-7 收益独立 -------------------------------------------------------- */
+  if (!suppressed('C-7') && module.charter?.requiresRewardLedger && state.rewards) {
+    for (const entry of state.rewards) {
+      if (!entry || typeof entry.actorId !== 'string' || typeof entry.kind !== 'string') {
+        out.push({ code: 'CHARTER_C7_BAD_REWARD', message: 'reward entry is missing actorId or kind' });
+        continue;
+      }
+      if (!Number.isFinite(entry.amount) || entry.amount === 0) {
+        out.push({
+          code: 'CHARTER_C7_BAD_REWARD',
+          message: `reward for ${entry.actorId} has a non-finite or zero amount`
+        });
+      }
+      if (!entry.reason || entry.reason.trim().length === 0) {
+        // 没有理由的收益等于没记账：事后无法回答"哪条规则给了这一分"。
+        out.push({
+          code: 'CHARTER_C7_BAD_REWARD',
+          message: `reward ${entry.actorId}/${entry.kind} carries no reason`
+        });
+      }
+    }
+  }
+
   /* C-6 语义不变量 ------------------------------------------------------ */
   if (!suppressed('C-6') && module.checkInvariants) {
     let messages: string[] = [];

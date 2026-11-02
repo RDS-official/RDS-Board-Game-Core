@@ -17,6 +17,15 @@ export interface ReduceContext {
    * `nextSeed` into `state.prngState`; the helper never mutates state.
    */
   roll: (spec: DiceSpec, seed: number) => { result: RollResult; nextSeed: number };
+  /**
+   * 宪章 C-7：记一笔收益。写到 `state.rewards`（只追加），**不直接改状态**。
+   *
+   * 用途是把"谁因为什么拿到多少"与"状态怎么变"解耦：模组照旧改 chips / score，
+   * 但同时在记账口留下一行理由，`outcome()` 与结算摘要据此解释得分来源。
+   *
+   * 必须在 reduce 内调用（上下文只在转移期间有效）。
+   */
+  reward: (actorId: ActorId, kind: string, amount: number, reason: string) => void;
 }
 
 export interface GameCapabilities {
@@ -449,6 +458,12 @@ export interface GameModule {
      * 声明后，`engine.getProjectedStateFor()` 的 AI 分支会做运行期断言。
      */
     requiresProjection?: boolean;
+    /**
+     * 声明本模组已把收益改动接进 `ctx.reward()`（C-7）。
+     * 声明后内核校验 `state.rewards` 的条目完整性：必须有 actor / kind /
+     * 非零 amount / 非空 reason —— 没理由的收益等于没记账。
+     */
+    requiresRewardLedger?: boolean;
   };
   /** Optional module-level redaction for projection-only fields. */
   project?: ProjectionRedactor;

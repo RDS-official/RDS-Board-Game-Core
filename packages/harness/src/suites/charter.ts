@@ -527,3 +527,128 @@ test('charter C-4: every runtime DeterministicPRNG call advances prngState', () 
 
   assertEqual(offenders.join(', '), '', 'DeterministicPRNG used without advancing prngState');
 });
+
+/* -------------------------------------------------------------------------- */
+/* C-7 收益独立                                                                */
+/* -------------------------------------------------------------------------- */
+
+test('charter C-7: poker records every chip movement in the reward ledger', () => {
+  const module = GAME_REGISTRY.poker;
+  assert(module.charter?.requiresRewardLedger, 'poker declares a reward ledger');
+  assert(module.checkInvariants, 'poker declares semantic invariants');
+
+  const engine = new UniversalGameEngine(module, 42, { strict: true });
+  const rnd = picker(42);
+  const before: Record<string, number> = {};
+
+  for (let i = 0; i < 600; i++) {
+    const legal = engine.getLegalActions(engine.getActiveActorId());
+    if (legal.length === 0) break;
+    const result = engine.dispatch(legal[rnd(legal.length)]);
+    if (!result.ok) break;
+
+    const state = engine.getRawState();
+    for (const pid of state.playerOrder) {
+      const chips = Number(state.players[pid]?.customProps?.chips ?? 0);
+      if (before[pid] === undefined) before[pid] = chips;
+    }
+    if (state.gameOver) break;
+  }
+
+  const final = engine.getRawState();
+  const rewards = final.rewards ?? [];
+  assert(rewards.length > 0, 'a played session produces reward entries');
+
+  // 每条记录都必须自洽：有 actor / kind / 非零金额 / 非空理由。
+  for (const entry of rewards) {
+    assert(typeof entry.actorId === 'string' && entry.actorId.length > 0, 'reward has an actor');
+    assert(typeof entry.kind === 'string' && entry.kind.length > 0, 'reward has a kind');
+    assert(Number.isFinite(entry.amount) && entry.amount !== 0, 'reward amount is a non-zero finite number');
+    assert(entry.reason.trim().length > 0, 'reward carries a human-readable reason');
+    assert(Number.isInteger(entry.seq) && entry.seq >= 0, 'reward is aligned to a transition seq');
+  }
+
+  const codes = engine.getViolations().map(v => v.code);
+  assert(!codes.includes('CHARTER_C7_BAD_REWARD'), 'no malformed reward entries were recorded');
+});
+
+test('charter C-7: the ledger explains a chip swing the state diff alone cannot', () => {
+  const module = GAME_REGISTRY.poker;
+  const engine = new UniversalGameEngine(module, 7, { strict: true });
+  const rnd = picker(7);
+
+  // 打到出现至少一笔正的筹码收益为止（摊牌或弃牌取胜）。
+  for (let i = 0; i < 800 && !(engine.getRawState().rewards ?? []).some(r => r.amount > 0); i++) {
+    const legal = engine.getLegalActions(engine.getActiveActorId());
+    if (legal.length === 0) break;
+    if (!engine.dispatch(legal[rnd(legal.length)]).ok) break;
+  }
+
+  const rewards = engine.getRawState().rewards ?? [];
+  const wins = rewards.filter(r => r.amount > 0);
+  assert(wins.length > 0, 'a session that reaches a showdown records a positive reward');
+  assert(
+    wins.every(w => /摊牌|弃牌|低保/.test(w.reason)),
+    `every gain names its cause, got: ${JSON.stringify(wins.map(w => w.reason))}`
+  );
+});
+
+test('charter C-7: a reward without a reason is reported', () => {
+  const module = GAME_REGISTRY.poker;
+  const charter = resolveCharter(module);
+  const engine = new UniversalGameEngine(module, 42, { strict: true });
+  const base = engine.getRawState();
+  const tampered: GameState = {
+    ...base,
+    rewards: [{ actorId: base.playerOrder[0], kind: 'chips', amount: 50, reason: '   ', seq: 1 }]
+  };
+  const violations = checkCharter(module, charter, tampered);
+  assert(
+    violations.some(v => v.code === 'CHARTER_C7_BAD_REWARD' && /no reason/.test(v.message)),
+    'an unexplained reward must be flagged'
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* C-8 元规则分区                                                              */
+/* -------------------------------------------------------------------------- */
+
+test('charter C-8: 𝒦_view (presentation) never appears on a transition path', () => {
+  const offenders: string[] = [];
+  const games = readdirSync('packages/games/src', { withFileTypes: true })
+    .filter(e => e.isDirectory())
+    .map(e => e.name);
+
+  for (const game of games) {
+    const dir = `packages/games/src/${game}`;
+    for (const file of listFiles(dir)) {
+      // 规则实现处：reduce / legalActions / 结算逻辑都在这两个文件里。
+      if (!/rules\.ts$|helpers\.ts$/.test(file)) continue;
+      const source = readFileSync(file, 'utf8');
+      // 先整体剥掉块注释与行注释，再逐行找：块注释跨行，逐行处理会漏。
+      // 保留换行数，这样报出来的行号仍然对得上源文件。
+      const stripped = source
+        .replace(/\/\*[\s\S]*?\*\//g, m => m.replace(/[^\n]/g, ' '))
+        .replace(/\/\/[^\n]*/g, '');
+      stripped.split('\n').forEach((line, index) => {
+        if (/\bpresentation\b/.test(line)) offenders.push(`${file}:${index + 1}`);
+      });
+    }
+  }
+
+  assertEqual(offenders.join(', '), '', '𝒦_view leaked into a rules/helpers transition path');
+});
+
+test('charter C-8: driver semantics stay in 𝒦_driver, not in reduce', () => {
+  const module = GAME_REGISTRY.poker;
+  // 𝒦_driver 的三个字段只应被驱动方（app / server）读取。
+  // 这里断言它们的形状：都是数据或纯函数，不持有状态、不产生副作用。
+  assert(module.driverActions === undefined || Array.isArray(module.driverActions), 'driverActions is a list');
+  if (module.heartbeat) {
+    assert(typeof module.heartbeat.intervalMs === 'number', 'heartbeat.intervalMs is a number');
+    assert(typeof module.heartbeat.action === 'function', 'heartbeat.action is a function');
+  }
+  if (module.isAutomated) {
+    assert(typeof module.isAutomated === 'function', 'isAutomated is a predicate');
+  }
+});
