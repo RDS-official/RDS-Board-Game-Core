@@ -5,6 +5,8 @@ import * as THREE from 'three';
  * All materials are procedurally generated at runtime (canvas textures),
  * so the scene has zero external asset dependencies.
  */
+export const TABLE_SIZE = { width: 33, length: 24 } as const;
+
 export class GameTableBuilder {
   private static feltTexture: THREE.CanvasTexture | null = null;
   private static woodTexture: THREE.CanvasTexture | null = null;
@@ -136,7 +138,8 @@ export class GameTableBuilder {
     return texture;
   }
 
-  public static createTable(width = 33, length = 24): THREE.Group {
+
+  public static createTable(width = TABLE_SIZE.width, length = TABLE_SIZE.length): THREE.Group {
     const tableGroup = new THREE.Group();
 
     // ---------- Felt surface ----------

@@ -5,13 +5,13 @@ import { TransactionalAnimationQueue } from './animationQueue';
 import { BoardRaycaster, InteractiveObjectData } from './raycaster';
 import { CardMeshBuilder } from './procedural/cardMesh';
 import { ChipMeshBuilder } from './procedural/chipMesh';
-import { SEAT_BOARD, SeatPlateBuilder, type WoodKind } from './procedural/seatPlate';
+import { SeatPlateBuilder, type WoodKind } from './procedural/seatPlate';
 import { pokemonCardBackTexture, pokemonCardTexture } from './procedural/pokemonAssets';
 import { DiceMeshBuilder } from './procedural/diceMesh';
 import { HexTileBuilder } from './procedural/hexTile';
 import { RoomTileBuilder } from './procedural/roomTile';
 import { TokenMeshBuilder } from './procedural/tokenMesh';
-import { GameTableBuilder } from './table';
+import { GameTableBuilder, TABLE_SIZE } from './table';
 import { createDefaultProjectionRegistry, ProjectionRegistry } from './projectionPort';
 import { LabelOverlay, WorldLabel } from './labels/labelOverlay';
 import { ScreenRect } from './labels/labelLayout';
@@ -381,14 +381,22 @@ export class BoardGameScene {
    */
   private seatStandees: { group: THREE.Group; jitter: number; lamp?: THREE.Mesh; seatId: string }[] = [];
   /** 每个座位「默认视角正下方」的定位标：白点 + 30% 白线 + 状态环/旋转箭头。 */
-  /** 牌桌边界（含桌沿）：标柱最多只能走到这里，按「方桌」的矩形边界算。 */
-  private tableBounds = { rx: 8, rz: 5 };
+  /** 外层大方桌的边界（红圈）：立柱活动的外部限制（33 × 24 大桌木沿）。 */
+  private tableBounds = {
+    rx: TABLE_SIZE.width / 2 - 0.6,
+    rz: TABLE_SIZE.length / 2 - 0.6
+  };
+  /** 内层牌桌椭圆的边界（绿圈）：立柱活动的内部限制（不侵入牌桌牌面）。 */
+  private tableInnerOval = { rx: 9.25, rz: 5.95 };
   private seatBeacons: {
     group: THREE.Group;
     ring: THREE.Mesh;
     spinner: THREE.Group;
     arrow: THREE.Mesh;
     line: THREE.Mesh;
+    avatarSprite: THREE.Sprite;
+    seatCamPos: THREE.Vector3;
+    defaultOutward: { x: number; y: number };
     seatId: string;
   }[] = [];
 
@@ -2065,10 +2073,11 @@ export class BoardGameScene {
     this.seatStandees = [];
     this.seatBeacons = [];
     const seatNodes = Object.values(graph.nodes).filter(node => node.type === 'SEAT');
-    this.tableBounds = {
-      rx: Math.max(3.6, ...seatNodes.map(node => Math.abs(node.position[0]))) + 1.1,
-      rz: Math.max(2.6, ...seatNodes.map(node => Math.abs(node.position[2]))) + 1.1
-    };
+    if (seatNodes.length > 0) {
+      const rx = Math.max(3.6, ...seatNodes.map(node => Math.abs(node.position[0]))) + 1.1;
+      const rz = Math.max(2.6, ...seatNodes.map(node => Math.abs(node.position[2]))) + 1.1;
+      this.tableInnerOval = { rx: rx + 0.35, rz: rz + 0.35 };
+    }
 
     // Render Nodes
     Object.values(graph.nodes).forEach(node => {
@@ -2395,19 +2404,25 @@ export class BoardGameScene {
             ...seatNodes.map(entry => Math.abs(entry.position[0])),
             4
           );
-          // 标柱最多走到桌沿：机位在桌外很远，直接放机位下面会跑出画面、还会把
-          // 自动取景撑大。这里取「座位方向 × 桌面椭圆」的交点，正好落在桌沿上；
-          // 高度仍取那台相机的高度。
+          // 视角定位标：活动范围在「绿圈（内层椭圆牌桌）与红圈（外层大方桌木沿）」之间
           const back = Math.max(7, span * 1.05);
           const eye = 2 + back * 0.29;
-          const rim = this.rimPoint(outward.x, outward.y);
+          const defaultCamX = seatX + outward.x * back;
+          const defaultCamZ = seatZ + outward.y * back;
+          const clamped = this.clampBeaconPosition(defaultCamX, defaultCamZ, outward);
+          const seatCamPos = new THREE.Vector3(defaultCamX, eye, defaultCamZ);
           const beacon = this.createSeatBeacon(
-            rim.x,
-            rim.z,
+            clamped.x,
+            clamped.z,
             eye,
-            SEAT_BOARD.width * 0.5
+            seatPlayer
           );
-          this.seatBeacons.push({ ...beacon, seatId });
+          this.seatBeacons.push({
+            ...beacon,
+            seatCamPos,
+            defaultOutward: { x: outward.x, y: outward.y },
+            seatId
+          });
           this.boardObjectsGroup.add(beacon.group);
         }
         this.raycaster.registerInteractive(plate, {
@@ -4110,6 +4125,9 @@ export class BoardGameScene {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
     texture.anisotropy = 4;
     BoardGameScene.pokerCloth = texture;
     return texture;
@@ -4763,6 +4781,9 @@ export class BoardGameScene {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
     // 1024px 的标签在屏幕上往往只有一百多像素宽：没有 mipmap 时 GPU 只取 4 个
     // 纹素，文字边缘会碎成噪点（远景尤其明显）。开 mipmap + 各向异性，缩小时
     // 才会平滑地滤到目标尺寸。
@@ -4920,35 +4941,158 @@ export class BoardGameScene {
    * 的高度——不管从哪个座位看，线顶都落在自己的视平线上。
    */
   /**
-   * 从桌心沿 (dx, dz) 方向走到桌面边界的交点。
+   * 把点位约束在「绿圈（内层牌桌椭圆）与红圈（外层大方桌木沿）」之间的环带活动范围内。
    *
-   * 边界用「方桌」的矩形边界（`rx` × `rz`），不是内切的椭圆：椭圆对角方向的
-   * 边界会缩进去，标柱看起来像被吸到桌子中间。
+   * @param x 目标 X 坐标（如相机在地面上的投影）
+   * @param z 目标 Z 坐标
+   * @param fallbackOutward 当点位在桌心附近无法确定方向时的推开方向
    */
-  private rimPoint(dx: number, dz: number): { x: number; z: number } {
-    const length = Math.hypot(dx, dz);
-    if (length < 1e-4) return { x: 0, z: 0 };
-    const { rx, rz } = this.tableBounds;
-    const ux = dx / length;
-    const uz = dz / length;
-    const k = Math.min(
-      Math.abs(ux) > 1e-4 ? rx / Math.abs(ux) : Number.POSITIVE_INFINITY,
-      Math.abs(uz) > 1e-4 ? rz / Math.abs(uz) : Number.POSITIVE_INFINITY
-    );
-    return { x: ux * k, z: uz * k };
+  private clampBeaconPosition(
+    x: number,
+    z: number,
+    fallbackOutward?: { x: number; y: number }
+  ): { x: number; z: number } {
+    // 1. 外层边界（红圈）：外层大方桌木沿矩形（rx ≈ 15.9, rz ≈ 11.4）
+    const outerRx = this.tableBounds.rx;
+    const outerRz = this.tableBounds.rz;
+    let px = Math.max(-outerRx, Math.min(outerRx, x));
+    let pz = Math.max(-outerRz, Math.min(outerRz, z));
+
+    // 2. 内层边界（绿圈）：内层牌桌椭圆外沿（innerRx, innerRz）
+    const { rx: innerRx, rz: innerRz } = this.tableInnerOval;
+    const d = Math.hypot(px, pz);
+    if (d < 1e-4) {
+      const fx = fallbackOutward?.x ?? 0;
+      const fz = fallbackOutward?.y ?? 1;
+      return { x: fx * innerRx, z: fz * innerRz };
+    }
+
+    const ellipseDist = Math.sqrt((px / innerRx) ** 2 + (pz / innerRz) ** 2);
+    if (ellipseDist < 1.0) {
+      // 位于绿圈内：沿中心到该点的径向推到绿圈外沿
+      const factor = 1.0 / Math.max(1e-4, ellipseDist);
+      px *= factor;
+      pz *= factor;
+    }
+
+    return { x: px, z: pz };
+  }
+
+  /**
+   * 立柱顶端的圆形玩家头像牌：始终朝向视角方向（Sprite），用于快速识别座位玩家。
+   */
+  private createBeaconAvatarSprite(player?: {
+    name?: string;
+    avatar?: string;
+    avatarUrl?: string;
+    color?: string;
+  }): THREE.Sprite {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    const drawFallback = () => {
+      ctx.clearRect(0, 0, size, size);
+      // 底色圆盘
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, 114, 0, Math.PI * 2);
+      ctx.fillStyle = player?.color || '#334155';
+      ctx.fill();
+      ctx.clip();
+
+      // 兜底头像：emoji / 首字
+      const glyph = String(player?.avatar || player?.name?.slice(0, 1) || '👤');
+      ctx.fillStyle = '#f8fafc';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `${glyph.length > 1 ? 104 : 118}px ${CANVAS_FONT_STACK}`;
+      ctx.fillText(glyph, size / 2, size / 2 + 6);
+      ctx.restore();
+
+      // 黄铜圆环金边
+      ctx.beginPath();
+      ctx.arc(size / 2, size / 2, 114, 0, Math.PI * 2);
+      ctx.strokeStyle = '#c9a24a';
+      ctx.lineWidth = 12;
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    };
+
+    drawFallback();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+
+    if (player?.avatarUrl && typeof Image !== 'undefined') {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        ctx.clearRect(0, 0, size, size);
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, 114, 0, Math.PI * 2);
+        ctx.clip();
+        const sw = img.naturalWidth || img.width;
+        const sh = img.naturalHeight || img.height;
+        const scale = Math.max((size - 24) / sw, (size - 24) / sh);
+        const w = sw * scale;
+        const h = sh * scale;
+        ctx.drawImage(img, size / 2 - w / 2, size / 2 - h / 2, w, h);
+        ctx.restore();
+
+        // 重绘黄铜金边
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, 114, 0, Math.PI * 2);
+        ctx.strokeStyle = '#c9a24a';
+        ctx.lineWidth = 12;
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        texture.needsUpdate = true;
+      };
+      img.src = player.avatarUrl;
+    }
+
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(1.25, 1.25, 1);
+    sprite.userData.ownedTexture = true;
+    return sprite;
   }
 
   private createSeatBeacon(
     x: number,
     z: number,
     height: number,
-    radius: number
-  ): { group: THREE.Group; ring: THREE.Mesh; spinner: THREE.Group; arrow: THREE.Mesh; line: THREE.Mesh } {
+    player?: { name?: string; avatar?: string; avatarUrl?: string; color?: string }
+  ): {
+    group: THREE.Group;
+    ring: THREE.Mesh;
+    spinner: THREE.Group;
+    arrow: THREE.Mesh;
+    line: THREE.Mesh;
+    avatarSprite: THREE.Sprite;
+  } {
     const group = new THREE.Group();
-    group.position.set(x, 0, z);
+    // 大方桌木沿上表面在 y = 0.19
+    group.position.set(x, 0.19, z);
 
     const dot = new THREE.Mesh(
-      new THREE.CircleGeometry(0.14, 24),
+      new THREE.CircleGeometry(0.18, 24),
       new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true,
@@ -4958,7 +5102,7 @@ export class BoardGameScene {
       })
     );
     dot.rotation.x = -Math.PI / 2;
-    dot.position.y = 0.02;
+    dot.position.y = 0.01;
     group.add(dot);
 
     const line = new THREE.Mesh(
@@ -4985,11 +5129,11 @@ export class BoardGameScene {
       })
     );
     ring.rotation.x = -Math.PI / 2;
-    ring.position.y = 0.03;
+    ring.position.y = 0.02;
     group.add(ring);
 
     const spinner = new THREE.Group();
-    spinner.position.y = 0.05;
+    spinner.position.y = 0.03;
     spinner.visible = false;
     const shape = new THREE.Shape();
     shape.moveTo(0, 0.52);
@@ -5007,11 +5151,15 @@ export class BoardGameScene {
       })
     );
     arrow.rotation.x = -Math.PI / 2;
-    arrow.position.x = radius * 0.9;
+    arrow.position.x = 0.93;
     spinner.add(arrow);
     group.add(spinner);
 
-    return { group, ring, spinner, arrow, line };
+    const avatarSprite = this.createBeaconAvatarSprite(player);
+    avatarSprite.position.set(0, height - 0.65, 0);
+    group.add(avatarSprite);
+
+    return { group, ring, spinner, arrow, line, avatarSprite };
   }
 
   private updateSeatStandees(dt: number): void {
@@ -5069,16 +5217,22 @@ export class BoardGameScene {
     // 只有轮到该玩家时箭头出现并旋转。
     const viewerId = live?.viewerId;
     for (const beacon of this.seatBeacons) {
-      const { seatId } = beacon;
-      // 自己的标柱跟着视角走：相机往哪边转，它就沿着桌沿滑到哪边，但永远不
-      // 越过桌面（`rimPoint` 直接取椭圆交点）。其它座位固定在各自桌沿。
-      // 自己的那根线正对着相机，会画成一条贯穿屏幕的白线——只保留地面圆环。
-      beacon.line.visible = seatId !== viewerId;
-      if (seatId === viewerId && Math.hypot(cam.x, cam.z) > 0.5) {
-        const rim = this.rimPoint(cam.x, cam.z);
-        beacon.group.position.x = rim.x;
-        beacon.group.position.z = rim.z;
+      const { seatId, seatCamPos, defaultOutward } = beacon;
+
+      // 自己的标柱跟随视角移动：活动范围严格限制在「红圈（大方桌）与绿圈（椭圆牌桌）」之间
+      if (seatId === viewerId) {
+        const pos = this.clampBeaconPosition(cam.x, cam.z, defaultOutward);
+        beacon.group.position.x = pos.x;
+        beacon.group.position.z = pos.z;
+        beacon.group.position.y = 0.19;
       }
+
+      // 自己的线与头像正对相机时不画（避免遮挡视线）；
+      // 其他玩家立柱顶端显示头像圆形贴片（Sprite，始终朝向视角方向）
+      const isOther = seatId !== viewerId;
+      beacon.line.visible = isOther;
+      beacon.avatarSprite.visible = isOther;
+
       const ringMat = beacon.ring.material as THREE.MeshBasicMaterial;
       const arrowMat = beacon.arrow.material as THREE.MeshBasicMaterial;
       const folded = !!hand?.folded?.includes(seatId);
@@ -5093,16 +5247,22 @@ export class BoardGameScene {
       beacon.spinner.visible = turn;
       if (turn) beacon.spinner.rotation.y += dt * 2.2;
 
-      // 视角越远圈越小：9 个单位内保持 0.86，25 个单位外缩到 0.33，中间线性过渡。
-      // 远景里大圈会糊成一片，近景小圈又显得局促，所以跟着相机距离缩放。
+      // 视角越远圈越小（0.86~0.33），并且同步缩放箭头；
+      // 根据每个玩家的视角计算各自的圈：
+      // - 自己的圈根据当前相机的真实距离缩放；
+      // - 其他玩家的圈根据该玩家默认视角的视距缩放。
+      const viewPos = seatId === viewerId ? cam : seatCamPos;
       const dist = Math.hypot(
-        cam.x - beacon.group.position.x,
-        cam.z - beacon.group.position.z
+        viewPos.x - beacon.group.position.x,
+        viewPos.y - beacon.group.position.y,
+        viewPos.z - beacon.group.position.z
       );
-      const far = Math.min(1, Math.max(0, (dist - 9) / 16));
+      const far = Math.min(1, Math.max(0, (dist - 4) / 22));
       const ringRadius = 0.86 + (0.33 - 0.86) * far;
       beacon.ring.scale.setScalar(ringRadius);
-      beacon.arrow.position.x = ringRadius * 0.9;
+      const arrowScale = ringRadius / 0.86;
+      beacon.arrow.scale.setScalar(arrowScale);
+      beacon.arrow.position.x = ringRadius * 0.93;
     }
   }
   private renderLoop(): void {
