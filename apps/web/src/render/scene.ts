@@ -3169,7 +3169,8 @@ export class BoardGameScene {
 
     const label = this.createLabelSprite(`${zone.name} · ${items.length}`, '#cbb57a');
     label.position.set(anchor[0], 0.55, anchor[2]);
-    label.scale.set(2.6, 0.52, 1);
+    // 贴图是 4:1（1024×256），牌面也用 4:1：原来是 5:1，文字被横向拉宽 25%。
+    label.scale.set(2.6, 0.65, 1);
     this.boardObjectsGroup.add(label);
   }
 
@@ -4191,7 +4192,7 @@ export class BoardGameScene {
     const pot = Number(hand?.pot ?? 0) + street;
     const potLabel = this.createLabelSprite(`POT · 底池 ${pot}`, '#f6dc9c', 46);
     potLabel.position.set(0, 0.78, rz * 0.24);
-    potLabel.scale.set(3.4, 0.6, 1);
+    potLabel.scale.set(3.4, 0.85, 1);
     this.boardObjectsGroup.add(potLabel);
 
     // The pot itself: a real pile of chips under the readout.
@@ -4701,8 +4702,12 @@ export class BoardGameScene {
     ctx.lineWidth = 4;
     ctx.stroke();
 
-    const scale = 2;
-    const scaledFontSize = fontSize * scale;
+    // 字号占满贴图高度的六成左右（原来只有三成半）：贴图在屏幕上通常只有
+    // 一百多像素宽，字越大、落到屏幕上的纹素越多，越清楚。长文本仍由下面的
+    // 宽度循环自动缩小。
+    const scale = 3.2;
+    // 上限 150px：贴图高 256、胶囊内高 184，再大就顶出胶囊了。
+    const scaledFontSize = Math.min(fontSize * scale, 150);
     ctx.font = `600 ${scaledFontSize}px ${CANVAS_FONT_STACK}`;
     let fitted = scaledFontSize;
     while (ctx.measureText(text).width > 920 && fitted > 28) {
@@ -4716,10 +4721,13 @@ export class BoardGameScene {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
+    // 1024px 的标签在屏幕上往往只有一百多像素宽：没有 mipmap 时 GPU 只取 4 个
+    // 纹素，文字边缘会碎成噪点（远景尤其明显）。开 mipmap + 各向异性，缩小时
+    // 才会平滑地滤到目标尺寸。
     texture.generateMipmaps = true;
-    texture.minFilter = THREE.LinearFilter;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
     texture.magFilter = THREE.LinearFilter;
-    texture.anisotropy = 4;
+    texture.anisotropy = this.renderer?.capabilities?.getMaxAnisotropy?.() ?? 8;
     const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
     const sprite = new THREE.Sprite(material);
     sprite.userData.ownedTexture = true;
