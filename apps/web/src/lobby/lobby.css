@@ -227,6 +227,38 @@
 .lob-lb-icon {
   font-size: 16px;
 }
+/* 头部右侧：隐藏 AI 开关 + 对局数量。 */
+.lob-lb-headright {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.lob-lb-toggle {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong, rgba(217, 180, 91, 0.28));
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.lob-lb-toggle:hover {
+  color: var(--text);
+  border-color: rgba(217, 180, 91, 0.55);
+  background: rgba(217, 180, 91, 0.1);
+}
+/* 打开时明确表达「当前已隐藏 AI」，而不是普通的高亮。 */
+.lob-lb-toggle.on {
+  color: #1a1409;
+  border-color: var(--gold);
+  background: var(--gold);
+  font-weight: 600;
+}
 .lob-lb-list {
   display: flex;
   flex-direction: column;
@@ -238,7 +270,8 @@
 }
 .lob-lb-row {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto 42px;
+  /* 占比列要放得下 4 位小数（"100.0000%"），比原来的 42px 宽一档。 */
+  grid-template-columns: 22px minmax(0, 1fr) auto 56px;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
