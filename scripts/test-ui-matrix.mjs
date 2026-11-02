@@ -176,7 +176,14 @@ async function runScreen(browser, game, scenario) {
     const stepsAt = now();
 
     const initialActions = await page.locator('.dock-actions .act').count();
-    if (initialActions === 0) failures.push(`${label}: no action buttons`);
+    // A bound seat can legitimately have nothing to do: 操作栏改成「等别人出手」。
+    // That is a correct screen, not a blank one — the assertion is "the dock has
+    // something to say", so an explanatory empty state counts and a truly empty
+    // slot still fails.
+    const initialHint = initialActions === 0
+      ? await page.locator('.dock-actions .empty-hint').count()
+      : 0;
+    if (initialActions === 0 && initialHint === 0) failures.push(`${label}: no action buttons`);
 
     for (let step = 0; step < 6; step++) {
       const buttons = page.locator('.dock-actions .act');

@@ -12,7 +12,7 @@
  * explored room is built from the describeNode hints, never from the HUD. Full-screen
  * beats (a haunt starting) follow the same rule through describeMoment.
  */
-import type { GameModule } from '@rds/kernel/module';
+import type { GameModule, MomentPresentationState } from '@rds/kernel/module';
 import type { Entity, MapGraphNode } from '@rds/kernel/types';
 import { actorDetailKey, entityDetailKey, nodeDetailKey } from './contracts';
 import type { GameSnapshot, UiDetailView, UiDiscoveryView, UiMoment, UiNotice, ViewerId } from './contracts';
@@ -186,6 +186,66 @@ export interface MomentBoard {
 }
 
 /**
+ * The slice of a projection a presentation declaration may read.
+ *
+ * Curtains and "which seat am I" declarations read the same facts, so both go
+ * through this one trim: a declaration can never walk the whole state, and a new
+ * declaration cannot quietly widen what the view layer hands out.
+ */
+export function momentSlice(
+  board: MomentBoard,
+  mission: string | undefined,
+  viewer: ViewerId | undefined,
+  handOf?: (playerId: string) => { cards: string[]; hidden: number }
+): MomentPresentationState {
+  const players: Record<string, { name: string; role?: string; alive?: boolean }> = {};
+  for (const [id, player] of Object.entries(board.players ?? {})) {
+    if (!player) continue;
+    players[id] = { name: player.name ?? id, role: player.role, alive: player.alive };
+  }
+  // Table order, including the seats no longer in the hand: a settlement lists
+  // the whole table, and the declaration should not have to guess the order.
+  const order = board.playerOrder?.length ? [...board.playerOrder] : Object.keys(board.players ?? {});
+  const seats = order.flatMap(playerId => {
+    const player = board.players?.[playerId];
+    if (!player) return [];
+    const hand = handOf?.(playerId);
+    return [
+      {
+        playerId,
+        name: player.name ?? playerId,
+        score: Number(player.score ?? 0),
+        cards: hand?.cards,
+        hidden: hand?.hidden
+      }
+    ];
+  });
+  return { globalVars: board.globalVars ?? {}, mission, viewer, seats, players };
+}
+
+/**
+ * The seat the local player should watch the table from, if the game declares one.
+ *
+ * A single-player table opens on the full-information seat so a designer can see
+ * everything; a playable game, though, has exactly one protagonist. The game says
+ * who that is (`presentation.defaultViewer`), the presenter applies it once at
+ * boot, and the viewer switch stays available — so this is a starting point, not a
+ * lock. An id that is not on the table is ignored rather than silently binding a
+ * spectator camera to a seat that no longer exists.
+ */
+export function resolveDefaultViewer(
+  module: GameModule,
+  board: MomentBoard,
+  mission: string | undefined
+): ViewerId | null {
+  const declare = module.presentation?.defaultViewer;
+  if (!declare) return null;
+  const seat = declare(momentSlice(board, mission, undefined));
+  if (!seat) return null;
+  return board.players?.[seat] ? seat : null;
+}
+
+/**
  * Build the neutral curtain for a game-declared beat, or null.
  *
  * The HUD keeps the “already played” bookmark by `key` and paints the returned
@@ -200,30 +260,7 @@ export function buildMoment(
   const describe = context.module.presentation?.describeMoment;
   if (!describe) return null;
   const viewer = context.viewer;
-  const players: Record<string, { name: string; role?: string; alive?: boolean }> = {};
-  for (const [id, player] of Object.entries(board.players ?? {})) {
-    if (!player) continue;
-    players[id] = { name: player.name ?? id, role: player.role, alive: player.alive };
-  }
-  // Table order, including the seats no longer in the hand: a settlement lists
-  // the whole table, and the declaration should not have to guess the order.
-  const order = board.playerOrder?.length
-    ? [...board.playerOrder]
-    : Object.keys(board.players ?? {});
-  const seats = order.flatMap(playerId => {
-    const player = board.players?.[playerId];
-    if (!player) return [];
-    const hand = context.handOf?.(playerId);
-    return [{
-      playerId,
-      name: player.name ?? playerId,
-      score: Number(player.score ?? 0),
-      cards: hand?.cards,
-      hidden: hand?.hidden
-    }];
-  });
-
-  const moment = describe({ globalVars: board.globalVars ?? {}, mission, viewer, seats, players });
+  const moment = describe(momentSlice(board, mission, viewer, context.handOf));
   if (!moment) return null;
   return {
     key: moment.key,
