@@ -46,6 +46,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { itemSlotId } from '@rds/games/betrayal/helpers';
 import { layoutRoom, hashString as layoutHash } from '@rds/web/render/procedural/roomLayout';
 import { PROPS } from '@rds/web/render/procedural/props';
+import { boardCardPosition, boardRowFrame, BOARD_ROW_PITCH } from '@rds/web/render/boardFacing';
+import { layoutForGame } from '@rds/app/layout';
 import { definePresentation } from '@rds/kernel/module';
 import { test, assert, assertEqual } from '../testKit';
 import { counterModule } from '../suiteHelpers';
@@ -792,3 +794,68 @@ test('presentation: a table can declare its protagonist without the shell knowin
   missing.dispose();
 });
 
+
+test('presentation: a shared board row turns to the seated viewer, and only then', () => {
+  // 公共牌朝向（PR2）：牌行沿观察者座位的切线排布，牌面顶端朝离开该座位的方向。
+  // 这里守纯布局函数；屏幕空间的「正对 + 可读 + 阅读方向」由浏览器探针
+  // （scripts/probe-board-facing.mjs）负责。
+  const seats = (count: number) =>
+    Array.from({ length: count }, (_, index) => {
+      const angle = Math.PI / 2 + (index * Math.PI * 2) / count;
+      return { outX: Math.cos(angle), outZ: Math.sin(angle) };
+    });
+  /** 牌顶端方向与「离开观察者」方向的夹角：0° = 正对，180° = 上下颠倒。 */
+  const tilt = (topX: number, topZ: number, { outX, outZ }: { outX: number; outZ: number }) =>
+    Math.abs((Math.atan2(topX * -outZ - topZ * -outX, topX * -outX + topZ * -outZ) * 180) / Math.PI);
+
+  // 没有座位（上帝视角 / 观察席 / 没有座位概念的游戏）：保持原来的正北朝向。
+  const north = boardRowFrame({ count: 5, centerX: 0, centerZ: 0 });
+  assertEqual(north.yaw, 0, 'no viewer keeps the historical north row');
+  assertEqual(north.facesViewer, false, 'the row does not claim to face anyone');
+  assertEqual(
+    boardRowFrame({ count: 5, centerX: 0, centerZ: 0, viewer: { outX: 0, outZ: 0 } }).yaw,
+    0,
+    'a zero-length bearing is not a direction'
+  );
+
+  for (const count of [1, 2, 3, 4, 5]) {
+    for (const viewer of seats(6)) {
+      const frame = boardRowFrame({ count, centerX: 0, centerZ: 0, viewer });
+      // 排布方向是座位朝向的切线：投影到视线方向必须为 0，否则牌行顺着视线排开
+      // ——那正是「必须转镜头才看得清」的形态。牌面顶端（本地 −Z 经 yaw）必须背对座位。
+      assert(Math.abs(frame.axisX * viewer.outX + frame.axisZ * viewer.outZ) < 1e-9, 'row runs on the seat tangent');
+      assert(tilt(-Math.sin(frame.yaw), -Math.cos(frame.yaw), viewer) < 1e-6, 'row is upright for every seat');
+      // 间距不随观察者改变：整行宽度只由 pitch 与张数决定。
+      const head = boardCardPosition(frame, count, 0, 0);
+      const tail = boardCardPosition(frame, count, count - 1, 0);
+      assert(
+        Math.abs(Math.hypot(tail[0] - head[0], tail[2] - head[2]) - (count - 1) * BOARD_ROW_PITCH) < 1e-9,
+        'the row keeps its spacing and stays straight'
+      );
+    }
+  }
+
+  // 正对 +Z 的座位退化成旧的固定朝向——能力打开也不会挪动恰好朝北的那一座。
+  assertEqual(
+    boardRowFrame({ count: 5, centerX: 0, centerZ: 0, viewer: { outX: 0, outZ: 1 } }).yaw,
+    0,
+    'the seat that already faced the row keeps yaw 0'
+  );
+  // 反证：旧的固定朝向只有朝北那一座读到 0°，其余五座 27–45°（屏幕上更夸张）。
+  assertEqual(seats(6).filter(viewer => tilt(0, -1, viewer) <= 15).length, 1, 'fixed-north is upright from one seat');
+});
+
+test('presentation: only a game that declares board facing turns its board row', () => {
+  assertEqual(layoutForGame('poker').boardFacesViewer, true, 'poker declares the capability');
+  for (const gameId of ['catan', 'betrayal', 'splendor', 'sanguosha', 'dune_mahjong', '__nope__']) {
+    assertEqual(layoutForGame(gameId).boardFacesViewer, undefined, `${gameId} keeps the fixed row`);
+  }
+  // 渲染层只认能力，不认身份：朝向这一段里不许出现按 gameId 判断的分支。
+  const scene = readFileSync(new URL('../../../../apps/web/src/render/scene.ts', import.meta.url), 'utf8');
+  const facing = scene.slice(scene.indexOf('private boardViewerBearing'), scene.indexOf('private renderHand'));
+  assert(facing.length > 0, 'the renderer resolves the viewer bearing in one place');
+  for (const word of ['poker', 'gameId', 'meta.id']) {
+    assert(!facing.includes(word), `the facing path infers the game from ${word}`);
+  }
+  assert(facing.includes('boardFacesViewer') && facing.includes("'GOD'"), 'capability in, omniscient camera out');
+});

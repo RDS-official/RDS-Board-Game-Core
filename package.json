@@ -31,6 +31,7 @@
     "test:centre:ui": "node scripts/verify-centre-mode-browser.mjs",
     "probe:ui": "node scripts/probe-ui-layout.mjs",
     "probe:hand": "node scripts/probe-hand-layout.mjs",
+    "probe:board": "node scripts/probe-board-facing.mjs",
     "probe:tokens": "node scripts/probe-design-tokens.mjs",
     "probe:a11y": "node scripts/probe-a11y.mjs",
     "tokens:export": "node scripts/export-design-tokens.mjs",
