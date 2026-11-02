@@ -5228,10 +5228,14 @@ export class BoardGameScene {
       }
 
       // 自己的线与头像正对相机时不画（避免遮挡视线）；
-      // 其他玩家立柱顶端显示头像圆形贴片（Sprite，始终朝向视角方向）
+      // 其他玩家立柱顶端显示头像圆形贴片（Sprite，始终朝向视角方向）。
+      // 相机贴到某支立柱跟前时（例如上帝视角直接切到某个座位机位，viewer
+      // 仍是 GOD），头像贴片会撑满整屏，所以近距一律不画。
       const isOther = seatId !== viewerId;
-      beacon.line.visible = isOther;
-      beacon.avatarSprite.visible = isOther;
+      const nearCamera =
+        Math.hypot(cam.x - beacon.group.position.x, cam.z - beacon.group.position.z) < 3;
+      beacon.line.visible = isOther && !nearCamera;
+      beacon.avatarSprite.visible = isOther && !nearCamera;
 
       const ringMat = beacon.ring.material as THREE.MeshBasicMaterial;
       const arrowMat = beacon.arrow.material as THREE.MeshBasicMaterial;
