@@ -146,11 +146,18 @@ gh pr merge <新PR号> --squash --delete-branch
 - 涉及凭据、鉴权的线上问题时，优先**降级而非硬修**（参照 §4 第 7 条）。
 
 ### 2.7 自动部署与上线机制 (CI/CD)
+- **PR 必过 CI**：`.github/workflows/ci.yml` 在 PR 上跑「类型 / lint / 结构 / 文档 +
+  内核一致性 + 夹具矩阵 + UI 冒烟」，按改动面裁剪。分支保护要求必过 check 是汇总 job
+  **`gate`**，`strict: true` + `enforce_admins: true`——**管理员也推不进未通过 CI 的 `main`**。
+  细节见 [docs/QUALITY-GATES.md](docs/QUALITY-GATES.md) §11。
+- **自动合并**：`auto-merge.yml` 在 `ci` 成功后 squash 合并**本仓库**的 PR（fork PR
+  一律不自动合并），随后显式 `gh workflow run deploy.yml`（`GITHUB_TOKEN` 的 push
+  不会触发新 workflow，这一步是补上京东云那条部署链路）。
 - 生产环境配置了 **GitHub Webhook 自动化流水线**：
   - 目标端点：`https://rdsbg.zooter.eu.org/api/github-webhook`
 - **自动触发条件**：
   - 只有当变更**经由 §2.3 的 Squash 合并进入 `main`** 时，AWS 服务器才会触发自动化拉取与部署。
-    直接 push `main` 仅在 §2.6 紧急流程下允许，同样会触发部署。
+    直接 push `main` 已被分支保护阻断；§2.6 紧急流程需先临时摘掉保护。
   - 服务器会自动执行：`git reset --hard origin/main` -> `pnpm install` -> `pnpm run build` -> `pm2 reload rds-board-core` -> `sudo systemctl reload caddy`。
   - 用户专属分支（`users/*`）的提交不会干扰生产环境运行。
 - 因此**合并即上线**：PR 里的「回滚方式」一栏不是形式主义，是线上事故时唯一能照抄的步骤。

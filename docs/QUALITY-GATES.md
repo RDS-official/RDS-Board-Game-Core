@@ -109,9 +109,10 @@
 
 ## 7. 后续阶段
 
-### Phase 2：CI 阻断（单独 PR）
-- `deploy.yml` 在 `pnpm docs:check` 之后加 `pnpm lint`（此时已是 0 error，可直接全仓阻断）；
-- 若担心历史分支回退，可先 `biome lint --changed`，稳定后切全仓。
+### Phase 2：CI 阻断 ✅ **已落地**（`.github/workflows/ci.yml`）
+
+PR 的必过 check 是汇总 job **`gate`**（`main` 分支保护已要求它）；`ci` 通过后
+`auto-merge.yml` 自动 squash 合并并补触发一次 `deploy.yml`。完整说明见 §10。
 
 ### Phase 3（进行中）
 - 全仓格式化 PR：`pnpm format`（建议同时把 `lineEnding` 与 git 换行策略对齐，避免 CRLF 噪声）—— 待做；
@@ -207,3 +208,66 @@ UI 矩阵的三个提速点（都不是砍覆盖）：
 
 复现/验收方法：把指针停在动作牌中央 1 秒，`mouseover / mouseout` 应各为 0 次，牌的
 `getBoundingClientRect().x` 不应跳变（修复前是 12Hz、±307px）。
+---
+
+## 11. CI 门禁与自动合并（2026-11-02）
+
+两个 workflow：**`ci.yml`（必过门禁）** 与 **`auto-merge.yml`（合并器）**。
+`deploy.yml` 保持原样，负责把 `main` 送上生产。
+
+### 11.1 `ci.yml` 跑什么
+
+分 job 而不是一个大 job：失败时一眼看出是「类型挂了」还是「UI 挂了」，静态检查
+几十秒出结果，不用等浏览器。
+
+| job | 何时跑 | 内容 | 超时 |
+| --- | --- | --- | --- |
+| `changes` | 总是 | 用 `git diff --name-only base...head` 分类改动面 | 5 min |
+| `static` | 有代码或文档改动 | `pnpm lint` → `check-structure` → `tsc + build` → `docs:check` | 15 min |
+| `core` | 任何代码改动 | `test-core-parallel`（3 分片，含分层边界） | 15 min |
+| `matrix` | `packages/{kernel,games,harness}` | `MATRIX_FAST=1`（每夹具 1 seed，抓回放哈希） | 20 min |
+| `server` | `apps/server/` | `pnpm test:server` | 10 min |
+| `ui` | `apps/web` / `packages/app` / `.css` / 几何 | `UI_SMOKE=1`（每游戏首屏）+ Playwright Chromium | 25 min |
+| `gate` | 总是 | 汇总：任一 job 失败则失败；`skipped` 视为「不适用」 | 5 min |
+
+**哪些是精简的、为什么**：
+
+| 本地全量 | CI 用的 | 理由 |
+| --- | --- | --- |
+| `pnpm verify:all`（8 闸门） | 同一批闸门，但按 diff 裁剪 | 只动 `.md` 的 PR 不该跑 Playwright |
+| 矩阵 72 seed-runs / 27 场景 | `MATRIX_FAST=1`，每夹具 1 seed | 回放哈希与非法动作在单 seed 就会暴露；多 seed 留在本地 |
+| `pnpm test:ui`（21 屏 + card-overlay） | `UI_SMOKE=1`（每游戏首屏） | 抓启动崩溃与首屏报错是最有价值的部分；深度 flow 留在本地 |
+| `pnpm probe:overlap` / `probe:layout` | **不跑** | 只在动 `render/procedural` 时有意义，且需真实 WebGL；本地必跑（§5） |
+
+`GATE_SCALE=1.5` 把 `scripts/lib/gates.mjs` 的时长预算放大 1.5 倍：runner 是 2 核
+共享机，软件渲染比开发机慢，不放大会因为「慢」而不是「错」失败。
+
+### 11.2 分支保护
+
+`main` 已要求必过 check **`gate`**（`strict: true`，即必须基于最新 main），
+`enforce_admins: true`。**这意味着连管理员也不能直推 main**——AGENTS.md §2.1 的
+「禁止直推」从约定变成了服务端强制（§2.6 紧急流程因此需要先临时摘掉保护）。
+
+### 11.3 `auto-merge.yml`
+
+`ci` 成功（`workflow_run` 触发）后，对同一次运行的 PR：
+
+1. 必须是 `OPEN`、目标是 `main`、非草稿、**非 fork**、`MERGEABLE`；
+2. `headRefOid` 必须等于这次 ci 检验的 head（期间有人 push 就等下一轮）；
+3. 重新 `gh pr checks` 确认 `gate` 是 `SUCCESS`（不信缓存）；
+4. `gh pr merge --squash --delete-branch`；
+5. 合并成功后 **显式 `gh workflow run deploy.yml`**。
+
+第 5 步不是多余的：GitHub 规定 **`GITHUB_TOKEN` 执行的操作不会触发新的 workflow**，
+所以机器人合并产生的 push 不会唤醒 `deploy.yml`（京东云 rsync 链路）。
+AWS 那条走仓库 webhook，不受影响。
+
+fork PR 一律不自动合并——任何人都能开 fork PR，自动合并等于把 main 的写权限交出去。
+
+### 11.4 本地等价命令
+
+```bash
+pnpm verify:fast      # 内循环：类型 + lint + 核心（~30s）
+pnpm verify:changed   # 提 PR 前：按 diff 裁剪（CI 跑的是同一套）
+pnpm verify:all       # 合并前最终全量（CI 不跑的那部分在这里）
+```
