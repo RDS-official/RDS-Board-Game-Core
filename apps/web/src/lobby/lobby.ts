@@ -261,6 +261,15 @@ const accentOf = (g?: HubGameInfo): string => g?.accent ?? '#6ea8fe';
 
 // ---------------- 认证视图 ----------------
 
+/**
+ * 构建期注入的 short commit hash（`vite.config.ts` 的 `__COMMIT_HASH__`）。
+ * 登录页脚注用它确认线上跑的是哪一版；solo/probe 配置没注入时退回 `dev`，
+ * 不抛错——登录页不能因为缺一个构建常量就打不开。
+ */
+function buildCommitShort(): string {
+  return typeof __COMMIT_HASH__ !== 'undefined' ? __COMMIT_HASH__ : 'dev';
+}
+
 function authHtml() {
   return `
   <div class="lob-auth-wrap">
@@ -280,6 +289,7 @@ function authHtml() {
         </div>
         <div id="err" class="lob-error"></div>
       </div>
+      <div class="lob-auth-commit" title="当前前端构建对应的提交">commit ${buildCommitShort()}</div>
     </div>
   </div>`;
 }
