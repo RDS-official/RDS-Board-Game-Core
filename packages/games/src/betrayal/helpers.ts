@@ -973,11 +973,15 @@ export function drawRoomCandidate(
       for (const tid of items) {
         commit(state, ECSManager.moveEntity(state, tid, 'zone_room_deck'));
       }
+      // 宪章 C-4：弃牌堆洗回抽牌堆必须推进 `prngState`。
+      // 旧实现用 `state.seed + items.length + attempts * 19` 拼了一个假随机源，
+      // 既不推进 prngState，也让"随机"退化为可由局面直接推算的确定值。
       const shuffled = DeterministicPRNG.shuffle(
-        (state.seed ?? 42) + items.length + attempts * 19,
+        state.prngState,
         state.zones.zone_room_deck.orderedEntities
       );
       state.zones.zone_room_deck.orderedEntities = shuffled.result;
+      state.prngState = shuffled.nextSeed;
     }
   };
 

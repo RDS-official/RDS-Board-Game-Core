@@ -476,7 +476,18 @@ export type DecisionKind = 'SIMULTANEOUS' | 'BIDDING' | 'VOTE';
 export type DecisionPolicy =
   | { type: 'ALL_COMMITTED' }
   | { type: 'FIRST_ACCEPT'; acceptTypes: string[] }
-  | { type: 'PRIORITY'; priorities: Record<string, number>; shortCircuitAt: number };
+  | { type: 'PRIORITY'; priorities: Record<string, number>; shortCircuitAt: number }
+  /**
+   * 宪章 C-3：所有提交作为**动作多重集**一次性进入模组，不允许内核替它
+   * 排成串行 reduce。
+   *
+   * 结算走 `GameModule.applySimultaneous(state, actions, ctx)`；没声明该函数的
+   * 模组退化为 `ALL_COMMITTED`（内核按座位序逐条 reduce，并记一条宪章偏离）。
+   *
+   * 与 `PRIORITY` 的区别：PRIORITY 也会**排序**，但排序本身就意味着"先到先得"
+   * 的语义 —— 对卡坦贸易竞标、山屋协同投票这类规则，顺序不该由内核决定。
+   */
+  | { type: 'SIMULTANEOUS' };
 
 export type DecisionSubmission = Action | 'PASS' | 'COMMITTED';
 
@@ -702,6 +713,14 @@ export interface ProjectedGameState extends Omit<GameState, 'entities' | 'zones'
   legalActions: Action[];
   factionTopology: Record<PlayerId, Record<PlayerId, FactionRelation>>;
   maskedEntityCount: number;
+  /**
+   * 观看者自己手牌的实体 id（`zone_hand_<viewerId>` 的内容）。
+   *
+   * 手牌区本身对所有观察者可见（牌桌要知道"谁还有几张牌"），但 ECMAScript
+   * 的引用语义意味着 `zones.viewer.orderedEntities` 仍然指向真实实体 id。
+   * 机器决策（AI）必须走这条通道，才能证明它只读自己的牌——见宪章 C-5。
+   */
+  ownHand: EntityId[];
   maskedNodeCount?: number;
   maskedEdgeCount?: number;
 }
@@ -727,4 +746,9 @@ export interface DispatchResult {
   stateHash?: string;
   decisionOpened?: boolean;
   decisionResolved?: boolean;
+  /**
+   * 宪章违规（C-1 / C-2 / C-6 / C-9）。**不阻断**转移：它们表示"规则被违反了
+   * 或模块绕过了形式化约束"，而不是"状态坏了"。见 `docs/KERNEL-CHARTER.md`。
+   */
+  violations?: { code: string; message: string }[];
 }

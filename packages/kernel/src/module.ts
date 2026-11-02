@@ -2,6 +2,7 @@ import { RuleHookImpl } from './rules';
 import { ProjectionRedactor } from './observer';
 import { Action, ActorId, DecisionWindow, DiceSpec, GameOutcome, GameState, MapGraphNode, NodeId, RollResult, SelectionCandidate, SelectionSpec, TopologySpec, VisualTraceEvent } from './types';
 import { ActionSchemaMap } from './validation';
+import type { CharterDeviation } from './charter';
 
 /** Per-transition helpers handed to a module's reducer. */
 export interface ReduceContext {
@@ -44,6 +45,18 @@ export interface GameMeta {
   /** Kernel scheduling/legality version; mismatched logs are rejected. */
   engineVersion?: number;
   capabilities: GameCapabilities;
+  /**
+   * C-9 扩展字段收口：声明本模块会往自由形状字段里写哪些 key。
+   *
+   * 内核据此做"未登记 key 出现即违规"的检查 —— 这条是防止规则悄悄长出
+   * 内核不认识的状态的唯一手段。未声明则不做检查（存量模组灰度）。
+   */
+  stateSchema?: {
+    /** `state.globalVars` 允许的 key 集合。 */
+    globalVars?: readonly string[];
+    /** `player.customProps` / `entity.components.custom` 允许的 key 集合。 */
+    customProps?: readonly string[];
+  };
 }
 
 /** A named, deterministic initial position used by tests, demos and replays. */
@@ -414,6 +427,29 @@ export interface GameModule {
   actionSchemas?: ActionSchemaMap;
   /** Optional semantic payload validation (cross-field constraints). */
   validatePayload?: (state: GameState, action: Action, payload: Record<string, unknown>) => string[];
+  /**
+   * C-6 语义不变量：规则层面的守恒 / 一致性断言（筹码守恒、怪物与实体 1:1 …）。
+   *
+   * 与 `kernel/src/invariants.ts` 的结构性检查互补：那边保证"状态形状没坏"，
+   * 这边保证"规则没被违反"。返回人类可读的违规描述，空数组表示通过。
+   * 内核在 strict 模式下每次转移后调用；违规**不阻断**转移，只记录到
+   * `engine.getViolations()` 并在 `DispatchResult.violations` 中带回。
+   *
+   * 必须纯：不得修改 state，不得调用 `outcome()` / 随机数。
+   */
+  checkInvariants?: (state: GameState) => string[];
+  /**
+   * 本模块对宪章的**显式偏离登记**（C-x）。与 `docs/RULES-DEVIATIONS.md` 对应。
+   * 未登记就偏离的条款，内核会按违规记录。
+   */
+  charter?: {
+    deviations?: readonly CharterDeviation[];
+    /**
+     * 声明本模块的机器决策入口已收口到投影状态（C-5）。
+     * 声明后，`engine.getProjectedStateFor()` 的 AI 分支会做运行期断言。
+     */
+    requiresProjection?: boolean;
+  };
   /** Optional module-level redaction for projection-only fields. */
   project?: ProjectionRedactor;
   /** Candidate provider for declarative SelectionSpec targets. */
@@ -473,6 +509,20 @@ export interface GameModule {
    * Default kernel behaviour: apply submissions in policy order via reduce().
    */
   resolveDecision?: (state: GameState, window: DecisionWindow, ctx: ReduceContext) => GameState;
+  /**
+   * 宪章 C-3：`SIMULTANEOUS` 决策窗口的结算入口。
+   *
+   * `actions` 是**动作多重集**（`{ actorId, action }`），数组顺序不代表发生
+   * 顺序 —— 模组必须一次性消费，自己决定如何合并（平局打破、边池、竞标…）。
+   *
+   * 未声明时内核退化为"按座位序逐条 reduce"，并记一条
+   * `CHARTER_C3_SERIALIZED` 偏离：语义仍然确定，但顺序敏感。
+   */
+  applySimultaneous?: (
+    state: GameState,
+    actions: { actorId: ActorId; action: Action }[],
+    ctx: ReduceContext
+  ) => GameState;
 
   /** Called after a decision window resolves; may open the next window. */
   onDecisionResolved?: (state: GameState, window: DecisionWindow, ctx: ReduceContext) => GameState;

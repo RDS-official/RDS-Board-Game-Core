@@ -137,6 +137,8 @@ export const catanModule: GameModule = defineGame({
   },
   legalActions: (state, playerId) => CatanRules.getLegalActions(state, playerId),
   reduce: (state, action, ctx) => CatanRules.applyAction(state, action, ctx),
+  // 宪章 C-3：掷 7 的"各弃一半"多方同时结算。
+  applySimultaneous: (state, actions, ctx) => CatanRules.applySimultaneous(state, actions, ctx),
   onDecisionResolved: (state, window) => CatanRules.onDecisionResolved(state, window),
   outcome: state => toOutcome(CatanRules.checkWinCondition(state))
 });
@@ -175,7 +177,11 @@ export const sanguoshaModule: GameModule = defineGame({
     PLAY_PEACH: { type: 'PLAY_PEACH', fields: { entityId: { kind: 'string', required: true } } },
     PLAY_WUXIE: { type: 'PLAY_WUXIE', fields: { entityId: { kind: 'string', required: true } } },
     JUDGE_BAGUA: { type: 'JUDGE_BAGUA', allowPayload: false },
-    PASS: { type: 'PASS', allowPayload: false }
+    PASS: { type: 'PASS', allowPayload: false },
+    // 回合流程：摸牌与结束回合。`legalActions` 无条件提供，`reduce` 里有对应分支，
+    // 但历史上漏登记在代数声明里（宪章 C-1 抓到的真实缺口）。
+    DRAW_CARDS: { type: 'DRAW_CARDS', allowPayload: false },
+    END_TURN: { type: 'END_TURN', allowPayload: false }
   },
   setup: seed => setupSanguosha(seed),
   legalActions: (state, playerId) => SanguoshaRules.getLegalActions(state, playerId),
@@ -387,6 +393,8 @@ export const betrayalModule: GameModule = defineGame({
     EXIT_STAY: { type: 'EXIT_STAY', fields: {} },
     EXIT_PAY: { type: 'EXIT_PAY', fields: {} },
     JUMP_DOWN: { type: 'JUMP_DOWN', allowPayload: false },
+    // 前门被锁时的「试着开前门」（`legalActions` 在 frontDoorLocked 时给出）。
+    TRY_FRONT_DOOR: { type: 'TRY_FRONT_DOOR', allowPayload: false },
     CLIMB_UP: { type: 'CLIMB_UP', fields: { targetNodeId: { kind: 'string', required: true } } },
     USE_ITEM: {
       type: 'USE_ITEM',
@@ -547,6 +555,8 @@ export const duneMahjongModule: GameModule = defineGame({
   setup: seed => setupDuneMahjong(seed),
   legalActions: (state, playerId) => DuneMahjongRules.getLegalActions(state, playerId),
   reduce: (state, action, ctx) => DuneMahjongRules.applyAction(state, action, ctx),
+  // 宪章 C-3：战斗之轮的双 dial 多重集一次性结算，顺序不影响结果。
+  applySimultaneous: (state, actions, ctx) => DuneMahjongRules.applySimultaneous(state, actions as never, ctx),
   outcome: state => toOutcome(DuneMahjongRules.checkWinCondition(state))
 });
 
@@ -572,6 +582,13 @@ export const pokerModule: GameModule = defineGame({
       dynamicRules: false,
       topology: 'ring',
       topologySpec: { kind: 'ring', adjacency: 'neighbors', geometry: 'ring' }
+    },
+    /**
+     * C-9 扩展字段收口：德扑只往 `globalVars` 里写这 7 个 key。
+     * 未登记的 key 出现，内核会记一条 `CHARTER_C9_UNDECLARED_GLOBAL_VAR`。
+     */
+    stateSchema: {
+      globalVars: ['config', 'hand', 'lastHand', 'log', 'observers', 'seating', 'seats']
     }
   },
   hooks: [],
@@ -587,6 +604,15 @@ export const pokerModule: GameModule = defineGame({
     // 座位流程：入座 → 准备（全员准备后 START_HAND 才放行）。
     TAKE_SEAT: { type: 'TAKE_SEAT', allowPayload: false },
     READY_UP: { type: 'READY_UP', allowPayload: false },
+    // 免等待开下一手（服务端在结算幕布超时后派发）。
+    FORCE_START: { type: 'FORCE_START', allowPayload: false },
+    // 一手结束后的收尾：准备下一手 / 亮牌 / 埋牌。三者都在 `legalActions`
+    // 的 COMPLETE 分支里给出，但历史上没进代数声明（C-1 缺口）。
+    READY: { type: 'READY', allowPayload: false },
+    SHOW: { type: 'SHOW', allowPayload: false },
+    MUCK: { type: 'MUCK', allowPayload: false },
+    // 单机夹具用的调试动作：一键让所有座位就绪。
+    DEBUG_READY_ALL: { type: 'DEBUG_READY_ALL', allowPayload: false },
     // 观察者席位：重新上桌申请 + 驱动方心跳（低保结算）。
     OBSERVER_REJOIN: { type: 'OBSERVER_REJOIN', allowPayload: false },
     OBSERVER_TICK: { type: 'OBSERVER_TICK', payload: { seconds: { kind: 'integer', min: 0 } } }
@@ -677,7 +703,26 @@ export const pokerModule: GameModule = defineGame({
   legalActions: (state, playerId) => PokerRules.getLegalActions(state, playerId),
   validatePayload: (state, action, payload) => PokerRules.validatePayload(state, action, payload),
   reduce: (state, action, ctx) => PokerRules.applyAction(state, action, ctx),
-  outcome: state => toOutcome(PokerRules.checkWinCondition(state))
+  outcome: state => toOutcome(PokerRules.checkWinCondition(state)),
+  // C-6：规则层守恒断言（筹码守恒 / 底池一致性 / 手号单调），内核每次转移后调用。
+  checkInvariants: state => PokerRules.checkInvariants(state),
+  /**
+   * C-5：AI 决策收口到投影状态（`decisionView()` → `choosePokerAction`）。
+   * C-2 偏离登记：`applyAction()` 内联驱动 AI（`advanceAi`，上限 64 次）并在
+   * `settle()` 里连续关街 / 发牌 / 摊牌，一次 `reduce` 可推进 8~64 次逻辑转移。
+   * 移除条件：驱动方改为按 `presentation.aiActionDelayMs` 逐步派发
+   * （`autoAi: false`），且 `settle()` 拆成 follow-up action。
+   */
+  charter: {
+    requiresProjection: true,
+    deviations: [
+      {
+        clause: 'C-2',
+        reason: 'applyAction 内联驱动 AI + settle 连续关街，一次 reduce 可含 8~64 次逻辑转移',
+        expires: '2027-03-31'
+      }
+    ]
+  }
 });
 
 export const GAME_REGISTRY: Record<string, GameModule> = {

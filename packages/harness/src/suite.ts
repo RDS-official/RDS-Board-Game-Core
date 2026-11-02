@@ -22,6 +22,7 @@ import './suites/rules';
 import './suites/splendor';
 import './suites/splendorExpansions';
 import './suites/poker';
+import './suites/charter';
 import './suites/rulesBetrayal';
 import './suites/diagnostics';
 

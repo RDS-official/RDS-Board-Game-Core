@@ -77,9 +77,15 @@ export function deckEntity(card: Card, zoneId: string): Entity {
 }
 
 /** Decode a card from its entity; `null` when the entity is not a playing card. */
-export function cardOfEntity(entity: Entity | undefined): Card | null {
-  if (entity?.type !== 'CARD') return null;
-  const custom = entity.components.custom as { rank?: unknown; suit?: unknown } | undefined;
+/**
+ * 从实体读出牌面。
+ *
+ * 接受 `Partial<Entity>`：投影状态里被遮住的牌只有 `id / type / zoneId`，
+ * 牌面字段被抹掉，这里会正确地返回 null —— 这正是 AI 走投影通道的体现。
+ */
+export function cardOfEntity(entity: Partial<Entity> | undefined): Card | null {
+  if (entity?.type !== 'CARD' || !entity.id) return null;
+  const custom = entity.components?.custom as { rank?: unknown; suit?: unknown } | undefined;
   const rank = Number(custom?.rank);
   const suit = String(custom?.suit ?? '');
   if (!Number.isInteger(rank) || !SUITS.includes(suit as Suit)) return null;
@@ -96,8 +102,19 @@ export function cardOfId(id: string): Card | null {
   return { id, suit, rank };
 }
 
-/** Cards currently sitting in a zone, in zone order. */
-export function cardsInZone(state: GameState, zoneId: string): Card[] {
+/**
+ * Cards currently sitting in a zone, in zone order.
+ *
+ * 入参放宽到 `Pick<GameState, 'zones' | 'entities'>`：投影状态同样满足，
+ * 被遮住的牌会解析成 null 并被过滤掉（AI 只看得到翻开的那几张）。
+ */
+/** 投影状态的实体表比权威状态宽（字段可缺、可被 `isMasked` 遮住）。 */
+export type CardView = {
+  zones: GameState['zones'];
+  entities: Record<string, Partial<Entity> | undefined>;
+};
+
+export function cardsInZone(state: CardView, zoneId: string): Card[] {
   const zone = state.zones[zoneId];
   if (!zone) return [];
   return zone.orderedEntities
@@ -106,6 +123,6 @@ export function cardsInZone(state: GameState, zoneId: string): Card[] {
 }
 
 /** Cards owned by one seat (hole cards). */
-export function holeCards(state: GameState, playerId: string): Card[] {
+export function holeCards(state: CardView, playerId: string): Card[] {
   return cardsInZone(state, `zone_hand_${playerId}`);
 }

@@ -293,3 +293,27 @@
 **保留为固定属性的唯一一处**：木乃伊的攻击强制扣力量（`rules.ts` 中显式传 `'might'`），属剧本特例，不参与分配。
 
 **实现要点**：`dealDamage()` 同时只会打开一个分配窗口；若已有待分配伤害，后续伤害立即结算，避免被吞。
+
+---
+
+## H. 宪章偏离登记（2026-11 起）
+
+> 依据：[KERNEL-CHARTER.md](KERNEL-CHARTER.md) 的 C-1…C-9 硬性约束。
+> 任何模组**明知违背**宪章条款的实现，都必须在这里登记：`偏离条款 / 理由 / 到期日 / 关闭条件`。
+> 未登记的偏离视为缺陷（新模组强制、存量模组灰度）。
+
+当前存量偏离（对应 [ARCHITECTURE-ISSUES.md](ARCHITECTURE-ISSUES.md) 的 AR 编号）：
+
+| 偏离条款 | 模组 | 具体表现 | 理由 | 关闭条件 |
+| --- | --- | --- | --- | --- |
+| C-2 单步转移 | poker | `applyAction()` → `advanceAi()`（上限 64 次）内联推进 AI | 夹具默认 `autoAi`，让全桌 AI 可在一次 dispatch 内完成一圈 | `driverActions` 逐步派发落地后删除循环（AR-44）· **已机器登记**：`module.charter.deviations`，到期 2027-03-31 |
+| C-2 单步转移 | poker | `settle()` 循环内可连关多条街并发牌至摊牌（上限 8） | 全下提前封盘时需要一次推进多街 | 改为 follow-up action 链（AR-44） |
+| C-3 并发表达 | poker / betrayal | 多人同时决策仍走串行 `reduce` | 尚未声明 `applySimultaneous` | 照 catan / dune 的写法补上合并语义（AR-45） |
+| C-3 并发表达 | dune_mahjong / catan | ~~战斗之轮 / 弃牌串行结算~~ | — | ✅ **已关闭（2026-11）**：`policy: { type: 'SIMULTANEOUS' }` + `applySimultaneous()` 多重集结算，顺序无关性有测试（AR-45） |
+| C-4 随机收口 | betrayal | ~~`drawRoomCandidate()` 用 `seed + items.length + attempts * 19` 拼假随机源~~ | — | ✅ **已关闭（2026-11）**：改为读 `state.prngState` 并写回 `nextSeed`；`charter C-4` 测试覆盖全部运行期调用点（AR-46） |
+| C-4 随机收口 | poker | ~~`ai.ts` 的 `noise()` 自实现 FNV 哈希作决策抖动~~ | 不想污染 `prngState`，保持 AI 决策与状态跃迁解耦 | ✅ **已部分关闭（2026-11）**：改名 `deriveNoise(view)`，入参为投影、不再读 `prngState`；仍未走 `ctx.roll()`（AR-46） |
+| C-5 信息约束 | poker | ~~AI 用 raw `GameState` 决策~~ | 历史实现，未区分投影通道 | ✅ **已关闭（2026-11）**：`choosePokerAction` 改收 `ProjectedGameState`，`rules.ts` 经 `decisionView()` 投影后调用（AR-2） |
+| C-7 收益独立 | poker / catan | 收益在 `showdown()` / 建造分支里直接改状态，未记账 | 内核尚无 `ctx.reward()` | `state.rewards` 落地后回填（AR-47） |
+| C-8 元规则分区 | sanguosha | `bagua_armor` 钩子只发提示，真正判定写在 `JUDGE_BAGUA` 分支 | 钩子表达力不足 | 声明式规则表 + 通用解释器（AR-49） |
+| C-9 扩展字段收口 | 其余 5 个玩法 | 规则状态寄居 `globalVars` / `custom`（47 个 key） | 未声明 key 集合 | 照 poker 的 `meta.stateSchema.globalVars` 逐个登记（AR-43） |
+| C-9 扩展字段收口 | poker | ~~`globalVars` 7 个 key 未登记~~ | — | ✅ **已关闭（2026-11）**：`meta.stateSchema.globalVars` 声明 7 个 key，内核做未登记即报（AR-43） |

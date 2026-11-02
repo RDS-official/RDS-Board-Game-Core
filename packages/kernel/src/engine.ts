@@ -3,10 +3,17 @@ import {
   evaluateWindow,
   orderedSubmissions,
   resolveDecision,
+  simultaneousBatch,
   submitDecision,
   topDecision
 } from './decisions';
 import { checkInvariants, KernelInvariantError } from './invariants';
+import {
+  checkCharter,
+  resolveCharter,
+  type CharterViolation,
+  type ResolvedCharter
+} from './charter';
 import { MapGraphManager } from './graph';
 import { GameModule, ReduceContext, SpatialQuery } from './module';
 import { CognitiveObserver, ProjectionRedactor } from './observer';
@@ -160,6 +167,14 @@ export class UniversalGameEngine {
   /** Optional per-room secret; when set, hidden-entity aliases become HMAC-keyed (S5). */
   private aliasSecret?: string;
   private silent = false;
+  /** 宪章判据（C-1 / C-2 / C-6 / C-9），构造时从模块声明解析一次。 */
+  private readonly charter: ResolvedCharter;
+  /**
+   * 宪章违规的滚动记录。与结构性 invariant 不同，这些**不阻断**转移，
+   * 只在这里累积，供验证脚本与开发者面板读取。
+   */
+  private readonly charterViolations: CharterViolation[] = [];
+  private static readonly MAX_CHARTER_VIOLATIONS = 200;
 
   private visualListeners: ((events: VisualTraceEvent[]) => void)[] = [];
   private stateChangeListeners: ((state: ProjectedGameState) => void)[] = [];
@@ -170,6 +185,7 @@ export class UniversalGameEngine {
     this.pipeline = new RulePipeline(this.rules);
     this.strict = options.strict ?? true;
     this.projectRedactor = module.project ?? {};
+    this.charter = resolveCharter(module);
     this.maxFollowUpActions = normalizeLimit(
       options.maxFollowUpActions,
       DEFAULT_MAX_FOLLOW_UP_ACTIONS,
@@ -281,6 +297,20 @@ export class UniversalGameEngine {
 
   public getProjectedState(): ProjectedGameState {
     return this.getProjectedStateFor(this.currentViewer);
+  }
+
+  /**
+   * C-5 信息约束：模块的机器决策入口（`isAutomated` 指向的 AI）只应看到
+   * `𝒪(s, actor)`，而不是权威状态。
+   *
+   * 声明了 `charter.requiresProjection` 的模块，驱动方在派发 AI 动作前调用
+   * 这里取视图 —— 与真人 UI 拿到的是同一个投影，作弊面收窄到"类型系统 + 这条
+   * 断言"。未声明的模块保持旧行为（返回 undefined），由报告脚本统计缺口。
+   */
+  public getDecisionViewFor(actorId: ActorId): ProjectedGameState | undefined {
+    if (!this.module.charter?.requiresProjection) return undefined;
+    if (!this.module.isAutomated?.(this.state, actorId)) return undefined;
+    return this.getProjectedStateFor(actorId as PlayerId);
   }
 
   /** Project for an arbitrary viewer without changing the engine's own view. */
@@ -971,11 +1001,62 @@ export class UniversalGameEngine {
       }
     }
 
+    this.recordCharterViolations(next, tickAction);
+
     this.state = next;
     this.history.push(tickAction);
     this.emitVisual(events);
     this.notifyStateChange();
     return { ok: true, events, stateHash: this.getStateHash(), action: tickAction };
+  }
+
+  /**
+   * 宪章检查（C-1 / C-6 / C-9）。
+   *
+   * **不阻断**：语义不变量违规说明"规则被违反了"，但状态本身仍然自洽，
+   * 中止转移只会让房间卡死。这里记录并在 `DispatchResult.violations` 里带回，
+   * 由驱动方决定是提示、回滚还是重开。
+   */
+  private recordCharterViolations(next: GameState, action: Action): void {
+    if (!this.strict) return;
+    const violations = checkCharter(this.module, this.charter, next, action);
+    if (violations.length === 0) return;
+    this.charterViolations.push(...violations);
+    if (this.charterViolations.length > UniversalGameEngine.MAX_CHARTER_VIOLATIONS) {
+      this.charterViolations.splice(0, this.charterViolations.length - UniversalGameEngine.MAX_CHARTER_VIOLATIONS);
+    }
+  }
+
+  /** 本次会话累积的宪章违规（只读快照，最近的在末尾）。 */
+  public getViolations(): readonly CharterViolation[] {
+    return [...this.charterViolations];
+  }
+
+  /** 清空违规记录（重开一局时调用，避免旧对局污染统计）。 */
+  public clearViolations(): void {
+    this.charterViolations.length = 0;
+  }
+
+  /**
+   * C-2 观测：一次 `reduce` 内的逻辑跃迁次数。
+   *
+   * 内核无法通用地识别"一次跃迁"，因此用**可观测代理**：`turn` 的增量。
+   * 模组若在一次 `reduce` 内推进多次回合（内联驱动 AI / 连续结算），
+   * `delta > 1`。未登记偏离 C-2 的模块，这一步记为违规。
+   */
+  private observeTransitions(before: GameState, after: GameState, rootType: string, followUps: number): void {
+    if (!this.strict) return;
+    const turns = Math.max(0, (after.turn ?? 0) - (before.turn ?? 0));
+    if (turns <= 1) return;
+    // 登记过偏离的模块照样统计，但不报违规。
+    if (!this.charter.enforceSingleTransition) return;
+    this.charterViolations.push({
+      code: 'CHARTER_C2_MULTI_TRANSITION',
+      message: `reduce("${rootType}") advanced ${turns} turns in one call (${followUps} follow-ups) — inline AI / inline settlement breaks single-step assumptions`
+    });
+    if (this.charterViolations.length > UniversalGameEngine.MAX_CHARTER_VIOLATIONS) {
+      this.charterViolations.splice(0, this.charterViolations.length - UniversalGameEngine.MAX_CHARTER_VIOLATIONS);
+    }
   }
 
   private finalizeTransition(
@@ -1011,6 +1092,10 @@ export class UniversalGameEngine {
         };
       }
     }
+
+    this.recordCharterViolations(next, loggedAction);
+
+    this.observeTransitions(this.state, next, loggedAction.type, next.actionLog.length - this.state.actionLog.length - 1);
 
     this.state = next;
     this.emitVisual(events);
@@ -1084,6 +1169,8 @@ export class UniversalGameEngine {
       }
     }
 
+    this.recordCharterViolations(next, action);
+
     this.state = next;
     this.history.push(action);
     this.emitVisual(events);
@@ -1110,12 +1197,34 @@ export class UniversalGameEngine {
     );
 
     let current = state;
-    for (const entry of reveal) {
-      const submission = entry.submission;
-      if (submission === 'PASS' || submission === 'COMMITTED') continue;
-      const reduced = this.reduceWithPipeline(current, submission, ctx, events);
-      if (reduced.error) return { state: current, error: reduced.error };
-      if (!reduced.cancelled) current = reduced.state;
+
+    if (window.policy.type === 'SIMULTANEOUS') {
+      // 宪章 C-3：多重集一次性交给模组，内核不替它排序。
+      const batch = simultaneousBatch(window);
+      if (batch.length > 0) {
+        if (this.module.applySimultaneous) {
+          current = this.module.applySimultaneous(current, batch, ctx);
+        } else {
+          // 模组没声明合并语义：退回串行，但把这件事记下来。
+          this.charterViolations.push({
+            code: 'CHARTER_C3_SERIALIZED',
+            message: `decision "${window.title}" is SIMULTANEOUS but the module declares no applySimultaneous — settled in seat order (order-sensitive)`
+          });
+          for (const entry of batch) {
+            const reduced = this.reduceWithPipeline(current, entry.action, ctx, events);
+            if (reduced.error) return { state: current, error: reduced.error };
+            if (!reduced.cancelled) current = reduced.state;
+          }
+        }
+      }
+    } else {
+      for (const entry of reveal) {
+        const submission = entry.submission;
+        if (submission === 'PASS' || submission === 'COMMITTED') continue;
+        const reduced = this.reduceWithPipeline(current, submission, ctx, events);
+        if (reduced.error) return { state: current, error: reduced.error };
+        if (!reduced.cancelled) current = reduced.state;
+      }
     }
 
     const marked = resolveDecision(current, window.id);
@@ -1195,6 +1304,8 @@ export class UniversalGameEngine {
         return this.fail(`state invariant violation after response — ${violations[0].code}: ${violations[0].message}`, events);
       }
     }
+
+    this.recordCharterViolations(next, action);
 
     this.state = next;
     this.history.push(action);
