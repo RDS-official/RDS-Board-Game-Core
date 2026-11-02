@@ -24,6 +24,13 @@ import { CatanRules } from './catan/rules';
 import { setupCatan } from './catan/setup';
 import { CATAN_SCENARIOS } from './catan/scenarios';
 import { DuneMahjongRules } from './dune_mahjong/rules';
+import {
+  checkBetrayalInvariants,
+  checkCatanInvariants,
+  checkDuneInvariants,
+  checkSanguoshaInvariants,
+  checkSplendorInvariants
+} from './invariants/semantic';
 import { setupDuneMahjong } from './dune_mahjong/setup';
 import { PokerRules } from './poker/rules';
 import { pokerScenario, setupPoker } from './poker/setup';
@@ -72,8 +79,20 @@ export const catanModule: GameModule = defineGame({
         geometry: 'hex',
         geometrySpec: { cellSize: 2.15, hexOrientation: 'pointy' }
       },
+    },
+    /**
+     * C-9 扩展字段收口：本模组会往自由形状字段里写这些 key。
+     * 未登记的 key 出现，内核记 CHARTER_C9_UNDECLARED_GLOBAL_VAR。
+     */
+    stateSchema: {
+      globalVars: ['bank', 'diceSum', 'freeRoads', 'largestArmyOwner', 'lastDiceRoll', 'longestRoadOwner', 'ports', 'resourcePicks', 'robberHexId', 'robberReason', 'setupIndex', 'setupLastVertex', 'setupOrder', 'tradeGive', 'tradeOffer'],
+      customProps: ['knightsPlayed', 'resources']
     }
   },
+  // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
+  checkInvariants: state => checkCatanInvariants(state),
+  // C-7：资源获取经 ctx.reward() 记账（掷骰产出 / 港口兑换 / 强盗抢夺）。
+  charter: { requiresRewardLedger: true },
   hooks: [],
   actionSchemas: {
     ROLL_DICE: { type: 'ROLL_DICE', allowPayload: false },
@@ -156,8 +175,18 @@ export const sanguoshaModule: GameModule = defineGame({
       dynamicRules: true,
       topology: 'ring',
       topologySpec: { kind: 'ring', adjacency: 'neighbors', geometry: 'ring' },
+    },
+    /**
+     * C-9 扩展字段收口：本模组会往自由形状字段里写这些 key。
+     * 未登记的 key 出现，内核记 CHARTER_C9_UNDECLARED_GLOBAL_VAR。
+     */
+    stateSchema: {
+      globalVars: ['drawDeckCount', 'hasPlayedStrikeThisTurn'],
+      customProps: ['characterSkill', 'hero', 'hp', 'maxHp']
     }
   },
+  // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
+  checkInvariants: state => checkSanguoshaInvariants(state),
   // 身份 token（主公/忠臣/反贼/内奸）是本包词汇，通用层只显示字符串。
   presentation: definePresentation({ roleLabel: sanguoshaRoleLabel }),
   hooks: SANGUOSHA_HOOKS,
@@ -211,8 +240,18 @@ export const splendorModule: GameModule = defineGame({
       dynamicRules: false,
       topology: 'none',
       topologySpec: { kind: 'none', adjacency: 'none', geometry: 'none' }
+    },
+    /**
+     * C-9 扩展字段收口：本模组会往自由形状字段里写这些 key。
+     * 未登记的 key 出现，内核记 CHARTER_C9_UNDECLARED_GLOBAL_VAR。
+     */
+    stateSchema: {
+      globalVars: ['bank', 'evolvedThisTurn', 'finalRoundComplete', 'lastRound', 'maxReserves', 'maxTokens', 'megaTokens', 'playerCount', 'scoreToWin', 'variant'],
+      customProps: ['assoc', 'bonuses', 'buriedIds', 'megaToken', 'purchasedCards', 'tokens']
     }
   },
+  // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
+  checkInvariants: state => checkSplendorInvariants(state),
   // The market row already previews faces on hover; a click must not open a
   // second card view for the same card.
   presentation: definePresentation({ cardPreviewOnHover: true }),
@@ -325,8 +364,18 @@ export const betrayalModule: GameModule = defineGame({
           { id: 'UPPER', name: '二楼', index: 2 }
         ]
       },
+    },
+    /**
+     * C-9 扩展字段收口：本模组会往自由形状字段里写这些 key。
+     * 未登记的 key 出现，内核记 CHARTER_C9_UNDECLARED_GLOBAL_VAR。
+     */
+    stateSchema: {
+      globalVars: ['elevatorRide', 'elevatorRoomId', 'floorAnchors', 'frontDoorLocked', 'frostRooms', 'haunt', 'hauntObjectives', 'hauntTriggered', 'lastElevatorRoll', 'lastNarration', 'lastRoll', 'omenNames', 'omensRevealed', 'peek', 'pendingDamage', 'pendingExit', 'pendingHauntRoll', 'pendingRoomPlacement', 'rollSeq', 'roomDeckTotal', 'tradeOffer'],
+      customProps: ['abducted', 'attacksLeft', 'banished', 'brewUsed', 'chantUsed', 'character', 'checkBonus', 'controlled', 'currentRoomId', 'effects', 'elevatorUsed', 'en', 'exitPassedRoom', 'floor', 'forcedRoll', 'forgeUsed', 'immuneMindControl', 'maskWorn', 'movesLeft', 'resonance', 'ritualUsed', 'rolledThisTurn', 'roomBuffs', 'roomId', 'sanctifyUsed', 'searchUsed', 'skipActions', 'startIndex', 'suppressUsed', 'tracks', 'traitIndex', 'traitModifiers', 'traits', 'usedItems']
     }
   },
+  // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
+  checkInvariants: state => checkBetrayalInvariants(state),
   // 山屋的卡牌词汇（武器/护甲/预兆…）、派生的详情行、新房间档案、四条数值阶梯、
   // 身份名与作祟序曲都由本包声明；通用层只负责摆放。
   presentation: definePresentation({
@@ -513,8 +562,18 @@ export const duneMahjongModule: GameModule = defineGame({
       dynamicRules: false,
       topology: 'none',
       topologySpec: { kind: 'none', adjacency: 'none', geometry: 'none' },
+    },
+    /**
+     * C-9 扩展字段收口：本模组会往自由形状字段里写这些 key。
+     * 未登记的 key 出现，内核记 CHARTER_C9_UNDECLARED_GLOBAL_VAR。
+     */
+    stateSchema: {
+      globalVars: ['battleMode', 'committedDials', 'mahjongTileDiscarded', 'mahjongTileDiscarder', 'revealedBattleResult'],
+      customProps: ['committedDial', 'faction', 'leader', 'spice', 'troops']
     }
   },
+  // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
+  checkInvariants: state => checkDuneInvariants(state),
   hooks: [],
   timing: { decision: 8, response: 8 },
   project: {
