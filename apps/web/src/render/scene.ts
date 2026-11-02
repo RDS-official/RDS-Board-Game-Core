@@ -381,11 +381,14 @@ export class BoardGameScene {
    */
   private seatStandees: { group: THREE.Group; jitter: number; lamp?: THREE.Mesh; seatId: string }[] = [];
   /** 每个座位「默认视角正下方」的定位标：白点 + 30% 白线 + 状态环/旋转箭头。 */
+  /** 牌桌椭圆的半轴（含桌沿），标柱最多只能走到这里。 */
+  private tableEllipse = { rx: 8, rz: 5 };
   private seatBeacons: {
     group: THREE.Group;
     ring: THREE.Mesh;
     spinner: THREE.Group;
     arrow: THREE.Mesh;
+    line: THREE.Mesh;
     seatId: string;
   }[] = [];
 
@@ -2062,6 +2065,10 @@ export class BoardGameScene {
     this.seatStandees = [];
     this.seatBeacons = [];
     const seatNodes = Object.values(graph.nodes).filter(node => node.type === 'SEAT');
+    this.tableEllipse = {
+      rx: Math.max(3.6, ...seatNodes.map(node => Math.abs(node.position[0]))) + 1.1,
+      rz: Math.max(2.6, ...seatNodes.map(node => Math.abs(node.position[2]))) + 1.1
+    };
 
     // Render Nodes
     Object.values(graph.nodes).forEach(node => {
@@ -2388,14 +2395,15 @@ export class BoardGameScene {
             ...seatNodes.map(entry => Math.abs(entry.position[0])),
             4
           );
-          // 机位在 `back` 之外，但标柱贴着桌沿放才看得见（放机位下面会跑到画面
-          // 外面，还会把相机的自动取景撑大）。高度仍取那台相机的高度。
+          // 标柱最多走到桌沿：机位在桌外很远，直接放机位下面会跑出画面、还会把
+          // 自动取景撑大。这里取「座位方向 × 桌面椭圆」的交点，正好落在桌沿上；
+          // 高度仍取那台相机的高度。
           const back = Math.max(7, span * 1.05);
           const eye = 2 + back * 0.29;
-          const reach = 2.4;
+          const rim = this.rimPoint(outward.x, outward.y);
           const beacon = this.createSeatBeacon(
-            seatX + outward.x * reach,
-            seatZ + outward.y * reach,
+            rim.x,
+            rim.z,
             eye,
             SEAT_BOARD.width * 0.5
           );
@@ -4911,12 +4919,23 @@ export class BoardGameScene {
    * 位置是某个座位的默认机位正下方（见 `setSeatView`），竖线高度就是那台相机
    * 的高度——不管从哪个座位看，线顶都落在自己的视平线上。
    */
+  /** 从桌心沿 (dx, dz) 方向走到桌面椭圆边界的交点。 */
+  private rimPoint(dx: number, dz: number): { x: number; z: number } {
+    const length = Math.hypot(dx, dz);
+    if (length < 1e-4) return { x: 0, z: 0 };
+    const { rx, rz } = this.tableEllipse;
+    const ux = dx / length;
+    const uz = dz / length;
+    const k = 1 / Math.sqrt((ux / rx) ** 2 + (uz / rz) ** 2);
+    return { x: ux * k, z: uz * k };
+  }
+
   private createSeatBeacon(
     x: number,
     z: number,
     height: number,
     radius: number
-  ): { group: THREE.Group; ring: THREE.Mesh; spinner: THREE.Group; arrow: THREE.Mesh } {
+  ): { group: THREE.Group; ring: THREE.Mesh; spinner: THREE.Group; arrow: THREE.Mesh; line: THREE.Mesh } {
     const group = new THREE.Group();
     group.position.set(x, 0, z);
 
@@ -4984,7 +5003,7 @@ export class BoardGameScene {
     spinner.add(arrow);
     group.add(spinner);
 
-    return { group, ring, spinner, arrow };
+    return { group, ring, spinner, arrow, line };
   }
 
   private updateSeatStandees(dt: number): void {
@@ -5040,14 +5059,18 @@ export class BoardGameScene {
 
     // 视角定位标：环色跟底座灯同源（轮到 = 淡红、已动作/已准备 = 绿、弃牌 = 灰），
     // 只有轮到该玩家时箭头出现并旋转。
+    const viewerId = live?.viewerId;
     for (const beacon of this.seatBeacons) {
       const { seatId } = beacon;
-      // 站在自己座位上时，自己的标柱就在相机脚下——会变成一条穿过画面中央的
-      // 白线。离相机太近的直接不画。
-      const bx = cam.x - beacon.group.position.x;
-      const bz = cam.z - beacon.group.position.z;
-      beacon.group.visible = Math.hypot(bx, bz) > 7;
-      if (!beacon.group.visible) continue;
+      // 自己的标柱跟着视角走：相机往哪边转，它就沿着桌沿滑到哪边，但永远不
+      // 越过桌面（`rimPoint` 直接取椭圆交点）。其它座位固定在各自桌沿。
+      // 自己的那根线正对着相机，会画成一条贯穿屏幕的白线——只保留地面圆环。
+      beacon.line.visible = seatId !== viewerId;
+      if (seatId === viewerId && Math.hypot(cam.x, cam.z) > 0.5) {
+        const rim = this.rimPoint(cam.x, cam.z);
+        beacon.group.position.x = rim.x;
+        beacon.group.position.z = rim.z;
+      }
       const ringMat = beacon.ring.material as THREE.MeshBasicMaterial;
       const arrowMat = beacon.arrow.material as THREE.MeshBasicMaterial;
       const folded = !!hand?.folded?.includes(seatId);
