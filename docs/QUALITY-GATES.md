@@ -238,6 +238,7 @@ UI 矩阵的三个提速点（都不是砍覆盖）：
 | 矩阵 72 seed-runs / 27 场景 | `MATRIX_FAST=1`，每夹具 1 seed | 回放哈希与非法动作在单 seed 就会暴露；多 seed 留在本地 |
 | `pnpm test:ui`（21 屏 + card-overlay） | `UI_SMOKE=1`（每游戏首屏） | 抓启动崩溃与首屏报错是最有价值的部分；深度 flow 留在本地 |
 | `pnpm probe:overlap` / `probe:layout` | **不跑** | 只在动 `render/procedural` 时有意义，且需真实 WebGL；本地必跑（§5） |
+| `pnpm probe:board` | **不跑** | 逐座位投影验证公共牌朝向与可读性；只在动 `render/scene.ts`、`layout.ts` 或扑克牌桌时才有意义（§POKER 10.2.1.1） |
 
 `GATE_SCALE=1.5` 把 `scripts/lib/gates.mjs` 的时长预算放大 1.5 倍：runner 是 2 核
 共享机，软件渲染比开发机慢，不放大会因为「慢」而不是「错」失败。

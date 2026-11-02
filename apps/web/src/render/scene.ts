@@ -21,6 +21,7 @@ import { PresentationPhysics } from './physics';
 import { BoardGameAudio } from './audio';
 import { CANVAS_FONT_STACK } from './fonts';
 import { handLayout, handRowSpan } from '../ui/handLayout';
+import { boardCardPosition, boardRowFrame, type ViewerBearing } from './boardFacing';
 
 export type CameraPreset = 'ISOMETRIC' | 'TOP_DOWN' | 'PLAYER_1' | 'PLAYER_2' | 'SEAT';
 
@@ -38,6 +39,13 @@ export type CameraPreset = 'ISOMETRIC' | 'TOP_DOWN' | 'PLAYER_1' | 'PLAYER_2' | 
 const HAND_ROW_SPAN = 6.4;
 /** Distance from the seat centre outwards to the hand row. */
 const HAND_ROW_DEPTH = 2.0;
+/**
+ * Push applied to a plain BOARD anchor before the row is laid out. Poker anchors
+ * the board at z = -0.85 precisely so that this offset lands the row on the felt;
+ * keeping the constant here means the board does not move when the facing
+ * capability is switched on.
+ */
+const BOARD_ROW_Z_OFFSET = 0.85;
 /** Table height of the hand row. */
 const HAND_ROW_Y = 0.13;
 /** World width of a card at layout scale 1. */
@@ -104,6 +112,13 @@ export interface LayoutHints {
   padding?: number;
   cameraDirection?: [number, number, number];
   minDistance?: number;
+  /**
+   * Capability: the shared board row turns to face the seated viewer instead of
+   * keeping one fixed world bearing (see `render/boardFacing.ts`). Games that do
+   * not declare it, and any camera that is not bound to a seat, keep the legacy
+   * fixed-north row.
+   */
+  boardFacesViewer?: boolean;
 }
 
 export interface RenderStats {
@@ -3637,6 +3652,29 @@ export class BoardGameScene {
   /* Hands around the table                                              */
   /* ------------------------------------------------------------------ */
 
+  /**
+   * Which way the seated viewer faces, for laying out a shared board row.
+   *
+   * Returns null — keep the row at its fixed bearing — unless *all* of these
+   * hold: the game declared the `boardFacesViewer` capability, a seat is bound
+   * as the viewer, and that seat has a projected SEAT node. A GOD camera, an
+   * observer without a seat, or a game that never declared the capability all
+   * fall through to the historical layout, so no other fixture changes.
+   */
+  private boardViewerBearing(state: ProjectedGameState): ViewerBearing | null {
+    if (!this.lastLayout?.boardFacesViewer) return null;
+    const viewerId = state.viewerId;
+    if (!viewerId || viewerId === 'GOD') return null;
+    const seatNode = Object.values(state.mapGraph.nodes).find(
+      node => node.type === 'SEAT' && String(node.props?.playerId ?? '') === viewerId
+    );
+    if (!seatNode) return null;
+    const [x, , z] = seatNode.position;
+    const len = Math.hypot(x, z);
+    if (!(len > 1e-6)) return null;
+    return { outX: x / len, outZ: z / len };
+  }
+
   private seatFrame(state: ProjectedGameState, ownerId?: string) {
     const seatNode = Object.values(state.mapGraph.nodes).find(
       n => n.type === 'SEAT' && n.props.playerId === ownerId
@@ -3698,6 +3736,9 @@ export class BoardGameScene {
         this.lastState?.gameId === 'poker' ? 'playing' : 'plate'
       );
       mesh.rotation.y = frame.facing;
+      // The deal tween spins a fresh card and must land on the row's bearing,
+      // not on world north; `layoutHandRow` rewrites this every frame anyway.
+      mesh.userData.restYaw = frame.facing;
       this.boardObjectsGroup.add(mesh);
       this.entityMeshes.set(entity.id, mesh);
       this.raycaster.registerInteractive(mesh, { type: 'ENTITY', id: entity.id, metadata: face });
@@ -3899,6 +3940,7 @@ export class BoardGameScene {
         frame.z + perpZ * side * offset - frame.outZ * 0.4
       );
       mesh.rotation.y = frame.facing;
+      mesh.userData.restYaw = frame.facing;
       this.applyCardVisualOffset(entity.id, mesh);
       this.boardObjectsGroup.add(mesh);
       this.entityMeshes.set(entity.id, mesh);
@@ -4378,11 +4420,16 @@ export class BoardGameScene {
         const from = deckPoint.clone();
         mesh.position.copy(from);
         const delay = index * stagger;
+        // A card keeps its resting bearing (a hand card faces its owner's seat,
+        // a board card faces the viewer's); only the extra spin of the deal is
+        // animated. Writing the absolute spin here would snap the card back to
+        // world north for the rest of the animation.
+        const restYaw = Number(mesh.userData.restYaw ?? 0);
         this.animQueue.animateArc(mesh, from, to, 1.1, 520, undefined, delay);
         this.animQueue.animate(
           520,
           p => {
-            mesh.rotation.y = (1 - p) * Math.PI * 2;
+            mesh.rotation.y = restYaw + (1 - p) * Math.PI * 2;
           },
           undefined,
           delay
@@ -4890,10 +4937,35 @@ export class BoardGameScene {
         // whole row and allow five cards instead of clamping at four, which
         // used to push the fifth card off to one side. The cards render at hole
         // -card size — half-scale faces turn the pips into unreadable specks.
+        //
+        // Orientation: a game that declares `boardFacesViewer` gets the row laid
+        // along the viewer seat's tangent with the card tops pointing away from
+        // that seat, so the seat camera reads the board upright without orbiting.
+        // Everything else (GOD camera, spectator, a game without the capability)
+        // keeps the historical fixed-north row.
         const shown = Math.min(totalInZone, 5);
         mesh.scale.set(0.62, 0.62, 0.62);
-        mesh.position.set(anchor[0] + (index - (shown - 1) / 2) * 0.98, anchor[1], anchor[2] + 0.85);
-        mesh.rotation.y = 0;
+        const displayState = this.lastState;
+        const bearing = displayState ? this.boardViewerBearing(displayState) : null;
+        const row = boardRowFrame({
+          count: shown,
+          centerX: anchor[0],
+          // Keeps the historical centre: the poker anchor sits at z = -0.85 and
+          // the row is pushed forward by the same amount to land on the felt.
+          centerZ: anchor[2] + BOARD_ROW_Z_OFFSET,
+          viewer: bearing
+        });
+        const [px, , pz] = boardCardPosition(row, shown, index, anchor[1]);
+        mesh.position.set(px, anchor[1], pz);
+        mesh.rotation.y = row.yaw;
+        // Yaw first, then the reveal flip about the card's *own* long axis.
+        // With the default 'XYZ' order the flip would happen about the world X
+        // axis instead, so a board card on the left or right of the row would
+        // tumble sideways while it turns over.
+        mesh.rotation.order = 'YXZ';
+        // Recorded so the deal/reveal tweens can restore the row's bearing
+        // instead of snapping the card back to north mid-animation.
+        mesh.userData.restYaw = row.yaw;
       }
     } else if (zone.type === 'HAND' && zone.anchorPosition) {
       const anchor = zone.anchorPosition;

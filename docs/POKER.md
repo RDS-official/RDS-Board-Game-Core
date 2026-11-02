@@ -415,6 +415,36 @@ HAND_OVER ─────────────► PREFLOP ──┬─► FLO
   `seatViewKey`（`viewer@座位号` / `viewer@obs原座位`）变化，于是重新取景；
   同一个座位不会因为普通状态更新而重置，玩家自己拖出来的角度会保留。
 
+#### 10.2.1.1 公共牌正对观察者（PR2）
+
+镜头坐到自己那一侧以后，公共牌仍然沿世界坐标的正北朝向铺开 —— 于是除「恰好朝北」
+的那一座以外，其余座位看到的牌都是歪的：p1 座位上实测倾角 −85°（横躺着看），
+p6 座位是 180°（上下颠倒），牌面宽度只剩 16–33px。这不是镜头问题，是**牌行自己的
+朝向**问题：一块摊平的牌只有一条「上」方向，而座位是从自己那一侧看它的。
+
+- 能力声明：`LayoutHints.boardFacesViewer`（`packages/app/src/layout.ts`，扑克声明为
+  `true`）。渲染层只问「这一行牌该不该跟着观察者」，不问「这是哪款游戏」——
+  `apps/web/src/render/scene.ts` 的 `boardViewerBearing()` 是唯一的入口，`render`
+  目录里没有一处按 `gameId` 决定朝向。
+- 纯布局函数：`apps/web/src/render/boardFacing.ts` 的 `boardRowFrame()`。给定观察者
+  座位朝向 `out`（桌心 → 座位，单位向量）：
+  - 牌行沿该座位的**切线** `axis = (outZ, −outX)` 排布（间距仍是 `BOARD_ROW_PITCH`
+    = 0.98，整行宽度不变）；
+  - 每张牌偏航 `yaw = atan2(outX, outZ)`，即牌面顶端朝**离开**观察者的方向；
+  - `out = (0, 1)` 退化成 `yaw = 0`、`axis = (1, 0)`，正是旧的固定朝向。
+  函数是纯的，座位无关、单位无关，`packages/harness` 直接import 断言，不需要浏览器。
+- 生效条件（三条同时成立，否则保持旧画面）：游戏声明了能力、`viewerId` 不是 `'GOD'`、
+  该观众有投影后的 SEAT 节点。上帝视角、观察席、没有座位概念的游戏都走旧路径，
+  调试与截图脚本看到的仍是原样。
+- 动画配合：发牌不再把 `rotation.y` 写成绝对值，而是从「该牌自己的静止朝向」
+  （`mesh.userData.restYaw`：手牌 = 自己座位的朝向，公共牌 = 当前观察者朝向）起转，
+  落地正好停在牌行的朝向上；翻牌用 `rotation.order = 'YXZ'`，绕牌自己的长轴翻，
+  于是行首行尾的牌不会侧翻。
+- 可读性下限（探针硬断言）：座位上 `|倾角| ≤ 15°`、牌面宽度 `≥ 60px`（1400×900）。
+  实测 6 个座位全部 `0–12°`、`82–99px`；改动前是 `−85…180°`、`16–33px`。
+- 回归：`pnpm probe:board`（`scripts/probe-board-facing.mjs`，真实浏览器逐座位投影，
+  屏幕空间测倾角与宽度）；纯布局数学在 `test:core` 的 `presentation` 用例里。
+
 ### 10.3 操作区图标与牌面同源
 
 动作坞不再用 emoji：`actionText.ts` 为扑克动作返回**内联 SVG**（30×30），与 3D 牌面同一套调色板（象牙 `#f2eddc`、墨黑 `#15161a`、赌场红 `#c8102e`、黄铜 `#c9a24a`、毛毡绿 `#17603a`）与同一母题——小牌面（点数+花色、红黑同 3D 牌）、背面红格纹、白边条筹码与筹码堆。六个动作各一枚：发牌（双牌扇）、弃牌（划线牌）、过牌（毛毡勾）、跟注（牌+筹码）、加注（筹码堆+箭头）、全押（发光筹码堆）。
@@ -485,6 +515,7 @@ HAND_OVER ─────────────► PREFLOP ──┬─► FLO
 pnpm test            # 含新增 poker 用例
 pnpm test:matrix     # 新夹具进入随机对局矩阵
 pnpm test:ui         # 新增 poker 屏幕
+pnpm probe:board     # 逐座位验证公共牌正对观察者且可读（§10.2.1.1）
 pnpm docs:check      # 本文链接有效
 pnpm lint
 node node_modules/typescript/bin/tsc --noEmit && pnpm run build
