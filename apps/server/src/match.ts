@@ -134,6 +134,17 @@ export class ServerMatch {
       }
     );
 
+    // ---- AR-1：中心模式的虚拟别名必须有密钥 --------------------------------
+    //
+    // `CognitiveObserver.getVirtualAlias()` 在没有 aliasSecret 时退化为
+    // FNV-1a 32 位哈希 —— 隐藏实体的 id 可被穷举还原（32 位空间，几秒钟）。
+    // P2P 房主侧本来就会生成密钥，但中心模式（服务端权威）一直没有设置，
+    // 等于把德扑的牌面、山屋的房间排列暴露给了任何能遍历 id 的客户端。
+    //
+    // 必须是每房随机、每房不同：同一密钥跨房复用会让别名在不同房间之间
+    // 变成可关联的指纹。也必须在任何投影之前设置，否则弱别名会先进缓存。
+    this.room.engine.setAliasSecret(crypto.randomBytes(32).toString('hex'));
+
     // 座位数必须覆盖房间里的真人：夹具可能不支持该人数（固定阵容的夹具会
     // 忽略 seats 请求），这时宁可开局失败，也不要摆出无人控制的空座位。
     if (options.seats !== undefined) {

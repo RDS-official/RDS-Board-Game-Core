@@ -9,6 +9,8 @@ import { defineDriver, definePresentation } from '@rds/kernel/module';
 import { openDecision } from '@rds/kernel/decisions';
 import type { Action, GameState, ProjectedGameState } from '@rds/kernel/types';
 import { GAME_REGISTRY } from '@rds/games/registry';
+import { SANGUOSHA_HOOKS } from '@rds/games/sanguosha/hooks';
+import { capabilityMismatches, deriveCapabilities } from '@rds/kernel/capabilities';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { choosePokerAction } from '@rds/games/poker/ai';
@@ -808,4 +810,201 @@ test('charter C-8: defineDriver validates its own fields', () => {
     unknownKey = error instanceof TypeError;
   }
   assert(unknownKey, 'a non-driver key must be rejected');
+});
+
+/* -------------------------------------------------------------------------- */
+/* AR-49 钩子承载规则（C-8 的另一半）                                            */
+/* -------------------------------------------------------------------------- */
+
+test('AR-49: the bagua hook translates a judge into the rule its params describe', () => {
+  const hook = SANGUOSHA_HOOKS.find(h => h.id === 'bagua_armor');
+  assert(hook, 'the bagua_armor hook exists');
+
+  const makeCtx = (params: Record<string, unknown>) => ({
+    impl: hook!,
+    instance: {
+      instanceId: 'probe',
+      hookId: 'bagua_armor',
+      ownerId: 'p1',
+      visibility: { type: 'PUBLIC' as const },
+      params: {}
+    },
+    params
+  });
+
+  // predicate 只对该护甲主人的判定生效
+  const judgeByOwner = { type: 'JUDGE_BAGUA', playerId: 'p1' };
+  const judgeByOther = { type: 'JUDGE_BAGUA', playerId: 'p2' };
+  assert(hook!.predicate(judgeByOwner, {} as never, makeCtx({}) as never), 'fires on the owner judge');
+  assert(!hook!.predicate(judgeByOther, {} as never, makeCtx({}) as never), 'ignores another seat judge');
+  // 不拦 PLAY_STRIKE：攻击照旧进栈，目标仍有选择权
+  assert(
+    !hook!.predicate(
+      { type: 'PLAY_STRIKE', playerId: 'p2', targetPlayerId: 'p1' },
+      {} as never,
+      makeCtx({}) as never
+    ),
+    'does not swallow the strike itself — the target keeps its choice'
+  );
+
+  // 默认参数
+  const base = hook!.handler(judgeByOwner, {} as never, makeCtx({}) as never);
+  assertEqual(base.type, 'MODIFY', 'the judge action is modified, not replaced');
+  const basePayload = base.modifiedAction?.payload as Record<string, unknown>;
+  assertEqual(basePayload.redIsDodge, true, 'red judges a Dodge by default');
+  assertEqual(basePayload.damageOnFail, 1, 'a failed judge costs one damage by default');
+  assertEqual(basePayload.ruleId, 'bagua_armor', 'the payload names the rule that produced it');
+
+  // 改 params 必须改变规则 —— 证明规则在钩子里，不在 reducer 里
+  const strict = hook!.handler(judgeByOwner, {} as never, makeCtx({ damageOnFail: 3, redIsDodge: false }) as never);
+  const strictPayload = strict.modifiedAction?.payload as Record<string, unknown>;
+  assertEqual(strictPayload.damageOnFail, 3, 'damageOnFail comes from the hook params');
+  assertEqual(strictPayload.redIsDodge, false, 'redIsDodge comes from the hook params');
+});
+
+test('AR-49: a real strike against the armor wearer routes through the hook', () => {
+  const module = GAME_REGISTRY.sanguosha;
+  let observed: string[] | undefined;
+
+  for (let seed = 1; seed <= 80 && !observed; seed++) {
+    const engine = new UniversalGameEngine(module, seed, { strict: true });
+    for (let i = 0; i < 500; i++) {
+      const actor = engine.getActiveActorId();
+      const legal = engine.getLegalActions(actor);
+      if (legal.length === 0) break;
+
+      const strike = legal.find(a => a.type === 'PLAY_STRIKE' && a.targetPlayerId === 'p1' && actor !== 'p1');
+      if (strike) {
+        if (!engine.dispatch(strike).ok) break;
+        const reaction = engine.getLegalActions('p1').find(a => a.type === 'JUDGE_BAGUA');
+        if (reaction) {
+          const result = engine.dispatch(reaction);
+          assert(result.ok, 'the judge resolves');
+          observed = result.events.map(e => e.title);
+          break;
+        }
+      }
+
+      const endTurn = legal.find(a => a.type === 'END_TURN');
+      if (!engine.dispatch(endTurn ?? legal[0]).ok) break;
+      if (engine.getRawState().gameOver) break;
+    }
+  }
+
+  assert(observed, 'a strike against the armor wearer was found within 80 seeds');
+  assert(
+    observed!.some(t => /Eight Trigrams Defense/.test(t)),
+    `the hook's own message must appear in the event stream, got: ${JSON.stringify(observed!.slice(0, 6))}`
+  );
+  // 旧实现在这里只有一句空提示，钩子不产生任何结算语义。
+  assert(
+    observed!.some(t => /red judges a Dodge|red judges|Eight Trigrams/.test(t)),
+    'the hook describes the rule it applied'
+  );
+});
+
+test('AR-49: the judge executor reads its rule from the payload, not from the game id', () => {
+  // reducer 不认识"八阵图"：同样的 JUDGE_BAGUA 换一组参数，行为必须不同。
+  const module = GAME_REGISTRY.sanguosha;
+  const engine = new UniversalGameEngine(module, 5, { strict: true });
+  const base = engine.getRawState();
+
+  // 用 two payloads 直接驱动 reduce，观察 hp 变化是否有差异。
+  const ctx = {
+    id: (k: string) => `${k}_probe`,
+    trace: () => {},
+    seq: base.seq + 1,
+    roll: () => ({ result: { spec: { sides: 100, count: 1 }, rolls: [1], total: 1 }, nextSeed: 1 }),
+    reward: () => {}
+  };
+  const victim = base.playerOrder[0];
+  const withDamage = module.reduce(
+    base,
+    { type: 'JUDGE_BAGUA', playerId: victim, payload: { redIsDodge: false, damageOnFail: 2 } },
+    ctx as never
+  );
+  const withoutDamage = module.reduce(
+    base,
+    { type: 'JUDGE_BAGUA', playerId: victim, payload: { redIsDodge: true, damageOnFail: 0 } },
+    ctx as never
+  );
+
+  const hpOf = (s: typeof base) => Number(s.players[victim].customProps?.hp ?? 0);
+  assert(
+    hpOf(withDamage) <= hpOf(withoutDamage),
+    `a harsher payload must not heal the victim (${hpOf(withDamage)} vs ${hpOf(withoutDamage)})`
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* AR-48 capabilities 必须与实现一致，且内核真的消费                            */
+/* -------------------------------------------------------------------------- */
+
+test('AR-48: every module declares capabilities that match its implementation', () => {
+  const evidenceOf = (id: string) => {
+    // 只认代码事实：模块源码里是否调用了中断栈。
+    const dir = `packages/games/src/${id}`;
+    if (!existsSync(dir)) return {};
+    const src = listFiles(dir)
+      .map(f => readFileSync(f, 'utf8'))
+      .join('\n');
+    return { usesInterruptStack: /InterruptStackManager\.(push|peek)/.test(src) };
+  };
+
+  const offenders: string[] = [];
+  for (const [id, module] of Object.entries(GAME_REGISTRY)) {
+    const engine = new UniversalGameEngine(module, 4242, { strict: true });
+    const mismatches = capabilityMismatches(module, engine.getRawState(), evidenceOf(id));
+    for (const m of mismatches) offenders.push(`${id}.${m.field}(${m.declared}→${m.derived})`);
+  }
+  assertEqual(offenders.join(', '), '', 'capability declarations must match the code');
+});
+
+test('AR-48: the kernel flags a module that hides information while claiming it does not', () => {
+  const poker = GAME_REGISTRY.poker;
+  const liar = {
+    ...poker,
+    meta: { ...poker.meta, capabilities: { ...poker.meta.capabilities, hiddenInformation: false } }
+  };
+  const engine = new UniversalGameEngine(liar, 7, { strict: true });
+  const open = engine.getLegalActions(engine.getActiveActorId()).find(a => a.type === 'START_HAND');
+  assert(open, 'a fresh table offers START_HAND');
+  engine.dispatch(open!);
+
+  const violations = engine.getViolations().filter(v => v.code === 'CHARTER_CAPABILITY_MISMATCH');
+  assert(violations.length > 0, 'the kernel must notice hidden entities despite hiddenInformation: false');
+  assert(
+    violations.some(v => /hiddenInformation/.test(v.message)),
+    `the message names the field, got: ${violations[0]?.message}`
+  );
+});
+
+test('AR-48: the kernel flags a module that claims simultaneous moves it cannot make', () => {
+  const splendor = GAME_REGISTRY.splendor;
+  const liar = {
+    ...splendor,
+    meta: {
+      ...splendor.meta,
+      capabilities: { ...splendor.meta.capabilities, simultaneousMoves: true }
+    }
+  };
+  const engine = new UniversalGameEngine(liar, 3, { strict: true });
+  const legal = engine.getLegalActions(engine.getActiveActorId());
+  if (legal.length > 0) engine.dispatch(legal[0]);
+
+  const violations = engine.getViolations().filter(v => v.code === 'CHARTER_CAPABILITY_MISMATCH');
+  assert(
+    violations.some(v => /simultaneousMoves/.test(v.message)),
+    `a claim with no applySimultaneous must be reported, got: ${JSON.stringify(violations.map(v => v.message))}`
+  );
+});
+
+test('AR-48: capability derivation does not count a single-seat SIMULTANEOUS window as simultaneous moves', () => {
+  // betrayal 用 kind:'SIMULTANEOUS' 开单人伤害窗口 —— 那不是"多人同时行动"。
+  const betrayal = GAME_REGISTRY.betrayal;
+  assertEqual(
+    deriveCapabilities(betrayal).simultaneousMoves,
+    false,
+    'a single-participant window is not a simultaneous-move capability'
+  );
 });

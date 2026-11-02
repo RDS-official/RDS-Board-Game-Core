@@ -168,6 +168,7 @@ const modeInfo = [
 
 console.log(`verify: ${gates.map(gate => gate.id).join(' + ')}${modeInfo ? ` (${modeInfo})` : ''}\n`);
 
+const isWindows = process.platform === 'win32';
 const startedAt = Date.now();
 const results = await Promise.all(
   gates.map(
@@ -175,10 +176,14 @@ const results = await Promise.all(
       new Promise(resolve => {
         const logPath = join(LOG_DIR, `verify-${gate.id}.log`);
         const out = openSync(logPath, 'w');
-        const child = spawn(gate.command, gate.args, {
+        // Windows 下 `shell: true` 会把 command 和 args 直接拼进命令行：Node 自己的
+        // 路径是 `C:\Program Files\nodejs\node.exe`，不加引号 cmd 会在空格处截断，
+        // 报 `'C:\Program' 不是内部或外部命令`。带空格的参数同理。
+        const quote = value => (isWindows && /\s/.test(value) ? `"${value}"` : value);
+        const child = spawn(quote(gate.command), gate.args.map(quote), {
           env: { ...process.env, NO_COLOR: '1', ...gate.env },
           stdio: ['ignore', out, out],
-          shell: process.platform === 'win32'
+          shell: isWindows
         });
         child.on('exit', code => {
           closeSync(out);

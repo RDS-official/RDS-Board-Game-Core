@@ -63,6 +63,10 @@
 .lob-auth { max-width: 380px; width: 100%; }
 .lob-auth h2 { margin: 6px 0 2px; }
 .lob-auth .lob-brand { font-size: 22px; margin-bottom: 10px; }
+/* 登录卡片脚注：只作版本溯源，弱化到不抢表单的视觉重心。 */
+.lob-auth-commit { margin-top: 14px; text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px; letter-spacing: .06em; color: var(--muted); opacity: .6; user-select: all; }
 
 /* ---------- 首页布局 ---------- */
 .lob-main { max-width: 1060px; margin: 24px auto; padding: 0 20px; display: grid; gap: 16px; }
