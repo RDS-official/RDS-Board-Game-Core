@@ -38,6 +38,8 @@ export interface SeatPlateInfo {
   muted?: boolean;
   /** Small marker under the text (suit symbol or seat number). */
   marker?: string;
+  /** 筹码数（横版立牌左侧的大字）。 */
+  chips?: string;
   /**
    * What this seat did on the current street (过牌 / 跟注 20 / 加注到 40 / 弃牌 /
    * 全押 200). Painted as a badge on the board; replaces the marker while set.
@@ -99,10 +101,13 @@ const WOODS: Record<WoodKind, WoodPalette> = {
   }
 };
 
-/** Card-sized board: matches the community/hole cards on the felt. */
-export const SEAT_BOARD = { width: 0.86, height: 1.24, thickness: 0.045 } as const;
+/**
+ * 立牌板面：比牌面宽一倍（横向 1.72 = 两张牌），高度仍是牌高，名字与数字才有
+ * 地方放大到 2.5 倍。贴图按同样的世界/像素密度给到 768×554。
+ */
+export const SEAT_BOARD = { width: 1.72, height: 0.62, thickness: 0.045 } as const;
 /** Metal disc under the board. */
-export const SEAT_BASE = { radius: 0.5, height: 0.055 } as const;
+export const SEAT_BASE = { radius: 0.78, height: 0.055 } as const;
 /** Lean of the board away from the table centre (radians). */
 const BOARD_TILT = 1.02;
 
@@ -131,8 +136,8 @@ export class SeatPlateBuilder {
 
     const wood = WOODS[info.wood ?? 'walnut'];
 
-    const width = 384;
-    const height = 554; // card aspect (0.86 : 1.24)
+    const width = 768;
+    const height = 277; // 1.72 : 0.62 —— 与 SEAT_BOARD 同比例（横版）
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -187,153 +192,71 @@ export class SeatPlateBuilder {
     ctx.lineWidth = 2;
     ctx.strokeRect(24, 24, width - 48, height - 48);
 
-    // Avatar coin.
-    const coinX = width / 2;
-    const coinY = 148;
-    const coinR = 66;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-    ctx.beginPath();
-    ctx.arc(coinX, coinY + 3, coinR + 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = info.muted ? 'rgba(110, 110, 110, 0.55)' : info.color;
-    ctx.beginPath();
-    ctx.arc(coinX, coinY, coinR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = info.active ? BRASS : wood.inkSoft;
-    ctx.lineWidth = info.active ? 6 : 3;
-    ctx.beginPath();
-    ctx.arc(coinX, coinY, coinR, 0, Math.PI * 2);
-    ctx.stroke();
+    // 横版：左边筹码、右边操作。名字与头像不再上牌——立牌只回答两件事：
+    // 「我还有多少」和「我刚做了什么」。
+    // 德州这类有筹码的牌桌只显示筹码；其它模组没有筹码字段，退回显示名字，
+    // 免得立牌变成一块空白木头。
+    const chipsText = info.chips || info.name;
+    const action = info.action ?? '';
 
-    const glyph = String(info.avatar || info.name.slice(0, 1) || '?');
-    ctx.fillStyle = wood.ink;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `${glyph.length > 1 ? 70 : 78}px ${CANVAS_FONT_STACK}`;
-    ctx.fillText(glyph, coinX, coinY + 4);
-
-    // Nickname.
-    ctx.textAlign = 'center';
-    ctx.fillStyle = info.muted ? 'rgba(120, 110, 96, 0.75)' : wood.ink;
-    let nameSize = 58;
-    ctx.font = `700 ${nameSize}px ${CANVAS_FONT_STACK}`;
-    while (ctx.measureText(info.name).width > width - 56 && nameSize > 22) {
-      nameSize -= 2;
-      ctx.font = `700 ${nameSize}px ${CANVAS_FONT_STACK}`;
-    }
-    ctx.fillText(info.name, coinX, 276);
-
-    // Detail lines (at most two).
-    if (info.detail) {
-      ctx.fillStyle = wood.inkSoft;
-      ctx.font = `600 31px ${CANVAS_FONT_STACK}`;
-      info.detail
-        .split(' · ')
-        .slice(0, 2)
-        .forEach((part, index) => {
-          let text = part;
-          while (ctx.measureText(text).width > width - 60 && text.length > 2) text = text.slice(0, -2);
-          ctx.fillText(text, coinX, 330 + index * 38);
-        });
+    if (chipsText) {
+      let chipsSize = 168;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `700 ${chipsSize}px ${CANVAS_FONT_STACK}`;
+      while (ctx.measureText(chipsText).width > width * 0.46 && chipsSize > 64) {
+        chipsSize -= 4;
+        ctx.font = `700 ${chipsSize}px ${CANVAS_FONT_STACK}`;
+      }
+      ctx.fillStyle = info.muted ? 'rgba(150, 140, 124, 0.8)' : wood.ink;
+      ctx.fillText(chipsText, width * 0.25, height * 0.53);
     }
 
-    // Suit / seat marker in the lower third.
-    // Action badge: what this seat did on the current street. It takes the
-    // marker's place while set, because the action is the more urgent fact.
-    if (info.action) {
-      const aggressive = /加注|全押|下注/.test(info.action);
-      const folded = /弃牌/.test(info.action);
-      const badgeW = 268;
-      const badgeH = 62;
-      const badgeY = height - 128;
-      ctx.fillStyle = folded ? '#8c1c28' : aggressive ? BRASS : 'rgba(10, 7, 4, 0.66)';
+    if (action) {
+      const aggressive = /加注|全押|下注|ALL/i.test(action);
+      const folded = /弃牌|弃权/i.test(action);
+      const badgeW = width * 0.42;
+      const badgeH = height * 0.66;
+      const badgeX = width * 0.71;
+      const badgeY = height * 0.53;
+      ctx.fillStyle = folded ? '#8c1c28' : aggressive ? BRASS : 'rgba(10, 7, 4, 0.7)';
       ctx.beginPath();
-      ctx.roundRect(coinX - badgeW / 2, badgeY - badgeH / 2, badgeW, badgeH, 18);
+      ctx.roundRect(badgeX - badgeW / 2, badgeY - badgeH / 2, badgeW, badgeH, 18);
       ctx.fill();
       ctx.strokeStyle = aggressive || folded ? 'rgba(0, 0, 0, 0.45)' : 'rgba(201, 162, 74, 0.75)';
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.roundRect(coinX - badgeW / 2, badgeY - badgeH / 2, badgeW, badgeH, 18);
+      ctx.roundRect(badgeX - badgeW / 2, badgeY - badgeH / 2, badgeW, badgeH, 18);
       ctx.stroke();
-
+      let size = 96;
+      ctx.font = `700 ${size}px ${CANVAS_FONT_STACK}`;
+      while (ctx.measureText(action).width > badgeW - 30 && size > 44) {
+        size -= 4;
+        ctx.font = `700 ${size}px ${CANVAS_FONT_STACK}`;
+      }
       ctx.fillStyle = aggressive ? '#241708' : '#f6ecd2';
-      ctx.font = `700 34px ${CANVAS_FONT_STACK}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      let text = info.action;
-      while (ctx.measureText(text).width > badgeW - 26 && text.length > 2) text = text.slice(0, -2);
-      ctx.fillText(text, coinX, badgeY + 1);
+      ctx.fillText(action, badgeX, badgeY + 2);
     } else if (info.marker) {
-      ctx.fillStyle = info.active ? BRASS : wood.inkSoft;
-      ctx.font = `600 64px ${CANVAS_FONT_STACK}`;
+      ctx.fillStyle = 'rgba(242, 232, 210, 0.3)';
+      ctx.font = `600 104px ${CANVAS_FONT_STACK}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(info.marker, coinX, height - 96);
+      ctx.fillText(info.marker, width * 0.86, height * 0.53);
     }
 
-    // Turn chevron at the top edge.
+    // 轮到你：顶部一道黄铜细条（原来是板顶的 V 形箭头）。
     if (info.active) {
       ctx.fillStyle = BRASS;
-      ctx.beginPath();
-      ctx.moveTo(coinX - 18, 34);
-      ctx.lineTo(coinX, 54);
-      ctx.lineTo(coinX + 18, 34);
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillRect(width * 0.33, 12, width * 0.34, 9);
     }
-
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 8;
-    // 真头像异步到货：先拿 emoji 兜底把整块板画完，图片到了只重绘铜圈。
-    this.paintAvatarImage(ctx, info, texture, { x: coinX, y: coinY, r: coinR });
+
     this.faceCache.set(key, texture);
     return texture;
-  }
-
-  /**
-   * 把大厅头像画进铜圈。
-   *
-   * 立牌纹理是开局同步画好的，头像却要联网加载；所以先用 emoji 占位，图片到位
-   * 后只重绘铜圈那一块（圆形裁切 + cover 缩放）再 `needsUpdate`，不会整块闪白。
-   * 加载失败就保持 emoji，离线/无头像的座位照旧。
-   */
-  private static paintAvatarImage(
-    ctx: CanvasRenderingContext2D,
-    info: SeatPlateInfo,
-    texture: THREE.CanvasTexture,
-    coin: { x: number; y: number; r: number }
-  ): void {
-    const url = info.avatarUrl;
-    if (!url || typeof Image === 'undefined') return;
-    const wood = WOODS[info.wood ?? 'walnut'];
-    const image = new Image();
-    image.crossOrigin = 'anonymous';
-    image.onload = () => {
-      const sourceW = image.naturalWidth || image.width;
-      const sourceH = image.naturalHeight || image.height;
-      if (!sourceW || !sourceH) return;
-      const diameter = coin.r * 2;
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(coin.x, coin.y, coin.r - 2, 0, Math.PI * 2);
-      ctx.clip();
-      if (info.muted) ctx.globalAlpha = 0.45;
-      // cover：短边铺满铜圈，长边居中裁掉。
-      const scale = Math.max(diameter / sourceW, diameter / sourceH);
-      const w = sourceW * scale;
-      const h = sourceH * scale;
-      ctx.drawImage(image, coin.x - w / 2, coin.y - h / 2, w, h);
-      ctx.restore();
-      // 重描铜圈，盖住圆形裁切的毛边。
-      ctx.strokeStyle = info.active ? BRASS : wood.inkSoft;
-      ctx.lineWidth = info.active ? 6 : 3;
-      ctx.beginPath();
-      ctx.arc(coin.x, coin.y, coin.r, 0, Math.PI * 2);
-      ctx.stroke();
-      texture.needsUpdate = true;
-    };
-    image.src = url;
   }
 
   /** Brushed black metal for the disc (concentric machining marks). */
