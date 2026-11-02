@@ -257,7 +257,7 @@ handler: () => ({
 
 ## 4. 分阶段落地
 
-> **2026-11 实际进度**：阶段 0 已全部完成，阶段 1 的 C-5 / C-6 已在德扑落地。
+> **2026-11 实际进度**：阶段 0 已全部完成，阶段 1 的 C-5 / C-6 已在德扑落地，阶段 2 的 C-3 并发表达（`SIMULTANEOUS` + `applySimultaneous`）与 C-4 随机收口已先期完成。
 > 内核侧新增 `packages/kernel/src/charter.ts`（宪章执行器）与
 > `packages/harness/src/suites/charter.ts`（12 条可执行断言）。
 > 下面各阶段保留原计划，✅ 标记已完成项。
@@ -271,6 +271,8 @@ handler: () => ({
 | C-5 | `choosePokerAction(view: ProjectedGameState)`；`poker/rules.ts` 经 `decisionView()` 先投影再决策；`deriveNoise(view)` 不再读 `prngState`；`ProjectedGameState.ownHand` 提供「自己的手牌」合法视图 | `charter C-5` 两例 |
 | C-6 | `GameModule.checkInvariants()` + `engine.getViolations()`，**不阻断**转移；poker 落地筹码守恒 / 底池一致性 / 手号单调 | `charter C-6` 三例 |
 | C-9 | `GameModule.meta.stateSchema.globalVars`；未登记 key 报 `CHARTER_C9_UNDECLARED_GLOBAL_VAR`；poker 登记 7 个 key | `charter C-9` 两例 |
+| C-3 | 新增 `DecisionPolicy: { type: 'SIMULTANEOUS' }` 与 `GameModule.applySimultaneous()`；决策窗口结算时把动作**多重集**一次交给模组，内核不排序；未声明合并语义的模组退回串行并记 `CHARTER_C3_SERIALIZED`。dune 战斗之轮、catan 掷 7 弃牌已迁移 | `charter C-3` 四例 |
+| C-4 | 运行期 `DeterministicPRNG` 调用必须推进 `prngState`；修掉 betrayal `drawRoomCandidate()` 用 `seed + items.length + attempts * 19` 拼假随机源的问题 | `charter C-4` 一例 |
 
 **C-6 实战成绩**：筹码守恒断言上线后立刻抓到一条真实记账问题——
 `handBets` 记录的是整手累计投入，**已结算进 `pot` 的部分仍留在其中**，

@@ -308,8 +308,9 @@
 | --- | --- | --- | --- | --- |
 | C-2 单步转移 | poker | `applyAction()` → `advanceAi()`（上限 64 次）内联推进 AI | 夹具默认 `autoAi`，让全桌 AI 可在一次 dispatch 内完成一圈 | `driverActions` 逐步派发落地后删除循环（AR-44）· **已机器登记**：`module.charter.deviations`，到期 2027-03-31 |
 | C-2 单步转移 | poker | `settle()` 循环内可连关多条街并发牌至摊牌（上限 8） | 全下提前封盘时需要一次推进多街 | 改为 follow-up action 链（AR-44） |
-| C-3 并发表达 | poker / catan / betrayal | 多人同时决策走决策窗口串行 `reduce` | 内核尚无动作多重集 `SIMULTANEOUS` 策略 | `𝒯` 接受 `Action[]` 后改为一次结算（AR-45） |
-| C-4 随机收口 | betrayal | `drawRoomCandidate()` 直接用 `DeterministicPRNG.shuffle(seed + …)` | 抽房间需要"重洗弃牌堆"的局部随机，未接入 `ctx.roll()` | 内核提供 `ctx.shuffle()` 后替换（AR-46） |
+| C-3 并发表达 | poker / betrayal | 多人同时决策仍走串行 `reduce` | 尚未声明 `applySimultaneous` | 照 catan / dune 的写法补上合并语义（AR-45） |
+| C-3 并发表达 | dune_mahjong / catan | ~~战斗之轮 / 弃牌串行结算~~ | — | ✅ **已关闭（2026-11）**：`policy: { type: 'SIMULTANEOUS' }` + `applySimultaneous()` 多重集结算，顺序无关性有测试（AR-45） |
+| C-4 随机收口 | betrayal | ~~`drawRoomCandidate()` 用 `seed + items.length + attempts * 19` 拼假随机源~~ | — | ✅ **已关闭（2026-11）**：改为读 `state.prngState` 并写回 `nextSeed`；`charter C-4` 测试覆盖全部运行期调用点（AR-46） |
 | C-4 随机收口 | poker | ~~`ai.ts` 的 `noise()` 自实现 FNV 哈希作决策抖动~~ | 不想污染 `prngState`，保持 AI 决策与状态跃迁解耦 | ✅ **已部分关闭（2026-11）**：改名 `deriveNoise(view)`，入参为投影、不再读 `prngState`；仍未走 `ctx.roll()`（AR-46） |
 | C-5 信息约束 | poker | ~~AI 用 raw `GameState` 决策~~ | 历史实现，未区分投影通道 | ✅ **已关闭（2026-11）**：`choosePokerAction` 改收 `ProjectedGameState`，`rules.ts` 经 `decisionView()` 投影后调用（AR-2） |
 | C-7 收益独立 | poker / catan | 收益在 `showdown()` / 建造分支里直接改状态，未记账 | 内核尚无 `ctx.reward()` | `state.rewards` 落地后回填（AR-47） |

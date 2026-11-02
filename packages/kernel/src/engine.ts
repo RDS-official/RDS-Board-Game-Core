@@ -3,6 +3,7 @@ import {
   evaluateWindow,
   orderedSubmissions,
   resolveDecision,
+  simultaneousBatch,
   submitDecision,
   topDecision
 } from './decisions';
@@ -1196,12 +1197,34 @@ export class UniversalGameEngine {
     );
 
     let current = state;
-    for (const entry of reveal) {
-      const submission = entry.submission;
-      if (submission === 'PASS' || submission === 'COMMITTED') continue;
-      const reduced = this.reduceWithPipeline(current, submission, ctx, events);
-      if (reduced.error) return { state: current, error: reduced.error };
-      if (!reduced.cancelled) current = reduced.state;
+
+    if (window.policy.type === 'SIMULTANEOUS') {
+      // 宪章 C-3：多重集一次性交给模组，内核不替它排序。
+      const batch = simultaneousBatch(window);
+      if (batch.length > 0) {
+        if (this.module.applySimultaneous) {
+          current = this.module.applySimultaneous(current, batch, ctx);
+        } else {
+          // 模组没声明合并语义：退回串行，但把这件事记下来。
+          this.charterViolations.push({
+            code: 'CHARTER_C3_SERIALIZED',
+            message: `decision "${window.title}" is SIMULTANEOUS but the module declares no applySimultaneous — settled in seat order (order-sensitive)`
+          });
+          for (const entry of batch) {
+            const reduced = this.reduceWithPipeline(current, entry.action, ctx, events);
+            if (reduced.error) return { state: current, error: reduced.error };
+            if (!reduced.cancelled) current = reduced.state;
+          }
+        }
+      }
+    } else {
+      for (const entry of reveal) {
+        const submission = entry.submission;
+        if (submission === 'PASS' || submission === 'COMMITTED') continue;
+        const reduced = this.reduceWithPipeline(current, submission, ctx, events);
+        if (reduced.error) return { state: current, error: reduced.error };
+        if (!reduced.cancelled) current = reduced.state;
+      }
     }
 
     const marked = resolveDecision(current, window.id);

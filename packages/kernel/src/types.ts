@@ -476,7 +476,18 @@ export type DecisionKind = 'SIMULTANEOUS' | 'BIDDING' | 'VOTE';
 export type DecisionPolicy =
   | { type: 'ALL_COMMITTED' }
   | { type: 'FIRST_ACCEPT'; acceptTypes: string[] }
-  | { type: 'PRIORITY'; priorities: Record<string, number>; shortCircuitAt: number };
+  | { type: 'PRIORITY'; priorities: Record<string, number>; shortCircuitAt: number }
+  /**
+   * 宪章 C-3：所有提交作为**动作多重集**一次性进入模组，不允许内核替它
+   * 排成串行 reduce。
+   *
+   * 结算走 `GameModule.applySimultaneous(state, actions, ctx)`；没声明该函数的
+   * 模组退化为 `ALL_COMMITTED`（内核按座位序逐条 reduce，并记一条宪章偏离）。
+   *
+   * 与 `PRIORITY` 的区别：PRIORITY 也会**排序**，但排序本身就意味着"先到先得"
+   * 的语义 —— 对卡坦贸易竞标、山屋协同投票这类规则，顺序不该由内核决定。
+   */
+  | { type: 'SIMULTANEOUS' };
 
 export type DecisionSubmission = Action | 'PASS' | 'COMMITTED';
 

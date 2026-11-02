@@ -509,6 +509,20 @@ export interface GameModule {
    * Default kernel behaviour: apply submissions in policy order via reduce().
    */
   resolveDecision?: (state: GameState, window: DecisionWindow, ctx: ReduceContext) => GameState;
+  /**
+   * 宪章 C-3：`SIMULTANEOUS` 决策窗口的结算入口。
+   *
+   * `actions` 是**动作多重集**（`{ actorId, action }`），数组顺序不代表发生
+   * 顺序 —— 模组必须一次性消费，自己决定如何合并（平局打破、边池、竞标…）。
+   *
+   * 未声明时内核退化为"按座位序逐条 reduce"，并记一条
+   * `CHARTER_C3_SERIALIZED` 偏离：语义仍然确定，但顺序敏感。
+   */
+  applySimultaneous?: (
+    state: GameState,
+    actions: { actorId: ActorId; action: Action }[],
+    ctx: ReduceContext
+  ) => GameState;
 
   /** Called after a decision window resolves; may open the next window. */
   onDecisionResolved?: (state: GameState, window: DecisionWindow, ctx: ReduceContext) => GameState;

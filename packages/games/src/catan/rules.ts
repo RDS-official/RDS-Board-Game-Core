@@ -269,6 +269,42 @@ export class CatanRules {
     ];
   }
 
+  /**
+   * 宪章 C-3：掷出 7 后的"各弃一半"多重集结算。
+   *
+   * 每个受害者弃的是自己的资源，彼此不读写对方的状态，因此合并语义就是
+   * "逐个应用"。与串行 fallback 的差别在于**语义假设**：这里由模组显式
+   * 声明"这些动作互不影响"，而不是让内核按座位序碰巧得到正确结果。
+   *
+   * 若将来引入"弃掉的牌进银行 / 影响他人"这类耦合规则，应该在这里改，
+   * 而不是回到 reduce 里的逐条循环。
+   */
+  public static applySimultaneous(
+    state: GameState,
+    actions: { actorId: string; action: Action }[],
+    ctx: ReduceContext
+  ): GameState {
+    let next = state;
+    for (const entry of actions) {
+      if (entry.action.type !== 'DISCARD_HALF') continue;
+      const pid = entry.actorId;
+      if (!next.players[pid]) continue;
+      const discarded = discardHalf(next, pid);
+      const summary = Object.entries(discarded)
+        .filter(([, amount]) => amount > 0)
+        .map(([res, amount]) => `${amount} ${res}`)
+        .join(', ');
+      ctx.trace({
+        id: ctx.id('evt'),
+        type: 'CARD_DISCARD',
+        title: `${next.players[pid].name} discarded ${summary || 'nothing'}`,
+        durationMs: 400
+      });
+      next = { ...next };
+    }
+    return next;
+  }
+
   public static applyAction(state: GameState, action: Action, ctx: ReduceContext): GameState {
     const trace = ctx.trace;
     const s: GameState = JSON.parse(JSON.stringify(state));
@@ -339,7 +375,8 @@ export class CatanRules {
                 description: 'Every player with more than 7 resource cards discards half (rounded down).',
                 participants: victims,
                 secret: false,
-                policy: { type: 'ALL_COMMITTED' },
+                // 宪章 C-3：每人各弃自己的半数，互不影响，一次性结算。
+                policy: { type: 'SIMULTANEOUS' },
                 payload: { kind: 'discard' }
               },
               ctx.id('discard')

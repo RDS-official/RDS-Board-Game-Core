@@ -137,6 +137,8 @@ export const catanModule: GameModule = defineGame({
   },
   legalActions: (state, playerId) => CatanRules.getLegalActions(state, playerId),
   reduce: (state, action, ctx) => CatanRules.applyAction(state, action, ctx),
+  // 宪章 C-3：掷 7 的"各弃一半"多方同时结算。
+  applySimultaneous: (state, actions, ctx) => CatanRules.applySimultaneous(state, actions, ctx),
   onDecisionResolved: (state, window) => CatanRules.onDecisionResolved(state, window),
   outcome: state => toOutcome(CatanRules.checkWinCondition(state))
 });
@@ -553,6 +555,8 @@ export const duneMahjongModule: GameModule = defineGame({
   setup: seed => setupDuneMahjong(seed),
   legalActions: (state, playerId) => DuneMahjongRules.getLegalActions(state, playerId),
   reduce: (state, action, ctx) => DuneMahjongRules.applyAction(state, action, ctx),
+  // 宪章 C-3：战斗之轮的双 dial 多重集一次性结算，顺序不影响结果。
+  applySimultaneous: (state, actions, ctx) => DuneMahjongRules.applySimultaneous(state, actions as never, ctx),
   outcome: state => toOutcome(DuneMahjongRules.checkWinCondition(state))
 });
 

@@ -5,8 +5,11 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { CognitiveObserver } from '@rds/kernel/observer';
 import { checkCharter, resolveCharter } from '@rds/kernel/charter';
+import { openDecision } from '@rds/kernel/decisions';
 import type { Action, GameState, ProjectedGameState } from '@rds/kernel/types';
 import { GAME_REGISTRY } from '@rds/games/registry';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { choosePokerAction } from '@rds/games/poker/ai';
 import { assert, assertEqual, test } from '../testKit';
 
@@ -53,6 +56,18 @@ function walkModule(module: (typeof GAME_REGISTRY)[string], seed: number, steps 
   }
 
   return { engine, seen, firstError };
+}
+
+
+/** 递归列出目录下的 .ts 文件。 */
+function listFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listFiles(path));
+    else if (entry.name.endsWith('.ts')) out.push(path);
+  }
+  return out;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -319,4 +334,196 @@ test('charter: violations are recorded without blocking the transition', () => {
 
   engine.clearViolations();
   assertEqual(engine.getViolations().length, 0, 'clearViolations empties the ring');
+});
+
+/* -------------------------------------------------------------------------- */
+/* C-3 并发表达                                                                */
+/* -------------------------------------------------------------------------- */
+
+/** 跑一场沙丘战斗之轮，按给定顺序提交两份固定 dial。 */
+function runBattleWheel(order: ('p1' | 'p2')[], pick: Record<'p1' | 'p2', number>) {
+  const module = GAME_REGISTRY.dune_mahjong;
+  const engine = new UniversalGameEngine(module, 7, { strict: true });
+  const open = engine.getLegalActions(engine.getActiveActorId()).find(a => a.type === 'OPEN_BATTLE_WINDOW');
+  assert(open, 'dune offers OPEN_BATTLE_WINDOW');
+  assert(engine.dispatch(open!).ok, 'the battle window opens');
+
+  for (const pid of order) {
+    const legal = engine.getLegalActions(pid);
+    assert(legal.length > pick[pid], `${pid} has at least ${pick[pid] + 1} dial options`);
+    const result = engine.dispatch(legal[pick[pid]]);
+    assert(result.ok, `commit for ${pid} succeeds: ${result.error ?? ''}`);
+  }
+
+  const state = engine.getRawState();
+  return {
+    result: state.globalVars.revealedBattleResult as Record<string, unknown> | undefined,
+    troops: { p1: state.players.p1.customProps?.troops, p2: state.players.p2.customProps?.troops },
+    score: { p1: state.players.p1.score, p2: state.players.p2.score },
+    violations: engine.getViolations().map(v => v.code)
+  };
+}
+
+test('charter C-3: the battle wheel resolves identically regardless of submission order', () => {
+  const module = GAME_REGISTRY.dune_mahjong;
+  assert(module.applySimultaneous, 'dune declares applySimultaneous');
+
+  for (const [label, pick] of [
+    ['same dial', { p1: 0, p2: 0 }],
+    ['different dials', { p1: 0, p2: 1 }]
+  ] as const) {
+    const forward = runBattleWheel(['p1', 'p2'], { ...pick });
+    const reverse = runBattleWheel(['p2', 'p1'], { ...pick });
+    assertEqual(
+      JSON.stringify(forward.result),
+      JSON.stringify(reverse.result),
+      `${label}: winner must not depend on who submits first`
+    );
+    assertEqual(JSON.stringify(forward.troops), JSON.stringify(reverse.troops), `${label}: troop spend matches`);
+    assertEqual(JSON.stringify(forward.score), JSON.stringify(reverse.score), `${label}: scores match`);
+  }
+});
+
+test('charter C-3: settlements go through the module batch, not the serial fallback', () => {
+  const forward = runBattleWheel(['p1', 'p2'], { p1: 0, p2: 0 });
+  assertEqual(
+    forward.violations.filter(code => code === 'CHARTER_C3_SERIALIZED').length,
+    0,
+    'a declared applySimultaneous means no serial-fallback deviation'
+  );
+  assert(forward.result, 'the battle produced a result');
+});
+
+test('charter C-3: a SIMULTANEOUS window without applySimultaneous is flagged', () => {
+  const base = GAME_REGISTRY.dune_mahjong;
+  // 抽掉合并语义，模拟一个"只贴了标签没实现"的模组。
+  const stripped = { ...base, applySimultaneous: undefined };
+  const engine = new UniversalGameEngine(stripped, 7, { strict: true });
+  const open = engine.getLegalActions(engine.getActiveActorId()).find(a => a.type === 'OPEN_BATTLE_WINDOW');
+  assert(open, 'window can still be opened');
+  engine.dispatch(open!);
+
+  for (const pid of ['p1', 'p2'] as const) {
+    const legal = engine.getLegalActions(pid);
+    assert(legal.length > 0, `${pid} has dial options`);
+    engine.dispatch(legal[0]);
+  }
+
+  const codes = engine.getViolations().map(v => v.code);
+  assert(
+    codes.includes('CHARTER_C3_SERIALIZED'),
+    `the kernel must record that it fell back to seat order, got ${JSON.stringify(codes)}`
+  );
+});
+
+test('charter C-3: SIMULTANEOUS never short-circuits on the first submission', () => {
+  const module = GAME_REGISTRY.dune_mahjong;
+  const engine = new UniversalGameEngine(module, 7, { strict: true });
+  const open = engine.getLegalActions(engine.getActiveActorId()).find(a => a.type === 'OPEN_BATTLE_WINDOW');
+  engine.dispatch(open!);
+
+  const first = engine.getLegalActions('p1')[0];
+  const result = engine.dispatch(first);
+
+  assertEqual(result.ok, true, 'the first submission is accepted');
+  assertEqual(result.decisionResolved ?? false, false, 'the window stays open until both commit');
+  assert(
+    !engine.getRawState().globalVars.revealedBattleResult,
+    'no settlement happens on the first submission'
+  );
+});
+
+test('charter C-3: catan multi-player discard is declared simultaneous and order-free', () => {
+  const module = GAME_REGISTRY.catan;
+  assert(module.applySimultaneous, 'catan declares applySimultaneous for the rolled-7 discard');
+
+  // 两副手牌都超过 7 张，各弃一半；弃牌互不影响，所以结果必须与提交顺序无关。
+  const bags: Record<string, Record<string, number>> = {
+    p1: { wood: 4, brick: 3, sheep: 2, wheat: 1, ore: 0 }, // 10 → 弃 5
+    p2: { wood: 0, brick: 1, sheep: 3, wheat: 4, ore: 1 } // 9  → 弃 4
+  };
+
+  const runDiscard = (order: string[]) => {
+    const engine = new UniversalGameEngine(module, 3, { strict: true });
+    const base = engine.getRawState();
+    const players = { ...base.players };
+    for (const pid of Object.keys(bags)) {
+      players[pid] = {
+        ...players[pid],
+        customProps: { ...players[pid].customProps, resources: { ...bags[pid] } }
+      };
+    }
+    // 直接在权威状态上开窗口，绕开掷骰的随机性。
+    const opened = openDecision(
+      { ...base, players, phase: 'DISCARD' },
+      {
+        kind: 'SIMULTANEOUS',
+        title: 'Rolled 7 — discard half',
+        participants: ['p1', 'p2'],
+        secret: false,
+        policy: { type: 'SIMULTANEOUS' },
+        payload: { kind: 'discard' }
+      },
+      'discard_test'
+    );
+
+    let state = opened.state;
+    const ctx = { id: (k: string) => `${k}_t`, trace: () => {}, seq: 0, roll: () => ({ result: { spec: { sides: 6, count: 1 }, rolls: [1], total: 1 }, nextSeed: 0 }) };
+    for (const pid of order) {
+      state = module.applySimultaneous!(
+        state,
+        [{ actorId: pid, action: { type: 'DISCARD_HALF', playerId: pid } }],
+        ctx as never
+      );
+    }
+    const sum = (bag: Record<string, number>) => Object.values(bag).reduce((a, b) => a + b, 0);
+    return {
+      p1: state.players.p1.customProps?.resources,
+      p2: state.players.p2.customProps?.resources,
+      p1Total: sum(state.players.p1.customProps?.resources as Record<string, number>),
+      p2Total: sum(state.players.p2.customProps?.resources as Record<string, number>)
+    };
+  };
+
+  const forward = runDiscard(['p1', 'p2']);
+  const reverse = runDiscard(['p2', 'p1']);
+
+  assertEqual(JSON.stringify(forward), JSON.stringify(reverse), 'discard outcome must not depend on order');
+  assertEqual(forward.p1Total, 5, 'p1 discards half of 10');
+  assertEqual(forward.p2Total, 5, 'p2 discards ceil-ish half of 9 (floor of 4 discarded)');
+});
+
+/* -------------------------------------------------------------------------- */
+/* C-4 随机收口                                                                */
+/* -------------------------------------------------------------------------- */
+
+test('charter C-4: every runtime DeterministicPRNG call advances prngState', () => {
+  const offenders: string[] = [];
+  const dirs = ['betrayal', 'catan', 'poker', 'sanguosha', 'splendor', 'dune_mahjong'];
+
+  for (const game of dirs) {
+    const dir = `packages/games/src/${game}`;
+    if (!existsSync(dir)) continue;
+    for (const file of listFiles(dir)) {
+      // setup / scenarios 构造初始状态，seed 由调用方给定，没有"前一个 prngState"。
+      if (/setup\.ts$|scenarios\.ts$/.test(file)) continue;
+      const source = readFileSync(file, 'utf8');
+      const lines = source.split('\n');
+
+      lines.forEach((line, index) => {
+        if (!/DeterministicPRNG\.(shuffle|nextInt|rollFaces)/.test(line)) return;
+        // 这一行往后 10 行内必须把某个 nextSeed 写回 prngState。
+        const window = lines.slice(index, index + 10).join('\n');
+        const advances = /prngState\s*[:=]\s*[^;\n]*nextSeed/.test(window);
+        // 允许"返回 nextSeed 交给调用方写回"的辅助函数：
+        //   同一窗口里出现 `nextSeed` 且函数返回类型/对象里带 nextSeed
+        const returnsSeed = /nextSeed/.test(window);
+        if (!advances && !returnsSeed) {
+          offenders.push(`${file}:${index + 1}`);
+        }
+      });
+    }
+  }
+
+  assertEqual(offenders.join(', '), '', 'DeterministicPRNG used without advancing prngState');
 });

@@ -89,7 +89,9 @@ export class DuneMahjongRules {
             description: 'Both Houses lock in troops, leader and weapon. Nothing is revealed until both commit.',
             participants: ['p1', 'p2'],
             secret: true,
-            policy: { type: 'ALL_COMMITTED' },
+            // 宪章 C-3：双方押注同时生效，顺序不该由内核决定。
+            // 结算走 applySimultaneous()，一次拿到两份 dial 再比。
+            policy: { type: 'SIMULTANEOUS' },
             payload: { allowedTypes: ['COMMIT_BATTLE_DIAL'] }
           },
           ctx.id('decision')
@@ -116,34 +118,8 @@ export class DuneMahjongRules {
           durationMs: 400
         });
 
-        // Check if both p1 and p2 have committed dials
-        if (dials.p1 && dials.p2) {
-          const p1Total = dials.p1.troops + dials.p1.leaderStr;
-          const p2Total = dials.p2.troops + dials.p2.leaderStr;
-          const winnerId = p1Total >= p2Total ? 'p1' : 'p2';
-          const loserId = winnerId === 'p1' ? 'p2' : 'p1';
-
-          nextState.globalVars.revealedBattleResult = {
-            p1Score: p1Total,
-            p2Score: p2Total,
-            winnerId
-          };
-
-          // Deduct sacrificed troops
-          nextState.players.p1.customProps.troops -= dials.p1.troops;
-          nextState.players.p2.customProps.troops -= dials.p2.troops;
-          nextState.players[winnerId].score += 5;
-
-          trace({
-            id: `dune_reveal_${ctx.id('g')}`,
-            type: 'ANNOUNCEMENT',
-            title: `💥 DIALS REVEALED! Atreides: ${p1Total} vs Harkonnen: ${p2Total}! Winner: ${nextState.players[winnerId].name}!`,
-            durationMs: 1200
-          });
-
-          // Reset committed dials for next round
-          nextState.globalVars.committedDials = {};
-        }
+        // 只负责记录。胜负由 applySimultaneous() 在窗口结算时一次性判定 ——
+        // 之前的实现在这里"等第二个人提交时开打"，等于让后提交者掌握结算时机。
         break;
       }
 
@@ -244,6 +220,89 @@ export class DuneMahjongRules {
         break;
       }
     }
+
+    return nextState;
+  }
+
+  /**
+   * 宪章 C-3：战斗之轮的多重集结算。
+   *
+   * 双方的 dial 同时生效 —— 不看谁先提交、也不看数组顺序。平局按
+   * "阿特雷迪斯防守方优先"（房规：同分守方胜），因此结果只由两份 dial 决定，
+   * 与提交时序无关。
+   *
+   * 这与旧实现的差别是**可审计性**：旧代码在第二个 `COMMIT_BATTLE_DIAL`
+   * 的分支里内联结算，谁后提交谁触发了结算；现在结算点固定在内核的窗口
+   * 解析阶段，且输入是完整的两份 dial。
+   */
+  public static applySimultaneous(
+    state: GameState,
+    actions: { actorId: string; action: Action }[],
+    ctx: ReduceContext
+  ): GameState {
+    const dials: Record<string, { troops: number; leaderStr: number }> = {
+      ...((state.globalVars.committedDials as Record<string, { troops: number; leaderStr: number }>) ?? {})
+    };
+
+    for (const entry of actions) {
+      if (entry.action.type !== 'COMMIT_BATTLE_DIAL') continue;
+      const payload = entry.action.payload as { troops?: unknown; leaderStr?: unknown } | undefined;
+      const troops = Number(payload?.troops ?? 0);
+      const leaderStr = Number(payload?.leaderStr ?? 0);
+      if (!Number.isFinite(troops) || !Number.isFinite(leaderStr)) continue;
+      dials[entry.actorId] = { troops: Math.max(0, troops), leaderStr };
+    }
+
+    let nextState: GameState = {
+      ...state,
+      globalVars: { ...state.globalVars, committedDials: dials }
+    };
+
+    const a = dials.p1;
+    const b = dials.p2;
+    if (!a || !b) return nextState;
+
+    const p1Total = a.troops + a.leaderStr;
+    const p2Total = b.troops + b.leaderStr;
+    // 同分守方（p1）胜，与提交顺序无关。
+    const winnerId = p1Total >= p2Total ? 'p1' : 'p2';
+
+    nextState = {
+      ...nextState,
+      globalVars: {
+        ...nextState.globalVars,
+        revealedBattleResult: { p1Score: p1Total, p2Score: p2Total, winnerId },
+        committedDials: {}
+      },
+      players: {
+        ...nextState.players,
+        p1: {
+          ...nextState.players.p1,
+          customProps: {
+            ...nextState.players.p1.customProps,
+            troops: Math.max(0, Number(nextState.players.p1.customProps?.troops ?? 0) - a.troops)
+          }
+        },
+        p2: {
+          ...nextState.players.p2,
+          customProps: {
+            ...nextState.players.p2.customProps,
+            troops: Math.max(0, Number(nextState.players.p2.customProps?.troops ?? 0) - b.troops)
+          }
+        },
+        [winnerId]: {
+          ...nextState.players[winnerId],
+          score: nextState.players[winnerId].score + 5
+        }
+      }
+    };
+
+    ctx.trace({
+      id: `dune_reveal_${ctx.id('g')}`,
+      type: 'ANNOUNCEMENT',
+      title: `💥 DIALS REVEALED! Atreides: ${p1Total} vs Harkonnen: ${p2Total}! Winner: ${nextState.players[winnerId].name}!`,
+      durationMs: 1200
+    });
 
     return nextState;
   }

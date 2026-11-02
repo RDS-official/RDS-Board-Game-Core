@@ -118,6 +118,11 @@ export function evaluateWindow(window: DecisionWindow): { ready: boolean; shortC
     return { ready: allCommitted, shortCircuited: false };
   }
 
+  if (window.policy.type === 'SIMULTANEOUS') {
+    // 多人同时生效：任何一人先提交都不能短路，必须等全员到齐再看整体。
+    return { ready: allCommitted, shortCircuited: false };
+  }
+
   if (window.policy.type === 'PRIORITY') {
     let highest = -Infinity;
     for (const pid of window.participants) {
@@ -152,6 +157,11 @@ export function orderedSubmissions(window: DecisionWindow): { playerId: PlayerId
         acceptTypes.includes(entry.submission.type)
     );
     return acceptedIndex >= 0 ? entries.slice(0, acceptedIndex + 1) : entries;
+  }
+
+  if (window.policy.type === 'SIMULTANEOUS') {
+    // 顺序对**语义**无意义：只用座位序保证审计输出稳定。
+    return entries;
   }
 
   if (window.policy.type === 'PRIORITY') {
@@ -211,4 +221,23 @@ export function projectDecision(window: DecisionWindow, viewerId: PlayerId | 'GO
 export function actionsInWindow(window: DecisionWindow, playerId: PlayerId): Action[] {
   const submission = window.submissions[playerId];
   return submission && submission !== 'PASS' && submission !== 'COMMITTED' ? [submission] : [];
+}
+
+/**
+ * 宪章 C-3：把已提交的动作整理成**多重集**交给模组。
+ *
+ * 与 `orderedSubmissions` 的区别：这里**不排序**。座位序只是数组顺序，
+ * 语义上它们同时发生，模组必须自己决定如何合并（例如：
+ * "所有投标同时生效，最高者得，同额按座位号打破平局"）。
+ *
+ * 每个元素带上提交者，方便模组在合并时引用。
+ */
+export function simultaneousBatch(window: DecisionWindow): { actorId: ActorId; action: Action }[] {
+  const batch: { actorId: ActorId; action: Action }[] = [];
+  for (const pid of window.participants) {
+    const submission = window.submissions[pid];
+    if (submission === undefined || submission === 'PASS' || submission === 'COMMITTED') continue;
+    batch.push({ actorId: pid, action: submission });
+  }
+  return batch;
 }
