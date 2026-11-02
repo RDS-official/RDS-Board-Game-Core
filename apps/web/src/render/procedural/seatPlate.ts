@@ -284,7 +284,7 @@ export class SeatPlateBuilder {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
+    texture.anisotropy = 8;
     // 真头像异步到货：先拿 emoji 兜底把整块板画完，图片到了只重绘铜圈。
     this.paintAvatarImage(ctx, info, texture, { x: coinX, y: coinY, r: coinR });
     this.faceCache.set(key, texture);
@@ -369,7 +369,7 @@ export class SeatPlateBuilder {
 
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
+    texture.anisotropy = 8;
     this.metalTexture = texture;
     return texture;
   }
