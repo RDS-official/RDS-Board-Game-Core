@@ -5,7 +5,7 @@ import { TransactionalAnimationQueue } from './animationQueue';
 import { BoardRaycaster, InteractiveObjectData } from './raycaster';
 import { CardMeshBuilder } from './procedural/cardMesh';
 import { ChipMeshBuilder } from './procedural/chipMesh';
-import { SeatPlateBuilder, type WoodKind } from './procedural/seatPlate';
+import { SEAT_BOARD, SeatPlateBuilder, type WoodKind } from './procedural/seatPlate';
 import { pokemonCardBackTexture, pokemonCardTexture } from './procedural/pokemonAssets';
 import { DiceMeshBuilder } from './procedural/diceMesh';
 import { HexTileBuilder } from './procedural/hexTile';
@@ -380,6 +380,14 @@ export class BoardGameScene {
    * of signs snapping to attention.
    */
   private seatStandees: { group: THREE.Group; jitter: number; lamp?: THREE.Mesh; seatId: string }[] = [];
+  /** 每个座位「默认视角正下方」的定位标：白点 + 30% 白线 + 状态环/旋转箭头。 */
+  private seatBeacons: {
+    group: THREE.Group;
+    ring: THREE.Mesh;
+    spinner: THREE.Group;
+    arrow: THREE.Mesh;
+    seatId: string;
+  }[] = [];
 
   /** Previous poker snapshot, used to detect what to animate. */
   private pokerFxPrev: {
@@ -2052,6 +2060,8 @@ export class BoardGameScene {
     // The board group is rebuilt from scratch every sync, so the standee list is
     // rebuilt with it.
     this.seatStandees = [];
+    this.seatBeacons = [];
+    const seatNodes = Object.values(graph.nodes).filter(node => node.type === 'SEAT');
 
     // Render Nodes
     Object.values(graph.nodes).forEach(node => {
@@ -2344,6 +2354,7 @@ export class BoardGameScene {
             avatarUrl: seatPlayer?.avatarUrl,
             color: seatPlayer?.color ?? '#455a64',
             detail: this.seatPlateDetail(state, seatId),
+            chips: String(seatPlayer?.customProps?.chips ?? ''),
             active: seatId === activeActor,
             muted: seatPlayer ? !seatPlayer.alive : false,
             marker,
@@ -2368,6 +2379,29 @@ export class BoardGameScene {
         group.rotation.y = Math.atan2(-outward.x, -outward.y) + jitter;
         this.seatStandees.push({ group, jitter, lamp, seatId });
         this.boardObjectsGroup.add(group);
+
+        // 视角定位标：放在「这个座位的默认机位」正下方的地面上——也就是
+        // `setSeatView` 里那台相机脚下的位置。竖线高度跟那台相机一样高，所以
+        // 站在任何座位看过去，线顶正好是自己眼睛的高度。
+        {
+          const span = Math.max(
+            ...seatNodes.map(entry => Math.abs(entry.position[0])),
+            4
+          );
+          // 机位在 `back` 之外，但标柱贴着桌沿放才看得见（放机位下面会跑到画面
+          // 外面，还会把相机的自动取景撑大）。高度仍取那台相机的高度。
+          const back = Math.max(7, span * 1.05);
+          const eye = 2 + back * 0.29;
+          const reach = 2.4;
+          const beacon = this.createSeatBeacon(
+            seatX + outward.x * reach,
+            seatZ + outward.y * reach,
+            eye,
+            SEAT_BOARD.width * 0.5
+          );
+          this.seatBeacons.push({ ...beacon, seatId });
+          this.boardObjectsGroup.add(beacon.group);
+        }
         this.raycaster.registerInteractive(plate, {
           type: 'NODE',
           id: node.id,
@@ -4871,8 +4905,89 @@ export class BoardGameScene {
    * Dead-on aiming looked wrong: every board snapped into the same plane, which
    * hides the table's structure. Each seat therefore carries a hashed ±30° offset
    */
-  private updateSeatStandees(): void {
-    if (this.seatStandees.length === 0) return;
+  /**
+   * 「视角定位标」：地面白点 + 30% 透明竖线 + 状态环 + 环上箭头。
+   *
+   * 位置是某个座位的默认机位正下方（见 `setSeatView`），竖线高度就是那台相机
+   * 的高度——不管从哪个座位看，线顶都落在自己的视平线上。
+   */
+  private createSeatBeacon(
+    x: number,
+    z: number,
+    height: number,
+    radius: number
+  ): { group: THREE.Group; ring: THREE.Mesh; spinner: THREE.Group; arrow: THREE.Mesh } {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+
+    const dot = new THREE.Mesh(
+      new THREE.CircleGeometry(0.14, 24),
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    dot.rotation.x = -Math.PI / 2;
+    dot.position.y = 0.02;
+    group.add(dot);
+
+    const line = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.028, 0.028, height, 10, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.3,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    line.position.y = height / 2;
+    group.add(line);
+
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(radius * 0.86, radius, 72),
+      new THREE.MeshBasicMaterial({
+        color: 0x64748b,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.03;
+    group.add(ring);
+
+    const spinner = new THREE.Group();
+    spinner.position.y = 0.05;
+    spinner.visible = false;
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0.52);
+    shape.lineTo(-0.32, -0.2);
+    shape.lineTo(0.32, -0.2);
+    shape.closePath();
+    const arrow = new THREE.Mesh(
+      new THREE.ShapeGeometry(shape),
+      new THREE.MeshBasicMaterial({
+        color: 0xff9a9a,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      })
+    );
+    arrow.rotation.x = -Math.PI / 2;
+    arrow.position.x = radius * 0.9;
+    spinner.add(arrow);
+    group.add(spinner);
+
+    return { group, ring, spinner, arrow };
+  }
+
+  private updateSeatStandees(dt: number): void {
     const cam = this.camera.position;
     const pulse = 0.55 + Math.sin(performance.now() / 320) * 0.25;
     // 半圆环灯每帧按**当前**牌局刷新：节点是增量复用的，建牌那一刻的状态不可靠。
@@ -4922,6 +5037,31 @@ export class BoardGameScene {
         material.opacity = 0.22;
       }
     }
+
+    // 视角定位标：环色跟底座灯同源（轮到 = 淡红、已动作/已准备 = 绿、弃牌 = 灰），
+    // 只有轮到该玩家时箭头出现并旋转。
+    for (const beacon of this.seatBeacons) {
+      const { seatId } = beacon;
+      // 站在自己座位上时，自己的标柱就在相机脚下——会变成一条穿过画面中央的
+      // 白线。离相机太近的直接不画。
+      const bx = cam.x - beacon.group.position.x;
+      const bz = cam.z - beacon.group.position.z;
+      beacon.group.visible = Math.hypot(bx, bz) > 7;
+      if (!beacon.group.visible) continue;
+      const ringMat = beacon.ring.material as THREE.MeshBasicMaterial;
+      const arrowMat = beacon.arrow.material as THREE.MeshBasicMaterial;
+      const folded = !!hand?.folded?.includes(seatId);
+      const turn = !isSettlement && !!live && seatId === actor;
+      const lastAction = hand?.lastActions?.[seatId];
+      const acted = !isSettlement && !!lastAction && !folded && !lastAction.includes('盲');
+      const ready = isSettlement && !!live && seatReadyForPlay(live, hand, seatId);
+      const hex = folded ? 0x6b7280 : turn ? 0xff9a9a : ready || acted ? 0x5fd08a : 0x64748b;
+      ringMat.color.setHex(hex);
+      arrowMat.color.setHex(0xff9a9a);
+      ringMat.opacity = turn ? 0.9 : 0.55;
+      beacon.spinner.visible = turn;
+      if (turn) beacon.spinner.rotation.y += dt * 2.2;
+    }
   }
   private renderLoop(): void {
     if (this.isDestroyed) return;
@@ -4939,7 +5079,7 @@ export class BoardGameScene {
     this.updateCardSettles(now);
     this.updateRoomSettles(now);
     this.updateNavArrows(now);
-    this.updateSeatStandees();
+    this.updateSeatStandees(dt);
     this.renderer.render(this.scene, this.camera);
     this.labels.render(
       this.camera,
