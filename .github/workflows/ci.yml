@@ -1,0 +1,324 @@
+name: ci
+
+# PR 的必过门禁：类型 / lint / 结构 / 文档 → 内核一致性 → 夹具矩阵 → UI 冒烟。
+#
+# 设计取舍（读完再改）：
+#
+#  1. **按改动面裁剪**：`scripts/verify.mjs` 的 `--changed` 已经实现了「这个 diff
+#     会影响哪些闸门」，这里在 `changes` job 里用同一套口径重新算一遍（CI 需要
+#     独立于本地 git 状态），而不是在 YAML 里维护第二份映射表。
+#     只动 `.md` 的 PR 只跑 docs；动 `packages/kernel` 才付矩阵的钱。
+#  2. **浏览器只在需要时装**：Playwright Chromium ~150MB，装一次几十秒。
+#     只有 diff 真的碰到 `apps/web` / `packages/app` / `.css` 时才装。
+#  3. **精简 ≠ 放松**：全量 `pnpm test:ui`（21 屏 + card-overlay）留在本地
+#     `pnpm verify:all`；CI 跑 `UI_SMOKE=1`（每游戏首屏）抓启动崩溃与首屏报错。
+#     合并进 main 后的 `deploy.yml` 仍会跑全量内核、服务端自检与生产构建。
+#  4. **分 job 而不是一个长 job**：失败时一眼看出是「类型挂了」还是「UI 挂了」；
+#     静态检查几十秒出结果，不必等浏览器。
+#
+# 分支保护要求的必过 check 是汇总 job **gate**（见 docs/QUALITY-GATES.md §7）。
+# auto-merge.yml 在它通过后自动 squash 合并。
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  # 允许在 Actions 页面手动跑一次，排障用。
+  workflow_dispatch:
+
+# 同一分支的新提交取消上一次运行：PR 连续 push 时不排队烧 CPU。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  # pnpm 的 devEngines 会试图下载指定版本；CI 用已装好的那个即可（与 deploy.yml 一致）。
+  npm_config_manage_package_manager_versions: 'false'
+  # corepack 在 runner 上的默认 home 可能不可写。
+  COREPACK_HOME: ${{ github.workspace }}/.corepack
+  # 给 gate 的时长预算留出 CI 机器的噪声余量（见 scripts/lib/gates.mjs）。
+  GATE_SCALE: '1.5'
+  NO_COLOR: '1'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. 改动面探测：算出这个 PR 该跑哪些闸门，供后面所有 job 复用。
+  # ---------------------------------------------------------------------------
+  changes:
+    name: detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      docs: ${{ steps.filter.outputs.docs }}
+      styles: ${{ steps.filter.outputs.styles }}
+      server: ${{ steps.filter.outputs.server }}
+      kernelish: ${{ steps.filter.outputs.kernelish }}
+      uish: ${{ steps.filter.outputs.uish }}
+      geometry: ${{ steps.filter.outputs.geometry }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # diff 需要 merge-base；浅克隆会让 origin/main 不可达。
+          fetch-depth: 0
+
+      # 与 scripts/verify.mjs 的 changedFiles() 同一套口径。
+      # 手写而不是引第三方 paths-filter：少一个依赖，规则就在眼前。
+      - name: Classify the diff
+        id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+            head="HEAD"
+          else
+            # push 到 main：比较前后两个 commit。
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            # 新分支 / force push 时 before 是全 0，无法比较。
+            if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+              base=""
+            fi
+          fi
+
+          if [ -n "$base" ] && git rev-parse --verify --quiet "$base" >/dev/null; then
+            git diff --name-only "$base...$head" > /tmp/changed.txt
+          else
+            # 比较不了就全跑：宁可慢，不可漏。
+            echo "__ALL__" > /tmp/changed.txt
+          fi
+
+          files=$(cat /tmp/changed.txt)
+          has() { echo "$files" | grep -Eq "$1" && echo true || echo false; }
+
+          if echo "$files" | grep -q '__ALL__'; then
+            echo "diff unavailable — running every gate" >&2
+            for k in code docs styles server kernelish uish geometry; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
+
+          {
+            echo "code=$(has '\.(ts|tsx|mjs|cjs|js)$')"
+            echo "docs=$(has '\.md$')"
+            echo "styles=$(has '\.css$')"
+            echo "server=$(has '^apps/server/')"
+            echo "kernelish=$(has '^packages/(kernel|games|harness)/')"
+            echo "uish=$(has '^(apps/web|packages/app)/')"
+            echo "geometry=$(has 'roomTile\.ts$|render/procedural/')"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "changed files:" >&2
+          cat /tmp/changed.txt >&2
+
+  # ---------------------------------------------------------------------------
+  # 2. 静态闸门：lint + 结构预算 + 类型 + 文档。几十秒出结果。
+  # ---------------------------------------------------------------------------
+  static:
+    name: static (lint · structure · types · docs)
+    needs: changes
+    if: >-
+      needs.changes.outputs.code == 'true' ||
+      needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Biome lint
+        if: needs.changes.outputs.code == 'true'
+        run: pnpm lint
+      - name: Structure budget
+        if: needs.changes.outputs.code == 'true'
+        run: node scripts/check-structure.mjs
+      - name: Typecheck + production build
+        if: needs.changes.outputs.code == 'true'
+        run: node scripts/verify-types.mjs
+      - name: Docs paths
+        if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.code == 'true'
+        run: node scripts/check-doc-paths.mjs
+
+  # ---------------------------------------------------------------------------
+  # 3. 内核一致性 + 分层边界（任何代码改动都要）。
+  # ---------------------------------------------------------------------------
+  core:
+    name: core conformance
+    needs: changes
+    if: needs.changes.outputs.code == 'true' || needs.changes.outputs.kernelish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # 3 分片并发；用例数与边界检查都在最后汇总，任一失败即失败。
+      - name: Kernel suite (3 shards)
+        run: node scripts/test-core-parallel.mjs
+
+  # ---------------------------------------------------------------------------
+  # 4. 黑盒矩阵（只在 kernel / games / harness 真被改动时）。
+  #    MATRIX_FAST=1 每个夹具只跑一个 seed：抓回放哈希与非法动作；
+  #    全量多 seed 留在本地 `pnpm verify:all`。
+  # ---------------------------------------------------------------------------
+  matrix:
+    name: fixture matrix (fast)
+    needs: changes
+    if: needs.changes.outputs.kernelish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Fixture matrix
+        env:
+          MATRIX_FAST: '1'
+        run: node scripts/test-matrix-parallel.mjs
+
+  # ---------------------------------------------------------------------------
+  # 5. 服务端自检（只在 apps/server 改动时）。selftest 自带一次性临时数据目录。
+  # ---------------------------------------------------------------------------
+  server:
+    name: server selftest
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Hub selftest
+        run: pnpm test:server
+
+  # ---------------------------------------------------------------------------
+  # 6. UI 冒烟（只在 web / app / css 改动时）：每款游戏首屏。
+  # ---------------------------------------------------------------------------
+  ui:
+    name: ui smoke
+    needs: changes
+    if: >-
+      needs.changes.outputs.uish == 'true' ||
+      needs.changes.outputs.styles == 'true' ||
+      needs.changes.outputs.geometry == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # runner 上没有系统 Chrome，scripts/lib/browser.mjs 会自动回落到
+      # Playwright 自带的 Chromium——所以这里装的是它（缓存 key 跟 lockfile 走）。
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      # 矩阵内部自己起停 dev server；swiftshader 软件渲染在 2 核 runner 上更慢，
+      # 降并发到 2 避免把单屏推到超时。
+      - name: UI smoke matrix
+        env:
+          UI_SMOKE: '1'
+          SOLO_PORT: '5180'
+          UI_WORKERS: '2'
+        run: node scripts/test-ui-matrix.mjs
+
+      - name: Upload UI failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-smoke-logs
+          path: ${{ runner.temp }}/rds-verify
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # 7. 汇总闸门：分支保护只盯这一个 check。
+  #
+  #    `if: always()` 保证前面有 job 失败时它也运行并失败，而不是被 skip——
+  #    skip 掉的 required check 在 GitHub 上同样算未通过，但显式失败的信息清楚得多。
+  # ---------------------------------------------------------------------------
+  gate:
+    name: gate
+    needs: [changes, static, core, matrix, server, ui]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Summarise gate results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | node -e '
+            let raw = "";
+            process.stdin.on("data", c => (raw += c));
+            process.stdin.on("end", () => {
+              const needs = JSON.parse(raw);
+              const failed = [];
+              for (const [job, info] of Object.entries(needs)) {
+                // "skipped" 是设计的一部分：这个 diff 不需要那个闸门。
+                if (info.result === "success" || info.result === "skipped") continue;
+                failed.push(`${job}: ${info.result}`);
+              }
+              if (failed.length > 0) {
+                console.error("gate failed:\n  " + failed.join("\n  "));
+                process.exit(1);
+              }
+              console.log("gate passed — every applicable check succeeded.");
+            });
+          '
+
+      - name: Job summary
+        if: always()
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          {
+            echo "### CI gate"
+            echo ""
+            echo "| job | result |"
+            echo "| --- | --- |"
+            echo "$NEEDS" | node -e '
+              let raw = "";
+              process.stdin.on("data", c => (raw += c));
+              process.stdin.on("end", () => {
+                const needs = JSON.parse(raw);
+                for (const [job, info] of Object.entries(needs)) {
+                  const icon = info.result === "success" ? "✅" : info.result === "skipped" ? "⏭️" : "❌";
+                  console.log(`| ${job} | ${icon} ${info.result} |`);
+                }
+              });
+            '
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -50,6 +50,10 @@ BASE_URL=http://127.0.0.1:6000/ pnpm shots
 
 改完之后按影响面选择，全绿再提 PR。
 
+> **PR 会被 CI 拦住**：`.github/workflows/ci.yml` 会自动跑其中一部分（按改动面裁剪），
+> 全部通过后 `auto-merge.yml` 自动 squash 合并。本地跑过 `pnpm verify:changed`
+> 基本就等于预演了一次 CI。详见 [docs/QUALITY-GATES.md](docs/QUALITY-GATES.md) §11。
+
 | 命令 | 覆盖 | 何时必跑 |
 | --- | --- | --- |
 | `pnpm test` | 内核一致性 268 例 + 分层边界检查 | 任何改动 |
@@ -59,6 +63,9 @@ BASE_URL=http://127.0.0.1:6000/ pnpm shots
 | `pnpm probe:layout` | 47 个房间的家具布局与**门位冲突**（必须 0） | 动 `props.ts` / `roomLayout.ts` / 房间摆件清单 |
 | `pnpm probe:overlap` | 房间几何是否越过板块 footprint（**z-fighting 回归**） | 动 `roomTile.ts`、新增贴墙构件 |
 | `tsc --noEmit` + `pnpm build` | 类型与生产构建 | 提交前 |
+
+> `probe:layout` 与 `probe:overlap` **不在 CI 里**（需要真实 WebGL，runner 上跑软件渲染
+> 不稳且慢），所以动渲染几何时必须本地跑。
 
 ### 两条硬约束（踩过坑）
 

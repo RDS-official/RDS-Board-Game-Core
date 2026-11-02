@@ -1,0 +1,192 @@
+name: auto-merge
+
+# `ci` 的 gate 通过后，把 **本仓库自己的 PR** 自动 squash 合并进 main，
+# 并显式触发部署（原因见下面的「为什么手动触发 deploy」）。
+#
+# 三条硬约束，改动前请先读：
+#
+#  1. **只认本仓库的分支**（`users/<name>/...`）。fork 的 PR 一律不自动合并：
+#     任何人都能开 fork PR，自动合并等于把 main 的写权限交出去。
+#  2. **必须 gate 成功，且是当前 head 那次成功**。合并前重新问一次
+#     `gh pr checks`，并按 `headRefOid` 与 ci 运行时的 head 比对，避免
+#     「检查的是旧 commit、合的是新 commit」。
+#  3. **分支保护兜底**：main 上已要求 `gate` 通过（见 docs/QUALITY-GATES.md §7）。
+#     即使这个 workflow 判断有误，服务端也会拒绝合并未通过检查的 PR。
+#
+# 为什么手动触发 deploy：
+#   GitHub 规定「用仓库自带 `GITHUB_TOKEN` 执行的操作不会触发新的 workflow」。
+#   所以由机器人 squash 合并产生的 push **不会**唤醒 `deploy.yml`（京东云 rsync
+#   那条链路）。AWS 那条走的是仓库 webhook，不受影响。这里在合并成功后显式
+#   `gh workflow run deploy.yml`，两条生产链路都照常更新。
+#
+# 合并方式遵循 AGENTS.md §2.3：只允许 squash，合并后删分支。
+
+on:
+  # ci 跑完就来看一眼（成功 / 失败 / 跳过都会触发，实际只在成功时干活）。
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+  # 允许在 PR 页面手动触发一次（例如补跑后忘了合并）。
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'PR 编号'
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write # 触发 deploy.yml 需要
+
+env:
+  npm_config_manage_package_manager_versions: 'false'
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+concurrency:
+  # 同一 PR 只处理一次；不同 PR 串行，避免两个合并同时改写 main。
+  group: auto-merge
+  cancel-in-progress: false
+
+jobs:
+  auto-merge:
+    name: auto-merge
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'pull_request')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge eligible pull requests
+        id: merge
+        shell: bash
+        env:
+          PR_INPUT: ${{ inputs.pr }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          merged=0
+          skipped=0
+
+          if [ -n "${PR_INPUT:-}" ]; then
+            prs="$PR_INPUT"
+          else
+            prs=$(echo '${{ toJSON(github.event.workflow_run.pull_requests) }}' | node -e '
+              let raw = "";
+              process.stdin.on("data", c => (raw += c));
+              process.stdin.on("end", () => {
+                const list = JSON.parse(raw || "[]");
+                console.log(list.map(p => p.number).join(" "));
+              });
+            ')
+          fi
+
+          if [ -z "${prs// }" ]; then
+            echo "no pull request is associated with this run — nothing to do"
+            echo "merged=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for pr in $prs; do
+            echo "::group::PR #$pr"
+
+            json=$(gh pr view "$pr" --repo "$REPO" \
+              --json number,isDraft,isCrossRepository,mergeable,state,headRefOid,baseRefName,headRefName,title)
+
+            eval "$(echo "$json" | node -e '
+              let raw = "";
+              process.stdin.on("data", c => (raw += c));
+              process.stdin.on("end", () => {
+                const pr = JSON.parse(raw);
+                const q = v => `"${String(v ?? "").replace(/"/g, "")}"`;
+                console.log("pr_state=" + q(pr.state));
+                console.log("pr_draft=" + (pr.isDraft ? "true" : "false"));
+                console.log("pr_fork=" + (pr.isCrossRepository ? "true" : "false"));
+                console.log("pr_mergeable=" + q(pr.mergeable));
+                console.log("pr_base=" + q(pr.baseRefName));
+                console.log("pr_head=" + q(pr.headRefName));
+                console.log("pr_sha=" + q(pr.headRefOid));
+              });
+            ')"
+
+            skip() {
+              echo "SKIP PR #$pr: $1"
+              skipped=$((skipped + 1))
+              echo "::endgroup::"
+              return 0
+            }
+
+            [ "$pr_state" = "OPEN" ]         || { skip "state=$pr_state"; continue; }
+            [ "$pr_base" = "main" ]          || { skip "targets $pr_base, not main"; continue; }
+            [ "$pr_draft" = "false" ]        || { skip "still a draft"; continue; }
+            [ "$pr_fork" = "false" ]         || { skip "来自 fork（不自动合并外部分支）"; continue; }
+            [ "$pr_mergeable" = "MERGEABLE" ] || { skip "mergeable=$pr_mergeable（有冲突或还在计算）"; continue; }
+
+            # head 必须仍是 ci 检验过的那个 commit：期间有人 push 就等下一轮。
+            if [ -n "${HEAD_SHA:-}" ] && [ "$pr_sha" != "$HEAD_SHA" ]; then
+              skip "head 已更新（$pr_sha != $HEAD_SHA），等新一轮 CI"
+              continue
+            fi
+
+            # 分支保护要求的 gate：合并前再问一次，不信缓存。
+            checks=$(gh pr checks "$pr" --repo "$REPO" --json name,state 2>/dev/null || echo '[]')
+            gate_state=$(echo "$checks" | node -e '
+              let raw = "";
+              process.stdin.on("data", c => (raw += c));
+              process.stdin.on("end", () => {
+                const list = JSON.parse(raw || "[]");
+                const gate = list.find(c => c.name === "gate");
+                console.log(gate ? gate.state : "MISSING");
+              });
+            ')
+            if [ "$gate_state" != "SUCCESS" ]; then
+              skip "gate is $gate_state, not SUCCESS"
+              continue
+            fi
+
+            # 直接 squash 合并：gate 已对当前 head 成功，服务端会按分支保护复核。
+            if ! gh pr merge "$pr" --repo "$REPO" --squash --delete-branch; then
+              echo "FAILED to merge PR #$pr"
+              echo "::endgroup::"
+              exit 1
+            fi
+            echo "MERGED PR #$pr ($pr_head → main)"
+            merged=$((merged + 1))
+            echo "::endgroup::"
+          done
+
+          echo "merged=$merged" >> "$GITHUB_OUTPUT"
+          echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
+          echo ""
+          echo "auto-merge: $merged merged, $skipped skipped"
+
+      # GITHUB_TOKEN 的 push 不会触发 deploy.yml（见文件头），这里补一次。
+      # AWS 走 webhook，不受影响；京东云靠这次 dispatch。
+      #
+      # 不需要等 main 前进：`gh pr merge` 是同步的，走到这里合并已经落地。
+      - name: Trigger deploy for the merged commit
+        if: steps.merge.outputs.merged != '0'
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "main is now $(gh api "repos/$REPO/branches/main" --jq .commit.sha)"
+          gh workflow run deploy.yml --repo "$REPO" --ref main
+          echo "deploy.yml dispatched for main"
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### auto-merge"
+            echo ""
+            echo "- merged: **${{ steps.merge.outputs.merged || 0 }}**"
+            echo "- skipped: **${{ steps.merge.outputs.skipped || 0 }}**"
+          } >> "$GITHUB_STEP_SUMMARY"
