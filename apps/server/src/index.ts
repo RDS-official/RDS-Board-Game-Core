@@ -30,7 +30,64 @@ interface AppEnv {
   };
 }
 
-const app = new Hono<AppEnv>();
+export const app = new Hono<AppEnv>();
+
+/* -------------------------------------------------------------------------- */
+/* AR-4：跨站请求防护                                                           */
+/* -------------------------------------------------------------------------- */
+/**
+ * 状态变更接口（POST / PUT / PATCH / DELETE）必须来自本站。
+ *
+ * 威胁模型：攻击者在 evil.com 上放一个自动提交的表单或 `fetch`，浏览器会
+ * **带上 Cookie**（旧实现）或让 `Origin` 指向 evil.com。由于本服务用 Bearer
+ * token 而不是 Cookie，简单跨站表单提交本来带不上凭据，但：
+ *
+ *  1. 浏览器对 `fetch` + `credentials` 的默认策略可以放宽，前端一旦这么写就裸奔；
+ *  2. 后端同时托管静态资源，攻击者可以用 DNS rebinding 让 evil.com 解析到
+ *     127.0.0.1 —— 这时 Host 头是内网地址而 Origin 是 evil.com；
+ *  3. 没有 Origin 校验时，任何拿到 token 的第三方页面都能静默改房间状态。
+ *
+ * 允许的情况（都不需要额外配置）：
+ *  - 没有 `Origin` 头：同源 `<form>`、curl、服务端到服务端调用；
+ *  - `Origin` 与请求的 `Host` 同源；
+ *  - `Origin` 在 `ALLOWED_ORIGINS` 里（用空格或逗号分隔，给反代 / 独立前端用）。
+ */
+const ALLOWED_ORIGINS = new Set(
+  (process.env.ALLOWED_ORIGINS ?? '')
+    .split(/[\s,]+/)
+    .map(o => o.trim())
+    .filter(Boolean)
+);
+
+/** 从 `Origin` 头里取 host（`https://a.com:443` → `a.com:443` 后再比对端口）。 */
+function originHost(origin: string): string | undefined {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return undefined;
+  }
+}
+
+app.use('*', async (c, next) => {
+  const method = c.req.method.toUpperCase();
+  // 只读请求不受影响。
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    await next();
+    return;
+  }
+
+  const origin = c.req.header('origin');
+  if (origin) {
+    const host = c.req.header('host');
+    const sameOrigin = host !== undefined && originHost(origin) === host;
+    if (!sameOrigin && !ALLOWED_ORIGINS.has(origin)) {
+      log.warn('security', 'cross-origin write rejected', { origin, host, path: c.req.path });
+      return c.json({ error: '跨站请求被拒绝' }, 403);
+    }
+  }
+
+  await next();
+});
 
 // ---- 认证 ----
 app.post('/api/auth/register', async c => {

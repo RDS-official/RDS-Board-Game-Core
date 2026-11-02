@@ -14,10 +14,10 @@
 
 | ID | 问题 | 证据 | 建议 | 状态 |
 | --- | --- | --- | --- | --- |
-| AR-1 | 中心模式虚拟别名未加密钥，隐藏实体 id 可被穷举还原 | `packages/kernel/src/observer.ts` 的 `getVirtualAlias()`（53-59 行）缺省走 FNV-1a 32 位；`packages/app/src/netSession.ts:221` 是唯一 `setAliasSecret` 调用点（仅 P2P 房主侧）；`apps/server/src/match.ts` 构造 `GameRoom` 时未设置 | `ServerMatch` 构造后 `this.room.engine.setAliasSecret(crypto.randomBytes(32).toString('hex'))`；补"中心模式别名必须是 HMAC 形式"的回归测试 | 待修 |
+| AR-1 | 中心模式虚拟别名未加密钥，隐藏实体 id 可被穷举还原 | ~~`packages/kernel/src/observer.ts` 的 `getVirtualAlias()` 缺省走 FNV-1a 32 位；`apps/server/src/match.ts` 构造 `GameRoom` 时未设置~~ | ✅ **已修复（2026-11）**：`MatchManager` 构造房间后立即 `setAliasSecret(crypto.randomBytes(32).toString('hex'))`；同时修掉一个连带缺陷 —— `setAliasSecret()` 现在会 `CognitiveObserver.resetAliases()`，否则设置密钥前已投影过的弱别名会留在缓存里继续被返回。selftest 断言中心模式别名必须是 16 位 HMAC | 已修复 |
 | AR-2 | ~~德扑 AI 从权威 raw state 决策~~ | ~~`rules.ts` 传 `state` 给 `choosePokerAction`~~ | ✅ **已修复**：`choosePokerAction(view: ProjectedGameState)`，`rules.ts` 经 `decisionView()` 投影；`deriveNoise(view)` 不再读 `prngState`；测试见 `harness/src/suites/charter.ts` 的 C-5 两例（含「抹掉对手筹码决策不变」断言） | 已修复 |
 | AR-3 | 认证态存 localStorage + Bearer，token 还会进入 URL 查询串 | `apps/web/src/lobby/lobby.ts:749` 写 localStorage、`lobby.ts:1062` 把 token 放进 `gameQuery`；`apps/web/src/lobby/api.ts:3` | 短期 token 移出 URL（一次性 ticket + postMessage）；中期换 `HttpOnly; Secure; SameSite=Lax` cookie | 待修 |
-| AR-4 | 状态变更接口无 CSRF / Origin 防护 | `apps/server/src/index.ts` 的 `/api/rooms/:id/{join,status,ready,kick,host,ai}` 只校验 Bearer | `/api/*` 非 GET 请求加 `Sec-Fetch-Site` / `Origin` 白名单中间件 | 待修 |
+| AR-4 | 状态变更接口无 CSRF / Origin 防护 | ~~所有 POST/PUT/DELETE 不做来源校验~~ | ✅ **已修复（2026-11）**：全局中间件校验 `Origin`（同源 / 无 Origin / `ALLOWED_ORIGINS` 白名单三者放行，其余 403）；只读请求不受影响。selftest 四条断言覆盖跨站写 / 同源写 / 无 Origin 写 / 跨站读 | 已修复 |
 
 ### 0.2 S1 · 严重
 

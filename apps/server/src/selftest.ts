@@ -13,6 +13,7 @@ const {
 const { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo } = await import('./rooms.ts');
 const { GAMES } = await import('./games.ts');
 const { MatchManager } = await import('./match.ts');
+const { app } = await import('./index.ts');
 const { settleHand, takeSeat, leaveSeat } = await import('./pokerSettle.ts');
 const { accountOf, peekAccount } = await import('./pokerLedger.ts');
 const { rankAccounts } = await import('./pokerLeaderboard.ts');
@@ -179,6 +180,34 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
   ok(accepted.ok === true, 'server accepts a legal action from the seat owner');
   ok(match.revision > 0, 'accepted action advances the server revision');
 
+  // AR-1：中心模式的虚拟别名必须是 HMAC，不能退化成 FNV 32 位。
+  // 没有密钥时隐藏实体 id 可被穷举（几秒钟），德扑牌面 / 山屋房间排列会暴露。
+  {
+    // 用一副牌面朝下的对局观察别名：splendor 没有隐藏实体，换 poker。
+    const hidden = matches.ensure({
+      roomId: 'r_alias_probe',
+      gameId: 'poker',
+      players: [
+        { userId: host, name: '测试员1' },
+        { userId: guest, name: '测试员2' }
+      ],
+      seats: 2,
+      seed: 99
+    });
+    // 只走公开 API：让房主开一手，牌面因此成为隐藏实体。
+    const openView: any = hidden.attach(host);
+    const startHand = (openView.state?.legalActions ?? []).find((a: any) => a.type === 'START_HAND');
+    if (startHand) hidden.submit(host, { ...startHand, playerId: 'p1' });
+    const view: any = hidden.attach(host);
+    const aliasIds = Object.keys(view.state.entities ?? {}).filter((k: string) => k.startsWith('v_id_'));
+    ok(aliasIds.length > 0, 'a centre-mode poker table masks hidden entities');
+    ok(
+      aliasIds.every((id: string) => /^v_id_[0-9a-f]{16}$/.test(id)),
+      `centre-mode aliases are HMAC (16 hex), not FNV — got ${aliasIds.slice(0, 2).join(', ')}`
+    );
+    matches.close('r_alias_probe');
+  }
+
   // 增量与全量都可用，且座位表稳定
   const delta: any = match.deltaFor(guest);
   ok(Array.isArray(delta.patches), 'server serves per-viewer deltas');
@@ -343,6 +372,36 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
 // 测试用户删除
 const deleteRes: any = adminDeleteUser(other.user.id, adminLogin.user.id);
 ok(deleteRes.ok === true, 'adminDeleteUser works');
+
+
+/* -------------------------------------------------------------------------- */
+/* AR-4：跨站写请求必须被拒                                                    */
+/* -------------------------------------------------------------------------- */
+{
+  const callApp = async (method: string, path: string, headers: Record<string, string>) => {
+    const res = await app.fetch(new Request(`http://127.0.0.1${path}`, { method, headers }));
+    return res.status;
+  };
+
+  const host = { host: '127.0.0.1', 'content-type': 'application/json' };
+
+  ok(
+    (await callApp('POST', '/api/auth/login', { ...host, origin: 'https://evil.example.com' })) === 403,
+    'AR-4: a cross-origin write is rejected'
+  );
+  ok(
+    (await callApp('POST', '/api/auth/login', { ...host, origin: 'http://127.0.0.1' })) !== 403,
+    'AR-4: a same-origin write reaches the handler'
+  );
+  ok(
+    (await callApp('POST', '/api/auth/login', { ...host })) !== 403,
+    'AR-4: a write without an Origin header is allowed (curl / same-site form)'
+  );
+  ok(
+    (await callApp('GET', '/api/games', { host: '127.0.0.1', origin: 'https://evil.example.com' })) !== 403,
+    'AR-4: reads are not blocked by the origin guard'
+  );
+}
 
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');
 try { fs.rmSync(process.env.HUB_DATA_DIR!, { recursive: true, force: true }); } catch { /* 临时目录清理失败无所谓 */ }
