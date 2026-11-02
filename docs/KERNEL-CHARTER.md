@@ -257,7 +257,7 @@ handler: () => ({
 
 ## 4. 分阶段落地
 
-> **2026-11 实际进度**：阶段 0 已全部完成，阶段 1 的 C-5 / C-6 已在德扑落地，阶段 2 的 C-3 并发表达（`SIMULTANEOUS` + `applySimultaneous`）与 C-4 随机收口已先期完成。
+> **2026-11 实际进度**：C-1 ~ C-9 全部有可执行断言。阶段 0 已完成；阶段 1（C-5 / C-6）在德扑落地；阶段 2（C-3 并发表达、C-4 随机收口）已完成；阶段 3 的 C-7 收益独立已落地，C-8 元规则分区以静态检查形式建立了回归防线。
 > 内核侧新增 `packages/kernel/src/charter.ts`（宪章执行器）与
 > `packages/harness/src/suites/charter.ts`（12 条可执行断言）。
 > 下面各阶段保留原计划，✅ 标记已完成项。
@@ -273,11 +273,36 @@ handler: () => ({
 | C-9 | `GameModule.meta.stateSchema.globalVars`；未登记 key 报 `CHARTER_C9_UNDECLARED_GLOBAL_VAR`；poker 登记 7 个 key | `charter C-9` 两例 |
 | C-3 | 新增 `DecisionPolicy: { type: 'SIMULTANEOUS' }` 与 `GameModule.applySimultaneous()`；决策窗口结算时把动作**多重集**一次交给模组，内核不排序；未声明合并语义的模组退回串行并记 `CHARTER_C3_SERIALIZED`。dune 战斗之轮、catan 掷 7 弃牌已迁移 | `charter C-3` 四例 |
 | C-4 | 运行期 `DeterministicPRNG` 调用必须推进 `prngState`；修掉 betrayal `drawRoomCandidate()` 用 `seed + items.length + attempts * 19` 拼假随机源的问题 | `charter C-4` 一例 |
+| C-7 | `ReduceContext.reward()` + `GameState.rewards`（只追加）；reduce 期间模组拿到的是累积缓冲区，转移落地时由内核一次性写入，记账口本身不是新的可变逃逸口。poker 的摊牌派池 / 弃牌取胜 / 观察者低保三处均已记账 | `charter C-7` 三例 |
+| C-8 | `𝒦_view`（presentation）不得出现在状态跃迁路径上 —— 静态扫描各模组的 `rules.ts` / `helpers.ts`（剥掉注释后），发现即失败 | `charter C-8` 两例 |
 
 **C-6 实战成绩**：筹码守恒断言上线后立刻抓到一条真实记账问题——
 `handBets` 记录的是整手累计投入，**已结算进 `pot` 的部分仍留在其中**，
 因此守恒式必须写成 `在手 + pot + 当前街道 streetBets = 总额`，而不能直接加
 `handBets`。没有这条语义不变量，这类错误只会在玩家发现「钱不对了」时暴露。
+
+### 4.1 决策窗口审计（2026-11）
+
+`applySimultaneous()` 只对**多人同时生效**的窗口有意义。对每个模组的实际窗口做一次
+审计，避免为了"用上某个能力"而硬造场景：
+
+| 模组 | 窗口 | 参与者 | 策略 | 需要 `applySimultaneous`？ |
+| --- | --- | --- | --- | --- |
+| catan | 掷 7 各弃一半 | 受害者（多人） | `SIMULTANEOUS` | ✅ 已实现（互不耦合） |
+| catan | 交易提议 | 同房间其他玩家 | `FIRST_ACCEPT` | ❌ 先到先得是**玩法本身** |
+| dune_mahjong | 战斗之轮 | p1 / p2 | `SIMULTANEOUS` | ✅ 已实现（平局守方胜） |
+| betrayal | 交易提议 | 同房间其他玩家 | `FIRST_ACCEPT` | ❌ 同上 |
+| betrayal | 伤害分摊 | **单人** | `ALL_COMMITTED` | ❌ 单人窗口无"同时"可言 |
+| poker | **无决策窗口** | — | — | ❌ 下注是逐人表态，本质串行 |
+
+**结论**：`poker` 与 `betrayal` **不需要** `applySimultaneous`。给它们硬加窗口会改变
+发牌/流程语义，属于为形式化而形式化 —— 那正是本宪章要反对的做法。真正需要这条约束的
+两个场景已经迁移完毕；日后若出现新的多人同时窗口，照 catan / dune 的写法补即可，
+未声明时内核会记 `CHARTER_C3_SERIALIZED`，不会悄悄退化。
+
+**catan 的交易窗口**是唯一有争议的一例：多人可同时接受，而实现是先到先得。
+按项目决定保留该语义（抢单是玩法的一部分），因此**不**改代码，但登记在
+[RULES-DEVIATIONS.md](RULES-DEVIATIONS.md) 的 C-3 条目里，说明这是有意为之而非疏漏。
 
 ### 阶段 0（1 周）✅ 已完成：不改架构，先建立度量
 

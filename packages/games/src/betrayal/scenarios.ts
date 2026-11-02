@@ -24,7 +24,9 @@ function scenarioContext(): ReduceContext {
     roll: (spec, seed) => {
       const roll = DeterministicPRNG.rollFaces(seed, spec);
       return { result: { spec, rolls: roll.rolls, total: roll.sum }, nextSeed: roll.nextSeed };
-    }
+    },
+    // 场景构造不是转移，没有收益可记；保留同样形状以免调用方分叉。
+    reward: () => undefined
   };
 }
 

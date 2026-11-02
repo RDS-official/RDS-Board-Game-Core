@@ -308,12 +308,15 @@
 | --- | --- | --- | --- | --- |
 | C-2 单步转移 | poker | `applyAction()` → `advanceAi()`（上限 64 次）内联推进 AI | 夹具默认 `autoAi`，让全桌 AI 可在一次 dispatch 内完成一圈 | `driverActions` 逐步派发落地后删除循环（AR-44）· **已机器登记**：`module.charter.deviations`，到期 2027-03-31 |
 | C-2 单步转移 | poker | `settle()` 循环内可连关多条街并发牌至摊牌（上限 8） | 全下提前封盘时需要一次推进多街 | 改为 follow-up action 链（AR-44） |
-| C-3 并发表达 | poker / betrayal | 多人同时决策仍走串行 `reduce` | 尚未声明 `applySimultaneous` | 照 catan / dune 的写法补上合并语义（AR-45） |
+| C-3 并发表达 | catan | 交易提议窗口 `FIRST_ACCEPT`：多人可同时接受，实现为先到先得 | **抢单是有意的玩法**，不是实现缺陷；改成同时成交会让报价方被多方同时兑现 | 不计划修改。若将来改为「同时接受、资源不足整笔作废」，需先改规则文档再改代码（AR-45） |
+| C-3 并发表达 | poker / betrayal | 审计结论：**不存在**多人同时决策窗口（见宪章 §4.1） | poker 下注逐人表态；betrayal 的交易是 `FIRST_ACCEPT`、伤害窗口是单人 | 无需 `applySimultaneous`；新增此类窗口时按 catan / dune 的写法声明（AR-45） |
 | C-3 并发表达 | dune_mahjong / catan | ~~战斗之轮 / 弃牌串行结算~~ | — | ✅ **已关闭（2026-11）**：`policy: { type: 'SIMULTANEOUS' }` + `applySimultaneous()` 多重集结算，顺序无关性有测试（AR-45） |
 | C-4 随机收口 | betrayal | ~~`drawRoomCandidate()` 用 `seed + items.length + attempts * 19` 拼假随机源~~ | — | ✅ **已关闭（2026-11）**：改为读 `state.prngState` 并写回 `nextSeed`；`charter C-4` 测试覆盖全部运行期调用点（AR-46） |
 | C-4 随机收口 | poker | ~~`ai.ts` 的 `noise()` 自实现 FNV 哈希作决策抖动~~ | 不想污染 `prngState`，保持 AI 决策与状态跃迁解耦 | ✅ **已部分关闭（2026-11）**：改名 `deriveNoise(view)`，入参为投影、不再读 `prngState`；仍未走 `ctx.roll()`（AR-46） |
 | C-5 信息约束 | poker | ~~AI 用 raw `GameState` 决策~~ | 历史实现，未区分投影通道 | ✅ **已关闭（2026-11）**：`choosePokerAction` 改收 `ProjectedGameState`，`rules.ts` 经 `decisionView()` 投影后调用（AR-2） |
-| C-7 收益独立 | poker / catan | 收益在 `showdown()` / 建造分支里直接改状态，未记账 | 内核尚无 `ctx.reward()` | `state.rewards` 落地后回填（AR-47） |
+| C-7 收益独立 | poker | ~~收益直接改状态，未记账~~ | — | ✅ **已关闭（2026-11）**：`ctx.reward()` + `state.rewards` 落地；摊牌派池 / 弃牌取胜 / 观察者低保三处均已记账，`charter C-7` 覆盖（AR-47） |
+| C-7 收益独立 | catan / betrayal / dune / splendor / sanguosha | 建造与计分仍直接改状态 | 尚未接入记账口 | 照 poker 的写法逐步接入 `ctx.reward()`（AR-47） |
 | C-8 元规则分区 | sanguosha | `bagua_armor` 钩子只发提示，真正判定写在 `JUDGE_BAGUA` 分支 | 钩子表达力不足 | 声明式规则表 + 通用解释器（AR-49） |
+| C-8 元规则分区 | 全部 6 个模组 | `𝒦_view` / `𝒦_rule` / `𝒦_driver` 仍在同一个 `GameModule` 上 | 尚无物理分离 | 🔶 **部分关闭（2026-11）**：`charter C-8` 静态扫描 `rules.ts` / `helpers.ts`，`presentation` 出现在转移路径上即失败；物理拆分留待后续（AR-49） |
 | C-9 扩展字段收口 | 其余 5 个玩法 | 规则状态寄居 `globalVars` / `custom`（47 个 key） | 未声明 key 集合 | 照 poker 的 `meta.stateSchema.globalVars` 逐个登记（AR-43） |
 | C-9 扩展字段收口 | poker | ~~`globalVars` 7 个 key 未登记~~ | — | ✅ **已关闭（2026-11）**：`meta.stateSchema.globalVars` 声明 7 个 key，内核做未登记即报（AR-43） |

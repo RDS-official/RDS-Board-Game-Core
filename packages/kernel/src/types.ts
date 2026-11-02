@@ -652,6 +652,28 @@ export interface VisualTraceEvent {
 /* Complete state s_t                                                          */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * 宪章 C-7：收益记账（ℛ 独立于 𝒯）。
+ *
+ * 每条记录回答一个问题：**这一次状态跃迁，谁因为什么拿到了多少。**
+ * 之前收益改动直接写在 reduce 里（`setChips(...)`、`score += 5`），
+ * 事后只能对比前后状态反推，回答不了"哪条规则给了这一分"。
+ *
+ * 只追加、不修改；由 `ctx.reward()` 写入，内核保证条目结构一致。
+ */
+export interface RewardEntry {
+  /** 拿到（正）或失去（负）收益的 actor。 */
+  actorId: ActorId;
+  /** 收益种类，模组自定义：`'chips'` / `'score'` / `'resources'` … */
+  kind: string;
+  /** 增减量。负数表示付出。 */
+  amount: number;
+  /** 人类可读的理由，会进结算摘要与审计。 */
+  reason: string;
+  /** 产生这条记录的转移序号，便于与 actionLog 对齐。 */
+  seq: number;
+}
+
 export interface GameState {
   /** Module id this state belongs to. */
   gameId: string;
@@ -703,6 +725,11 @@ export interface GameState {
    * Additive optional field: logs written before it existed replay unchanged.
    */
   winnerReason?: string;
+  /**
+   * 宪章 C-7：只追加的收益流水。`ctx.reward()` 写入，`outcome()` 可据此解释得分。
+   * 可选字段 —— 老日志没有它，回放不受影响。
+   */
+  rewards?: RewardEntry[];
 }
 
 /** Projected state o_{i,t} = O(s_t, i). */

@@ -82,9 +82,9 @@
 | AR-44 | `𝒯` 是万能函数，一次 `reduce` 可含 8~64 次逻辑转移 | `packages/games/src/poker/rules.ts:605` 的 `advanceAi()`（内部 `for … < 64`）、同文件 `settle()` 的 `for … < 8` | 宪章 C-2 单步转移；阶段 2 引入 `transition(state, actions[], ctx)` | 待修 |
 | AR-45 | 并发被降维成串行，多人同时决策顺序敏感 | `Action` 单 actor；`packages/kernel/src/engine.ts` 的 `resolveOpenDecision()` 串行 `reduce` | 宪章 C-3，新增 `SIMULTANEOUS` 决策策略，`𝒯` 接受动作多重集 | 🔶 **部分修复**：内核已有 `SIMULTANEOUS` 策略 + `applySimultaneous()`，dune / catan 已迁移；poker / betrayal 待补 |
 | AR-46 | 随机源未收口，模组可绕过 `ctx.roll()` | `packages/games/src/betrayal/helpers.ts` 的 `drawRoomCandidate()`、`packages/games/src/poker/ai.ts` 的 `noise()` | 宪章 C-4，`reduce` 不再注入 PRNG 静态方法，随机只能走 `ctx.roll()` | ✅ **已修复**：betrayal 弃牌堆重洗改为推进 `prngState`；`charter C-4` 覆盖全部运行期调用点 |
-| AR-47 | `ℛ` 与 `𝒯` 完全耦合，收益事后反推、无法审计 | `packages/games/src/poker/rules.ts` 的 `showdown()` 直接 `setChips()`；`packages/games/src/catan/rules.ts` 建造直接加分 | 宪章 C-7，`ctx.reward()` + append-only `state.rewards` | 待修 |
+| AR-47 | `ℛ` 与 `𝒯` 完全耦合，收益事后反推、无法审计 | ~~`poker/rules.ts` 的 `showdown()` 直接 `setChips()`~~ | 🔶 **部分修复（2026-11）**：内核已有 `ReduceContext.reward()` + 只追加的 `state.rewards`，poker 的摊牌派池 / 弃牌取胜 / 观察者低保三处已记账，`charter C-7` 三例覆盖；其余 5 个模组待接入 | 进行中 |
 | AR-48 | `capabilities` 四个布尔位在全仓只被 UI 读取，内核从不消费 | `apps/web/src/ui/mathInspector.ts:329-332` 是唯一读取点 | 要么让内核真正消费（调度 / 校验分支），要么从 `GameMeta` 移除并放入 `presentation` | 待修 |
-| AR-49 | 钩子机制被绕开：`bagua_armor` 的 handler 只返回一句提示 | `packages/games/src/sanguosha/hooks.ts`；真正的判定手写在 `packages/games/src/sanguosha/rules.ts` 的 `JUDGE_BAGUA` 分支 | 宪章 C-8 `𝒦` 分区；阶段 3 把 haunt / 技能改造成声明式规则表 + 通用解释器 | 待修 |
+| AR-49 | 钩子机制被绕开：`bagua_armor` 的 handler 只返回一句提示 | `packages/games/src/sanguosha/hooks.ts`；真正的判定手写在 `packages/games/src/sanguosha/rules.ts` 的 `JUDGE_BAGUA` 分支 | 🔶 **部分修复（2026-11）**：`charter C-8` 静态扫描各模组 `rules.ts` / `helpers.ts`，`presentation` 出现在转移路径上即失败（回归防线）；钩子表达力不足与物理拆分仍未解决 | 进行中 |
 
 ### 0.6 实施顺序（与审查报告 §10 一致）
 

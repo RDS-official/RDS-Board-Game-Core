@@ -402,7 +402,7 @@ function applyObserverSwaps(state: GameState): GameState {
 }
 
 /** 低保：每满 `stipendPeriodSeconds` 秒、筹码仍低于门槛，就发一次。 */
-function chargeObserverStipend(state: GameState, seconds: number): GameState {
+function chargeObserverStipend(state: GameState, seconds: number, ctx: ReduceContext): GameState {
   const observers = observerStateOf(state);
   if (observers.list.length === 0 || seconds <= 0) return state;
   let next = state;
@@ -413,6 +413,13 @@ function chargeObserverStipend(state: GameState, seconds: number): GameState {
     const grants = Math.floor(total / POKER_OBSERVER.stipendPeriodSeconds);
     if (grants > 0) {
       next = setChips(next, entry.playerId, chips + grants * POKER_OBSERVER.stipendAmount);
+      // 宪章 C-7：补贴是收益，不是"凭空多出来的筹码"。
+      ctx.reward(
+        entry.playerId,
+        'chips',
+        grants * POKER_OBSERVER.stipendAmount,
+        `观战 ${grants} 次低保（每次 ${POKER_OBSERVER.stipendAmount}）`
+      );
       next = pushLog(
         next,
         `观察者 ${nameOf(next, entry.playerId)} 领取低保 ${grants * POKER_OBSERVER.stipendAmount} · 现有 ${chipsOf(
@@ -647,7 +654,7 @@ export class PokerRules {
     if (action.type === 'OBSERVER_TICK') {
       const seconds = Math.floor(Number(action.payload?.seconds ?? 0));
       if (!Number.isFinite(seconds) || seconds <= 0) return state;
-      return { ...chargeObserverStipend(state, Math.min(seconds, 3600)), turn: state.turn + 1 };
+      return { ...chargeObserverStipend(state, Math.min(seconds, 3600), ctx), turn: state.turn + 1 };
     }
 
     if (action.type === 'OBSERVER_REJOIN') {
@@ -1199,6 +1206,8 @@ export class PokerRules {
       for (const [pid, amount] of Object.entries(award)) {
         next = setChips(next, pid, chipsOf(next, pid) + amount);
         awarded[pid] = (awarded[pid] ?? 0) + amount;
+        // 宪章 C-7：每一笔底池派发都留下"因为什么"。之前只能靠前后状态反推。
+        ctx.reward(pid, 'chips', amount, `摊牌赢池 ${best?.label ?? ''}（池 ${pot.amount}，${winners.length} 人分）`);
       }
       results.push({ amount: pot.amount, winners, label: best?.label ?? '' });
     }
@@ -1259,7 +1268,11 @@ export class PokerRules {
     const total = hand.pot + Object.values(hand.streetBets).reduce((sum, amount) => sum + amount, 0);
 
     let next = state;
-    if (winnerId) next = setChips(next, winnerId, chipsOf(next, winnerId) + total);
+    if (winnerId) {
+      next = setChips(next, winnerId, chipsOf(next, winnerId) + total);
+      // 宪章 C-7：无人跟注时赢下整个池，同样要能解释这是"对手弃牌"而不是"牌力更强"。
+      ctx.reward(winnerId, 'chips', total, `其余座位全部弃牌，赢下池 ${total}`);
+    }
 
     next = withHand(next, {
       ...(handOf(next) as PokerHandState),
