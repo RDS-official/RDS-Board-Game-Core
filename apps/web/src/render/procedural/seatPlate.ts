@@ -170,19 +170,7 @@ export class SeatPlateBuilder {
       }
       ctx.stroke();
     }
-    // A knot or two.
-    for (let i = 0; i < 2; i++) {
-      const cx = 40 + rnd() * (width - 80);
-      const cy = 60 + rnd() * (height - 120);
-      const radius = 10 + rnd() * 16;
-      const knot = ctx.createRadialGradient(cx, cy, 1, cx, cy, radius);
-      knot.addColorStop(0, 'rgba(0, 0, 0, 0.5)');
-      knot.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = knot;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    // 木纹里原本点了两个「木节」黑斑，远看像脏点，去掉。
 
     // Brass frame (thicker when it is this seat's turn).
     ctx.strokeStyle = info.active ? BRASS : 'rgba(201, 162, 74, 0.5)';
