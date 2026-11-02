@@ -1,6 +1,6 @@
 import { RuleHookImpl } from './rules';
 import { ProjectionRedactor } from './observer';
-import { Action, ActorId, DecisionWindow, DiceSpec, GameOutcome, GameState, MapGraphNode, NodeId, RollResult, SelectionCandidate, SelectionSpec, TopologySpec, VisualTraceEvent } from './types';
+import { Action, ActorId, DecisionWindow, DiceSpec, GameOutcome, GameState, MapGraphNode, NodeId, PlayerId, RollResult, SelectionCandidate, SelectionSpec, TopologySpec, VisualTraceEvent } from './types';
 import { ActionSchemaMap } from './validation';
 import type { CharterDeviation } from './charter';
 
@@ -416,6 +416,17 @@ export interface GamePresentationHints {
    * the view layer never maps a role itself. Must be pure.
    */
   roleLabel?: (role: string) => string | null;
+  /**
+   * Which seat the local player sits in before anyone chooses otherwise, or null
+   * when the game has no notion of "my seat".
+   *
+   * 单人演示桌默认是上帝视角，可对局类游戏的主角其实只有一个：坐在自己位子
+   * 上、从牌桌对面看牌桌的那个人。这一条把「第一人称视角属于某一名玩家」这件事
+   * 提升为能力声明，通用层因此不必知道任何游戏的座位结构，也能开局即入座。
+   * 联机座位由服务器下发，驱动方只把它当缺省值，不覆盖权威结果。
+   * 必须纯：只读投影切片，不写回状态。返回的 id 不在 `players` 里时驱动方忽略。
+   */
+  defaultViewer?: (state: MomentPresentationState) => PlayerId | null;
   /**
    * Title of the map overview panel in the game's own vocabulary.
    * A plain string, not a function — see definePresentation.

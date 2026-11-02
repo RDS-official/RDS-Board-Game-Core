@@ -34,7 +34,7 @@ import {
 import { setupDuneMahjong } from './dune_mahjong/setup';
 import { PokerRules } from './poker/rules';
 import { pokerScenario, setupPoker } from './poker/setup';
-import { pokerSettlementMoment } from './poker/presentation';
+import { pokerDefaultViewer, pokerSettlementMoment } from './poker/presentation';
 import { isAiSeat, POKER_TABLE } from './poker/seating';
 import { SANGUOSHA_HOOKS } from './sanguosha/hooks';
 import { sanguoshaRoleLabel } from './sanguosha/presentation';
@@ -729,7 +729,10 @@ export const pokerModule: GameModule = defineGame({
     }),
   presentation: definePresentation({
     // 结算幕布：每手结束播一次（key 含手数与结束方式，天然去重）。
-    describeMoment: state => pokerSettlementMoment(state)
+    describeMoment: state => pokerSettlementMoment(state),
+    // 开局坐在自己那一侧：单人桌的第一个真人座位就是「我」。没有这条声明，
+    // 演示桌会开在上帝视角——看得全，但那不是一个玩家的座位。
+    defaultViewer: state => pokerDefaultViewer(state)
   }),
   /**
    * C-8：`𝒦_driver` —— 全部驱动方语义集中在这里。

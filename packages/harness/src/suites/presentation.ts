@@ -749,3 +749,46 @@ test('presentation: the HUD holds no trait tables, role names or overture copy',
   assert(!session.includes('LOYALIST'), 'the shared layer no longer holds identity tables');
   assert(!session.includes('TRAIT_LABEL'), 'nor trait label tables');
 });
+
+test('presentation: a table can declare its protagonist without the shell knowing the game', () => {
+  const read = (relative: string) =>
+    readFileSync(new URL(relative, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
+  const session = read('../../../app/src/session.ts');
+  // 通用层不认识「德州扑克」：主角座位只能由游戏的能力声明给出。
+  // 只看绑定这一段——`session.ts` 里的 `gameId` 分支是既有的阶段文案债（AR-49 遗留），
+  // 这条绑定不能跟着一起长歪。
+  const bind = session.slice(
+    session.indexOf('private bindDefaultViewer'),
+    session.indexOf('/* GamePresenter')
+  );
+  assert(bind.length > 0, 'the presenter has one binding path');
+  for (const word of ['poker', 'gameId', 'meta.id']) {
+    assert(!bind.includes(word), `the binding path infers the seat from ${word}`);
+  }
+  assert(bind.includes('resolveDefaultViewer'), 'the presenter asks the declaration');
+  const inspect = read('../../../app/src/inspect.ts');
+  assert(inspect.includes('defaultViewer'), 'the resolver reads the declared capability');
+  assert(inspect.includes('momentSlice'), 'the declaration reads the same trimmed slice as a curtain');
+
+  // 只声明了「主角是谁」的模块也能被通用层驱动：没有座位概念的夹具保持上帝视角。
+  const module = {
+    ...counterModule,
+    presentation: definePresentation({ defaultViewer: () => 'p2' })
+  };
+  const bound = new UniversalSession(module, 5);
+  assertEqual(bound.getSnapshot().viewer, 'p2', 'the declared seat is the starting view');
+  bound.dispose();
+
+  const nobody = new UniversalSession(counterModule, 5);
+  assertEqual(nobody.getSnapshot().viewer, 'GOD', 'a game with no declaration keeps the god view');
+  nobody.dispose();
+
+  // 声明了一个不在桌上的座位：静默忽略，而不是把镜头绑到空位。
+  const missing = new UniversalSession(
+    { ...counterModule, presentation: definePresentation({ defaultViewer: () => 'p9' }) },
+    5
+  );
+  assertEqual(missing.getSnapshot().viewer, 'GOD', 'an absent seat is not bound');
+  missing.dispose();
+});
+

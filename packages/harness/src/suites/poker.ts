@@ -1246,3 +1246,66 @@ test('poker: the per-seat buy-in reaches setup and replays with the log', () => 
   const report = engine.verifyReplay();
   assert(report.ok, `replay matches with per-seat stacks: ${report.errors.join('; ')}`);
 });
+
+test('poker: a single-player table opens on the protagonist seat, not on the god view', async () => {
+  const { UniversalSession } = await import('@rds/app/session');
+  // 默认桌 = 1 真人 + AI 补位：主角就是 p1，牌面只该向他揭自己的两张。
+  const session = new UniversalSession(GAME_REGISTRY.poker, 77);
+  const boot = session.getSnapshot();
+  assertEqual(boot.viewer, 'p1', 'the table binds to the declared protagonist');
+  assertEqual(boot.revision, 0, 'binding is the initial state, not a change');
+  assertEqual(boot.board.viewerId, 'p1', 'the projection belongs to that seat');
+  assert(boot.board.maskedEntityCount > 0, 'opponents stay masked from the start');
+  assertEqual(boot.board.ownHand.length, 0, 'no hand is dealt before the first deal');
+
+  // 上帝视角仍然是一个可选滤镜：用于逐个座位核对牌桌。
+  session.setViewer('GOD');
+  assertEqual(session.getSnapshot().board.maskedEntityCount, 0, 'god view sees everything');
+  session.dispose();
+});
+
+test('poker: the action bar names the seat that is actually acting', async () => {
+  const { UniversalSession } = await import('@rds/app/session');
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 78, { scenario: 'ai_table_6' });
+  startHand(engine);
+  const session = new UniversalSession(GAME_REGISTRY.poker, 78, 'ai_table_6', engine);
+
+  // 视角固定在自己的座位上（入座 / 准备 / 结算都走这条通道）。
+  session.setViewer('p1');
+  // 换手的座位号随按钮位置变：让 p1 先弃牌，轮到的一定是别人。
+  for (let guard = 0; guard < 3 && engine.getActiveActorId() === 'p1'; guard++) {
+    const fold = engine.getLegalActions('p1').find(action => action.type === 'FOLD');
+    assert(!!fold, 'p1 can fold when the turn reaches it');
+    assert(engine.dispatch(fold!).ok, 'fold accepted');
+  }
+  const snap = session.getSnapshot();
+  const active = engine.getActiveActorId();
+  assert(active !== 'p1', `the hand is not on p1 any more (it is on ${active})`);
+  assertEqual(
+    snap.actorName,
+    engine.getActorName(active),
+    'the bar names the seat holding the turn, not the viewer'
+  );
+  assert(snap.actions.every(action => action.actionType !== 'CALL'), 'p1 is offered no betting action');
+  session.dispose();
+});
+
+test('poker: an all-AI table declares no protagonist', async () => {
+  const { pokerDefaultViewer } = await import('@rds/games/poker/presentation');
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 79, { scenario: 'ai_table_6' });
+  const raw = engine.getRawState();
+  assertEqual(
+    pokerDefaultViewer({ globalVars: raw.globalVars, players: raw.players }),
+    'p1',
+    'the human seat is the protagonist'
+  );
+  // 观察席演示里没有真人座位：主角声明必须静默失效，而不是绑到机器座位上。
+  assertEqual(
+    pokerDefaultViewer({
+      globalVars: { seats: raw.globalVars.seats, players: raw.players },
+      players: {}
+    }),
+    null,
+    'a seat that left the table is not a protagonist'
+  );
+});

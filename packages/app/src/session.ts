@@ -1,6 +1,6 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { describeActionView } from './actionText';
-import { buildEntityInspectNotice, buildMoment, buildNodeDiscoveryView } from './inspect';
+import { buildEntityInspectNotice, buildMoment, buildNodeDiscoveryView, resolveDefaultViewer } from './inspect';
 import { buildObserverRoster } from './observers';
 import { GameModule } from '@rds/kernel/module';
 import { Action, ActorId, GameState, PlayerId, ProjectedGameState, SelectionCandidate, SelectionSpec, VisualTraceEvent,
@@ -212,6 +212,12 @@ export class UniversalSession implements GamePresenter {
         Object.keys(engineOptions).length > 0 ? engineOptions : undefined
       );
 
+    // 单人桌开局先绑定「主角座位」：声明走能力（`presentation.defaultViewer`），
+    // 通用层不认识任何游戏的座位结构。注入引擎的路径（联机房主）座位由房间
+    // 决定，调用方会显式 `setViewer`，这里不能抢。绑定放在订阅之前，因此开局
+    // 仍然只有一次 rebuild、revision 从 0 起算——视角是初始状态，不是一次变更。
+    if (!engine) this.bindDefaultViewer();
+
     this.unsubscribers.push(
       this.engine.onStateChange(() => {
         this.revision += 1;
@@ -236,6 +242,17 @@ export class UniversalSession implements GamePresenter {
     // 开局若先轮到 AI（例如房间补位），也从这里启动节奏。
     this.scheduleAiTurn();
     this.startHeartbeat();
+  }
+
+  /**
+   * Bind the table to the seat the game declares as the local protagonist.
+   *
+   * 单人桌默认开在上帝视角，可玩起来主角只有一个。没声明、声明的人不在桌上，
+   * 都保持原视角——静默失败比把镜头绑到不存在的座位上好。
+   */
+  private bindDefaultViewer(): void {
+    const seat = resolveDefaultViewer(this.module, this.engine.getRawState(), undefined);
+    if (seat) this.engine.setViewer(seat);
   }
 
   /* ------------------------------------------------------------------ */
@@ -1106,6 +1123,14 @@ export class UniversalSession implements GamePresenter {
       ? openDecision.participants.filter(pid => openDecision.submissions[pid] === undefined)
       : [actor];
 
+    // 谁在行动，和「我能做什么」是两件事：视角绑定到某名玩家之后，`acting`
+    // 是他自己的合法动作范围（入座 / 准备 / 结算），而牌桌上真正轮到的人是
+    // `focusActors`。操作栏第一行写的是后者——否则轮到 AI 时栏里会写「行动者
+    // 玩家 1」，玩家以为该自己出手，桌子却没有动作可选。对局已结束时没有
+    // 行动者，退回视角本人（旧行为），免得写出一个空的「行动者」。
+    const turnActors =
+      focusActors.length > 0 ? focusActors : [this.engine.getActiveActorId() ?? actor];
+
     const legal = acting.flatMap(pid => this.engine.getLegalActions(pid));
     this.bound = buildActionsView(state, legal, (actorId, spec) =>
       this.engine.getSelectionCandidates(actorId, spec)
@@ -1139,7 +1164,9 @@ export class UniversalSession implements GamePresenter {
     }
 
     const actorName =
-      acting.length > 1 ? `${acting.length} 个行动者待提交` : this.engine.getActorName(acting[0] ?? actor);
+      turnActors.length > 1
+        ? `${turnActors.length} 个行动者待提交`
+        : this.engine.getActorName(turnActors[0] ?? actor);
 
     this.snapshot = {
       revision: this.revision,

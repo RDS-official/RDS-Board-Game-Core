@@ -120,3 +120,19 @@ export function pokerSettlementMoment(state: MomentPresentationState): MomentPre
     hold: true
   };
 }
+
+/**
+ * 单人牌桌上「我」坐哪一号：第一个真人座位。
+ *
+ * 德州扑克不是观察游戏——一个人的桌子也必须先决定**自己是哪只手**。座位编制
+ * 写在 `globalVars.seats`（`isAi` 标记机器座位），这里只做一件事：把第一个
+ * 真人座位报给通用层，让它开局就坐在那一侧。全 AI 的桌子（观察席演示）没有
+ * 主角，返回 null 保持上帝视角。
+ */
+export function pokerDefaultViewer(state: MomentPresentationState): string | null {
+  const seats = state.globalVars.seats as { playerId?: string; isAi?: boolean }[] | undefined;
+  const seat = seats?.find(entry => entry && !entry.isAi)?.playerId;
+  if (!seat) return null;
+  // 已进观察席（输光、离桌）的人不再是主角：投影里没有他，绑过去只会空镜。
+  return state.players[seat] ? seat : null;
+}

@@ -332,7 +332,7 @@ splendor / betryal / sanguosha 的分数是从场上实体派生的（每次重�
 | 分区 | 落点 | 字段 | 谁读 |
 | --- | --- | --- | --- |
 | `𝒦_rule` | 模块顶层 | `hooks` / `actionSchemas` / `validatePayload` / `resolveSelection` / `validateSelection` / `statModifiers` / `checkInvariants` | 内核 |
-| `𝒦_view` | `GameModule.presentation` | `cardFacts` / `cardStyle` / `describeNode` / `describeTrait` / `traits` / `describeMoment` / `roleLabel` / `mapTitle` / … | 视图层（HUD / 渲染） |
+| `𝒦_view` | `GameModule.presentation` | `cardFacts` / `cardStyle` / `describeNode` / `describeTrait` / `traits` / `describeMoment` / `roleLabel` / `defaultViewer` / `mapTitle` / … | 视图层（HUD / 渲染） |
 | `𝒦_driver` | `GameModule.driver` | `aiActionDelayMs` / `actionCooldownMs` / `heartbeat` / `driverActions` / `isAutomated` | 驱动方（app / server） |
 
 **为什么这次拆分值得做**：`aiActionDelayMs` 不改变任何像素，只决定 AI 隔多久出手；
