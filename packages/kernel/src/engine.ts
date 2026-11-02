@@ -288,9 +288,18 @@ export class UniversalGameEngine {
     return this.currentViewer;
   }
 
-  /** Per-room random secret for HMAC virtual aliases (REVIEW.md S5); never serialized. */
+  /**
+   * Per-room random secret for HMAC virtual aliases (REVIEW.md S5); never serialized.
+   *
+   * 设置密钥时必须清空别名缓存：`CognitiveObserver.getVirtualAlias()` 按
+   * `secret::viewer` 做缓存键，但**无密钥分支**的缓存键只有 `viewer`。
+   * 如果密钥设置之前已经投影过一次（例如房间刚建好、客户端先连上扫了一眼），
+   * 那批弱别名会一直留在缓存里，即使之后换了 HMAC 也继续返回旧的 FNV 值 ——
+   * 隐藏实体 id 依然可被穷举。清缓存让下一次投影重新计算。
+   */
   public setAliasSecret(secret: string): void {
     this.aliasSecret = secret;
+    CognitiveObserver.resetAliases();
   }
 
   public setViewer(viewer: PlayerId | 'GOD'): void {
