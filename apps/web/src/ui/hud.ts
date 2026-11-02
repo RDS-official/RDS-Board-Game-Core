@@ -60,6 +60,27 @@ const PLAYER_CARD_HEIGHT = 104;
 /** Arbiter owner id for the enlarged seat plaque window. */
 const SEAT_PEEK_OWNER = 'hud.seat';
 
+/** Hand slot: hold-to-confirm timing, drag cancel distance and cycle pitch. */
+const HAND_LONG_PRESS_MS = 1500;
+const HAND_PRESS_CANCEL_PX = 14;
+const HAND_DRAG_STEP_PX = 40;
+/** Wheel input is accumulated so a high-resolution trackpad does not skip cards. */
+const HAND_WHEEL_STEP_PX = 24;
+
+interface HandPressState {
+  pointerId: number;
+  actionId: string;
+  startX: number;
+  startY: number;
+  /** Horizontal or vertical drag axis, locked after the first few pixels. */
+  axis: 'x' | 'y' | null;
+  /** Number of whole 40px steps already consumed by the drag. */
+  stepCount: number;
+  moved: boolean;
+  frame: number;
+  timer: number | null;
+}
+
 export interface HUDOptions {
   onSwitchGame: (gameId: string) => void;
   /** Restart the current game at a named scenario ('' = plain setup). */
@@ -153,6 +174,14 @@ export class BoardGameHUD {
   /** Phone shell: whether the action drawer is expanded. */
   private dockOpen = false;
   private shellMedia?: MediaQueryList;
+  /** Action currently held by the hand slot, mirrored on its fan card. */
+  private heldActionId: string | null = null;
+  private heldIndex = 0;
+  /** Key of the card painted in the hand stage, to avoid restarting its animation. */
+  private handRenderedKey = '';
+  private handPress: HandPressState | null = null;
+  private handSuppressClick = false;
+  private handWheelDelta = 0;
   private diceOverlay?: DiceRollOverlay;
   /** The setup roll is not animated: opening a scenario should not play a dice cutscene. */
   private rollPrimed = false;
@@ -236,6 +265,7 @@ export class BoardGameHUD {
     this.hasAccountRanking = false;
     this.rankingTab = 'table';
     this.overlays.closeAll();
+    this.resetHandSlot();
     this.container.querySelector('#card-sheet-layer')?.remove();
     // Switching fixtures must not treat the new board as "already discovered".
     this.knownNodes = undefined;
@@ -265,6 +295,8 @@ export class BoardGameHUD {
 
     this.dockTraceOverlay?.remove();
     this.dockTraceOverlay = null;
+    const hand = this.container.querySelector('#hand-slot') as HTMLElement | null;
+    if (hand) this.cancelHandPress(hand);
   }
 
   /** 观察席倒计时的本地刷新：只做减法，不动游戏状态。 */
@@ -1344,6 +1376,13 @@ export class BoardGameHUD {
         <aside class="activity-feed" id="activity-feed"></aside>
       </div>
       <div class="action-dock" id="action-dock"></div>
+      <aside class="hand-slot" id="hand-slot" role="button" tabindex="0" aria-label="手持出牌区">
+        <svg class="hs-ring" viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="hs-ring-track" cx="50" cy="50" r="47"></circle>
+          <circle class="hs-ring-fill" cx="50" cy="50" r="47" pathLength="100"></circle>
+        </svg>
+        <div class="hs-stage"></div>
+      </aside>
       <div class="announcement-banner" id="announce" style="display:none"></div>
       <div class="payload-layer" id="payload-layer" style="display:none"></div>
     `;
@@ -1481,6 +1520,9 @@ export class BoardGameHUD {
       this.presenter.rewind(snapshot.log.cursor - 1);
       this.pushToast('↶', '已撤销上一步');
     });
+
+    const handSlot = this.container.querySelector('#hand-slot') as HTMLElement | null;
+    if (handSlot) this.bindHandSlot(handSlot);
   }
 
   private render(snapshot: GameSnapshot): void {
@@ -1509,7 +1551,9 @@ export class BoardGameHUD {
     if (snapshot.chipRanking?.length && !this.accountRanking) this.refreshAccountRanking();
     this.renderObservers(snapshot);
     this.renderHistory(snapshot);
+    this.reconcileHeldAction(snapshot.actions);
     this.renderDock(snapshot);
+    this.renderHandSlot(snapshot);
     this.maybeRevealNode(snapshot);
     this.maybeShowMoment();
   }
@@ -2457,6 +2501,319 @@ export class BoardGameHUD {
     }, 500);
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Hand slot (手持出牌区)                                                */
+  /* ------------------------------------------------------------------ */
+
+  /** Follow the held action by id; if it disappeared, clamp the old position. */
+  private reconcileHeldAction(actions: UiAction[]): void {
+    if (actions.length === 0) {
+      this.heldIndex = 0;
+      this.heldActionId = null;
+      return;
+    }
+    const byId = this.heldActionId ? actions.findIndex(action => action.id === this.heldActionId) : -1;
+    if (byId >= 0) {
+      this.heldIndex = byId;
+      return;
+    }
+    if (this.heldIndex < 0 || this.heldIndex >= actions.length) this.heldIndex = 0;
+    this.heldActionId = actions[this.heldIndex]?.id ?? null;
+  }
+
+  /** A new presenter/game starts with a clean hand stage. */
+  private resetHandSlot(): void {
+    const slot = this.container.querySelector('#hand-slot') as HTMLElement | null;
+    if (slot) this.cancelHandPress(slot);
+    this.heldActionId = null;
+    this.heldIndex = 0;
+    this.handRenderedKey = '';
+    this.handWheelDelta = 0;
+    this.handSuppressClick = false;
+    const stage = this.container.querySelector('.hs-stage') as HTMLElement | null;
+    if (stage) stage.innerHTML = '';
+    slot?.classList.remove('pressing');
+  }
+
+  private currentHeldAction(): UiAction | null {
+    return this.latest?.actions[this.heldIndex] ?? null;
+  }
+
+  private isSimpleAction(action: UiAction): boolean {
+    return !(action.fields?.length || action.selection || action.highlightIds?.length || action.placementEntityId);
+  }
+
+  private renderHandSlot(snapshot: GameSnapshot, direction: -1 | 0 | 1 = 0): void {
+    const slot = this.container.querySelector('#hand-slot') as HTMLElement | null;
+    const stage = slot?.querySelector('.hs-stage') as HTMLElement | null;
+    if (!slot || !stage) return;
+
+    const action = snapshot.actions[this.heldIndex] ?? null;
+    const total = snapshot.actions.length;
+    this.heldActionId = action?.id ?? null;
+    slot.dataset.empty = action ? '0' : '1';
+    slot.dataset.tone = action?.tone ?? 'neutral';
+    slot.setAttribute(
+      'aria-label',
+      action
+        ? `手持出牌区：${action.label}，第 ${this.heldIndex + 1} / ${total} 个。点击查看，长按执行，左右方向键切换。`
+        : '手持出牌区：无可执行动作'
+    );
+    // A snapshot may replace the list mid-press; never dispatch the stale card.
+    if (this.handPress && action?.id !== this.handPress.actionId) {
+      this.cancelHandPress(slot);
+      this.suppressHandClick();
+    }
+
+    const key = action?.id ?? '';
+    const content = this.handCardHtml(action, this.heldIndex, total);
+    const current = stage.querySelector<HTMLElement>('.hs-card:not(.hs-leaving)');
+    if (current && key === this.handRenderedKey) {
+      current.dataset.tone = slot.dataset.tone;
+      current.innerHTML = content;
+      this.syncHeldHighlight();
+      return;
+    }
+
+    stage.querySelectorAll('.hs-leaving').forEach(node => {
+      node.remove();
+    });
+    const next = document.createElement('div');
+    next.className = 'hs-card';
+    next.dataset.tone = slot.dataset.tone;
+    next.innerHTML = content;
+
+    if (current && direction !== 0 && action) {
+      const suffix = direction > 0 ? 'next' : 'prev';
+      current.classList.add('hs-leaving', `hs-leave-${suffix}`);
+      next.classList.add('hs-entering', `hs-enter-${suffix}`);
+      stage.append(next);
+      window.setTimeout(() => {
+        if (current.parentElement === stage) current.remove();
+      }, 280);
+    } else {
+      current?.remove();
+      stage.append(next);
+    }
+    this.handRenderedKey = key;
+    this.syncHeldHighlight();
+  }
+
+  private handCardHtml(action: UiAction | null, index: number, total: number): string {
+    if (!action) {
+      return `
+        <span class="hs-empty-ico" aria-hidden="true">◌</span>
+        <span class="hs-empty-label">无可执行动作</span>
+        <span class="hs-empty-hint">等待其他玩家或结算</span>
+      `;
+    }
+    return `
+      <div class="hs-top">
+        <span class="hs-kicker">手持出牌</span>
+        <span class="hs-count">${index + 1} / ${total}</span>
+      </div>
+      <span class="hs-icon" aria-hidden="true">${action.icon}</span>
+      <div class="hs-label">${escHtml(action.label)}</div>
+      <div class="hs-hint">${escHtml(action.hint)}</div>
+      <div class="hs-foot"><span>点击查看</span><span>长按 1.5s</span></div>
+    `;
+  }
+
+  /** Keep the fan card and the held plaque in sync without rebuilding the fan. */
+  private syncHeldHighlight(): void {
+    const id = this.heldActionId;
+    this.container.querySelectorAll<HTMLElement>('#action-dock .dock-fan .act').forEach(card => {
+      if (id && card.dataset.actionId === id) card.dataset.held = '1';
+      else delete card.dataset.held;
+    });
+  }
+
+  private cycleHeld(step: number, count = 1): void {
+    const snapshot = this.latest;
+    const total = snapshot?.actions.length ?? 0;
+    if (!snapshot || total < 2) return;
+    const direction = step >= 0 ? 1 : -1;
+    const next = (((this.heldIndex + direction * count) % total) + total) % total;
+    if (next === this.heldIndex) return;
+    this.heldIndex = next;
+    this.heldActionId = snapshot.actions[next]?.id ?? null;
+    this.renderHandSlot(snapshot, direction);
+  }
+
+  /** Click and Enter share this: simple actions execute, parameterised ones confirm. */
+  private activateHeldAction(): void {
+    const action = this.currentHeldAction();
+    if (!action) return;
+    if (this.isSimpleAction(action)) this.runAction(action);
+    else this.openActionDetail(action);
+  }
+
+  private bindHandSlot(slot: HTMLElement): void {
+    slot.addEventListener('pointerdown', event => this.startHandPress(slot, event));
+    slot.addEventListener('pointermove', event => this.moveHandPress(slot, event));
+    slot.addEventListener('pointerup', event => this.endHandPress(slot, event, false));
+    slot.addEventListener('pointercancel', event => this.endHandPress(slot, event, true));
+    slot.addEventListener(
+      'wheel',
+      event => this.handleHandWheel(event),
+      { passive: false }
+    );
+    slot.addEventListener('contextmenu', event => {
+      if (this.handPress) event.preventDefault();
+    });
+    slot.addEventListener('click', event => {
+      if (this.handSuppressClick) {
+        this.handSuppressClick = false;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const action = this.currentHeldAction();
+      if (action) this.openActionDetail(action);
+    });
+    slot.addEventListener('keydown', event => {
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        this.cycleHeld(event.key === 'ArrowRight' ? 1 : -1);
+        return;
+      }
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      this.activateHeldAction();
+    });
+  }
+
+  private handleHandWheel(event: WheelEvent): void {
+    const total = this.latest?.actions.length ?? 0;
+    if (total < 2) return;
+    event.preventDefault();
+    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? window.innerHeight : 1;
+    const dx = event.deltaX * scale;
+    const dy = event.deltaY * scale;
+    const delta = Math.abs(dy) >= Math.abs(dx) ? dy : dx;
+    if (delta === 0) return;
+    this.handWheelDelta += delta;
+    if (Math.abs(this.handWheelDelta) < HAND_WHEEL_STEP_PX) return;
+    const step = this.handWheelDelta > 0 ? 1 : -1;
+    this.handWheelDelta = 0;
+    this.cycleHeld(step);
+  }
+
+  private startHandPress(slot: HTMLElement, event: PointerEvent): void {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    // A new gesture starts clean; the previous long-press may not have emitted a click.
+    this.handSuppressClick = false;
+    const action = this.currentHeldAction();
+    if (!action) return;
+    slot.focus({ preventScroll: true });
+    this.cancelHandPress(slot);
+
+    const press: HandPressState = {
+      pointerId: event.pointerId,
+      actionId: action.id,
+      startX: event.clientX,
+      startY: event.clientY,
+      axis: null,
+      stepCount: 0,
+      moved: false,
+      frame: 0,
+      timer: null
+    };
+    this.handPress = press;
+    slot.classList.add('pressing');
+    const fill = slot.querySelector<SVGCircleElement>('.hs-ring-fill');
+    if (fill) fill.style.strokeDashoffset = '100';
+    try {
+      slot.setPointerCapture(event.pointerId);
+    } catch {
+      // Synthetic pointers have no active capture; the DOM listeners still work.
+    }
+
+    const started = performance.now();
+    const tick = (now: number): void => {
+      if (this.handPress !== press) return;
+      const progress = Math.min(1, (now - started) / HAND_LONG_PRESS_MS);
+      if (fill) fill.style.strokeDashoffset = String(100 - progress * 100);
+      press.frame = progress < 1 ? requestAnimationFrame(tick) : 0;
+    };
+    press.frame = requestAnimationFrame(tick);
+    press.timer = window.setTimeout(() => this.completeHandPress(slot, press), HAND_LONG_PRESS_MS);
+  }
+
+  private moveHandPress(slot: HTMLElement, event: PointerEvent): void {
+    const press = this.handPress;
+    if (!press || press.pointerId !== event.pointerId) return;
+    const dx = event.clientX - press.startX;
+    const dy = event.clientY - press.startY;
+    const distance = Math.hypot(dx, dy);
+    if (!press.axis && distance >= 6) press.axis = Math.abs(dx) >= Math.abs(dy) ? 'x' : 'y';
+    if (!press.moved && distance > HAND_PRESS_CANCEL_PX) {
+      press.moved = true;
+      this.clearHandRing(slot, press);
+    }
+    if (!press.axis) return;
+    // Mouse drags cycle horizontally; touch/pen swipes use either dominant axis.
+    if (event.pointerType === 'mouse' && press.axis !== 'x') return;
+    const travel = press.axis === 'y' ? -dy : dx;
+    const steps = Math.trunc(travel / HAND_DRAG_STEP_PX);
+    if (steps === press.stepCount) return;
+    const delta = steps - press.stepCount;
+    press.stepCount = steps;
+    if (delta !== 0) this.cycleHeld(Math.sign(delta), Math.abs(delta));
+  }
+
+  private endHandPress(slot: HTMLElement, event: PointerEvent, cancelled: boolean): void {
+    const press = this.handPress;
+    if (!press || press.pointerId !== event.pointerId) return;
+    const moved = press.moved || press.stepCount !== 0;
+    this.cancelHandPress(slot);
+    if (!cancelled && moved) this.suppressHandClick();
+  }
+
+  private clearHandRing(slot: HTMLElement, press: HandPressState): void {
+    if (press.timer !== null) {
+      window.clearTimeout(press.timer);
+      press.timer = null;
+    }
+    if (press.frame) {
+      cancelAnimationFrame(press.frame);
+      press.frame = 0;
+    }
+    slot.classList.remove('pressing');
+    const fill = slot.querySelector<SVGCircleElement>('.hs-ring-fill');
+    if (fill) fill.style.strokeDashoffset = '100';
+  }
+
+  private cancelHandPress(slot: HTMLElement): void {
+    const press = this.handPress;
+    if (!press) {
+      slot.classList.remove('pressing');
+      return;
+    }
+    this.clearHandRing(slot, press);
+    this.handPress = null;
+    try {
+      if (slot.hasPointerCapture(press.pointerId)) slot.releasePointerCapture(press.pointerId);
+    } catch {
+      // Already released by the browser.
+    }
+  }
+
+  private completeHandPress(slot: HTMLElement, press: HandPressState): void {
+    if (this.handPress !== press) return;
+    this.handPress = null;
+    this.clearHandRing(slot, press);
+    this.suppressHandClick();
+    const action = this.latest?.actions[this.heldIndex] ?? null;
+    if (!action || action.id !== press.actionId) return;
+    if (this.isSimpleAction(action)) this.runAction(action);
+    else this.openActionDetail(action);
+  }
+
+  private suppressHandClick(): void {
+    this.handSuppressClick = true;
+  }
+
   private renderDock(snapshot: GameSnapshot): void {
     const dock = this.container.querySelector('#action-dock') as HTMLElement | null;
     if (!dock) return;
@@ -2767,6 +3124,7 @@ export class BoardGameHUD {
                   data-action-id="${action.id}"
                   data-fan-label="${action.label}"
                   data-fan-hint="${action.hint}"
+                  ${index === this.heldIndex ? 'data-held="1"' : ''}
                   style="--i:${index};--off:${offset.toFixed(2)};--abs:${Math.abs(offset).toFixed(2)}"
                   title="${action.label}">
                   <span class="act-ico">${action.icon}</span>
@@ -3060,6 +3418,8 @@ export class BoardGameHUD {
 
   private bindDockEvents(dock: HTMLElement): void {
     this.startCooldownTicker(dock);
+    // Wheel over the dock cycles the held hand card, same as wheel over the slot.
+    dock.addEventListener('wheel', event => this.handleHandWheel(event), { passive: false });
     const REST_HINT =
       '<span class="fh-label">悬停查看动作</span><span class="fh-detail">点击牌面执行该动作 · 数字键直接执行</span>';
 

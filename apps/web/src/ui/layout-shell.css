@@ -97,6 +97,37 @@
   overflow-y: auto;
 }
 
+/* Desktop: the dock owns exactly the second quarter of the viewport width
+   (1/7 .. 4/7) and the hand slot stands immediately to its right. Below
+   1200px the old grid/bottom-drawer rules above stay in charge. */
+@media (min-width: 1200px) {
+  .app-shell > .action-dock {
+    /* grid-area would make the abs-positioned containing block the board cell;
+       auto lets left/bottom resolve against the full app shell (the viewport). */
+    grid-area: auto;
+    position: absolute;
+    left: calc(100vw / 7);
+    bottom: var(--shell-edge);
+    width: calc(3 * 100vw / 7);
+    margin: 0;
+  }
+
+  .app-shell > .hand-slot {
+    position: absolute;
+    left: calc(4 * 100vw / 7 + 48px);
+    bottom: var(--shell-edge);
+    display: block;
+    width: clamp(150px, min(11vw, 26vh), 260px);
+    aspect-ratio: 3 / 4;
+    z-index: 26;
+    pointer-events: auto;
+    outline: none;
+    touch-action: none;
+    user-select: none;
+    perspective: 720px;
+  }
+}
+
 /* Modals and the announcement banner are genuine overlays, not panels. */
 .app-shell > .announcement-banner,
 .app-shell > .payload-layer {

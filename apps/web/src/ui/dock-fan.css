@@ -411,3 +411,211 @@
   margin-right: 0;
   z-index: 999;
 }
+
+/* ============================================================
+   Hand slot · 手持出牌区
+   One held action stands right of the dock; the matching fan card carries
+   [data-held='1']. Geometry lives in layout-shell.css.
+   ============================================================ */
+.hand-slot {
+  display: none;
+  font-family: var(--font-ui);
+}
+
+.hand-slot .hs-stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  transform-style: preserve-3d;
+}
+
+.hand-slot .hs-card {
+  --hs-dir: 1;
+  grid-area: 1 / 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-6) var(--space-4);
+  overflow: hidden;
+  border: 1px solid var(--border-accent-soft);
+  border-radius: var(--radius-lg);
+  background: radial-gradient(120% 86% at 50% 0%, var(--surface-accent-wash), transparent 62%),
+    var(--gradient-chrome);
+  box-shadow: var(--shadow-3), inset 0 1px 0 var(--border-subtle);
+  color: var(--text-primary);
+  text-align: center;
+  cursor: pointer;
+}
+
+.hand-slot:hover .hs-card { border-color: var(--border-accent-strong); }
+.hand-slot:focus-visible .hs-card { outline: 2px solid var(--accent-bright); outline-offset: 3px; }
+.hand-slot[data-tone='primary'] .hs-card { border-color: var(--border-accent-strong); }
+.hand-slot[data-tone='danger'] .hs-card { border-color: var(--status-danger); }
+
+.hand-slot .hs-top {
+  position: absolute;
+  top: var(--space-3);
+  left: var(--space-4);
+  right: var(--space-4);
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  color: var(--text-tertiary);
+  font-size: var(--type-xs);
+  letter-spacing: 0.08em;
+}
+
+.hand-slot .hs-kicker { font-weight: var(--weight-bold); }
+.hand-slot .hs-count { font-family: var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+
+.hand-slot .hs-icon {
+  display: grid;
+  place-items: center;
+  width: clamp(48px, 4.4vw, 72px);
+  aspect-ratio: 1;
+  font-size: clamp(2.25rem, 3vw, 3.25rem);
+  line-height: 1;
+  filter: drop-shadow(0 8px 16px var(--surface-accent-strong));
+}
+
+.hand-slot .hs-icon svg { display: block; width: 100%; height: 100%; }
+
+.hand-slot .hs-label {
+  width: 100%;
+  font-family: var(--font-display);
+  font-size: var(--type-lg);
+  font-weight: var(--weight-bold);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.hand-slot .hs-hint {
+  width: 100%;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: var(--type-xs);
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow-wrap: anywhere;
+}
+
+.hand-slot .hs-foot {
+  position: absolute;
+  bottom: var(--space-3);
+  left: var(--space-3);
+  right: var(--space-3);
+  display: flex;
+  justify-content: center;
+  gap: var(--space-3);
+  color: var(--text-tertiary);
+  font-size: var(--type-xs);
+  white-space: nowrap;
+}
+
+.hand-slot[data-empty='1'] .hs-card {
+  gap: var(--space-2);
+  border-style: dashed;
+  border-color: var(--border-subtle);
+  background: var(--surface-panel);
+  box-shadow: var(--shadow-2);
+  color: var(--text-tertiary);
+}
+
+.hand-slot .hs-empty-ico { font-size: var(--type-3xl); line-height: 1; color: var(--text-tertiary); }
+.hand-slot .hs-empty-label { font-family: var(--font-display); font-size: var(--type-md); font-weight: var(--weight-bold); }
+.hand-slot .hs-empty-hint { font-size: var(--type-xs); color: var(--text-tertiary); }
+
+/* Circular hold timer, painted above the plaque while the press is live. */
+.hand-slot .hs-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: calc(133.34% + 18px);
+  aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  overflow: visible;
+  pointer-events: none;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.hand-slot.pressing .hs-ring { opacity: 1; }
+.hand-slot .hs-ring * { fill: none; stroke-width: 2.4; }
+.hand-slot .hs-ring-track { stroke: var(--border-strong); opacity: 0.45; }
+.hand-slot .hs-ring-fill {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  filter: drop-shadow(0 0 5px var(--accent));
+}
+
+.hand-slot[data-tone='danger'] .hs-ring-fill { stroke: var(--status-danger); filter: drop-shadow(0 0 5px var(--status-danger)); }
+.hand-slot.pressing .hs-card { border-color: var(--accent-bright); }
+.hand-slot[data-tone='danger'].pressing .hs-card { border-color: var(--status-danger); }
+
+/* Direction-of-travel swap: incoming springs in, outgoing tilts away. */
+.hand-slot .hs-card.hs-entering,
+.hand-slot .hs-card.hs-leaving { will-change: transform, opacity; }
+.hand-slot .hs-enter-next { --hs-dir: 1; animation: hs-enter 220ms cubic-bezier(0.18, 0.89, 0.32, 1.18) both; }
+.hand-slot .hs-enter-prev { --hs-dir: -1; animation: hs-enter 220ms cubic-bezier(0.18, 0.89, 0.32, 1.18) both; }
+.hand-slot .hs-leave-next { --hs-dir: 1; animation: hs-leave 200ms var(--ease-out) both; }
+.hand-slot .hs-leave-prev { --hs-dir: -1; animation: hs-leave 200ms var(--ease-out) both; }
+
+@keyframes hs-enter {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--hs-dir) * 46%)) rotateY(calc(var(--hs-dir) * -24deg)) scale(0.92);
+  }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes hs-leave {
+  from { opacity: 1; transform: none; }
+  to {
+    opacity: 0;
+    transform: translateX(calc(var(--hs-dir) * -42%)) rotateY(calc(var(--hs-dir) * 18deg)) scale(0.9);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hand-slot .hs-enter-next,
+  .hand-slot .hs-enter-prev { animation: hs-fade-in 160ms linear both; }
+  .hand-slot .hs-leave-next,
+  .hand-slot .hs-leave-prev { animation: hs-fade-out 160ms linear both; }
+
+  @keyframes hs-fade-in { from { opacity: 0; transform: none; } to { opacity: 1; transform: none; } }
+  @keyframes hs-fade-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: none; } }
+}
+
+/* Fan card mirror. Kept last so hover cannot remove the held outline. */
+.dock-fan .act[data-held='1'] {
+  border-color: var(--border-accent-strong);
+  box-shadow: 0 0 0 2px var(--surface-accent-wash), 0 12px 26px -14px var(--accent);
+}
+
+.dock-fan .act[data-held='1']::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.dock-fan .act.primary[data-held='1']::after { background: var(--text-on-accent); box-shadow: none; }
