@@ -73,6 +73,7 @@ jobs:
 
           merged=0
           skipped=0
+          rejected=0
 
           if [ -n "${PR_INPUT:-}" ]; then
             prs="$PR_INPUT"
@@ -97,7 +98,7 @@ jobs:
             echo "::group::PR #$pr"
 
             json=$(gh pr view "$pr" --repo "$REPO" \
-              --json number,isDraft,isCrossRepository,mergeable,state,headRefOid,baseRefName,headRefName,title)
+              --json number,isDraft,isCrossRepository,mergeable,mergeStateStatus,state,headRefOid,baseRefName,headRefName,title)
 
             eval "$(echo "$json" | node -e '
               let raw = "";
@@ -109,6 +110,7 @@ jobs:
                 console.log("pr_draft=" + (pr.isDraft ? "true" : "false"));
                 console.log("pr_fork=" + (pr.isCrossRepository ? "true" : "false"));
                 console.log("pr_mergeable=" + q(pr.mergeable));
+                console.log("pr_merge_state=" + q(pr.mergeStateStatus));
                 console.log("pr_base=" + q(pr.baseRefName));
                 console.log("pr_head=" + q(pr.headRefName));
                 console.log("pr_sha=" + q(pr.headRefOid));
@@ -127,6 +129,13 @@ jobs:
             [ "$pr_draft" = "false" ]        || { skip "still a draft"; continue; }
             [ "$pr_fork" = "false" ]         || { skip "来自 fork（不自动合并外部分支）"; continue; }
             [ "$pr_mergeable" = "MERGEABLE" ] || { skip "mergeable=$pr_mergeable（有冲突或还在计算）"; continue; }
+
+            # 分支保护是 strict（必须基于最新 main）。落后的 PR 直接 `gh pr merge`
+            # 会被服务端拒绝，这里先判断，免得把「等作者 rebase」记成一次失败运行。
+            if [ "$pr_merge_state" = "BEHIND" ]; then
+              skip "分支落后于 main（strict 保护要求先 rebase/update branch）"
+              continue
+            fi
 
             # head 必须仍是 ci 检验过的那个 commit：期间有人 push 就等下一轮。
             if [ -n "${HEAD_SHA:-}" ] && [ "$pr_sha" != "$HEAD_SHA" ]; then
@@ -151,20 +160,26 @@ jobs:
             fi
 
             # 直接 squash 合并：gate 已对当前 head 成功，服务端会按分支保护复核。
-            if ! gh pr merge "$pr" --repo "$REPO" --squash --delete-branch; then
-              echo "FAILED to merge PR #$pr"
-              echo "::endgroup::"
-              exit 1
+            #
+            # 合并失败**不**让整个 workflow 变红：这里的职责是「能合就合」，
+            # 合不了（服务端状态变了、保护规则又加了一条…）应该把原因留在
+            # 日志和 summary 里让人来看，而不是制造一个需要排查的失败运行。
+            if merge_err=$(gh pr merge "$pr" --repo "$REPO" --squash --delete-branch 2>&1); then
+              echo "MERGED PR #$pr ($pr_head → main)"
+              merged=$((merged + 1))
+            else
+              reason=$(echo "$merge_err" | tr '\n' ' ' | cut -c1-300)
+              echo "COULD-NOT-MERGE PR #$pr: $reason"
+              rejected=$((rejected + 1))
             fi
-            echo "MERGED PR #$pr ($pr_head → main)"
-            merged=$((merged + 1))
             echo "::endgroup::"
           done
 
           echo "merged=$merged" >> "$GITHUB_OUTPUT"
           echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
           echo ""
-          echo "auto-merge: $merged merged, $skipped skipped"
+          echo "auto-merge: $merged merged, $skipped skipped, $rejected rejected"
+          echo "rejected=$rejected" >> "$GITHUB_OUTPUT"
 
       # GITHUB_TOKEN 的 push 不会触发 deploy.yml（见文件头），这里补一次。
       # AWS 走 webhook，不受影响；京东云靠这次 dispatch。
@@ -189,4 +204,5 @@ jobs:
             echo ""
             echo "- merged: **${{ steps.merge.outputs.merged || 0 }}**"
             echo "- skipped: **${{ steps.merge.outputs.skipped || 0 }}**"
+            echo "- rejected: **${{ steps.merge.outputs.rejected || 0 }}**（服务端拒绝，见上面日志）"
           } >> "$GITHUB_STEP_SUMMARY"
