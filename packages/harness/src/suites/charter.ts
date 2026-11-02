@@ -10,6 +10,7 @@ import { openDecision } from '@rds/kernel/decisions';
 import type { Action, GameState, ProjectedGameState } from '@rds/kernel/types';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { SANGUOSHA_HOOKS } from '@rds/games/sanguosha/hooks';
+import { capabilityMismatches, deriveCapabilities } from '@rds/kernel/capabilities';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { choosePokerAction } from '@rds/games/poker/ai';
@@ -932,5 +933,78 @@ test('AR-49: the judge executor reads its rule from the payload, not from the ga
   assert(
     hpOf(withDamage) <= hpOf(withoutDamage),
     `a harsher payload must not heal the victim (${hpOf(withDamage)} vs ${hpOf(withoutDamage)})`
+  );
+});
+
+/* -------------------------------------------------------------------------- */
+/* AR-48 capabilities 必须与实现一致，且内核真的消费                            */
+/* -------------------------------------------------------------------------- */
+
+test('AR-48: every module declares capabilities that match its implementation', () => {
+  const evidenceOf = (id: string) => {
+    // 只认代码事实：模块源码里是否调用了中断栈。
+    const dir = `packages/games/src/${id}`;
+    if (!existsSync(dir)) return {};
+    const src = listFiles(dir)
+      .map(f => readFileSync(f, 'utf8'))
+      .join('\n');
+    return { usesInterruptStack: /InterruptStackManager\.(push|peek)/.test(src) };
+  };
+
+  const offenders: string[] = [];
+  for (const [id, module] of Object.entries(GAME_REGISTRY)) {
+    const engine = new UniversalGameEngine(module, 4242, { strict: true });
+    const mismatches = capabilityMismatches(module, engine.getRawState(), evidenceOf(id));
+    for (const m of mismatches) offenders.push(`${id}.${m.field}(${m.declared}→${m.derived})`);
+  }
+  assertEqual(offenders.join(', '), '', 'capability declarations must match the code');
+});
+
+test('AR-48: the kernel flags a module that hides information while claiming it does not', () => {
+  const poker = GAME_REGISTRY.poker;
+  const liar = {
+    ...poker,
+    meta: { ...poker.meta, capabilities: { ...poker.meta.capabilities, hiddenInformation: false } }
+  };
+  const engine = new UniversalGameEngine(liar, 7, { strict: true });
+  const open = engine.getLegalActions(engine.getActiveActorId()).find(a => a.type === 'START_HAND');
+  assert(open, 'a fresh table offers START_HAND');
+  engine.dispatch(open!);
+
+  const violations = engine.getViolations().filter(v => v.code === 'CHARTER_CAPABILITY_MISMATCH');
+  assert(violations.length > 0, 'the kernel must notice hidden entities despite hiddenInformation: false');
+  assert(
+    violations.some(v => /hiddenInformation/.test(v.message)),
+    `the message names the field, got: ${violations[0]?.message}`
+  );
+});
+
+test('AR-48: the kernel flags a module that claims simultaneous moves it cannot make', () => {
+  const splendor = GAME_REGISTRY.splendor;
+  const liar = {
+    ...splendor,
+    meta: {
+      ...splendor.meta,
+      capabilities: { ...splendor.meta.capabilities, simultaneousMoves: true }
+    }
+  };
+  const engine = new UniversalGameEngine(liar, 3, { strict: true });
+  const legal = engine.getLegalActions(engine.getActiveActorId());
+  if (legal.length > 0) engine.dispatch(legal[0]);
+
+  const violations = engine.getViolations().filter(v => v.code === 'CHARTER_CAPABILITY_MISMATCH');
+  assert(
+    violations.some(v => /simultaneousMoves/.test(v.message)),
+    `a claim with no applySimultaneous must be reported, got: ${JSON.stringify(violations.map(v => v.message))}`
+  );
+});
+
+test('AR-48: capability derivation does not count a single-seat SIMULTANEOUS window as simultaneous moves', () => {
+  // betrayal 用 kind:'SIMULTANEOUS' 开单人伤害窗口 —— 那不是"多人同时行动"。
+  const betrayal = GAME_REGISTRY.betrayal;
+  assertEqual(
+    deriveCapabilities(betrayal).simultaneousMoves,
+    false,
+    'a single-participant window is not a simultaneous-move capability'
   );
 });
