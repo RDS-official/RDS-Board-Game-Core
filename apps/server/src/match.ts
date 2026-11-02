@@ -130,7 +130,7 @@ export class ServerMatch {
               ...(buyIns.length > 0 ? { stacks: buyIns } : {})
             }),
         // AI 交给房间按游戏声明的节奏驱动，真人才能看清每一步。
-        ...(module.presentation?.aiActionDelayMs ? { autoAi: false } : {})
+        ...(module.driver?.aiActionDelayMs ? { autoAi: false } : {})
       }
     );
 
@@ -296,7 +296,7 @@ export class ServerMatch {
     }
     if (action.type.startsWith('__')) return this.reject('invalid action');
     // 驱动方动作（低保心跳）只能由服务器定时器派发，客户端不得伪造。
-    if (this.module.driverActions?.includes(action.type)) return this.reject('invalid action');
+    if (this.module.driver?.driverActions?.includes(action.type)) return this.reject('invalid action');
     const actor = String(action.actorId ?? action.playerId ?? '');
     if (actor !== seat) return this.reject(`actor does not match viewer: ${actor || '(missing)'}`);
     this.room.setCurrentViewer(seat);
@@ -404,7 +404,7 @@ export class ServerMatch {
    * 内核保持无时钟，动作照常进 actionLog，因此回放仍可复现。
    */
   private pulseHeartbeat(now: number): void {
-    const heartbeat = this.module.heartbeat;
+    const heartbeat = this.module.driver?.heartbeat;
     if (!heartbeat) return;
     if (now - this.lastHeartbeatAt < heartbeat.intervalMs) return;
     const action = heartbeat.action(this.room.engine.getRawState());
@@ -417,16 +417,16 @@ export class ServerMatch {
    * 内置 AI 的节奏泵。
    *
    * 房间用 `autoAi: false` 建引擎时，`isAutomated` 标出 AI 座位，具体动作来自它
-   * 自己的合法动作表，由这里按 `presentation.aiActionDelayMs`（德州 = 5s）逐个
+   * 自己的合法动作表，由这里按 `driver.aiActionDelayMs`（德州 = 5s）逐个
    * 派发：真人能看清 AI 的每一次跟注/加注，而不是一瞬间跳过整轮。
    */
   private startAiPump(): void {
-    const delay = this.module.presentation?.aiActionDelayMs;
+    const delay = this.module.driver?.aiActionDelayMs;
     if (!delay) return;
     const step = Math.max(100, Math.min(delay, 500));
     // 结算兜底：一手结束后等满冷却仍有人没点「准备」，服务器就替全桌开下一手。
     // 真人点准备仍照常提前开局；掉线/走开的玩家不再能把整张桌子卡死。
-    const settleGateMs = this.module.presentation?.actionCooldownMs?.START_HAND ?? 20000;
+    const settleGateMs = this.module.driver?.actionCooldownMs?.START_HAND ?? 20000;
     this.aiTimer = setInterval(() => {
       if (this.disposed) return;
       const now = Date.now();
@@ -436,7 +436,7 @@ export class ServerMatch {
       const actor = engine.getActiveActorId();
       // AI 与真人同一条管线：`isAutomated` 说出谁由机器控制，具体动作直接来自
       // 它自己的合法动作表（结算阶段就是「开下一手」），因此全桌 AI 也能继续打。
-      const automated = !!actor && !!this.module.isAutomated?.(state, actor);
+      const automated = !!actor && !!this.module.driver?.isAutomated?.(state, actor);
       const action = automated && actor ? engine.getLegalActions(actor)[0] : undefined;
       if (action) {
         if (now - this.lastAiAt < delay) return;

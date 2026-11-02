@@ -87,7 +87,7 @@ export interface GameSetupOptions {
   /** How many seats the table should have. */
   seats?: number;
   /**
-   * false 时由驱动方逐步派发内置 AI 的动作（配合 `aiActionDelayMs`），
+   * false 时由驱动方逐步派发内置 AI 的动作（配合 `driver.aiActionDelayMs`），
    * 内核不再在一次 reduce 里替 AI 把整个回合走完。
    */
   autoAi?: boolean;
@@ -319,6 +319,52 @@ export interface MomentPresentationHints {
  * declared here, inside that game's own package, instead of inside the generic
  * inspection code.
  */
+/**
+ * 宪章 C-8：`𝒦_driver` —— 只影响**驱动节奏**的声明。
+ *
+ * 这些字段由 app / server 的定时器读取，用来决定"什么时候派发下一个动作"。
+ * 它们**不属于**展示层：`aiActionDelayMs` 不改变任何像素，只决定 AI 隔多久出手。
+ * 历史上它们混在 `GamePresentationHints` 里，导致"展示"与"驱动"无法分别演进。
+ */
+export interface GameDriverHints {
+  /**
+   * How long (ms) each built-in AI seat should pause before its move, when the
+   * module wants a watchable pace instead of an instant reply. 0 / undefined
+   * means "let the kernel advance automated seats inline".
+   */
+  aiActionDelayMs?: number;
+  /**
+   * Minimum delay (ms) before an action type may be taken again, measured from
+   * the moment it first became available. Used for settle pauses: a hand has just
+   * finished and the table needs a beat before the next one is dealt. The driver
+   * enforces it; the kernel itself stays clock-free.
+   */
+  actionCooldownMs?: Record<string, number>;
+  /**
+   * 驱动方心跳：内核自己没有时钟，凡是「每 N 毫秒发生一次」的规则（观察者的
+   * 低保、定期补给等）都由 app / server 的定时器按这里声明的节奏派发一个动作。
+   * `action(state)` 返回 null 表示这一拍不需要派发（例如桌上没有观察者），
+   * 驱动方跳过即可。动作本身仍走正常的 reduce 路径，因此回放完全确定。
+   */
+  heartbeat?: {
+    intervalMs: number;
+    action: (state: GameState) => Action | null;
+  };
+  /**
+   * 只允许驱动方派发的动作类型（心跳等）。它们不进入 `legalActions`，因此
+   * 严格模式下的合法性校验按声明放行；面向客户端的入口必须拒绝这些类型。
+   */
+  driverActions?: readonly string[];
+  /**
+   * 由机器控制的角色（AI 座位）。
+   *
+   * 驱动方（app / server）据此按 `driver.aiActionDelayMs` 代它派发动作。
+   * AI 与真人走同一条 `legalActions → dispatch` 管线：`legalActions` 直接给出它
+   * 这一步要做的具体动作，因此结算阶段（准备 / 开下一手）也不会漏。
+   */
+  isAutomated?: (state: GameState, actorId: ActorId) => boolean;
+}
+
 export interface GamePresentationHints {
   /**
    * The board already previews card faces on hover, so a click on a card must
@@ -370,20 +416,6 @@ export interface GamePresentationHints {
    * the view layer never maps a role itself. Must be pure.
    */
   roleLabel?: (role: string) => string | null;
-  /**
-   * How long the driver should let a built-in AI think before its next action,
-   * in milliseconds. A fixture that resolves its AI inline (inside one reduce)
-   * leaves the table no time to follow what happened; declaring this makes the
-   * app/server drive the AI one step at a time, at a watchable pace.
-   */
-  aiActionDelayMs?: number;
-  /**
-   * Minimum delay (ms) before an action type may be taken again, measured from
-   * the moment it first became available. Used for settle pauses: a hand has just
-   * finished and the table needs a beat before the next one is dealt. The driver
-   * enforces it; the kernel itself stays clock-free.
-   */
-  actionCooldownMs?: Record<string, number>;
   /**
    * Title of the map overview panel in the game's own vocabulary.
    * A plain string, not a function — see definePresentation.
@@ -488,33 +520,17 @@ export interface GameModule {
    * serve every game without branching on the game id.
    */
   presentation?: GamePresentationHints;
+  /**
+   * 宪章 C-8：`𝒦_driver` —— 驱动节奏声明（AI 出手间隔、动作冷却）。
+   *
+   * 从 `presentation` 里拆出来的：这两者影响的是**什么时候派发下一个动作**，
+   * 不是渲染什么。app / server 读它，内核与视图都不读。
+   */
+  driver?: GameDriverHints;
   /** Optional spatial semantics (walls, doors, LOS, floors). */
   spatial?: SpatialQuery;
   /** Logical-clock TTLs (in ticks) applied to decisions / response windows. */
   timing?: { decision?: number; response?: number };
-  /**
-   * 驱动方心跳：内核自己没有时钟，凡是「每 N 毫秒发生一次」的规则（观察者的
-   * 低保、定期补给等）都由 app / server 的定时器按这里声明的节奏派发一个动作。
-   * `action(state)` 返回 null 表示这一拍不需要派发（例如桌上没有观察者），
-   * 驱动方跳过即可。动作本身仍走正常的 reduce 路径，因此回放完全确定。
-   */
-  heartbeat?: {
-    intervalMs: number;
-    action: (state: GameState) => Action | null;
-  };
-  /**
-   * 只允许驱动方派发的动作类型（心跳等）。它们不进入 `legalActions`，因此
-   * 严格模式下的合法性校验按声明放行；面向客户端的入口必须拒绝这些类型。
-   */
-  driverActions?: readonly string[];
-  /**
-   * 由机器控制的角色（AI 座位）。
-   *
-   * 驱动方（app / server）据此按 `presentation.aiActionDelayMs` 代它派发动作。
-   * AI 与真人走同一条 `legalActions → dispatch` 管线：`legalActions` 直接给出它
-   * 这一步要做的具体动作，因此结算阶段（准备 / 开下一手）也不会漏。
-   */
-  isAutomated?: (state: GameState, actorId: ActorId) => boolean;
   setup: (seed: number, options?: GameSetupOptions) => GameState;
   legalActions: (state: GameState, actorId: ActorId) => Action[];
   reduce: (state: GameState, action: Action, ctx: ReduceContext) => GameState;
@@ -557,6 +573,61 @@ export function defineGame(module: GameModule): GameModule {
  * a stray object or a typo would otherwise fail late and far from its cause. This
  * fails at module load, next to the declaration that caused it.
  */
+/**
+ * Authoring helper for `GameModule.driver` (charter C-8, `𝒦_driver`).
+ *
+ * 与 `definePresentation` 同样的理由：声明在模块加载时就校验，错误不会飘到
+ * 几秒后的某个定时器里才炸。
+ */
+export function defineDriver(hints: GameDriverHints): GameDriverHints {
+  for (const [key, value] of Object.entries(hints)) {
+    if (key === 'aiActionDelayMs') {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        throw new TypeError('driver.aiActionDelayMs must be a non-negative number');
+      }
+      continue;
+    }
+    if (key === 'actionCooldownMs') {
+      if (!value || typeof value !== 'object') {
+        throw new TypeError('driver.actionCooldownMs must be a record of milliseconds');
+      }
+      for (const ms of Object.values(value as Record<string, unknown>)) {
+        if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) {
+          throw new TypeError('driver.actionCooldownMs values must be non-negative numbers');
+        }
+      }
+      continue;
+    }
+    if (key === 'driverActions') {
+      if (!Array.isArray(value) || value.some(t => typeof t !== 'string')) {
+        throw new TypeError('driver.driverActions must be a list of action type strings');
+      }
+      continue;
+    }
+    if (key === 'heartbeat') {
+      if (!value || typeof value !== 'object') {
+        throw new TypeError('driver.heartbeat must be an object');
+      }
+      const beat = value as { intervalMs?: unknown; action?: unknown };
+      if (typeof beat.intervalMs !== 'number' || !Number.isFinite(beat.intervalMs) || beat.intervalMs <= 0) {
+        throw new TypeError('driver.heartbeat.intervalMs must be a positive number');
+      }
+      if (typeof beat.action !== 'function') {
+        throw new TypeError('driver.heartbeat.action must be a function');
+      }
+      continue;
+    }
+    if (key === 'isAutomated') {
+      if (typeof value !== 'function') {
+        throw new TypeError('driver.isAutomated must be a pure predicate');
+      }
+      continue;
+    }
+    throw new TypeError(`driver.${key} is not a driver declaration`);
+  }
+  return hints;
+}
+
 export function definePresentation(hints: GamePresentationHints): GamePresentationHints {
   for (const [key, value] of Object.entries(hints)) {
     if (key === 'mapTitle') {
@@ -567,22 +638,12 @@ export function definePresentation(hints: GamePresentationHints): GamePresentati
       if (typeof value !== 'boolean') throw new TypeError('presentation.cardPreviewOnHover must be a boolean');
       continue;
     }
-    if (key === 'aiActionDelayMs') {
-      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-        throw new TypeError('presentation.aiActionDelayMs must be a non-negative number');
-      }
-      continue;
-    }
-    if (key === 'actionCooldownMs') {
-      if (!value || typeof value !== "object") {
-        throw new TypeError('presentation.actionCooldownMs must be a record of milliseconds');
-      }
-      for (const ms of Object.values(value as Record<string, unknown>)) {
-        if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) {
-          throw new TypeError('presentation.actionCooldownMs values must be non-negative numbers');
-        }
-      }
-      continue;
+    if (key === 'aiActionDelayMs' || key === 'actionCooldownMs') {
+      // 宪章 C-8：这两个是驱动方语义（𝒦_driver），不属于展示。
+      // 仍然接受旧写法以免一次性打断所有调用方，但明确告诉作者该搬去哪。
+      throw new TypeError(
+        `presentation.${key} is a driver concern (charter C-8) — declare it on GameModule.driver via defineDriver() instead`
+      );
     }
     if (typeof value !== 'function') throw new TypeError(`presentation.${key} must be a pure function`);
   }
