@@ -218,32 +218,41 @@ export class SanguoshaRules {
         break;
       }
 
+      /*
+       * 通用判定执行器（宪章 C-8：钩子承载规则，reducer 只执行）。
+       *
+       * 这里**不知道**"八阵图"这个名字。规则本身由 `bagua_armor` 钩子通过
+       * payload 声明：判定结果如何解读（`redIsDodge`）、失败时承受多少伤害
+       * （`damageOnFail`）、成功意味着什么（`successMeans`）。
+       * 换成"乐不思蜀"或任何其它判定牌，改的是钩子，不是这里。
+       */
       case 'JUDGE_BAGUA': {
-        // Judge top card of deck
         const { value: judgeVal, nextSeed } = DeterministicPRNG.nextInt(nextState.prngState, 1, 100);
         nextState.prngState = nextSeed;
-        const isRed = judgeVal <= 50; // 50% probability red suit
 
-        if (isRed) {
-          trace({
-            id: `bagua_success_${ctx.id('g')}`,
-            type: 'ANNOUNCEMENT',
-            title: `八卦阵 Ba Gua Judgement RED: Dodge successful!`,
-            durationMs: 600
-          });
-        } else {
-          trace({
-            id: `bagua_fail_${ctx.id('g')}`,
-            type: 'ANNOUNCEMENT',
-            title: `八卦阵 Ba Gua Judgement BLACK: Failed to dodge!`,
-            durationMs: 600
-          });
-          // Fall through to take damage
-          if (player.customProps.hp > 0) {
-            player.customProps.hp -= 1;
-            player.score = player.customProps.hp;
-            nextState.players = { ...nextState.players, [pId]: player };
-          }
+        const redIsDodge = action.payload?.redIsDodge !== false;
+        const damageOnFail = Math.max(0, Number(action.payload?.damageOnFail ?? 1));
+        const isRed = judgeVal <= 50; // 50% 红牌
+        const judgedSuccess = redIsDodge ? isRed : !isRed;
+
+        trace({
+          id: `judge_${ctx.id('g')}`,
+          type: 'ANNOUNCEMENT',
+          title: judgedSuccess
+            ? `八卦阵 Ba Gua Judgement RED: Dodge successful!`
+            : `八卦阵 Ba Gua Judgement BLACK: Failed to dodge!`,
+          durationMs: 600
+        });
+
+        if (!judgedSuccess && damageOnFail > 0) {
+          const victim = { ...nextState.players[pId] };
+          const hp = Number(victim.customProps.hp ?? 0);
+          const nextHp = Math.max(0, hp - damageOnFail);
+          victim.customProps = { ...victim.customProps, hp: nextHp };
+          victim.score = nextHp;
+          nextState.players = { ...nextState.players, [pId]: victim };
+          // C-7：伤害也是一种收益（负向），记一笔以便审计。
+          ctx.reward(pId, 'hp', -Math.min(hp, damageOnFail), `判定失败，承受 ${damageOnFail} 点伤害`);
         }
         break;
       }

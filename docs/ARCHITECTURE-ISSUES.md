@@ -84,7 +84,7 @@
 | AR-46 | 随机源未收口，模组可绕过 `ctx.roll()` | `packages/games/src/betrayal/helpers.ts` 的 `drawRoomCandidate()`、`packages/games/src/poker/ai.ts` 的 `noise()` | 宪章 C-4，`reduce` 不再注入 PRNG 静态方法，随机只能走 `ctx.roll()` | ✅ **已修复**：betrayal 弃牌堆重洗改为推进 `prngState`；`charter C-4` 覆盖全部运行期调用点 |
 | AR-47 | `ℛ` 与 `𝒯` 完全耦合，收益事后反推、无法审计 | ~~`poker/rules.ts` 的 `showdown()` 直接 `setChips()`~~ | ✅ **已修复（2026-11）**：`ReduceContext.reward()` + 只追加的 `state.rewards`；poker 三处派发与 catan `grantResources()` 总闸已记账。其余模组的分数是派生值、无增量收益，不需要记账（理由见宪章 §4.2） | 已修复 |
 | AR-48 | `capabilities` 四个布尔位在全仓只被 UI 读取，内核从不消费 | `apps/web/src/ui/mathInspector.ts:329-332` 是唯一读取点 | 要么让内核真正消费（调度 / 校验分支），要么从 `GameMeta` 移除并放入 `presentation` | 待修 |
-| AR-49 | 钩子机制被绕开：`bagua_armor` 的 handler 只返回一句提示 | `packages/games/src/sanguosha/hooks.ts`；真正的判定手写在 `packages/games/src/sanguosha/rules.ts` 的 `JUDGE_BAGUA` 分支 | 🔶 **部分修复（2026-11）**：`𝒦` 三区已物理分离（`GameModule.driver` 独立于 `presentation`，`definePresentation()` 拒绝驱动键），`charter C-8` 五例覆盖；但 sanguosha 钩子表达力不足仍未解决 —— 需要声明式规则表 + 通用解释器 | 进行中 |
+| AR-49 | 钩子机制被绕开：`bagua_armor` 的 handler 只返回一句提示 | ~~`packages/games/src/sanguosha/hooks.ts` 只返回 CONTINUE；真正判定手写在 `rules.ts` 的 `JUDGE_BAGUA` 分支~~ | ✅ **已修复（2026-11）**：钩子改拦 `JUDGE_BAGUA` 并产出 `MODIFY`，把规则参数 （`redIsDodge` / `damageOnFail` / `successMeans` / `ruleId`）写进 payload；`rules.ts` 降级为**通用判定执行器**，不认识"八阵图"这个名字。`charter §AR-49` 三例覆盖，其中一例验证「改钩子 params 必须改变结果」 | 已修复 |
 
 ### 0.6 实施顺序（与审查报告 §10 一致）
 
