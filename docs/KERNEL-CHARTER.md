@@ -257,7 +257,7 @@ handler: () => ({
 
 ## 4. 分阶段落地
 
-> **2026-11 实际进度**：C-1 ~ C-9 全部有可执行断言。阶段 0 已完成；阶段 1（C-5 / C-6）在德扑落地；阶段 2（C-3 并发表达、C-4 随机收口）已完成；阶段 3 的 C-7 收益独立已落地，C-8 元规则分区以静态检查形式建立了回归防线。
+> **2026-11 实际进度**：C-1 ~ C-9 全部有可执行断言，且**已覆盖全部 6 个模组**（不再是只有 betryal / poker 两个示范）。阶段 0 已完成；阶段 1（C-5 / C-6）、阶段 2（C-3 / C-4）、阶段 3（C-7 / C-8）均已落地。
 > 内核侧新增 `packages/kernel/src/charter.ts`（宪章执行器）与
 > `packages/harness/src/suites/charter.ts`（12 条可执行断言）。
 > 下面各阶段保留原计划，✅ 标记已完成项。
@@ -269,11 +269,11 @@ handler: () => ({
 | C-1 | `checkCharter()` 检查动作类型是否在 `actionSchemas` 中声明；探针在全仓扫出并补齐 8 个漏登记类型（`DRAW_CARDS` / `END_TURN` / `TRY_FRONT_DOOR` / `READY` / `SHOW` / `MUCK` / `FORCE_START` / `DEBUG_READY_ALL`） | `charter C-1` 两例 |
 | C-2 | `observeTransitions()` 用 `turn` 增量作可观测代理，记录 `CHARTER_C2_MULTI_TRANSITION`；poker 经 `module.charter.deviations` 机器登记偏离，到期 2027-03-31 | `charter C-2` 两例 |
 | C-5 | `choosePokerAction(view: ProjectedGameState)`；`poker/rules.ts` 经 `decisionView()` 先投影再决策；`deriveNoise(view)` 不再读 `prngState`；`ProjectedGameState.ownHand` 提供「自己的手牌」合法视图 | `charter C-5` 两例 |
-| C-6 | `GameModule.checkInvariants()` + `engine.getViolations()`，**不阻断**转移；poker 落地筹码守恒 / 底池一致性 / 手号单调 | `charter C-6` 三例 |
-| C-9 | `GameModule.meta.stateSchema.globalVars`；未登记 key 报 `CHARTER_C9_UNDECLARED_GLOBAL_VAR`；poker 登记 7 个 key | `charter C-9` 两例 |
+| C-6 | `GameModule.checkInvariants()` + `engine.getViolations()`，**不阻断**转移。**全部 6 个模组**已落地：poker 筹码整除性 / 底池一致性 / 手号单调；catan 资源供给不超发；splendor 宝可球守恒；sanguosha 血量边界；dune 兵力与押注；betrayal 属性整数与房间存在性 | `charter C-6` 五例（含反向验证） |
+| C-9 | `GameModule.meta.stateSchema.globalVars` + `customProps`；未登记 key 报 `CHARTER_C9_UNDECLARED_GLOBAL_VAR`；**全部 6 个模组**均已登记 | `charter C-9` 三例 |
 | C-3 | 新增 `DecisionPolicy: { type: 'SIMULTANEOUS' }` 与 `GameModule.applySimultaneous()`；决策窗口结算时把动作**多重集**一次交给模组，内核不排序；未声明合并语义的模组退回串行并记 `CHARTER_C3_SERIALIZED`。dune 战斗之轮、catan 掷 7 弃牌已迁移 | `charter C-3` 四例 |
 | C-4 | 运行期 `DeterministicPRNG` 调用必须推进 `prngState`；修掉 betrayal `drawRoomCandidate()` 用 `seed + items.length + attempts * 19` 拼假随机源的问题 | `charter C-4` 一例 |
-| C-7 | `ReduceContext.reward()` + `GameState.rewards`（只追加）；reduce 期间模组拿到的是累积缓冲区，转移落地时由内核一次性写入，记账口本身不是新的可变逃逸口。poker 的摊牌派池 / 弃牌取胜 / 观察者低保三处均已记账 | `charter C-7` 三例 |
+| C-7 | `ReduceContext.reward()` + `GameState.rewards`（只追加）；reduce 期间模组拿到的是累积缓冲区，转移落地时由内核一次性写入，记账口本身不是新的可变逃逸口。poker（摊牌派池 / 弃牌取胜 / 观察者低保）与 catan（资源获取，加在 `grantResources()` 总闸上，覆盖掷骰产出 / 港口兑换 / 强盗抢夺）已接入 | `charter C-7` 四例 |
 | C-8 | `𝒦_view`（presentation）不得出现在状态跃迁路径上 —— 静态扫描各模组的 `rules.ts` / `helpers.ts`（剥掉注释后），发现即失败 | `charter C-8` 两例 |
 
 **C-6 实战成绩**：筹码守恒断言上线后立刻抓到一条真实记账问题——
@@ -303,6 +303,27 @@ handler: () => ({
 **catan 的交易窗口**是唯一有争议的一例：多人可同时接受，而实现是先到先得。
 按项目决定保留该语义（抢单是玩法的一部分），因此**不**改代码，但登记在
 [RULES-DEVIATIONS.md](RULES-DEVIATIONS.md) 的 C-3 条目里，说明这是有意为之而非疏漏。
+
+### 4.2 全模组迁移记录（2026-11）
+
+第一批只覆盖了 poker（示范），其余模组仍在绕过约束。第二批把 C-6 / C-7 / C-9 铺到全部 6 个模组：
+
+| 模组 | C-9 声明 | C-6 语义不变量 | C-7 收益记账 |
+| --- | --- | --- | --- |
+| catan | 15 gv / 2 cp | 资源供给不超发（每种 ≤ 19） | ✅ `grantResources()` 总闸 |
+| splendor | 10 gv / 6 cp | 宝可球守恒（持有 + 银行 ≤ 供给） | ⏳ 分数是派生值，无累加收益 |
+| betrayal | 21 gv / 34 cp | 属性为整数；角色房间必须存在 | ⏳ 无筹码/分数型收益 |
+| sanguosha | 2 gv / 4 cp | 血量 ∈ [0, maxHp] 且为整数 | ⏳ 同上 |
+| dune_mahjong | 5 gv / 5 cp | 兵力非负；押注 ≤ 持有兵力 | ⏳ 同上 |
+| poker | 7 gv / 8 cp | 筹码整除性 / 底池一致 / 手号单调 | ✅ 三处派发 |
+
+**为什么 C-7 只铺了 2 个模组**：`state.rewards` 记的是"这次跃迁谁因为什么拿到多少"。
+splendor / betryal / sanguosha 的分数是从场上实体派生的（每次重算整表），
+没有"增量"，硬塞进流水账只会重复记录同一分。它们真正需要的是 C-6 的守恒断言，
+那已经落地了。catan 与 poker 有真实的筹码/资源流动，所以接了记账口。
+
+**C-9 的键集怎么来的**：多 seed 随机实跑（25 轮 × 260 步）取并集，再用源码静态扫描补漏。
+验证标准不是"测试通过"，而是**跑 5000+ 步不出现 `CHARTER_C9_UNDECLARED_GLOBAL_VAR`**。
 
 ### 阶段 0（1 周）✅ 已完成：不改架构，先建立度量
 

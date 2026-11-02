@@ -44,8 +44,19 @@ export function setBank(state: GameState, bank: ResourceBag): void {
   state.globalVars.bank = bank;
 }
 
-/** Add resources, limited by the finite bank. Returns how many were actually added. */
-export function grantResources(state: GameState, pid: PlayerId, res: CatanResource, amount: number): number {
+/**
+ * Add resources, limited by the finite bank. Returns how many were actually added.
+ *
+ * `ctx` 可选：传入时把这次获取记进收益流水（宪章 C-7）。加在两个资源总闸上，
+ * 覆盖面最广 —— 掷骰产出、港口兑换、强盗抢夺都走这里。
+ */
+export function grantResources(
+  state: GameState,
+  pid: PlayerId,
+  res: CatanResource,
+  amount: number,
+  ctx?: { reward: (actorId: string, kind: string, amount: number, reason: string) => void }
+): number {
   if (amount <= 0) return 0;
   const player = state.players[pid];
   if (!player) return 0;
@@ -58,6 +69,7 @@ export function grantResources(state: GameState, pid: PlayerId, res: CatanResour
   player.customProps = { ...player.customProps, resources: bag };
   bank[res] -= available;
   setBank(state, bank);
+  ctx?.reward(pid, `resource:${res}`, available, `获得 ${available} ${res}（来源：掷骰/兑换/抢夺）`);
   return available;
 }
 

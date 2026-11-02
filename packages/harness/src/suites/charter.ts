@@ -254,9 +254,10 @@ test('charter C-6: chip conservation catches a booking error the structural chec
   };
 
   const messages = module.checkInvariants!(tampered);
+  // 不假设总额是常量（破产补位会让总额增长），断言的是"整除性被破坏"。
   assert(
-    messages.some(m => m.includes('chip conservation')),
-    `a 250-chip booking error must be reported, got: ${JSON.stringify(messages)}`
+    messages.some(m => /not a multiple of the \d+-chip buy-in/.test(m)),
+    `a 250-chip booking error must break the buy-in invariant, got: ${JSON.stringify(messages)}`
   );
 });
 
@@ -651,4 +652,98 @@ test('charter C-8: driver semantics stay in 𝒦_driver, not in reduce', () => {
   if (module.isAutomated) {
     assert(typeof module.isAutomated === 'function', 'isAutomated is a predicate');
   }
+});
+
+/* -------------------------------------------------------------------------- */
+/* C-6 / C-7 / C-9 全模组覆盖                                                   */
+/* -------------------------------------------------------------------------- */
+
+test('charter C-6: every module declares semantic invariants that accept real play', () => {
+  for (const [id, module] of Object.entries(GAME_REGISTRY)) {
+    assert(module.checkInvariants, `${id} must declare checkInvariants (C-6)`);
+    const engine = new UniversalGameEngine(module, 4242, { strict: true });
+    const rnd = picker(4242);
+    for (let i = 0; i < 120; i++) {
+      const legal = engine.getLegalActions(engine.getActiveActorId());
+      if (legal.length === 0) break;
+      if (!engine.dispatch(legal[rnd(legal.length)]).ok) break;
+      if (engine.getRawState().gameOver) break;
+    }
+    const c6 = engine.getViolations().filter(v => v.code === 'CHARTER_C6_SEMANTIC_INVARIANT');
+    assertEqual(c6.length, 0, `${id} stayed rule-consistent: ${c6[0]?.message ?? ''}`);
+  }
+});
+
+test('charter C-6: semantic invariants actually reject broken state (no silent pass)', () => {
+  // 反向验证：故意破坏状态，确认断言不是"永远返回空数组"。
+  const catan = new UniversalGameEngine(GAME_REGISTRY.catan, 7, { strict: true }).getRawState();
+  const flooded = { ...catan, globalVars: { ...catan.globalVars, bank: { ...catan.globalVars.bank, wood: 99 } } };
+  assert(
+    (GAME_REGISTRY.catan.checkInvariants?.(flooded) ?? []).some(m => /supply exceeded/.test(m)),
+    'catan must reject an overdrawn resource bank'
+  );
+
+  const sanguosha = new UniversalGameEngine(GAME_REGISTRY.sanguosha, 7, { strict: true }).getRawState();
+  const pid = sanguosha.playerOrder[0];
+  const dying = {
+    ...sanguosha,
+    players: { ...sanguosha.players, [pid]: { ...sanguosha.players[pid], customProps: { ...sanguosha.players[pid].customProps, hp: -3 } } }
+  };
+  assert(
+    (GAME_REGISTRY.sanguosha.checkInvariants?.(dying) ?? []).some(m => /negative hp/.test(m)),
+    'sanguosha must reject negative hp'
+  );
+
+  const betrayal = new UniversalGameEngine(GAME_REGISTRY.betrayal, 7, { strict: true }).getRawState();
+  const bp = betrayal.playerOrder[0];
+  const lost = {
+    ...betrayal,
+    players: { ...betrayal.players, [bp]: { ...betrayal.players[bp], customProps: { ...betrayal.players[bp].customProps, currentRoomId: 'room_nowhere' } } }
+  };
+  assert(
+    (GAME_REGISTRY.betrayal.checkInvariants?.(lost) ?? []).some(m => /does not exist/.test(m)),
+    'betrayal must reject a player standing in a non-existent room'
+  );
+});
+
+test('charter C-9: every module declares its globalVars keys and stays inside them', () => {
+  for (const [id, module] of Object.entries(GAME_REGISTRY)) {
+    assert(module.meta.stateSchema?.globalVars, `${id} must declare meta.stateSchema.globalVars (C-9)`);
+    const declared = new Set(module.meta.stateSchema!.globalVars!);
+    const engine = new UniversalGameEngine(module, 808, { strict: true });
+    const rnd = picker(808);
+    for (let i = 0; i < 120; i++) {
+      const legal = engine.getLegalActions(engine.getActiveActorId());
+      if (legal.length === 0) break;
+      if (!engine.dispatch(legal[rnd(legal.length)]).ok) break;
+      if (engine.getRawState().gameOver) break;
+    }
+    const state = engine.getRawState();
+    for (const key of Object.keys(state.globalVars)) {
+      if (key.startsWith('__')) continue;
+      if (state.globalVars[key] === undefined) continue;
+      assert(declared.has(key), `${id} wrote an undeclared globalVars.${key}`);
+    }
+  }
+});
+
+test('charter C-7: catan books resource gains through the reward ledger', () => {
+  const module = GAME_REGISTRY.catan;
+  assert(module.charter?.requiresRewardLedger, 'catan declares a reward ledger');
+
+  const engine = new UniversalGameEngine(module, 31337, { strict: true });
+  const rnd = picker(31337);
+  for (let i = 0; i < 500 && (engine.getRawState().rewards ?? []).length === 0; i++) {
+    const legal = engine.getLegalActions(engine.getActiveActorId());
+    if (legal.length === 0) break;
+    if (!engine.dispatch(legal[rnd(legal.length)]).ok) break;
+    if (engine.getRawState().gameOver) break;
+  }
+
+  const rewards = engine.getRawState().rewards ?? [];
+  assert(rewards.length > 0, 'catan produces reward entries when resources are gained');
+  assert(
+    rewards.every(r => r.kind.startsWith('resource:') && r.reason.length > 0),
+    `every catan reward names its resource and cause, got: ${JSON.stringify(rewards.slice(0, 2))}`
+  );
 });

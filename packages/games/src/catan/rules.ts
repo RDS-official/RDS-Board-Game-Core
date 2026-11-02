@@ -320,7 +320,7 @@ export class CatanRules {
         if (Number(s.globalVars.setupIndex ?? 0) >= s.playerOrder.length) {
           for (const hexId of s.mapGraph.nodes[nodeId]?.props?.hexIds ?? []) {
             const resource = s.mapGraph.nodes[hexId]?.props?.resource as CatanResource | 'desert';
-            if (resource && resource !== 'desert') grantResources(s, pid, resource, 1);
+            if (resource && resource !== 'desert') grantResources(s, pid, resource, 1, ctx);
           }
         }
 
@@ -497,7 +497,7 @@ export class CatanRules {
 
         discardDevCard(s, action.entityId!);
         let gained = 0;
-        for (const resource of picks) gained += grantResources(s, pid, resource, 1);
+        for (const resource of picks) gained += grantResources(s, pid, resource, 1, ctx);
         trace({
           id: ctx.id('evt'),
           type: 'CARD_PLAY',
@@ -665,7 +665,7 @@ export class CatanRules {
         const type = building.components.building?.type;
         if (type !== 'SETTLEMENT' && type !== 'CITY') continue;
 
-        const granted = grantResources(state, building.ownerId, resource, type === 'CITY' ? 2 : 1);
+        const granted = grantResources(state, building.ownerId, resource, type === 'CITY' ? 2 : 1, ctx);
         if (granted > 0) {
           ctx.trace({
             id: ctx.id('evt'),
