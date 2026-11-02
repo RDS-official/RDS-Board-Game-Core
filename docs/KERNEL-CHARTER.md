@@ -344,6 +344,42 @@ splendor / betryal / sanguosha 的分数是从场上实体派生的（每次重�
 否则两套并存，拆分等于没做。类型层面这两个键也从 `GamePresentationHints` 删除了，
 `tsc` 会强制所有调用方搬完。
 
+### 4.4 钩子承载规则的样板：八阵图（AR-49）
+
+C-8 要求 `𝒦_rule` 能表达规则。之前 sanguosha 的八阵图是个反例：钩子只发一句提示，
+真正的判定手写在 `rules.ts` 的 `case 'JUDGE_BAGUA'` 里 —— 钩子形同虚设。
+
+改造后的分工：
+
+| 层 | 承担什么 |
+| --- | --- |
+| `hooks.ts`（`𝒦_rule`） | **规则**：判红算不算闪避、判黑扣几点血、成功意味着什么 |
+| `rules.ts`（执行器） | **机制**：掷骰、按 payload 解释结果、结算后果、记收益流水 |
+
+钩子用 `MODIFY` 而不是 `REPLACE`：
+
+```ts
+handler: (action, _state, ctx) => ({
+  type: 'MODIFY',
+  modifiedAction: { ...action, payload: {
+    redIsDodge: params.redIsDodge !== false,
+    damageOnFail: params.damageOnFail ?? 1,
+    successMeans: 'DODGE',
+    ruleId: ctx.instance.hookId
+  }}
+})
+```
+
+**为什么是 MODIFY 不是 REPLACE**：`PLAY_STRIKE` 的完整规则是「进栈 → 等目标选择
+（出闪 / 用八卦 / 挨打）」。如果钩子 REPLACE 掉整个 `PLAY_STRIKE`，目标就失去了
+选择权 —— 那是改变玩法，不是形式化。钩子只在目标**已经决定用八卦**之后介入。
+
+**判据**：`rules.ts` 的 `JUDGE_BAGUA` 分支里不该出现"八卦""Ba Gua"这类专有词。
+换成"乐不思蜀"或任何其它判定牌，改的是钩子参数，不是 reducer。
+
+> 改钩子的 `params`（`damageOnFail: 3` / `redIsDodge: false`）必须改变判定结果 ——
+> 这条断言是"规则真的在钩子里"的硬证据，已进测试。
+
 ### 阶段 0（1 周）✅ 已完成：不改架构，先建立度量
 
 1. 把 §1.1 的矩阵变成一个新的报告脚本（审查报告 [附录 B](ARCHITECTURE-REVIEW-2026-11.md#附录-b--审查复现命令) 已给出可直接落地的实现），在 CI 输出到构建日志（**不设门槛**，只做可见性）。
