@@ -381,8 +381,8 @@ export class BoardGameScene {
    */
   private seatStandees: { group: THREE.Group; jitter: number; lamp?: THREE.Mesh; seatId: string }[] = [];
   /** 每个座位「默认视角正下方」的定位标：白点 + 30% 白线 + 状态环/旋转箭头。 */
-  /** 牌桌椭圆的半轴（含桌沿），标柱最多只能走到这里。 */
-  private tableEllipse = { rx: 8, rz: 5 };
+  /** 牌桌边界（含桌沿）：标柱最多只能走到这里，按「方桌」的矩形边界算。 */
+  private tableBounds = { rx: 8, rz: 5 };
   private seatBeacons: {
     group: THREE.Group;
     ring: THREE.Mesh;
@@ -522,7 +522,7 @@ export class BoardGameScene {
     // 2. Scene
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(0x070a0e);
-    this.scene.fog = new THREE.FogExp2(0x070a0e, 0.02);
+    this.scene.fog = new THREE.FogExp2(0x070a0e, 0.012);
 
     // 3. Camera & Controls
     this.camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 0.1, 120);
@@ -2065,7 +2065,7 @@ export class BoardGameScene {
     this.seatStandees = [];
     this.seatBeacons = [];
     const seatNodes = Object.values(graph.nodes).filter(node => node.type === 'SEAT');
-    this.tableEllipse = {
+    this.tableBounds = {
       rx: Math.max(3.6, ...seatNodes.map(node => Math.abs(node.position[0]))) + 1.1,
       rz: Math.max(2.6, ...seatNodes.map(node => Math.abs(node.position[2]))) + 1.1
     };
@@ -4919,14 +4919,22 @@ export class BoardGameScene {
    * 位置是某个座位的默认机位正下方（见 `setSeatView`），竖线高度就是那台相机
    * 的高度——不管从哪个座位看，线顶都落在自己的视平线上。
    */
-  /** 从桌心沿 (dx, dz) 方向走到桌面椭圆边界的交点。 */
+  /**
+   * 从桌心沿 (dx, dz) 方向走到桌面边界的交点。
+   *
+   * 边界用「方桌」的矩形边界（`rx` × `rz`），不是内切的椭圆：椭圆对角方向的
+   * 边界会缩进去，标柱看起来像被吸到桌子中间。
+   */
   private rimPoint(dx: number, dz: number): { x: number; z: number } {
     const length = Math.hypot(dx, dz);
     if (length < 1e-4) return { x: 0, z: 0 };
-    const { rx, rz } = this.tableEllipse;
+    const { rx, rz } = this.tableBounds;
     const ux = dx / length;
     const uz = dz / length;
-    const k = 1 / Math.sqrt((ux / rx) ** 2 + (uz / rz) ** 2);
+    const k = Math.min(
+      Math.abs(ux) > 1e-4 ? rx / Math.abs(ux) : Number.POSITIVE_INFINITY,
+      Math.abs(uz) > 1e-4 ? rz / Math.abs(uz) : Number.POSITIVE_INFINITY
+    );
     return { x: ux * k, z: uz * k };
   }
 
@@ -4967,7 +4975,7 @@ export class BoardGameScene {
     group.add(line);
 
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(radius * 0.86, radius, 72),
+      new THREE.RingGeometry(0.86, 1, 72),
       new THREE.MeshBasicMaterial({
         color: 0x64748b,
         transparent: true,
@@ -5084,6 +5092,17 @@ export class BoardGameScene {
       ringMat.opacity = turn ? 0.9 : 0.55;
       beacon.spinner.visible = turn;
       if (turn) beacon.spinner.rotation.y += dt * 2.2;
+
+      // 视角越远圈越小：9 个单位内保持 0.86，25 个单位外缩到 0.33，中间线性过渡。
+      // 远景里大圈会糊成一片，近景小圈又显得局促，所以跟着相机距离缩放。
+      const dist = Math.hypot(
+        cam.x - beacon.group.position.x,
+        cam.z - beacon.group.position.z
+      );
+      const far = Math.min(1, Math.max(0, (dist - 9) / 16));
+      const ringRadius = 0.86 + (0.33 - 0.86) * far;
+      beacon.ring.scale.setScalar(ringRadius);
+      beacon.arrow.position.x = ringRadius * 0.9;
     }
   }
   private renderLoop(): void {
