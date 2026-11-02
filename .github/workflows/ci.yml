@@ -1,0 +1,48 @@
+name: ci
+
+# PR 门禁。
+#
+# main 分支保护要求名为 `gate` 的 status check，因此 job id 必须固定在
+# `gate`，重命名会让所有已打开的 PR 变回 blocked。
+#
+# 这里跑的是部署流水线里的同一组命令（`deploy.yml` 在 push main 时再跑一遍），
+# 区别只是本工作流**不部署**，只在 PR 上验证。
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: npm_config_manage_package_manager_versions=false pnpm install --frozen-lockfile
+
+      - name: Type-check and build
+        run: npm_config_manage_package_manager_versions=false pnpm verify:types
+
+      - name: Docs paths
+        run: npm_config_manage_package_manager_versions=false pnpm docs:check
+
+      - name: Core conformance suite
+        run: npm_config_manage_package_manager_versions=false pnpm test
+
+      - name: Server self-test
+        run: npm_config_manage_package_manager_versions=false pnpm test:server
