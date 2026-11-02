@@ -113,3 +113,5 @@ pnpm verify:all   # 一次跑完 core + matrix + overlap + lint/structure + tsc/
 - 新增规则/卡牌/剧本 → 同步更新 [docs/BETRAYAL.md](docs/BETRAYAL.md) 的覆盖表；
 - 修掉一个手测问题 → 在 [docs/SIMULATOR-AUDIT.md](docs/SIMULATOR-AUDIT.md) 登记 `SA-xx`，保留复现描述；
 - 涉及内核表达力的缺陷 → 写进 [docs/KERNEL-EXPRESSION.md](docs/KERNEL-EXPRESSION.md)，不要在单款游戏里打补丁。
+
+docs-only change to verify the auto-merge loop.
