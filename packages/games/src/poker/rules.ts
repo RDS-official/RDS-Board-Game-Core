@@ -1,6 +1,7 @@
 import { ECSManager } from '@rds/kernel/ecs';
 import type { ReduceContext } from '@rds/kernel/module';
 import { DeterministicPRNG } from '@rds/kernel/prng';
+import { CognitiveObserver } from '@rds/kernel/observer';
 import type { Action, GameState, Player, PlayerId, VisibilityRule } from '@rds/kernel/types';
 import {
   buildPots,
@@ -19,6 +20,18 @@ import { AI_PROFILE, POKER_AI_ROSTER, getAiHeroName, isAiSeat, seatingOf, type S
 import { observerOf, observerStateOf, POKER_OBSERVER, pickAiSeat, withObserverState, type PokerObserver } from './observers';
 import { buildHandFacts, type PokerHandFact } from './stats';
 import { createSeatPlayer, POKER_DEFAULTS, seatPosition } from './setup';
+
+/**
+ * 给 AI 座位构造 `𝒪(s, i)`（宪章 C-5 信息约束）。
+ *
+ * 与 `engine.getProjectedStateFor(seat)` 是同一份投影，只是这里不经过引擎
+ * （`reduce` 内部拿不到 engine 实例）。投影把牌堆顺序、对手底牌、
+ * `prngState` / `seed` 一并抹掉；AI 因此**在类型层面**读不到这些字段。
+ */
+function decisionView(state: GameState, seat: PlayerId) {
+  return CognitiveObserver.projectState(state, seat, undefined, undefined, undefined);
+}
+
 
 /**
  * Texas Hold'em rules: legal actions, betting resolution, streets, showdown.
@@ -475,7 +488,7 @@ export class PokerRules {
     // AI 与真人走同一条管线：直接给出它这一步要做的具体动作，驱动方原样派发，
     // 结算、准备、开下一手也走同一张动作表，不再有「AI 专用」的 AI_ACT。
     if (isAiSeat(state, playerId)) {
-      const decided = choosePokerAction(state, playerId);
+      const decided = choosePokerAction(decisionView(state, playerId), playerId);
       return decided ? [decided] : [];
     }
 
@@ -617,7 +630,7 @@ export class PokerRules {
       if (next.gameOver) return next;
       const active = next.activeActorId ?? next.activePlayerId;
       if (!active || !isAiSeat(next, active)) return next;
-      const action = choosePokerAction(next, active);
+      const action = choosePokerAction(decisionView(next, active), active);
       if (!action) return next;
       const stepped = this.applyHuman(next, action, ctx);
       if (stepped === next) return next; // 动作被拒：停止推进，避免空转
@@ -1329,6 +1342,89 @@ export class PokerRules {
     next = applyObserverSwaps(next);
     const seat = seatAfter(next.playerOrder, hand.buttonSeat, pid => chipsOf(next, pid) > 0);
     return { ...next, activePlayerId: next.playerOrder[seat], phase: 'HAND_OVER' };
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Semantic invariants (charter C-6)                                 */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * 规则层守恒断言（宪章 C-6）。
+   *
+   * 内核的 `invariants.ts` 只保证状态**形状**没坏（61 条全是结构一致性）；
+   * 这几条保证**规则没被违反**。它们是德扑这套规则自己的"物理定律"：
+   *
+   *  1. **筹码守恒**：每个座位手上的筹码 + 已进底池的筹码 = 常量（初始总额）。
+   *     这是最该有、却一直没有的一条 —— 任何一次分池 / 摊牌 / 观察者补贴的
+   *     记账错误都会在这里暴露，而不是等玩家发现"钱不对了"。
+   *  2. **底池非负**：`pot` 与每一份 `handBets` 都不能是负数。
+   *  3. **底池一致性**：`pot` 应等于已完成街道上 `streetBets` 之和的累计 ——
+   *     这里用更弱的可判定形式：`pot >= 0` 且不大于全场 `handBets` 总和。
+   *  4. **手号单调**：`handNo` 不回退。
+   *
+   * 必须纯：只读 state，不改任何东西，不调用 outcome()。
+   */
+  public static checkInvariants(state: GameState): string[] {
+    const out: string[] = [];
+
+    const hand = handOf(state);
+    const seats = state.playerOrder;
+
+    for (const pid of seats) {
+      const chips = Number(state.players[pid]?.customProps?.chips ?? 0);
+      if (!Number.isFinite(chips) || chips < 0) {
+        out.push(`poker: seat ${pid} has negative or non-finite chips (${chips})`);
+      }
+    }
+
+    if (hand) {
+      if (!Number.isFinite(hand.pot) || hand.pot < 0) {
+        out.push(`poker: pot is negative or non-finite (${hand.pot})`);
+      }
+      for (const [pid, amount] of Object.entries(hand.handBets ?? {})) {
+        if (!Number.isFinite(amount) || amount < 0) {
+          out.push(`poker: handBets[${pid}] is negative or non-finite (${amount})`);
+        }
+      }
+      const handBetsTotal = Object.values(hand.handBets ?? {}).reduce((sum, n) => sum + n, 0);
+      if (hand.pot > handBetsTotal + 1e-9) {
+        out.push(`poker: pot (${hand.pot}) exceeds total committed chips (${handBetsTotal})`);
+      }
+
+      /*
+       * 筹码守恒（真正的物理定律）：
+       *
+       *     在手筹码 + 已完成街道的底池 + 当前街道未结算的下注 = 初始总额
+       *
+       * 注意**不能**用 `handBets` 当"已下注"：它记录的是整手累计投入，已经
+       * 结算进 `pot` 的部分同时还留在 `handBets` 里（见 `collectBets()`），
+       * 直接相加会把翻前的死钱算两遍。当前街道的钱只算 `streetBets`。
+       */
+      const inHands = seats.reduce((sum, pid) => {
+        const chips = Number(state.players[pid]?.customProps?.chips ?? 0);
+        return sum + (Number.isFinite(chips) ? chips : 0);
+      }, 0);
+      const streetUnsettled = Object.values(hand.streetBets ?? {}).reduce(
+        (sum, n) => sum + (Number.isFinite(n) ? n : 0),
+        0
+      );
+      const total = inHands + hand.pot + streetUnsettled;
+      const declaredTotal = POKER_DEFAULTS.startingStack * seats.length;
+      if (seats.length > 0 && Math.abs(total - declaredTotal) > 1e-6) {
+        out.push(
+          `poker: chip conservation violated — seats ${inHands} + pot ${hand.pot} + street ${streetUnsettled} = ${total}, expected ${declaredTotal}`
+        );
+      }
+    }
+
+    const lastHand = state.globalVars.lastHand as { handNo?: number } | undefined;
+    if (hand && typeof lastHand?.handNo === 'number' && typeof hand.handNo === 'number') {
+      if (hand.handNo < lastHand.handNo) {
+        out.push(`poker: handNo regressed (${hand.handNo} < ${lastHand.handNo})`);
+      }
+    }
+
+    return out;
   }
 
   /* ---------------------------------------------------------------- */

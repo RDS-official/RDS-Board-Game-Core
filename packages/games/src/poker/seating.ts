@@ -150,7 +150,14 @@ export function isAiSeat(state: GameState, playerId: PlayerId): boolean {
   return !!npc;
 }
 
-export function aiTierOf(state: GameState, playerId: PlayerId): PokerAiTier | undefined {
+/**
+ * AI 档位。取**状态**而非原始 `GameState`：AI 决策走投影状态（宪章 C-5），
+ * 这里只看 `globalVars.seats`，投影与权威状态同形。
+ */
+export function aiTierOf(
+  state: Pick<GameState, 'globalVars'>,
+  playerId: PlayerId
+): PokerAiTier | undefined {
   const raw = state.globalVars.seats as SeatAssignment[] | undefined;
   return raw?.find(seat => seat.playerId === playerId)?.aiTier;
 }
