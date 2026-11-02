@@ -91,7 +91,7 @@ export function resolveCharter(module: GameModule): ResolvedCharter {
 export function isDeclaredAction(module: GameModule, action: Action): boolean {
   if (!module.actionSchemas) return true; // 模块整体未声明：交给报告脚本，不在热路径逐个报
   if (action.type === '__TICK__') return true;
-  if ((module.driverActions ?? []).includes(action.type)) return true;
+  if ((module.driver?.driverActions ?? []).includes(action.type)) return true;
   return Object.prototype.hasOwnProperty.call(module.actionSchemas, action.type);
 }
 

@@ -202,7 +202,7 @@ export class UniversalSession implements GamePresenter {
       ...(scenario ? { scenario } : {}),
       ...(seats === undefined ? {} : { seats }),
       // 声明了 AI 节奏的游戏交给本会话逐步驱动 AI，否则内核内联推进。
-      ...(module.presentation?.aiActionDelayMs ? { autoAi: false } : {})
+      ...(module.driver?.aiActionDelayMs ? { autoAi: false } : {})
     };
     this.engine =
       engine ??
@@ -885,18 +885,18 @@ export class UniversalSession implements GamePresenter {
       clearTimeout(this.aiTimer);
       this.aiTimer = null;
     }
-    const delay = this.module.presentation?.aiActionDelayMs;
+    const delay = this.module.driver?.aiActionDelayMs;
     if (!delay) return;
     const state = this.engine.getRawState();
     const actor = this.engine.getActiveActorId();
-    if (!actor || !this.module.isAutomated?.(state, actor)) return;
+    if (!actor || !this.module.driver?.isAutomated?.(state, actor)) return;
     if (this.engine.getLegalActions(actor).length === 0) return;
     this.aiTimer = setTimeout(() => {
       this.aiTimer = null;
       // 这 5 秒里状态可能已经变了（真人先手、换座、牌局结束），到点重新问一次。
       const live = this.engine.getRawState();
       const liveActor = this.engine.getActiveActorId();
-      if (!liveActor || !this.module.isAutomated?.(live, liveActor)) {
+      if (!liveActor || !this.module.driver?.isAutomated?.(live, liveActor)) {
         this.scheduleAiTurn();
         return;
       }
@@ -914,7 +914,7 @@ export class UniversalSession implements GamePresenter {
    * 所以「第几拍发了多少低保」在回放里仍是确定的。
    */
   private startHeartbeat(): void {
-    const heartbeat = this.module.heartbeat;
+    const heartbeat = this.module.driver?.heartbeat;
     if (!heartbeat || this.heartbeatTimer !== null) return;
     this.heartbeatTimer = setInterval(() => {
       const state = this.engine.getRawState();
@@ -1118,7 +1118,10 @@ export class UniversalSession implements GamePresenter {
     // 动作冷却（游戏声明 `actionCooldownMs`）：一手刚结束先留出阅读时间，再允许
     // 开下一手。时钟只存在于驱动层，内核保持无时钟、可回放。
     // 首帧（revision 0）不设冷却：开局那一次 START_HAND 本来就该立刻可用。
-    const cooldowns = this.revision === 0 ? undefined : module.presentation?.actionCooldownMs;
+    const cooldowns =
+      this.revision === 0
+        ? undefined
+        : module.driver?.actionCooldownMs;
     if (cooldowns) {
       const now = Date.now();
       const live = new Set<string>();

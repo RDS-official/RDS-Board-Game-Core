@@ -317,6 +317,6 @@
 | C-7 收益独立 | poker | ~~收益直接改状态，未记账~~ | — | ✅ **已关闭（2026-11）**：`ctx.reward()` + `state.rewards` 落地；摊牌派池 / 弃牌取胜 / 观察者低保三处均已记账，`charter C-7` 覆盖（AR-47） |
 | C-7 收益独立 | catan / betrayal / dune / splendor / sanguosha | 建造与计分仍直接改状态 | 尚未接入记账口 | 照 poker 的写法逐步接入 `ctx.reward()`（AR-47） |
 | C-8 元规则分区 | sanguosha | `bagua_armor` 钩子只发提示，真正判定写在 `JUDGE_BAGUA` 分支 | 钩子表达力不足 | 声明式规则表 + 通用解释器（AR-49） |
-| C-8 元规则分区 | 全部 6 个模组 | `𝒦_view` / `𝒦_rule` / `𝒦_driver` 仍在同一个 `GameModule` 上 | 尚无物理分离 | 🔶 **部分关闭（2026-11）**：`charter C-8` 静态扫描 `rules.ts` / `helpers.ts`，`presentation` 出现在转移路径上即失败；物理拆分留待后续（AR-49） |
+| C-8 元规则分区 | 全部 6 个模组 | ~~`𝒦_view` / `𝒦_driver` 混在 `presentation` 与模块顶层~~ | — | ✅ **已关闭（2026-11）**：驱动方语义全部收进 `GameModule.driver`（`defineDriver()` 加载时校验），`definePresentation()` 对驱动键直接抛错，`tsc` 强制所有调用方迁移（AR-49） |
 | C-9 扩展字段收口 | 其余 5 个玩法 | 规则状态寄居 `globalVars` / `custom`（47 个 key） | 未声明 key 集合 | 照 poker 的 `meta.stateSchema.globalVars` 逐个登记（AR-43） |
 | C-9 扩展字段收口 | poker | ~~`globalVars` 7 个 key 未登记~~ | — | ✅ **已关闭（2026-11）**：`meta.stateSchema.globalVars` 声明 7 个 key，内核做未登记即报（AR-43） |

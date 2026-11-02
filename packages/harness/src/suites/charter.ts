@@ -5,6 +5,7 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { CognitiveObserver } from '@rds/kernel/observer';
 import { checkCharter, resolveCharter } from '@rds/kernel/charter';
+import { defineDriver, definePresentation } from '@rds/kernel/module';
 import { openDecision } from '@rds/kernel/decisions';
 import type { Action, GameState, ProjectedGameState } from '@rds/kernel/types';
 import { GAME_REGISTRY } from '@rds/games/registry';
@@ -80,7 +81,7 @@ test('charter C-1: every action type a module actually offers is declared', () =
   for (const [id, module] of Object.entries(GAME_REGISTRY)) {
     if (!module.actionSchemas) continue; // 整块未形式化：由报告脚本统计，不在此逐条报
     const declared = new Set(Object.keys(module.actionSchemas));
-    const driver = new Set(module.driverActions ?? []);
+    const driver = new Set(module.driver?.driverActions ?? []);
 
     // 多个 seed，覆盖不同分支（结算幕布 / 前门被锁 / 观察者席位 …）
     for (const seed of [1, 7, 42, 1234]) {
@@ -644,13 +645,16 @@ test('charter C-8: driver semantics stay in 𝒦_driver, not in reduce', () => {
   const module = GAME_REGISTRY.poker;
   // 𝒦_driver 的三个字段只应被驱动方（app / server）读取。
   // 这里断言它们的形状：都是数据或纯函数，不持有状态、不产生副作用。
-  assert(module.driverActions === undefined || Array.isArray(module.driverActions), 'driverActions is a list');
-  if (module.heartbeat) {
-    assert(typeof module.heartbeat.intervalMs === 'number', 'heartbeat.intervalMs is a number');
-    assert(typeof module.heartbeat.action === 'function', 'heartbeat.action is a function');
+  assert(
+    module.driver?.driverActions === undefined || Array.isArray(module.driver.driverActions),
+    'driverActions is a list'
+  );
+  if (module.driver?.heartbeat) {
+    assert(typeof module.driver.heartbeat.intervalMs === 'number', 'heartbeat.intervalMs is a number');
+    assert(typeof module.driver.heartbeat.action === 'function', 'heartbeat.action is a function');
   }
-  if (module.isAutomated) {
-    assert(typeof module.isAutomated === 'function', 'isAutomated is a predicate');
+  if (module.driver?.isAutomated) {
+    assert(typeof module.driver.isAutomated === 'function', 'isAutomated is a predicate');
   }
 });
 
@@ -746,4 +750,62 @@ test('charter C-7: catan books resource gains through the reward ledger', () => 
     rewards.every(r => r.kind.startsWith('resource:') && r.reason.length > 0),
     `every catan reward names its resource and cause, got: ${JSON.stringify(rewards.slice(0, 2))}`
   );
+});
+
+/* -------------------------------------------------------------------------- */
+/* C-8 𝒦 三区物理分离                                                          */
+/* -------------------------------------------------------------------------- */
+
+test('charter C-8: driver declarations live only on GameModule.driver', () => {
+  const DRIVER_KEYS = ['aiActionDelayMs', 'actionCooldownMs', 'heartbeat', 'driverActions', 'isAutomated'];
+  for (const [id, module] of Object.entries(GAME_REGISTRY)) {
+    // ① 展示层不得再出现任何驱动字段
+    const presentation = module.presentation as Record<string, unknown> | undefined;
+    if (presentation) {
+      for (const key of DRIVER_KEYS) {
+        assert(!(key in presentation), `${id} still declares presentation.${key} (charter C-8)`);
+      }
+    }
+    // ② GameModule 顶层也不得保留（已并入 driver）
+    const top = module as unknown as Record<string, unknown>;
+    for (const key of ['heartbeat', 'driverActions', 'isAutomated']) {
+      assert(!(key in top), `${id} still declares top-level ${key} — it belongs on GameModule.driver`);
+    }
+  }
+});
+
+test('charter C-8: definePresentation rejects driver keys at module load', () => {
+  let threw = false;
+  try {
+    // 故意用旧写法：类型层面已被删除，这里模拟 JS 调用方 / as any 绕过。
+    (definePresentation as (h: unknown) => unknown)({ aiActionDelayMs: 5000 });
+  } catch (error) {
+    threw = error instanceof TypeError && /driver concern/.test((error as Error).message);
+  }
+  assert(threw, 'definePresentation must reject aiActionDelayMs with a migration hint');
+});
+
+test('charter C-8: defineDriver validates its own fields', () => {
+  assertEqual(defineDriver({ aiActionDelayMs: 5000 }).aiActionDelayMs, 5000, 'a valid delay is accepted');
+  assertEqual(
+    JSON.stringify(defineDriver({ actionCooldownMs: { START_HAND: 20000 } }).actionCooldownMs),
+    JSON.stringify({ START_HAND: 20000 }),
+    'a valid cooldown map is accepted'
+  );
+
+  let badDelay = false;
+  try {
+    (defineDriver as (h: unknown) => unknown)({ aiActionDelayMs: -1 });
+  } catch (error) {
+    badDelay = error instanceof TypeError;
+  }
+  assert(badDelay, 'a negative delay must be rejected');
+
+  let unknownKey = false;
+  try {
+    (defineDriver as (h: unknown) => unknown)({ mapTitle: 'x' });
+  } catch (error) {
+    unknownKey = error instanceof TypeError;
+  }
+  assert(unknownKey, 'a non-driver key must be rejected');
 });

@@ -257,7 +257,7 @@ handler: () => ({
 
 ## 4. 分阶段落地
 
-> **2026-11 实际进度**：C-1 ~ C-9 全部有可执行断言，且**已覆盖全部 6 个模组**（不再是只有 betryal / poker 两个示范）。阶段 0 已完成；阶段 1（C-5 / C-6）、阶段 2（C-3 / C-4）、阶段 3（C-7 / C-8）均已落地。
+> **2026-11 实际进度**：C-1 ~ C-9 全部有可执行断言，且**已覆盖全部 6 个模组**。阶段 0 ~ 阶段 3 全部落地，包括 C-8 的物理分离（`𝒦_view` / `𝒦_driver` 不再混在同一个字段上）。
 > 内核侧新增 `packages/kernel/src/charter.ts`（宪章执行器）与
 > `packages/harness/src/suites/charter.ts`（12 条可执行断言）。
 > 下面各阶段保留原计划，✅ 标记已完成项。
@@ -274,7 +274,7 @@ handler: () => ({
 | C-3 | 新增 `DecisionPolicy: { type: 'SIMULTANEOUS' }` 与 `GameModule.applySimultaneous()`；决策窗口结算时把动作**多重集**一次交给模组，内核不排序；未声明合并语义的模组退回串行并记 `CHARTER_C3_SERIALIZED`。dune 战斗之轮、catan 掷 7 弃牌已迁移 | `charter C-3` 四例 |
 | C-4 | 运行期 `DeterministicPRNG` 调用必须推进 `prngState`；修掉 betrayal `drawRoomCandidate()` 用 `seed + items.length + attempts * 19` 拼假随机源的问题 | `charter C-4` 一例 |
 | C-7 | `ReduceContext.reward()` + `GameState.rewards`（只追加）；reduce 期间模组拿到的是累积缓冲区，转移落地时由内核一次性写入，记账口本身不是新的可变逃逸口。poker（摊牌派池 / 弃牌取胜 / 观察者低保）与 catan（资源获取，加在 `grantResources()` 总闸上，覆盖掷骰产出 / 港口兑换 / 强盗抢夺）已接入 | `charter C-7` 四例 |
-| C-8 | `𝒦_view`（presentation）不得出现在状态跃迁路径上 —— 静态扫描各模组的 `rules.ts` / `helpers.ts`（剥掉注释后），发现即失败 | `charter C-8` 两例 |
+| C-8 | `𝒦_view` / `𝒦_driver` **物理分离**：驱动方语义（`aiActionDelayMs` / `actionCooldownMs` / `heartbeat` / `driverActions` / `isAutomated`）从 `GameModule` 顶层与 `presentation` 全部收进新的 `GameModule.driver`（`defineDriver()` 加载时校验）；另有静态扫描确保 `presentation` 不出现在 `rules.ts` / `helpers.ts` 的转移路径上 | `charter C-8` 五例 |
 
 **C-6 实战成绩**：筹码守恒断言上线后立刻抓到一条真实记账问题——
 `handBets` 记录的是整手累计投入，**已结算进 `pot` 的部分仍留在其中**，
@@ -324,6 +324,25 @@ splendor / betryal / sanguosha 的分数是从场上实体派生的（每次重�
 
 **C-9 的键集怎么来的**：多 seed 随机实跑（25 轮 × 260 步）取并集，再用源码静态扫描补漏。
 验证标准不是"测试通过"，而是**跑 5000+ 步不出现 `CHARTER_C9_UNDECLARED_GLOBAL_VAR`**。
+
+### 4.3 `𝒦` 三区分离的落点（C-8）
+
+`GameModule` 上的字段现在按宪章 §3 的 C-8 分区：
+
+| 分区 | 落点 | 字段 | 谁读 |
+| --- | --- | --- | --- |
+| `𝒦_rule` | 模块顶层 | `hooks` / `actionSchemas` / `validatePayload` / `resolveSelection` / `validateSelection` / `statModifiers` / `checkInvariants` | 内核 |
+| `𝒦_view` | `GameModule.presentation` | `cardFacts` / `cardStyle` / `describeNode` / `describeTrait` / `traits` / `describeMoment` / `roleLabel` / `mapTitle` / … | 视图层（HUD / 渲染） |
+| `𝒦_driver` | `GameModule.driver` | `aiActionDelayMs` / `actionCooldownMs` / `heartbeat` / `driverActions` / `isAutomated` | 驱动方（app / server） |
+
+**为什么这次拆分值得做**：`aiActionDelayMs` 不改变任何像素，只决定 AI 隔多久出手；
+`heartbeat` 决定"每 20 秒派一拍"，与画面无关。它们原本住在 `presentation` 里，
+导致"展示"与"驱动"无法分别演进 —— 想调 AI 节奏就得动展示层，反之亦然。
+
+**迁移时的硬约束**：`definePresentation()` 现在对 `aiActionDelayMs` / `actionCooldownMs`
+直接抛 `TypeError`，并提示改用 `defineDriver()`。这是有意的：旧写法必须报错，
+否则两套并存，拆分等于没做。类型层面这两个键也从 `GamePresentationHints` 删除了，
+`tsc` 会强制所有调用方搬完。
 
 ### 阶段 0（1 周）✅ 已完成：不改架构，先建立度量
 

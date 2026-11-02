@@ -1,4 +1,4 @@
-import { defineGame, definePresentation, GameModule } from '@rds/kernel/module';
+import { defineDriver, defineGame, definePresentation, GameModule } from '@rds/kernel/module';
 import { GameOutcome } from '@rds/kernel/types';
 import { BETRAYAL_HOOKS } from './betrayal/hooks';
 import {
@@ -727,33 +727,42 @@ export const pokerModule: GameModule = defineGame({
       ...(options?.stacks === undefined ? {} : { stacks: options.stacks }),
       ...(options?.autoAi === undefined ? {} : { autoAi: options.autoAi })
     }),
-  /** 只由驱动方心跳派发的动作：玩家永远看不到，客户端入口也会拒绝。 */
-  driverActions: ['OBSERVER_TICK'],
-  /**
-   * 内置 AI 座位。驱动方按 `aiActionDelayMs` 代它们派发动作；`legalActions`
-   * 直接给出具体动作，AI 和真人因此走的是同一条管线（结算阶段也一样）。
-   */
-  isAutomated: (state, actorId) => isAiSeat(state, actorId),
-  /**
-   * 观察者低保心跳：内核没有时钟，驱动方（app / server）每 20 秒派一拍，
-   * PokerRules 把这些秒数累计成「满 60 秒 +10 筹码」。桌上没有观察者时不派发。
-   */
-  heartbeat: {
-    intervalMs: 20_000,
-    action: state => {
-      const observers = (state.globalVars.observers as { list?: { playerId: string }[] } | undefined)
-        ?.list;
-      if (!Array.isArray(observers) || observers.length === 0) return null;
-      return {
-        type: 'OBSERVER_TICK',
-        playerId: observers[0].playerId,
-        payload: { seconds: 20 }
-      };
-    }
-  },
   presentation: definePresentation({
     // 结算幕布：每手结束播一次（key 含手数与结束方式，天然去重）。
-    describeMoment: state => pokerSettlementMoment(state),
+    describeMoment: state => pokerSettlementMoment(state)
+  }),
+  /**
+   * C-8：`𝒦_driver` —— 全部驱动方语义集中在这里。
+   *
+   * 之前这些字段散落在 GameModule 顶层（`driverActions` / `isAutomated` /
+   * `heartbeat`）以及 `presentation` 里（`aiActionDelayMs` / `actionCooldownMs`），
+   * 规则、展示、驱动三者混在一起，无法分别演进。
+   */
+  driver: defineDriver({
+    /** 只由驱动方心跳派发的动作：玩家永远看不到，客户端入口也会拒绝。 */
+    driverActions: ['OBSERVER_TICK'],
+    /**
+     * 内置 AI 座位。驱动方按 `aiActionDelayMs` 代它们派发动作；`legalActions`
+     * 直接给出具体动作，AI 和真人因此走的是同一条管线（结算阶段也一样）。
+     */
+    isAutomated: (state, actorId) => isAiSeat(state, actorId),
+    /**
+     * 观察者低保心跳：内核没有时钟，驱动方（app / server）每 20 秒派一拍，
+     * PokerRules 把这些秒数累计成「满 60 秒 +10 筹码」。桌上没有观察者时不派发。
+     */
+    heartbeat: {
+      intervalMs: 20_000,
+      action: state => {
+        const observers = (state.globalVars.observers as { list?: { playerId: string }[] } | undefined)
+          ?.list;
+        if (!Array.isArray(observers) || observers.length === 0) return null;
+        return {
+          type: 'OBSERVER_TICK',
+          playerId: observers[0].playerId,
+          payload: { seconds: 20 }
+        };
+      }
+    },
     // 内置 AI 每步至少 5 秒，真人跟得上牌桌；驱动方据此逐步派发它的具体动作。
     aiActionDelayMs: 5000,
     // 一手刚结束，先让牌桌读完结算，20 秒后才允许开下一手。
@@ -769,7 +778,7 @@ export const pokerModule: GameModule = defineGame({
    * C-5：AI 决策收口到投影状态（`decisionView()` → `choosePokerAction`）。
    * C-2 偏离登记：`applyAction()` 内联驱动 AI（`advanceAi`，上限 64 次）并在
    * `settle()` 里连续关街 / 发牌 / 摊牌，一次 `reduce` 可推进 8~64 次逻辑转移。
-   * 移除条件：驱动方改为按 `presentation.aiActionDelayMs` 逐步派发
+   * 移除条件：驱动方改为按 `driver.aiActionDelayMs` 逐步派发
    * （`autoAi: false`），且 `settle()` 拆成 follow-up action。
    */
   charter: {
