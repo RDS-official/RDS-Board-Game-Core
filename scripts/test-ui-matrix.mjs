@@ -50,8 +50,12 @@ const now = () => Date.now();
  *
  * `vite.config.ts` proxies `/healthz`, `/api` and `/ws` to the Hub server on
  * :8787 so the unified shell can detect the lobby in dev. When the UI matrix
- * runs without `apps/server` up, every page load logs one 502 for that probe.
- * Filter it (and only it) so real console errors still fail the run.
+ * runs without `apps/server` up, every page load logs one 502 for that probe,
+ * and the diagnostics client's `POST /api/diagnostics` comes back 404. Filter
+ * those (and only those) so real console errors still fail the run.
+ *
+ * `process is not defined` is a headless-Chromium artefact: some CJS shim in the
+ * software-GL launch path touches `process`, which never exists in the browser.
  */
 const ENV_NOISE = [
   /\/healthz/i,
@@ -59,8 +63,15 @@ const ENV_NOISE = [
   /process is not defined/i
 ];
 
+/** Resource URLs whose failed loads are environment noise (checked by URL). */
+const ENV_NOISE_URL = [/\/healthz/i, /\/api\/diagnostics/i];
+
 function isEnvNoise(text) {
   return ENV_NOISE.some(pattern => pattern.test(text));
+}
+
+function isNoiseRequest(url) {
+  return !!url && ENV_NOISE_URL.some(pattern => pattern.test(url));
 }
 
 /** Wire a page's console/page errors into `errors`, ignoring env noise. */
@@ -72,6 +83,10 @@ function collectErrors(page, errors) {
     if (message.type() !== 'error') return;
     const text = message.text();
     if (isEnvNoise(text)) return;
+    // A failed fetch logs a URL-less "Failed to load resource" line; the console
+    // message still carries the request URL in its location, which is how the
+    // diagnostics 404 gets told apart from a genuinely broken module import.
+    if (isNoiseRequest(message.location()?.url)) return;
     errors.push(`console: ${text}`);
   });
 }
