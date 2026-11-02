@@ -59,6 +59,29 @@ let roomsTimer: ReturnType<typeof setInterval> | null = null;
 let leaderboardTimer: ReturnType<typeof setInterval> | null = null;
 let pokerLeaderboardData: PokerLeaderboardResponse | null = null;
 let selectedLeaderboardUserId: string | null = null;
+/**
+ * 风云榜是否隐藏 AI。
+ *
+ * 存 localStorage：这是玩家的个人偏好（我只关心真人排名），刷新或换页不该忘。
+ * 读不到（隐私模式 / 存储被禁）就当 false，功能照常，只是记不住。
+ */
+const HIDE_AI_KEY = 'lob.leaderboard.hideAi';
+function readHideAi(): boolean {
+  try {
+    return localStorage.getItem(HIDE_AI_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+let hideAiInLeaderboard = readHideAi();
+function setHideAi(next: boolean): void {
+  hideAiInLeaderboard = next;
+  try {
+    localStorage.setItem(HIDE_AI_KEY, next ? '1' : '0');
+  } catch {
+    /* 存不了就只在本次会话生效 */
+  }
+}
 let rootEl: HTMLElement | null = null;
 let onEnterGame: ((p: EnterGameParams) => void) | null = null;
 let visibilityHandler: (() => void) | null = null;
@@ -261,8 +284,81 @@ function authHtml() {
   </div>`;
 }
 
+/**
+ * 把服务端排行摊成「当前该显示的列表」。
+ *
+ * 占比在**前端重算**而不是直接用 `row.share`：隐藏 AI 时要求「只比较真人」，
+ * 分母也必须只累计真人筹码，否则百分比会加起来不到 100%，看着像算错了。
+ * 不隐藏 AI 时分母 = 全部行，与服务端口径一致，所以两条路径共用一套算法。
+ *
+ * 比例统一 4 位小数：风云榜的筹码差距往往只有千分之几，1 位小数会显示成一排
+ * 相同的 3.7%，看不出谁在前。
+ */
+function leaderboardView(): {
+  rows: { row: PokerLeaderboardResponse['rows'][number]; percent: string }[];
+  total: number;
+} {
+  const all = pokerLeaderboardData?.rows ?? [];
+  const visible = hideAiInLeaderboard ? all.filter(row => !row.isAi) : all;
+  const total = visible.reduce((sum, row) => sum + Math.max(0, row.chips), 0);
+  const rows = visible.map(row => ({
+    row,
+    percent: total > 0 ? ((Math.max(0, row.chips) / total) * 100).toFixed(4) : '0.0000'
+  }));
+  return { rows, total };
+}
+
+/** 排行榜列表的 DOM（初次渲染与轮询刷新共用，避免两份模板各改各的）。 */
+function leaderboardRowsHtml(): string {
+  const { rows } = leaderboardView();
+  if (rows.length === 0) {
+    // 区分「还没加载」与「隐藏 AI 后一个真人都没有」：后者不该显示「加载中」。
+    if (!pokerLeaderboardData) {
+      return '<div class="lob-empty" style="padding:16px 0; font-size:12px">加载排行榜中…</div>';
+    }
+    return `<div class="lob-empty" style="padding:16px 0; font-size:12px">${
+      hideAiInLeaderboard ? '暂无真人玩家上榜' : '暂无排行数据'
+    }</div>`;
+  }
+  return rows
+    .map(({ row, percent }, index) => {
+      const isAi = !!row.isAi;
+      const tag = isAi
+        ? '<span class="lob-tag ai">AI 名将</span>'
+        : '<span class="lob-tag human">真人</span>';
+      const playing = row.roomId
+        ? '<span class="lob-tag playing" title="正在对局">在桌</span>'
+        : '';
+      const rankClass = index === 0 ? 'top1' : index === 1 ? 'top2' : index === 2 ? 'top3' : '';
+      const avatarHtml = row.avatarUrl
+        ? `<img class="lob-lb-avatar" src="${esc(row.avatarUrl)}" alt="" loading="lazy" />`
+        : `<span class="lob-lb-avatar ${isAi ? 'ai-avatar' : ''}">${esc(row.name.slice(0, 1))}</span>`;
+      return `
+        <div class="lob-lb-row" data-rank-user="${esc(row.userId)}" title="${esc(row.name)} · 点击查看生涯战绩">
+          <span class="lob-lb-rank ${rankClass}">${index + 1}</span>
+          <span class="lob-lb-name">
+            ${avatarHtml}
+            <span class="lob-lb-text">${esc(row.name)}</span>
+            ${tag}${playing}
+          </span>
+          <span class="lob-lb-chips">${row.chips}</span>
+          <span class="lob-lb-pct">${percent}%</span>
+        </div>
+      `;
+    })
+    .join('');
+}
+
+/** 页脚：说明当前占比的分母是谁，避免「隐藏 AI 后百分比为什么变了」的疑问。 */
+function leaderboardFootHtml(): string {
+  const { total, rows } = leaderboardView();
+  if (hideAiInLeaderboard) {
+    return `<span>仅统计真人 · 占比 = 真人筹码 / 真人总筹码（${total}）</span>`;
+  }
+  return `<span>AI 每半小时可领 2 次救济金 · 占比 ${rows.length} 席合计 ${total}</span>`;
+}
+
 function leaderboardHtml(): string {
-  const rows = pokerLeaderboardData?.rows ?? [];
   return `
     <div class="lob-card lob-leaderboard-card">
       <div class="lob-lb-head">
@@ -270,45 +366,19 @@ function leaderboardHtml(): string {
           <span class="lob-lb-icon">♠</span>
           <b>德州扑克风云榜</b>
         </div>
-        <span class="lob-muted" style="font-size:12px">${pokerLeaderboardData?.rooms ?? 0} 桌对局中</span>
+        <div class="lob-lb-headright">
+          <button
+            type="button"
+            class="lob-lb-toggle${hideAiInLeaderboard ? ' on' : ''}"
+            id="lb-hide-ai"
+            aria-pressed="${hideAiInLeaderboard}"
+            title="${hideAiInLeaderboard ? '显示 AI 名将' : '隐藏 AI 名将，只比较真人筹码'}"
+          >${hideAiInLeaderboard ? '显示 AI' : '隐藏 AI'}</button>
+          <span class="lob-muted" style="font-size:12px">${pokerLeaderboardData?.rooms ?? 0} 桌对局中</span>
+        </div>
       </div>
-      <div class="lob-lb-list" id="poker-leaderboard-list">
-        ${
-          rows.length === 0
-            ? '<div class="lob-empty" style="padding:16px 0; font-size:12px">加载排行榜中…</div>'
-            : rows
-                .map((row, index) => {
-                  const percent = (row.share * 100).toFixed(1);
-                  const isAi = !!row.isAi;
-                  const tag = isAi
-                    ? '<span class="lob-tag ai">AI 名将</span>'
-                    : '<span class="lob-tag human">真人</span>';
-                  const playing = row.roomId
-                    ? '<span class="lob-tag playing" title="正在对局">在桌</span>'
-                    : '';
-                  const rankClass = index === 0 ? 'top1' : index === 1 ? 'top2' : index === 2 ? 'top3' : '';
-                  const avatarHtml = row.avatarUrl
-                    ? `<img class="lob-lb-avatar" src="${esc(row.avatarUrl)}" alt="" loading="lazy" />`
-                    : `<span class="lob-lb-avatar ${isAi ? 'ai-avatar' : ''}">${esc(row.name.slice(0, 1))}</span>`;
-                  return `
-                    <div class="lob-lb-row" data-rank-user="${esc(row.userId)}" title="${esc(row.name)} · 点击查看生涯战绩">
-                      <span class="lob-lb-rank ${rankClass}">${index + 1}</span>
-                      <span class="lob-lb-name">
-                        ${avatarHtml}
-                        <span class="lob-lb-text">${esc(row.name)}</span>
-                        ${tag}${playing}
-                      </span>
-                      <span class="lob-lb-chips">${row.chips}</span>
-                      <span class="lob-lb-pct">${percent}%</span>
-                    </div>
-                  `;
-                })
-                .join('')
-        }
-      </div>
-      <div class="lob-lb-foot">
-        <span>AI 每半小时可领 2 次救济金 · 筹码不足不上桌</span>
-      </div>
+      <div class="lob-lb-list" id="poker-leaderboard-list">${leaderboardRowsHtml()}</div>
+      <div class="lob-lb-foot" id="poker-leaderboard-foot">${leaderboardFootHtml()}</div>
     </div>
   `;
 }
@@ -483,42 +553,12 @@ async function refreshLeaderboard() {
   try {
     const data = await getPokerLeaderboard();
     pokerLeaderboardData = data;
+    // 轮询只换列表与页脚，不重建整张卡片：重建会把用户的滚动位置和
+    // 悬停状态一起冲掉，「隐藏 AI」按钮也就跟着闪。
     const listEl = document.getElementById('poker-leaderboard-list');
-    if (listEl) {
-      const rows = data.rows ?? [];
-      if (rows.length === 0) {
-        listEl.innerHTML = '<div class="lob-empty" style="padding:16px 0; font-size:12px">暂无排行数据</div>';
-      } else {
-        listEl.innerHTML = rows
-          .map((row, index) => {
-            const percent = (row.share * 100).toFixed(1);
-            const isAi = !!row.isAi;
-            const tag = isAi
-              ? '<span class="lob-tag ai">AI 名将</span>'
-              : '<span class="lob-tag human">真人</span>';
-            const playing = row.roomId
-              ? '<span class="lob-tag playing" title="正在对局">在桌</span>'
-              : '';
-            const rankClass = index === 0 ? 'top1' : index === 1 ? 'top2' : index === 2 ? 'top3' : '';
-            const avatarHtml = row.avatarUrl
-              ? `<img class="lob-lb-avatar" src="${esc(row.avatarUrl)}" alt="" loading="lazy" />`
-              : `<span class="lob-lb-avatar ${isAi ? 'ai-avatar' : ''}">${esc(row.name.slice(0, 1))}</span>`;
-            return `
-              <div class="lob-lb-row" data-rank-user="${esc(row.userId)}" title="${esc(row.name)} · 点击查看生涯战绩">
-                <span class="lob-lb-rank ${rankClass}">${index + 1}</span>
-                <span class="lob-lb-name">
-                  ${avatarHtml}
-                  <span class="lob-lb-text">${esc(row.name)}</span>
-                  ${tag}${playing}
-                </span>
-                <span class="lob-lb-chips">${row.chips}</span>
-                <span class="lob-lb-pct">${percent}%</span>
-              </div>
-            `;
-          })
-          .join('');
-      }
-    }
+    if (listEl) listEl.innerHTML = leaderboardRowsHtml();
+    const footEl = document.getElementById('poker-leaderboard-foot');
+    if (footEl) footEl.innerHTML = leaderboardFootHtml();
   } catch {}
 }
 
@@ -925,6 +965,22 @@ function bind() {
     if (!row?.dataset.rankUser) return;
     selectedLeaderboardUserId = row.dataset.rankUser;
     render();
+  });
+
+  // 风云榜「隐藏 AI」开关：原地换列表与页脚，不整卡重建。
+  $('lb-hide-ai')?.addEventListener('click', () => {
+    setHideAi(!hideAiInLeaderboard);
+    const button = $('lb-hide-ai') as HTMLButtonElement | null;
+    if (button) {
+      button.textContent = hideAiInLeaderboard ? '显示 AI' : '隐藏 AI';
+      button.classList.toggle('on', hideAiInLeaderboard);
+      button.setAttribute('aria-pressed', String(hideAiInLeaderboard));
+      button.title = hideAiInLeaderboard ? '显示 AI 名将' : '隐藏 AI 名将，只比较真人筹码';
+    }
+    const listEl = document.getElementById('poker-leaderboard-list');
+    if (listEl) listEl.innerHTML = leaderboardRowsHtml();
+    const footEl = document.getElementById('poker-leaderboard-foot');
+    if (footEl) footEl.innerHTML = leaderboardFootHtml();
   });
 
   // 战绩详情弹窗关闭
