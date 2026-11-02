@@ -55,6 +55,18 @@ function boundaryCheck() {
     }
   ];
 
+  /**
+   * 浏览器安全：内核 / 应用 / 渲染层的代码都会被打包进浏览器，那里没有 Node 的
+   * `process` 全局量。曾经 `engine.ts` 的自动推进循环里直接读
+   * `process.env.PUMP_DEBUG`，于是**每一次有 AI 座位的动作**都在浏览器里抛
+   * `ReferenceError`（联机房间与单机 AI 桌都会走到），只有 UI 矩阵能发现它。
+   * 这条静态检查把它挡在提交前：上述目录里除了显式 `globalThis` 探测，不许出现
+   * `process.<x>`。
+   */
+  const browserDirs = ['packages/kernel/src', 'packages/app/src', 'packages/net/src', 'apps/web/src'];
+  const processRef = /(?<![.\w$])process\s*(?:\.|\[)/;
+  const allowed = /globalThis/;
+
   const failures = [];
   for (const rule of rules) {
     for (const file of listTs(rule.dir)) {
@@ -67,6 +79,22 @@ function boundaryCheck() {
           if (pattern.test(line)) failures.push(`${file}: ${line.trim()}`);
         }
       }
+    }
+  }
+
+  // 浏览器安全扫描：只认代码行（注释里提到 `process.env` 是说明，不是引用）。
+  for (const dir of browserDirs) {
+    for (const file of listTs(dir)) {
+      const lines = readFileSync(file, 'utf8').split('\n');
+      lines.forEach((line, index) => {
+        // 只扫代码行：块注释 / 行注释 / JSDoc 里提到 `process.env` 是说明，不是引用。
+        const code = line.replace(/\/\/.*$/, '').trim();
+        if (!code || code.startsWith('*') || code.startsWith('/*')) return;
+        if (!processRef.test(code)) return;
+        // `globalThis.process?.env` 是允许的显式探测。
+        if (allowed.test(code)) return;
+        failures.push(`${file}:${index + 1}: browser-safe process access required — ${line.trim()}`);
+      });
     }
   }
 

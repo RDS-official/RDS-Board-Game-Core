@@ -143,6 +143,22 @@ function normalizeLimit(value: number | undefined, fallback: number, name: strin
 }
 
 /**
+ * `PUMP_DEBUG` 是 Node 侧的调试开关（`PUMP_DEBUG=1 pnpm test` 时打印自动推进轨迹）。
+ *
+ * 内核同时跑在浏览器里，而浏览器没有 `process` 全局量 —— 直接写
+ * `process.env.PUMP_DEBUG` 会让**每一次有 AI 座位的动作**在浏览器里抛
+ * `ReferenceError`（引擎的自动推进循环里那一行是必经之路，联机房间与单机 AI 桌都
+ * 会走到）。所以这里显式判断全局量存在再读，浏览器下恒为 false。
+ *
+ * 用 `globalThis` 而不是 `typeof process`：后者在 Vite 的 ESM 打包里仍会被替换成
+ * 未定义的自由变量，而前者在两种运行时下都安全。
+ */
+const debugPump =
+  typeof globalThis === 'object' &&
+  !!(globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.PUMP_DEBUG;
+
+/**
  * Deterministic, observable, replayable kernel.
  *
  * s_{t+1} = T_{K_t}(s_t, a_t) is applied through a single pipeline:
@@ -557,7 +573,7 @@ export class UniversalGameEngine {
         //    不是"谁做决定"，调用方（含测试）不需要知道 SETTLE_STEP 存在。
         if (this.autoAi === false) break;
         const aiAction = this.pickAutomatedAction();
-        if (process.env.PUMP_DEBUG) {
+        if (debugPump) {
           console.error(`[pump ${guard}] seq=${this.state.seq} turn=${this.state.turn} actor=${this.getActiveActorId()} ai=${aiAction?.type ?? 'none'} street=${(this.state.globalVars as any).hand?.street}`);
         }
         if (!aiAction) break;
