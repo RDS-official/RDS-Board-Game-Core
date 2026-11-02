@@ -306,8 +306,8 @@
 
 | 偏离条款 | 模组 | 具体表现 | 理由 | 关闭条件 |
 | --- | --- | --- | --- | --- |
-| C-2 单步转移 | poker | `applyAction()` → `advanceAi()`（上限 64 次）内联推进 AI | 夹具默认 `autoAi`，让全桌 AI 可在一次 dispatch 内完成一圈 | `driverActions` 逐步派发落地后删除循环（AR-44）· **已机器登记**：`module.charter.deviations`，到期 2027-03-31 |
-| C-2 单步转移 | poker | `settle()` 循环内可连关多条街并发牌至摊牌（上限 8） | 全下提前封盘时需要一次推进多街 | 改为 follow-up action 链（AR-44） |
+| C-2 单步转移 | poker | ~~`applyAction()` → `advanceAi()`（上限 64 次）内联推进 AI~~ | — | ✅ **已关闭（2026-11）**：循环删除，AI 改由引擎 `pumpAutomated()` 逐步 dispatch（AR-44） |
+| C-2 单步转移 | poker | ~~`settle()` 循环内可连关多条街并发牌至摊牌（上限 8）~~ | — | ✅ **已关闭（2026-11）**：拆成单步 + `SETTLE_STEP` 经 follow-up 链逐步执行（AR-44） |
 | C-3 并发表达 | catan | 交易提议窗口 `FIRST_ACCEPT`：多人可同时接受，实现为先到先得 | **抢单是有意的玩法**，不是实现缺陷；改成同时成交会让报价方被多方同时兑现 | 不计划修改。若将来改为「同时接受、资源不足整笔作废」，需先改规则文档再改代码（AR-45） |
 | C-3 并发表达 | poker / betrayal | 审计结论：**不存在**多人同时决策窗口（见宪章 §4.1） | poker 下注逐人表态；betrayal 的交易是 `FIRST_ACCEPT`、伤害窗口是单人 | 无需 `applySimultaneous`；新增此类窗口时按 catan / dune 的写法声明（AR-45） |
 | C-3 并发表达 | dune_mahjong / catan | ~~战斗之轮 / 弃牌串行结算~~ | — | ✅ **已关闭（2026-11）**：`policy: { type: 'SIMULTANEOUS' }` + `applySimultaneous()` 多重集结算，顺序无关性有测试（AR-45） |

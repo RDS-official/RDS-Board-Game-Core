@@ -79,7 +79,7 @@
 | ID | 问题 | 证据 | 建议 | 状态 |
 | --- | --- | --- | --- | --- |
 | AR-43 | 只有 1/6 模组用全了内核五类原语，规则逻辑下沉到 47 个 `globalVars` key | `KERNEL-CHARTER.md` §1.1 / §1.2 的使用率矩阵 | ✅ **已修复（2026-11）**：全部 6 个模组登记了 `meta.stateSchema.globalVars` / `customProps`，内核做未登记即报；5000+ 步实跑 0 未声明 key。CI 使用率矩阵仍未做 | 已修复 |
-| AR-44 | `𝒯` 是万能函数，一次 `reduce` 可含 8~64 次逻辑转移 | `packages/games/src/poker/rules.ts:605` 的 `advanceAi()`（内部 `for … < 64`）、同文件 `settle()` 的 `for … < 8` | 宪章 C-2 单步转移；阶段 2 引入 `transition(state, actions[], ctx)` | 待修 |
+| AR-44 | `𝒯` 是万能函数，一次 `reduce` 可含 8~64 次逻辑转移 | ~~`poker/rules.ts` 的 `advanceAi()`（`for ... < 64`）、同文件 `settle()` 的 `for ... < 8`~~ | ✅ **已修复（2026-11）**：`advanceAi` 的 64 次循环删除；`settle()` 拆成单步，多步由 `resolveFollowUp()` → `SETTLE_STEP` 经内核 follow-up 逐步派发；AI 推进由引擎 `pumpAutomated()` 逐步 `dispatch`（**每步都进 history**，回放可重现）。poker 的 C-2 偏离登记已移除，`charter C-2` 断言单次 reduce 的 turn 增量 ≤ 1 | 已修复 |
 | AR-45 | 并发被降维成串行，多人同时决策顺序敏感 | `Action` 单 actor；`packages/kernel/src/engine.ts` 的 `resolveOpenDecision()` 串行 `reduce` | 宪章 C-3，新增 `SIMULTANEOUS` 决策策略，`𝒯` 接受动作多重集 | 🔶 **部分修复**：内核已有 `SIMULTANEOUS` 策略 + `applySimultaneous()`，dune / catan 已迁移；poker / betrayal 待补 |
 | AR-46 | 随机源未收口，模组可绕过 `ctx.roll()` | `packages/games/src/betrayal/helpers.ts` 的 `drawRoomCandidate()`、`packages/games/src/poker/ai.ts` 的 `noise()` | 宪章 C-4，`reduce` 不再注入 PRNG 静态方法，随机只能走 `ctx.roll()` | ✅ **已修复**：betrayal 弃牌堆重洗改为推进 `prngState`；`charter C-4` 覆盖全部运行期调用点 |
 | AR-47 | `ℛ` 与 `𝒯` 完全耦合，收益事后反推、无法审计 | ~~`poker/rules.ts` 的 `showdown()` 直接 `setChips()`~~ | ✅ **已修复（2026-11）**：`ReduceContext.reward()` + 只追加的 `state.rewards`；poker 三处派发与 catan `grantResources()` 总闸已记账。其余模组的分数是派生值、无增量收益，不需要记账（理由见宪章 §4.2） | 已修复 |

@@ -34,7 +34,7 @@ import {
 import { setupDuneMahjong } from './dune_mahjong/setup';
 import { PokerRules } from './poker/rules';
 import { pokerScenario, setupPoker } from './poker/setup';
-import { pokerDefaultViewer, pokerSettlementMoment } from './poker/presentation';
+import { pokerSettlementMoment } from './poker/presentation';
 import { isAiSeat, POKER_TABLE } from './poker/seating';
 import { SANGUOSHA_HOOKS } from './sanguosha/hooks';
 import { sanguoshaRoleLabel } from './sanguosha/presentation';
@@ -729,10 +729,7 @@ export const pokerModule: GameModule = defineGame({
     }),
   presentation: definePresentation({
     // 结算幕布：每手结束播一次（key 含手数与结束方式，天然去重）。
-    describeMoment: state => pokerSettlementMoment(state),
-    // 开局坐在自己那一侧：单人桌的第一个真人座位就是「我」。没有这条声明，
-    // 演示桌会开在上帝视角——看得全，但那不是一个玩家的座位。
-    defaultViewer: state => pokerDefaultViewer(state)
+    describeMoment: state => pokerSettlementMoment(state)
   }),
   /**
    * C-8：`𝒦_driver` —— 全部驱动方语义集中在这里。
@@ -743,7 +740,7 @@ export const pokerModule: GameModule = defineGame({
    */
   driver: defineDriver({
     /** 只由驱动方心跳派发的动作：玩家永远看不到，客户端入口也会拒绝。 */
-    driverActions: ['OBSERVER_TICK'],
+    driverActions: ['OBSERVER_TICK', 'SETTLE_STEP'],
     /**
      * 内置 AI 座位。驱动方按 `aiActionDelayMs` 代它们派发动作；`legalActions`
      * 直接给出具体动作，AI 和真人因此走的是同一条管线（结算阶段也一样）。
@@ -774,6 +771,8 @@ export const pokerModule: GameModule = defineGame({
   legalActions: (state, playerId) => PokerRules.getLegalActions(state, playerId),
   validatePayload: (state, action, payload) => PokerRules.validatePayload(state, action, payload),
   reduce: (state, action, ctx) => PokerRules.applyAction(state, action, ctx),
+  // 宪章 C-2：只声明规则上的结算步；AI 由内核 pump 逐步派发。
+  resolveFollowUp: (state, ctx) => PokerRules.resolveFollowUp(state, ctx),
   outcome: state => toOutcome(PokerRules.checkWinCondition(state)),
   // C-6：规则层守恒断言（筹码守恒 / 底池一致性 / 手号单调），内核每次转移后调用。
   checkInvariants: state => PokerRules.checkInvariants(state),
@@ -788,13 +787,10 @@ export const pokerModule: GameModule = defineGame({
     requiresProjection: true,
     // C-7：所有筹码增减都经 ctx.reward() 记账（摊牌 / 弃牌取胜 / 观察者低保）。
     requiresRewardLedger: true,
-    deviations: [
-      {
-        clause: 'C-2',
-        reason: 'applyAction 内联驱动 AI + settle 连续关街，一次 reduce 可含 8~64 次逻辑转移',
-        expires: '2027-03-31'
-      }
-    ]
+    // C-2 偏离已于 2026-11 移除：`advanceAi` 的 64 次循环删除、`settle()` 拆成单步
+    // （多步由 `SETTLE_STEP` 经内核 follow-up 逐步派发），现在一次 reduce 只产生
+    // 一次逻辑跃迁，不需要再登记偏离。
+    deviations: []
   }
 });
 

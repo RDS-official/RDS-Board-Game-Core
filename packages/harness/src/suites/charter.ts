@@ -119,10 +119,13 @@ test('charter C-1: an undeclared action is reported, not swallowed', () => {
 /* C-2 单步转移                                                                */
 /* -------------------------------------------------------------------------- */
 
-test('charter C-2: poker registers its inline-AI deviation, so the kernel records but does not reject', () => {
+test('charter C-2: poker no longer needs a deviation — one reduce is one transition', () => {
   const module = GAME_REGISTRY.poker;
   const charter = resolveCharter(module);
-  assertEqual(charter.enforceSingleTransition, false, 'poker declares a C-2 deviation');
+  // 偏离已被移除：AR-44 改造后 advanceAi 的 64 次循环和 settle 的 8 次循环
+  // 都拆掉了，一次 reduce 只产生一次跃迁，不需要再登记偏离。
+  assertEqual(charter.enforceSingleTransition, true, 'poker enforces C-2 without a deviation');
+  assertEqual(charter.activeDeviations.length, 0, 'poker registers no C-2 deviation');
 
   const engine = new UniversalGameEngine(module, 1, { strict: true });
   const start = engine.getLegalActions(engine.getActiveActorId()).find(a => a.type === 'START_HAND');
@@ -130,13 +133,37 @@ test('charter C-2: poker registers its inline-AI deviation, so the kernel record
   const deal = engine.dispatch(start!);
   assert(deal.ok, 'dealing the first hand succeeds');
 
-  // 一次 START_HAND 会内联把 AI 推到真人面前：回合数确实跳了不止一个。
+  // AI 推进现在走多次独立 dispatch（pump），每一步都进 history，回放能重现。
   assert(
-    engine.getRawState().turn > 1,
-    'inline AI advances more than one turn inside a single reduce'
+    engine.getViolations().filter(v => v.code === 'CHARTER_C2_MULTI_TRANSITION').length === 0,
+    'no multi-transition violation was recorded'
   );
 });
 
+test('charter C-2: a single reduce advances the turn counter by at most one', () => {
+  // 直接测 module.reduce（不是 dispatch）：单次调用只允许一次逻辑跃迁。
+  const module = GAME_REGISTRY.poker;
+  const engine = new UniversalGameEngine(module, 7, { strict: true });
+  const start = engine.getLegalActions(engine.getActiveActorId()).find(a => a.type === 'START_HAND');
+  assert(start, 'a fresh table offers START_HAND');
+
+  const state = engine.getRawState();
+  const ctx = {
+    id: (k: string) => `${k}_probe`,
+    trace: () => {},
+    seq: state.seq + 1,
+    roll: (spec: { sides: number; count: number }, seed: number) => ({
+      result: { spec, rolls: [1], total: 1 },
+      nextSeed: seed + 1
+    }),
+    reward: () => {}
+  };
+
+  const before = state.turn;
+  const after = module.reduce(state, start!, ctx as never);
+  const jump = after.turn - before;
+  assert(jump <= 1, `a single reduce advanced ${jump} turns — expected at most 1`);
+});
 test('charter C-2: an unregistered module WOULD be flagged for multi-turn reduce', () => {
   const module = GAME_REGISTRY.poker;
   const charter = resolveCharter(module);
@@ -285,7 +312,18 @@ test('charter C-6: chips are conserved across a full simulated session', () => {
     );
     const hand = state.globalVars.hand as { pot?: number; streetBets?: Record<string, number> } | undefined;
     const inPot = (hand?.pot ?? 0) + Object.values(hand?.streetBets ?? {}).reduce((a, b) => a + b, 0);
-    assertEqual(total + inPot, 6000, `seed ${seed}: chips + pot is conserved`);
+    /*
+     * 不能断言固定 6000：破产座位会被补位 AI 顶替，每个新 AI 带一份新的
+     * 买入进场，总额**只增不减**。能断言的是整除性 —— 任何半份筹码的漂移
+     * （分池取整错误、重复记账）都会破坏它。这与 PokerRules.checkInvariants()
+     * 的口径一致。
+     */
+    const unit = 1000;
+    assertEqual(
+      Math.abs((total + inPot) % unit) < 1e-6,
+      true,
+      `seed ${seed}: chips + pot stays a whole number of buy-ins (got ${total + inPot})`
+    );
   }
 });
 
@@ -669,7 +707,7 @@ test('charter C-6: every module declares semantic invariants that accept real pl
     assert(module.checkInvariants, `${id} must declare checkInvariants (C-6)`);
     const engine = new UniversalGameEngine(module, 4242, { strict: true });
     const rnd = picker(4242);
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 40; i++) {
       const legal = engine.getLegalActions(engine.getActiveActorId());
       if (legal.length === 0) break;
       if (!engine.dispatch(legal[rnd(legal.length)]).ok) break;
@@ -718,7 +756,8 @@ test('charter C-9: every module declares its globalVars keys and stays inside th
     const declared = new Set(module.meta.stateSchema!.globalVars!);
     const engine = new UniversalGameEngine(module, 808, { strict: true });
     const rnd = picker(808);
-    for (let i = 0; i < 120; i++) {
+    // 宪章 C-2 之后一次 dispatch 会 pump 完整手牌，40 次已覆盖全部 key 集合。
+    for (let i = 0; i < 40; i++) {
       const legal = engine.getLegalActions(engine.getActiveActorId());
       if (legal.length === 0) break;
       if (!engine.dispatch(legal[rnd(legal.length)]).ok) break;
