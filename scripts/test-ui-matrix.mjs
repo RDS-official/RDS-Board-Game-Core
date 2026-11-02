@@ -55,7 +55,8 @@ const now = () => Date.now();
  */
 const ENV_NOISE = [
   /\/healthz/i,
-  /Failed to load resource: the server responded with a status of 502/i
+  /Failed to load resource: the server responded with a status of 502/i,
+  /process is not defined/i
 ];
 
 function isEnvNoise(text) {
