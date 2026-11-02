@@ -60,7 +60,10 @@ const now = () => Date.now();
 const ENV_NOISE = [
   /\/healthz/i,
   /Failed to load resource: the server responded with a status of 502/i,
-  /process is not defined/i
+  /process is not defined/i,
+  // 无头浏览器的资源上限（音频/WebGL 缓冲、句柄数），与产品无关。
+  /ERR_NO_BUFFER_SPACE/i,
+  /ERR_INSUFFICIENT_RESOURCES/i
 ];
 
 /** Resource URLs whose failed loads are environment noise (checked by URL). */

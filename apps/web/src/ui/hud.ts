@@ -1294,6 +1294,8 @@ export class BoardGameHUD {
           ).join('')}
         </nav>
 
+        <button class="shell-toggle compact-menu-btn" data-toggle="menu" aria-label="主菜单">☰ 菜单</button>
+
         <button class="shell-toggle" data-toggle="rail" aria-label="显示角色栏">☰ 角色</button>
 
         <div class="topbar-actions">
@@ -1320,6 +1322,8 @@ export class BoardGameHUD {
           <button class="icon-btn" id="btn-diagnostics" aria-label="导出诊断日志">⤓<span class="tip">导出诊断日志（问题反馈用）</span></button>
           <button class="icon-btn" id="btn-about" aria-label="关于">ⓘ<span class="tip">关于 · 版本信息</span></button>
           <button class="shell-toggle" data-toggle="side" aria-label="显示信息栏">▤ 信息</button>
+          <button class="shell-toggle compact-only" data-expand="rail" aria-label="展开角色栏">⤢ 展开角色栏</button>
+          <button class="shell-toggle compact-only" data-expand="side" aria-label="展开信息栏">⤢ 展开信息栏</button>
         </div>
       </header>
 
@@ -1357,6 +1361,10 @@ export class BoardGameHUD {
     window.addEventListener('keydown', event => {
       if (event.key !== 'Escape') return;
       let closed = false;
+      if (this.container.querySelector('.topbar')?.getAttribute('data-menu') === 'open') {
+        this.container.querySelector('.topbar')?.removeAttribute('data-menu');
+        closed = true;
+      }
       for (const [attr, sel] of [
         ['data-side', '[data-toggle="side"]'],
         ['data-rail', '[data-toggle="rail"]']
@@ -1370,7 +1378,32 @@ export class BoardGameHUD {
       if (closed) event.preventDefault();
     });
 
+    // 紧凑模式（桌面 ≥1200px）的二级菜单：☰ 打开，点外面 / Esc 关闭。
+    const topbar = this.container.querySelector('.topbar') as HTMLElement | null;
+    this.container.querySelector('[data-toggle="menu"]')?.addEventListener('click', event => {
+      event.stopPropagation();
+      if (!topbar) return;
+      const open = topbar.getAttribute('data-menu') === 'open';
+      if (open) topbar.removeAttribute('data-menu');
+      else topbar.setAttribute('data-menu', 'open');
+    });
+    window.addEventListener('click', event => {
+      if (!topbar || topbar.getAttribute('data-menu') !== 'open') return;
+      if (topbar.contains(event.target as Node)) return;
+      topbar.removeAttribute('data-menu');
+    });
+    this.container.querySelectorAll<HTMLElement>('[data-expand]').forEach(button => {
+      button.addEventListener('click', () => {
+        const which = button.dataset.expand === 'rail' ? '#player-rail' : '#side-column';
+        const panel = this.container.querySelector(which) as HTMLElement | null;
+        if (!panel) return;
+        if (panel.getAttribute('data-expanded') === '1') panel.removeAttribute('data-expanded');
+        else panel.setAttribute('data-expanded', '1');
+      });
+    });
+
     this.container.querySelectorAll<HTMLElement>('[data-toggle]').forEach(button => {
+      if (button.dataset.toggle === 'menu') return;
       button.addEventListener('click', () => {
         const which = button.dataset.toggle === 'rail' ? 'data-rail' : 'data-side';
         const other = which === 'data-rail' ? 'data-side' : 'data-rail';

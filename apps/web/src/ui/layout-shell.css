@@ -794,3 +794,100 @@
     padding-right: 0;
   }
 }
+
+/* ============================================================
+   紧凑面板（桌面 ≥1200px）
+   ------------------------------------------------------------
+   顶栏 / 左角色栏 / 右信息栏的宽和高都不超过视口的 1/7；放不下的内容
+   折进「☰ 菜单」里的原地弹出浮层，不再常驻占位。平板与手机沿用原有
+   的抽屉逻辑，下面这些规则不生效。
+   ============================================================ */
+.compact-menu-btn,
+.compact-only {
+  display: none;
+}
+
+@media (min-width: 1200px) {
+  .ui-layer.app-shell {
+    --panel-cap-w: calc(100vw / 7);
+    --panel-cap-h: calc(100vh / 7);
+  }
+
+  .app-shell > .topbar {
+    position: relative;
+    width: var(--panel-cap-w);
+    max-height: var(--panel-cap-h);
+    justify-self: start;
+    padding: var(--space-2) var(--space-3);
+  }
+  .app-shell > .topbar .brand-text,
+  .app-shell > .topbar .game-switch,
+  .app-shell > .topbar .topbar-actions {
+    display: none;
+  }
+  .app-shell > .topbar .brand-mark {
+    font-size: 22px;
+  }
+  .compact-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+  }
+
+  /* 二级菜单：原地弹出（不改变面板占位） */
+  .app-shell > .topbar[data-menu='open'] .game-switch,
+  .app-shell > .topbar[data-menu='open'] .topbar-actions {
+    display: flex;
+    position: absolute;
+    top: calc(100% + var(--space-2));
+    left: 0;
+    z-index: 90;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+    width: max-content;
+    max-width: min(420px, 72vw);
+    padding: var(--space-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface-panel-solid);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  }
+  /* 两段都贴着顶栏右侧弹出：游戏页签先一行铺开，动作区接在它下面。 */
+  .app-shell > .topbar[data-menu='open'] .game-switch {
+    left: calc(var(--panel-cap-w) + var(--space-2));
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: max-content;
+    max-width: min(420px, 72vw);
+  }
+  .app-shell > .topbar[data-menu='open'] .topbar-actions {
+    left: calc(var(--panel-cap-w) + var(--space-2));
+    top: calc(100% + var(--space-2) + 56px);
+    max-height: min(62vh, 480px);
+    overflow-y: auto;
+  }
+
+  /* 角色栏 / 信息栏：宽高压在 1/7，内容滚动；菜单里可原地展开 */
+  .app-shell > .player-rail,
+  .app-shell > .side-column {
+    width: var(--panel-cap-w);
+    max-height: var(--panel-cap-h);
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+  .app-shell > .player-rail[data-expanded='1'],
+  .app-shell > .side-column[data-expanded='1'] {
+    width: min(330px, 36vw);
+    max-height: min(74vh, 660px);
+    z-index: 75;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface-panel-solid);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  }
+  .compact-only {
+    display: inline-flex;
+  }
+}
