@@ -9,6 +9,11 @@ import {
 } from './decisions';
 import { checkInvariants, KernelInvariantError } from './invariants';
 import {
+  capabilityMismatches,
+  stateHasHiddenInformation,
+  type CapabilityEvidence
+} from './capabilities';
+import {
   checkCharter,
   resolveCharter,
   type CharterViolation,
@@ -170,6 +175,8 @@ export class UniversalGameEngine {
   private silent = false;
   /** 宪章判据（C-1 / C-2 / C-6 / C-9），构造时从模块声明解析一次。 */
   private readonly charter: ResolvedCharter;
+  /** AR-48：模块的代码事实证据（当前只看是否用了中断栈）。 */
+  private readonly capabilityEvidence: CapabilityEvidence = {};
   /**
    * 宪章违规的滚动记录。与结构性 invariant 不同，这些**不阻断**转移，
    * 只在这里累积，供验证脚本与开发者面板读取。
@@ -288,18 +295,9 @@ export class UniversalGameEngine {
     return this.currentViewer;
   }
 
-  /**
-   * Per-room random secret for HMAC virtual aliases (REVIEW.md S5); never serialized.
-   *
-   * 设置密钥时必须清空别名缓存：`CognitiveObserver.getVirtualAlias()` 按
-   * `secret::viewer` 做缓存键，但**无密钥分支**的缓存键只有 `viewer`。
-   * 如果密钥设置之前已经投影过一次（例如房间刚建好、客户端先连上扫了一眼），
-   * 那批弱别名会一直留在缓存里，即使之后换了 HMAC 也继续返回旧的 FNV 值 ——
-   * 隐藏实体 id 依然可被穷举。清缓存让下一次投影重新计算。
-   */
+  /** Per-room random secret for HMAC virtual aliases (REVIEW.md S5); never serialized. */
   public setAliasSecret(secret: string): void {
     this.aliasSecret = secret;
-    CognitiveObserver.resetAliases();
   }
 
   public setViewer(viewer: PlayerId | 'GOD'): void {
@@ -1059,9 +1057,42 @@ export class UniversalGameEngine {
    * 中止转移只会让房间卡死。这里记录并在 `DispatchResult.violations` 里带回，
    * 由驱动方决定是提示、回滚还是重开。
    */
+  /**
+   * AR-48：用运行期事实核对能力声明。
+   *
+   * 这是内核**真正消费** `capabilities` 的地方（此前只有 UI 读它）。
+   */
+  private checkCapabilityFacts(state: GameState): string[] {
+    const out: string[] = [];
+    const caps = this.module.meta.capabilities;
+    if (!caps) return out;
+
+    if (!caps.hiddenInformation && stateHasHiddenInformation(state)) {
+      out.push('capabilities.hiddenInformation is false but the state contains viewer-hidden entities/zones');
+    }
+    if (!caps.interruptStack && (state.interruptStack?.length ?? 0) > 0) {
+      out.push(`capabilities.interruptStack is false but ${state.interruptStack.length} stack frame(s) are live`);
+    }
+    if (!caps.simultaneousMoves && typeof this.module.applySimultaneous === 'function') {
+      out.push('capabilities.simultaneousMoves is false but the module declares applySimultaneous()');
+    }
+
+    // 反过来也要查：声明"有"但实现里没有。
+    for (const mismatch of capabilityMismatches(this.module, state, this.capabilityEvidence)) {
+      if (mismatch.declared && !mismatch.derived) out.push(mismatch.message);
+    }
+    return out;
+  }
+
   private recordCharterViolations(next: GameState, action: Action): void {
     if (!this.strict) return;
     const violations = checkCharter(this.module, this.charter, next, action);
+
+    // AR-48：能力位必须与运行期事实一致，否则"能力声明"只是装饰。
+    for (const message of this.checkCapabilityFacts(next)) {
+      violations.push({ code: 'CHARTER_CAPABILITY_MISMATCH', message });
+    }
+
     if (violations.length === 0) return;
     this.charterViolations.push(...violations);
     if (this.charterViolations.length > UniversalGameEngine.MAX_CHARTER_VIOLATIONS) {
