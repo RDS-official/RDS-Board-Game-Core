@@ -177,6 +177,13 @@ export class UniversalGameEngine {
   private readonly charter: ResolvedCharter;
   /** AR-48：模块的代码事实证据（当前只看是否用了中断栈）。 */
   private readonly capabilityEvidence: CapabilityEvidence = {};
+  /** 防止 pump 重入（run 内部不会再调 dispatch，但保险）。 */
+  private pumping = false;
+  /**
+   * 禁用自动推进。重放时置 true：`history` 里已经包含 pump 产生的每一步，
+   * 再 pump 一次会把自动步重复叠加，导致 hash 与 live 不一致。
+   */
+  private pumpDisabled = false;
   /**
    * 宪章违规的滚动记录。与结构性 invariant 不同，这些**不阻断**转移，
    * 只在这里累积，供验证脚本与开发者面板读取。
@@ -185,6 +192,16 @@ export class UniversalGameEngine {
   private static readonly MAX_CHARTER_VIOLATIONS = 200;
   /** 收益流水的保留上限（C-7）；超出从头部裁剪。 */
   private static readonly MAX_REWARD_ENTRIES = 500;
+  /** 一次 dispatch 之后自动推进的上限（规则步 + AI 步）。 */
+  private static readonly AUTO_PUMP_LIMIT = 400;
+  /**
+   * "开新一手 / 开新局"类动作：pump 不自动派发。
+   *
+   * 这是**驱动方的节奏**（联机时要给人读结算幕布、等真人点准备）。
+   * 内联自动开局会让 AI 一手接一手打下去 —— 我第一版 AR-44 改造正是在
+   * 这里死循环的（pump 自激，seq 涨到 401 撞上限）。
+   */
+  private static readonly DEAL_ACTION_TYPES = new Set(['START_HAND']);
 
   private visualListeners: ((events: VisualTraceEvent[]) => void)[] = [];
   private stateChangeListeners: ((state: ProjectedGameState) => void)[] = [];
@@ -492,14 +509,109 @@ export class UniversalGameEngine {
   /* ------------------------------------------------------------------ */
 
   public dispatch(action: Action): DispatchResult {
-    return this.run(action);
+    const result = this.run(action);
+    if (!result.ok) return result;
+    return this.pumpAutomated(result);
+  }
+
+  /**
+   * 宪章 C-2：逐步推进"自动步"，直到轮到真人或对局结束。
+   *
+   * **每一步都通过 `this.run()`**，这是与旧实现（模组内部 for 循环）的本质区别：
+   *
+   *  - `run()` 会把每一步写进 `history` 与 `actionLog`，因此 `exportLog()` 的
+   *    重放能完整重现 —— 旧的 `advanceAi` 在 reduce 内部推 64 步，那些步
+   *    只存在于状态里，回放时重现不出来（这正是我上一次改造失败的原因）。
+   *  - 每一步各跑一遍 structural invariant 与宪章检查。
+   *
+   * 两类自动步：
+   *  1. 模块用 `resolveFollowUp()` 声明的**规则步**（关街 / 发牌 / 摊牌）；
+   *  2. 轮到 `isAutomated()` 的座位时，取它的合法动作派发（与真人同一条管线）。
+   *
+   * 只有 `autoAi` 为 false 时才交回驱动方（联机房间按节奏逐步派发）。
+   */
+  private pumpAutomated(root: DispatchResult): DispatchResult {
+    if (this.pumpDisabled) return root;
+    if (this.pumping) return root;
+
+    const events = [...root.events];
+    let last = root;
+    this.pumping = true;
+    try {
+      for (let guard = 0; guard < UniversalGameEngine.AUTO_PUMP_LIMIT; guard++) {
+        if (this.state.gameOver) break;
+
+        // 1) 规则自动步（模块声明）
+        const step = this.pickFollowUpStep(events);
+        if (step) {
+          const result = this.run(step, true);
+          if (!result.ok) break;
+          events.push(...result.events);
+          last = result;
+          continue;
+        }
+
+        // 2) AI 座位：取合法动作派发。
+        //    `autoAi: false` 时把 AI 交给驱动方按节奏派发 —— 但**规则步**
+        //    （上面第 1 步）始终由内核自动推进：那是"牌桌按规则必然发生的事"，
+        //    不是"谁做决定"，调用方（含测试）不需要知道 SETTLE_STEP 存在。
+        if (this.autoAi === false) break;
+        const aiAction = this.pickAutomatedAction();
+        if (process.env.PUMP_DEBUG) {
+          console.error(`[pump ${guard}] seq=${this.state.seq} turn=${this.state.turn} actor=${this.getActiveActorId()} ai=${aiAction?.type ?? 'none'} street=${(this.state.globalVars as any).hand?.street}`);
+        }
+        if (!aiAction) break;
+        const beforeSeq = this.state.seq;
+        const result = this.run(aiAction, true);
+        if (!result.ok) break;
+        events.push(...result.events);
+        last = result;
+        // 空转保护：动作被接受却没有推进状态（seq 不变），继续循环只会烧 CPU。
+        if (this.state.seq === beforeSeq) break;
+      }
+    } finally {
+      this.pumping = false;
+    }
+
+    return { ...last, events };
+  }
+
+  /** 模块声明了还没走完的规则步（取第一条）。 */
+  private pickFollowUpStep(events: VisualTraceEvent[]): Action | undefined {
+    if (!this.module.resolveFollowUp) return undefined;
+    const ctx = this.makeContext(this.state.seq + 1, events);
+    return this.module.resolveFollowUp(this.state, ctx)[0];
+  }
+
+  /**
+   * 轮到 AI 座位时，取它这一步要做的具体动作。
+   *
+   * **只派发牌局内的动作，不自动开新一手**：`START_HAND` 这类"开新局"属于
+   * 驱动方的节奏（联机时有人要读结算幕布、有人还没点准备）。内联自动开局
+   * 会让 pump 一手接一手地打下去 —— 我第一版就是在这里死循环的。
+   *
+   * 判据用 `isRoundWrappedUp()`：模块的 `resolveFollowUp()` 已经在
+   * "本手结束"时返回空，这里再确认一次不至于把开局动作也算作自动步。
+   */
+  private pickAutomatedAction(): Action | undefined {
+    const isAutomated = this.module.driver?.isAutomated;
+    if (!isAutomated) return undefined;
+    const actor = this.getActiveActorId();
+    if (!isAutomated(this.state, actor)) return undefined;
+    const legal = this.legalActionsFor(this.state, actor);
+    const pick = legal[0];
+    if (!pick) return undefined;
+    // 开局类动作交回驱动方。
+    if (this.module.driver?.driverActions?.includes(pick.type)) return undefined;
+    if (UniversalGameEngine.DEAL_ACTION_TYPES.has(pick.type)) return undefined;
+    return pick;
   }
 
   private fail(error: string, events: VisualTraceEvent[] = []): DispatchResult {
     return { ok: false, error, events, stateHash: this.getStateHash() };
   }
 
-  private run(action: Action): DispatchResult {
+  private run(action: Action, trusted = false): DispatchResult {
     const events: VisualTraceEvent[] = [];
 
     if (this.state.gameOver) return this.fail('game is over');
@@ -566,7 +678,10 @@ export class UniversalGameEngine {
     }
 
     // 3. Regular turn action
-    if (this.strict && !this.isLegal(action)) {
+    // `trusted`：动作由 pump 从 `legalActionsFor()` 直接取得，已经过一次合法性
+    // 计算。再跑 `isLegal()` 会把整份 legalActions（含 AI 投影决策）算第二遍 ——
+    // 实测这是 pump 的主要开销。
+    if (this.strict && !trusted && !this.isLegal(action)) {
       return this.fail(`illegal action "${action.type}" for ${actorId} in phase ${this.state.phase}`);
     }
 
@@ -1436,6 +1551,12 @@ export class UniversalGameEngine {
       ...(stacks === undefined ? {} : { stacks })
     });
     shadow.silent = true;
+    /*
+     * 重放时**不能**再 pump：`history` 里已经包含 pump 产生的每一步
+     * （这正是它让回放能重现的原因）。若再 pump 一次，每个根动作都会额外
+     * 重生一遍自动步，状态与 live 对不上 —— 我第一版就在这里的 hash 不一致。
+     */
+    shadow.pumpDisabled = true;
     const errors: string[] = [];
 
     for (const action of actions) {

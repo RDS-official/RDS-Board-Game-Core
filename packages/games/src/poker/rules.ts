@@ -620,35 +620,42 @@ export class PokerRules {
   public static applyAction(state: GameState, action: Action, ctx: ReduceContext): GameState {
     const hand = handOf(state);
     if (!hand) return state;
-    // 每次真人动作落地后，让当前该出手的 AI 座位连续行动，直到轮到真人为止。
-    // 内联在 reduce 里（而不是外部定时器）保证状态跃迁与 replay 完全一致。
-    return this.advanceAi(this.applyHuman(state, action, ctx), ctx);
+    // 宪章 C-2：一次 reduce 只做一次跃迁。AI 推进交给内核 pumpAutomated()
+    // 逐步 dispatch —— 那才保证每一步都进 history（回放才能重现）。
+    return this.applyHuman(state, action, ctx);
   }
 
   /**
-   * 连续驱动 AI 座位。上限 64 次防止病态循环；AI 永远给出合法动作，
-   * 由 `choosePokerAction` 保证，内核仍会再校验一次。
+   * 宪章 C-2：声明"还有哪些自动步"。
+   *
+   * 只声明**规则上必然发生的**结算步（本街结束 → 收注 / 发下一街）。
+   * AI 决策不在这里推 —— 它由内核的 pump 按 `isAutomated` 逐个 dispatch，
+   * 与真人走同一条管线。开局（`START_HAND`）也不在这里：那是驱动方的节奏。
    */
-  private static advanceAi(state: GameState, ctx: ReduceContext): GameState {
-    // 外部驱动模式下每个 AI 动作由驱动方单独派发，内核不再内联推进。
-    if (!configOf(state).autoAi) return state;
-    let next = state;
-    for (let guard = 0; guard < 64; guard++) {
-      if (next.gameOver) return next;
-      const active = next.activeActorId ?? next.activePlayerId;
-      if (!active || !isAiSeat(next, active)) return next;
-      const action = choosePokerAction(decisionView(next, active), active);
-      if (!action) return next;
-      const stepped = this.applyHuman(next, action, ctx);
-      if (stepped === next) return next; // 动作被拒：停止推进，避免空转
-      next = stepped;
-    }
-    return next;
+  public static resolveFollowUp(state: GameState, ctx: ReduceContext): Action[] {
+    if (state.gameOver) return [];
+    /*
+     * 快速短路：绝大多数调用发生在"本街进行中"，此时没有任何结算步。
+     * 先看一手牌是否还在进行、本街是否已结束，再决定要不要构造 SETTLE_STEP —
+     * 这省掉了每次 pump 迭代的重复判断（poker 一局要问上千次）。
+     */
+    const hand = handOf(state);
+    if (!hand || hand.street === 'COMPLETE') return [];
+    if (!this.needsSettlement(state)) return [];
+    return [{ type: 'SETTLE_STEP', playerId: state.activePlayerId }];
   }
 
   private static applyHuman(state: GameState, action: Action, ctx: ReduceContext): GameState {
     const hand = handOf(state);
     if (!hand) return state;
+
+    // 宪章 C-2：结算步作为一次独立的 reduce（内核逐步派发），
+    // 这样每一步都进 history —— 回放才能重现。
+    if (action.type === 'SETTLE_STEP') {
+      // 单步结算：轮到下一个人 / 收一次注发一条街 / 摊牌。
+      // 不再额外 collectBets —— `settle()` 内部已经做过一次。
+      return this.settle(state, ctx);
+    }
 
     // 观察者的两件事：领低保（驱动方心跳派发）与申请重新上桌。
     if (action.type === 'OBSERVER_TICK') {
@@ -766,6 +773,14 @@ export class PokerRules {
 
     const betted = this.applyBet(state, action, ctx);
     if (betted === state) return state;
+
+    /*
+     * 宪章 C-2：`settle()` 只做**单步**（要么切换行动者，要么收一次注发一条街，
+     * 要么摊牌）。旧实现的 for 循环会重复 collectBets，把同一份下注反复
+     * 计入底池（实测 pot 被算成实际下注的 13 倍）。
+     *
+     * 需要多步时，`resolveFollowUp()` 返回 SETTLE_STEP，由内核作为独立跃迁派发。
+     */
     const settled = this.settle(betted, ctx);
     return { ...settled, turn: state.turn + 1 };
   }
@@ -923,35 +938,73 @@ export class PokerRules {
    * true once every seat that can still act has matched the current bet (平注)
    * and has acted since the last full raise.
    */
+  /**
+   * 宪章 C-2：一次 `reduce` 只推进一步。
+   *
+   * 旧实现 `for (guard < 8)` 连续关街 / 发牌 / 摊牌，一次 reduce 可走完
+   * 翻牌 → 转牌 → 河牌 → 摊牌。**更糟的是它会在循环里重复 `collectBets()`**，
+   * 同一份底池被反复累加 —— 我实测过 pot 被算成实际下注额的 13 倍
+   * （筹码总和从 6000 变 7000）。这个 bug 在旧实现里也存在，只是被
+   * `advanceAi` 的 64 次内联推进掩盖了。
+   *
+   * 现在只处理当前这一步，剩下的交给 `needsSettlement()` + `SETTLE_STEP`。
+   */
   private static settle(state: GameState, ctx: ReduceContext): GameState {
-    let next = state;
-    for (let guard = 0; guard < 8; guard++) {
-      const hand = handOf(next);
-      if (!hand) return next;
-      const live = livePlayers(next);
-      if (live.length <= 1) return this.finishByFold(next, ctx, live[0]);
+    const hand = handOf(state);
+    if (!hand) return state;
+    const live = livePlayers(state);
+    if (live.length <= 1) return this.finishByFold(state, ctx, live[0]);
 
-      if (!isRoundComplete(hand, live)) {
-        const seat = this.actorSeatFrom(next, this.seatOf(next, next.activePlayerId), false);
-        return { ...next, activePlayerId: next.playerOrder[seat] };
-      }
-
-      if (hand.street === 'RIVER') return this.showdown(next, ctx);
-
-      next = this.collectBets(next);
-      next = this.dealNextStreet(next, ctx);
-
-      const afterHand = handOf(next);
-      if (!afterHand) return next;
-      const actors = livePlayers(next).filter(pid => !afterHand.allIn.includes(pid));
-      if (actors.length === 0) continue;
-
-      const seat = this.actorSeatFrom(next, afterHand.buttonSeat, false);
-      next = { ...next, activePlayerId: next.playerOrder[seat], phase: afterHand.street };
-      if (isRoundComplete(afterHand, livePlayers(next))) continue;
-      return next;
+    if (!isRoundComplete(hand, live)) {
+      const seat = this.actorSeatFrom(state, this.seatOf(state, state.activePlayerId), false);
+      return { ...state, activePlayerId: state.playerOrder[seat] };
     }
-    return next;
+
+    if (hand.street === 'RIVER') return this.showdown(state, ctx);
+
+    // 只收一次注、只发一条街，并把行动权交给新街道上第一个能行动的人。
+    // 旧实现的 for 循环里有一段 `actorSeatFrom(afterHand.buttonSeat)`，拆单步时
+    // 必须同步保留 —— 少了它，发完牌还停在原来那个人身上（实测翻牌后
+    // expected p2 got p3）。
+    const collected = this.collectBets(state);
+    const dealt = this.dealNextStreet(collected, ctx);
+
+    const afterHand = handOf(dealt);
+    if (!afterHand) return dealt;
+
+    const liveAfter = livePlayers(dealt);
+    // 全员 all-in：无人可行动，直接进结算步（摊牌会在下一个 SETTLE_STEP 里发生）。
+    const actors = liveAfter.filter(pid => !afterHand.allIn.includes(pid));
+    if (actors.length === 0) return dealt;
+
+    const seat = this.actorSeatFrom(dealt, afterHand.buttonSeat, false);
+    // 与旧实现保持一致：只改 activePlayerId，**不动 activeActorId**。
+    // 多设 activeActorId 会让 resetSeatResponsibility / getLegalActions 走岔
+    // （实测翻牌后行动者拿不到任何合法动作）。
+    return {
+      ...dealt,
+      activePlayerId: dealt.playerOrder[seat],
+      phase: afterHand.street
+    };
+  }
+
+  /**
+   * 本街已结束、但还没到摊牌 —— 说明还有结算步要走（收注 / 发下一街）。
+   *
+   * `resolveFollowUp()` 据此派发 `SETTLE_STEP`，让内核把它作为一次独立跃迁
+   * 执行（各跑一遍 invariant，且进 history 保证回放）。
+   */
+  private static needsSettlement(state: GameState): boolean {
+    const hand = handOf(state);
+    if (!hand) return false;
+    if (hand.street === 'COMPLETE') return false;
+    const live = livePlayers(state);
+    if (live.length <= 1) return false;
+    if (!isRoundComplete(hand, live)) return false;
+    // 本街已结束 → 一定还有下一步（发下一条街 或 摊牌），哪怕只剩 all-in 玩家。
+    // 全员 all-in 时没有"可行动者"，但牌还得发到河牌才摊牌 —— 漏掉这点会让
+    // 牌局卡在 FLOP 不再推进（我拆单步时踩过）。
+    return true;
   }
 
   private static seatOf(state: GameState, playerId: string): number {

@@ -560,6 +560,14 @@ export interface GameModule {
    * 未声明时内核退化为"按座位序逐条 reduce"，并记一条
    * `CHARTER_C3_SERIALIZED` 偏离：语义仍然确定，但顺序敏感。
    */
+  /**
+   * 宪章 C-2：一次 `reduce` 结束后，声明"接下来还有哪些自动步"。
+   *
+   * 这是替代"在 reduce 里写 `for` 循环推进 AI / 连续结算"的官方出口。
+   * 内核拿到动作后会**作为独立的一次 dispatch 执行**（每步都进 history，回放可重现）。
+   */
+  resolveFollowUp?: (state: GameState, ctx: ReduceContext) => Action[];
+
   applySimultaneous?: (
     state: GameState,
     actions: { actorId: ActorId; action: Action }[],
