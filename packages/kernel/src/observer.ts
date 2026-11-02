@@ -223,6 +223,15 @@ export class CognitiveObserver {
         ? redactor.globalVars(state.globalVars, state, viewerId)
         : state.globalVars;
 
+    // C-5：观看者自己手牌的实体 id。牌桌可见"有几张牌"，但只有本人知道是哪几张。
+    const ownHandZoneId = `zone_hand_${viewerId}`;
+    const ownHand =
+      viewerId === 'GOD'
+        ? Object.values(state.entities)
+            .filter(entity => entity.zoneId?.startsWith('zone_hand_'))
+            .map(entity => entity.id)
+        : (state.zones[ownHandZoneId]?.orderedEntities ?? []).filter(id => !!projectedEntities[id]);
+
     const projectedEffects = (state.effects ?? [])
       .filter(effect => this.isVisibleTo(effect.visibility ?? { type: 'PUBLIC' }, viewerId))
       .map(effect => JSON.parse(JSON.stringify(effect)));
@@ -272,6 +281,7 @@ export class CognitiveObserver {
       legalActions: filteredLegalActions,
       factionTopology,
       maskedEntityCount: maskedCount,
+      ownHand,
       maskedNodeCount,
       maskedEdgeCount
     };

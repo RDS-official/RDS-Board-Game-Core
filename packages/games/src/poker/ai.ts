@@ -1,4 +1,4 @@
-import type { GameState, PlayerId } from '@rds/kernel/types';
+import type { GameState, PlayerId, ProjectedGameState } from '@rds/kernel/types';
 import type { Action } from '@rds/kernel/types';
 import { toCall, minRaiseTo, mayRaise, type BettingState } from './betting';
 import { cardOfEntity, holeCards, type Card } from './cards';
@@ -8,18 +8,29 @@ import { AI_PROFILE, aiTierOf, type PokerAiTier } from './seating';
 /**
  * 内置 AI 策略（德州扑克）。
  *
- * 约束：策略是**状态 → 动作**的纯函数，不持有随机数实例（内核禁止把可变
- * 随机源放进状态）。随机性来自 `state.prngState` 派生的决定论哈希，
- * 因此同一份状态 + 同一个 seed 永远给出同一个动作，replay 完全可复现。
+ * 约束（宪章 C-5 信息约束）：策略只接受 **`ProjectedGameState`** —— 也就是
+ * `𝒪(s, i)`，与真人客户端拿到的是同一份投影。类型系统因此保证了它读不到
+ * 牌堆顺序、别人的底牌、`prngState`、`seed`：这些字段在 `ProjectedGameState`
+ * 里根本不存在（`Omit<…, 'entities' | 'zones' | 'prngState' | 'seed'>`）。
+ *
+ * 策略是**状态 → 动作**的纯函数，不持有随机数实例（内核禁止把可变随机源
+ * 放进状态）。随机性来自状态的派生的决定论哈希，因此同一份状态永远给出
+ * 同一个动作，replay 完全可复现。
  *
  * 三档差异只体现在两个参数上（见 seating.ts 的 AI_PROFILE）：
  *  - `aggression`：拿到强牌时加注的频率与幅度；
  *  - `looseness`：愿意用多宽的起手牌继续看牌。
  */
 
-/** 从状态派生的确定性 0..1 小数（不污染 prngState，只读）。 */
-function noise(state: GameState, playerId: PlayerId, salt: number): number {
-  const key = `${state.prngState}:${state.seq}:${state.turn}:${playerId}:${salt}:${state.globalVars.hand?.handNo ?? 0}`;
+/**
+ * 从**投影**状态派生的确定性 0..1 小数。
+ *
+ * 旧实现读 `state.prngState`，那是权威状态字段，AI 不应该看见；这里改用
+ * 投影里公开的 `seq` / `turn` / 手号组合，仍然是状态的确定函数，replay 不变。
+ */
+function deriveNoise(view: ProjectedGameState, playerId: PlayerId, salt: number): number {
+  const handNo = (view.globalVars.hand as { handNo?: number } | undefined)?.handNo ?? 0;
+  const key = `${view.seq}:${view.turn}:${playerId}:${salt}:${handNo}`;
   let hash = 2166136261 >>> 0;
   for (let index = 0; index < key.length; index++) {
     hash ^= key.charCodeAt(index);
@@ -32,15 +43,15 @@ type Strength = 'trash' | 'weak' | 'medium' | 'strong' | 'monster';
 
 /**
  * 牌力估计：翻前按起手牌粗分，翻后按当前最佳成手牌分档。
- * 只看自己的底牌 + 公共牌（合法信息），不窥探牌堆。
+ * 只看自己的底牌 + 自己的手牌区（投影里的 `ownHand`），不窥探牌堆。
  */
-function strengthOf(state: GameState, playerId: PlayerId): { strength: Strength; score: number } {
-  const hole = holeCards(state, playerId);
+function strengthOf(view: ProjectedGameState, playerId: PlayerId): { strength: Strength; score: number } {
+  const hole = holeCards(view, playerId);
   if (hole.length === 0) return { strength: 'trash', score: 0 };
 
-  const hand = state.globalVars.hand as (BettingState & { community: string[] }) | undefined;
+  const hand = view.globalVars.hand as (BettingState & { community: string[] }) | undefined;
   const community: Card[] = (hand?.community ?? [])
-    .map((id: string) => cardOfEntity(state.entities[id]))
+    .map((id: string) => cardOfEntity(view.entities[id]))
     .filter((card): card is Card => card !== null);
 
   // 翻前：只按底牌强度（对子 > 高牌相连 > 高牌）。
@@ -88,27 +99,26 @@ function strengthOf(state: GameState, playerId: PlayerId): { strength: Strength;
  * 选择动作。返回 null 表示「不行动」（调用方会跳过该座位）。
  * 一定会返回一个合法动作，绝不返回非法动作——合法性由内核兜底校验。
  */
-export function choosePokerAction(state: GameState, playerId: PlayerId): Action | null {
-  const hand = state.globalVars.hand as
+export function choosePokerAction(view: ProjectedGameState, playerId: PlayerId): Action | null {
+  const hand = view.globalVars.hand as
     | (BettingState & { street: string; folded: string[]; allIn: string[] })
     | undefined;
   if (!hand) return null;
   if (hand.street === 'COMPLETE') {
     // 本手结束：由当前主动作玩家开下一手；AI 直接开。
-    return state.activePlayerId === playerId ? { type: 'START_HAND', playerId } : null;
+    return view.activePlayerId === playerId ? { type: 'START_HAND', playerId } : null;
   }
-  if (state.activePlayerId !== playerId) return null;
+  if (view.activePlayerId !== playerId) return null;
   if (hand.folded.includes(playerId) || hand.allIn.includes(playerId)) return null;
 
-  const tier: PokerAiTier = aiTierOf(state, playerId) ?? 'intermediate';
-  const profile = AI_PROFILE[tier];
-  const chips = Number(state.players[playerId]?.customProps?.chips ?? 0);
+  const profile = AI_PROFILE[aiTierOf(view, playerId) ?? 'intermediate'];
+  const chips = Number(view.players[playerId]?.customProps?.chips ?? 0);
   if (chips <= 0) return null;
 
   const owed = toCall(hand, playerId);
-  const { strength, score } = strengthOf(state, playerId);
-  const roll = noise(state, playerId, 1);
-  const raiseRoll = noise(state, playerId, 2);
+  const { strength } = strengthOf(view, playerId);
+  const roll = deriveNoise(view, playerId, 1);
+  const raiseRoll = deriveNoise(view, playerId, 2);
 
   // 决策：垃圾牌大多弃牌，除非免费看牌。
   if (strength === 'trash') {
@@ -173,7 +183,7 @@ export interface ChipShare {
   tierLabel?: string;
 }
 
-export function chipShares(state: GameState): ChipShare[] {
+export function chipShares(state: Pick<GameState, 'globalVars' | 'playerOrder' | 'players'>): ChipShare[] {
   const raw = state.globalVars.seats as
     | { playerId: string; isAi: boolean; aiTier?: PokerAiTier }[]
     | undefined;

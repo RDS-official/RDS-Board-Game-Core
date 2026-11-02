@@ -306,12 +306,13 @@
 
 | 偏离条款 | 模组 | 具体表现 | 理由 | 关闭条件 |
 | --- | --- | --- | --- | --- |
-| C-2 单步转移 | poker | `applyAction()` → `advanceAi()`（上限 64 次）内联推进 AI | 夹具默认 `autoAi`，让全桌 AI 可在一次 dispatch 内完成一圈 | `driverActions` 逐步派发落地后删除循环（AR-44） |
+| C-2 单步转移 | poker | `applyAction()` → `advanceAi()`（上限 64 次）内联推进 AI | 夹具默认 `autoAi`，让全桌 AI 可在一次 dispatch 内完成一圈 | `driverActions` 逐步派发落地后删除循环（AR-44）· **已机器登记**：`module.charter.deviations`，到期 2027-03-31 |
 | C-2 单步转移 | poker | `settle()` 循环内可连关多条街并发牌至摊牌（上限 8） | 全下提前封盘时需要一次推进多街 | 改为 follow-up action 链（AR-44） |
 | C-3 并发表达 | poker / catan / betrayal | 多人同时决策走决策窗口串行 `reduce` | 内核尚无动作多重集 `SIMULTANEOUS` 策略 | `𝒯` 接受 `Action[]` 后改为一次结算（AR-45） |
 | C-4 随机收口 | betrayal | `drawRoomCandidate()` 直接用 `DeterministicPRNG.shuffle(seed + …)` | 抽房间需要"重洗弃牌堆"的局部随机，未接入 `ctx.roll()` | 内核提供 `ctx.shuffle()` 后替换（AR-46） |
-| C-4 随机收口 | poker | `ai.ts` 的 `noise()` 自实现 FNV 哈希作决策抖动 | 不想污染 `prngState`，保持 AI 决策与状态跃迁解耦 | AI 入参改投影后由 `deriveNoise(view)` 承载（AR-2 / AR-46） |
-| C-5 信息约束 | poker | AI 用 raw `GameState` 决策 | 历史实现，未区分投影通道 | `choosePokerAction` 改收 `ProjectedGameState`（AR-2） |
+| C-4 随机收口 | poker | ~~`ai.ts` 的 `noise()` 自实现 FNV 哈希作决策抖动~~ | 不想污染 `prngState`，保持 AI 决策与状态跃迁解耦 | ✅ **已部分关闭（2026-11）**：改名 `deriveNoise(view)`，入参为投影、不再读 `prngState`；仍未走 `ctx.roll()`（AR-46） |
+| C-5 信息约束 | poker | ~~AI 用 raw `GameState` 决策~~ | 历史实现，未区分投影通道 | ✅ **已关闭（2026-11）**：`choosePokerAction` 改收 `ProjectedGameState`，`rules.ts` 经 `decisionView()` 投影后调用（AR-2） |
 | C-7 收益独立 | poker / catan | 收益在 `showdown()` / 建造分支里直接改状态，未记账 | 内核尚无 `ctx.reward()` | `state.rewards` 落地后回填（AR-47） |
 | C-8 元规则分区 | sanguosha | `bagua_armor` 钩子只发提示，真正判定写在 `JUDGE_BAGUA` 分支 | 钩子表达力不足 | 声明式规则表 + 通用解释器（AR-49） |
-| C-9 扩展字段收口 | 全部 6 个玩法 | 规则状态寄居 `globalVars` / `custom`（47 个 key） | 内核尚无 `meta.stateSchema` | 登记 key 集合并接入内核校验（AR-43） |
+| C-9 扩展字段收口 | 其余 5 个玩法 | 规则状态寄居 `globalVars` / `custom`（47 个 key） | 未声明 key 集合 | 照 poker 的 `meta.stateSchema.globalVars` 逐个登记（AR-43） |
+| C-9 扩展字段收口 | poker | ~~`globalVars` 7 个 key 未登记~~ | — | ✅ **已关闭（2026-11）**：`meta.stateSchema.globalVars` 声明 7 个 key，内核做未登记即报（AR-43） |

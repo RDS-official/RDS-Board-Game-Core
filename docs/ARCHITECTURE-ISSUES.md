@@ -15,7 +15,7 @@
 | ID | 问题 | 证据 | 建议 | 状态 |
 | --- | --- | --- | --- | --- |
 | AR-1 | 中心模式虚拟别名未加密钥，隐藏实体 id 可被穷举还原 | `packages/kernel/src/observer.ts` 的 `getVirtualAlias()`（53-59 行）缺省走 FNV-1a 32 位；`packages/app/src/netSession.ts:221` 是唯一 `setAliasSecret` 调用点（仅 P2P 房主侧）；`apps/server/src/match.ts` 构造 `GameRoom` 时未设置 | `ServerMatch` 构造后 `this.room.engine.setAliasSecret(crypto.randomBytes(32).toString('hex'))`；补"中心模式别名必须是 HMAC 形式"的回归测试 | 待修 |
-| AR-2 | 德扑 AI 从权威 raw state 决策，与真人不在同一信息通道 | `packages/games/src/poker/rules.ts:478` 传 `state` 给 `choosePokerAction`；`packages/games/src/poker/ai.ts:44` 的 `strengthOf()` 读 raw state | AI 入参改为 `ProjectedGameState`；补"AI 可见信息 ⊆ 投影信息"断言 | 待修 |
+| AR-2 | ~~德扑 AI 从权威 raw state 决策~~ | ~~`rules.ts` 传 `state` 给 `choosePokerAction`~~ | ✅ **已修复**：`choosePokerAction(view: ProjectedGameState)`，`rules.ts` 经 `decisionView()` 投影；`deriveNoise(view)` 不再读 `prngState`；测试见 `harness/src/suites/charter.ts` 的 C-5 两例（含「抹掉对手筹码决策不变」断言） | 已修复 |
 | AR-3 | 认证态存 localStorage + Bearer，token 还会进入 URL 查询串 | `apps/web/src/lobby/lobby.ts:749` 写 localStorage、`lobby.ts:1062` 把 token 放进 `gameQuery`；`apps/web/src/lobby/api.ts:3` | 短期 token 移出 URL（一次性 ticket + postMessage）；中期换 `HttpOnly; Secure; SameSite=Lax` cookie | 待修 |
 | AR-4 | 状态变更接口无 CSRF / Origin 防护 | `apps/server/src/index.ts` 的 `/api/rooms/:id/{join,status,ready,kick,host,ai}` 只校验 Bearer | `/api/*` 非 GET 请求加 `Sec-Fetch-Site` / `Origin` 白名单中间件 | 待修 |
 
@@ -78,7 +78,7 @@
 
 | ID | 问题 | 证据 | 建议 | 状态 |
 | --- | --- | --- | --- | --- |
-| AR-43 | 只有 1/6 模组用全了内核五类原语，规则逻辑下沉到 47 个 `globalVars` key | `KERNEL-CHARTER.md` §1.1 / §1.2 的使用率矩阵 | 引入 `meta.stateSchema` 登记 key 集合；CI 输出使用率矩阵（宪章 C-9、阶段 0） | 待修 |
+| AR-43 | 只有 1/6 模组用全了内核五类原语，规则逻辑下沉到 47 个 `globalVars` key | `KERNEL-CHARTER.md` §1.1 / §1.2 的使用率矩阵 | 🔶 **部分修复**：内核已有 `meta.stateSchema.globalVars` + `CHARTER_C9_UNDECLARED_GLOBAL_VAR` 检查，poker 已登记 7 个 key；其余 5 个模组待登记；CI 使用率矩阵未做 | 进行中 |
 | AR-44 | `𝒯` 是万能函数，一次 `reduce` 可含 8~64 次逻辑转移 | `packages/games/src/poker/rules.ts:605` 的 `advanceAi()`（内部 `for … < 64`）、同文件 `settle()` 的 `for … < 8` | 宪章 C-2 单步转移；阶段 2 引入 `transition(state, actions[], ctx)` | 待修 |
 | AR-45 | 并发被降维成串行，多人同时决策顺序敏感 | `Action` 单 actor；`packages/kernel/src/engine.ts` 的 `resolveOpenDecision()` 串行 `reduce` | 宪章 C-3，新增 `SIMULTANEOUS` 决策策略，`𝒯` 接受动作多重集 | 待修 |
 | AR-46 | 随机源未收口，模组可绕过 `ctx.roll()` | `packages/games/src/betrayal/helpers.ts` 的 `drawRoomCandidate()`、`packages/games/src/poker/ai.ts` 的 `noise()` | 宪章 C-4，`reduce` 不再注入 PRNG 静态方法，随机只能走 `ctx.roll()` | 待修 |

@@ -257,13 +257,33 @@ handler: () => ({
 
 ## 4. 分阶段落地
 
-### 阶段 0（1 周）：不改架构，先建立度量
+> **2026-11 实际进度**：阶段 0 已全部完成，阶段 1 的 C-5 / C-6 已在德扑落地。
+> 内核侧新增 `packages/kernel/src/charter.ts`（宪章执行器）与
+> `packages/harness/src/suites/charter.ts`（12 条可执行断言）。
+> 下面各阶段保留原计划，✅ 标记已完成项。
+
+### 已完成（2026-11，本次实现）
+
+| 条款 | 落地内容 | 验证 |
+| --- | --- | --- |
+| C-1 | `checkCharter()` 检查动作类型是否在 `actionSchemas` 中声明；探针在全仓扫出并补齐 8 个漏登记类型（`DRAW_CARDS` / `END_TURN` / `TRY_FRONT_DOOR` / `READY` / `SHOW` / `MUCK` / `FORCE_START` / `DEBUG_READY_ALL`） | `charter C-1` 两例 |
+| C-2 | `observeTransitions()` 用 `turn` 增量作可观测代理，记录 `CHARTER_C2_MULTI_TRANSITION`；poker 经 `module.charter.deviations` 机器登记偏离，到期 2027-03-31 | `charter C-2` 两例 |
+| C-5 | `choosePokerAction(view: ProjectedGameState)`；`poker/rules.ts` 经 `decisionView()` 先投影再决策；`deriveNoise(view)` 不再读 `prngState`；`ProjectedGameState.ownHand` 提供「自己的手牌」合法视图 | `charter C-5` 两例 |
+| C-6 | `GameModule.checkInvariants()` + `engine.getViolations()`，**不阻断**转移；poker 落地筹码守恒 / 底池一致性 / 手号单调 | `charter C-6` 三例 |
+| C-9 | `GameModule.meta.stateSchema.globalVars`；未登记 key 报 `CHARTER_C9_UNDECLARED_GLOBAL_VAR`；poker 登记 7 个 key | `charter C-9` 两例 |
+
+**C-6 实战成绩**：筹码守恒断言上线后立刻抓到一条真实记账问题——
+`handBets` 记录的是整手累计投入，**已结算进 `pot` 的部分仍留在其中**，
+因此守恒式必须写成 `在手 + pot + 当前街道 streetBets = 总额`，而不能直接加
+`handBets`。没有这条语义不变量，这类错误只会在玩家发现「钱不对了」时暴露。
+
+### 阶段 0（1 周）✅ 已完成：不改架构，先建立度量
 
 1. 把 §1.1 的矩阵变成一个新的报告脚本（审查报告 [附录 B](ARCHITECTURE-REVIEW-2026-11.md#附录-b--审查复现命令) 已给出可直接落地的实现），在 CI 输出到构建日志（**不设门槛**，只做可见性）。
 2. 在 `packages/kernel/src/module.ts` 中为 `GameModule` 增加 `checkInvariants?` / `meta.stateSchema?` 两个**可选**字段（**暂不启用**），让模组可以先声明。
 3. 为 `docs/RULES-DEVIATIONS.md` 增加"宪章偏离登记"章节，模组可先登记："本模组内联 AI 推进，偏离 C-2，理由：…"。
 
-### 阶段 1（1 个月）：收紧最危险的两条
+### 阶段 1（1 个月）🔶 进行中：收紧最危险的两条（C-5 / C-6 德扑已落地，其余模组待接入）
 
 1. **C-5 信息约束**（改动最小、收益最大）：
    - `ai.ts` 的 `choosePokerAction` 入参改为 `ProjectedGameState`；

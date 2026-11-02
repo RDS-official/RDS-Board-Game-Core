@@ -702,6 +702,14 @@ export interface ProjectedGameState extends Omit<GameState, 'entities' | 'zones'
   legalActions: Action[];
   factionTopology: Record<PlayerId, Record<PlayerId, FactionRelation>>;
   maskedEntityCount: number;
+  /**
+   * 观看者自己手牌的实体 id（`zone_hand_<viewerId>` 的内容）。
+   *
+   * 手牌区本身对所有观察者可见（牌桌要知道"谁还有几张牌"），但 ECMAScript
+   * 的引用语义意味着 `zones.viewer.orderedEntities` 仍然指向真实实体 id。
+   * 机器决策（AI）必须走这条通道，才能证明它只读自己的牌——见宪章 C-5。
+   */
+  ownHand: EntityId[];
   maskedNodeCount?: number;
   maskedEdgeCount?: number;
 }
@@ -727,4 +735,9 @@ export interface DispatchResult {
   stateHash?: string;
   decisionOpened?: boolean;
   decisionResolved?: boolean;
+  /**
+   * 宪章违规（C-1 / C-2 / C-6 / C-9）。**不阻断**转移：它们表示"规则被违反了
+   * 或模块绕过了形式化约束"，而不是"状态坏了"。见 `docs/KERNEL-CHARTER.md`。
+   */
+  violations?: { code: string; message: string }[];
 }
