@@ -23,7 +23,6 @@ import { CANVAS_FONT_STACK } from './fonts';
 import { handLayout, handRowSpan } from '../ui/handLayout';
 import { BOARD_ROW_PITCH, boardCardPosition, boardRowFrame, type ViewerBearing } from './boardFacing';
 import {
-  clampAboveTable,
   DEALER_LIFT,
   dealerAreaYaw,
   dealerBobOffset,
@@ -79,6 +78,25 @@ const HAND_ROW_DEPTH = 2.0;
  * capability is switched on.
  */
 const BOARD_ROW_Z_OFFSET = 0.85;
+/**
+ * The revealed board row floats above the felt as an upright display.
+ *
+ * Cards stand 70° up from the table (20° off vertical) so their faces read from
+ * a seated camera, hang `BOARD_ROW_HOVER_Y` above the felt — clear of the chips
+ * and the seat standees — and bob on a 4 s sine (`render/dealerArea.ts`).
+ *
+ * The public pose is `rotation.x = −70°`: that angle is what the cards are set
+ * to. The house card mesh paints its face on +Y, so a −70° X rotation on its own
+ * would show the back; the row geometry carries a compensating +140° X turn so
+ * the readable easel pose (face up and toward the camera) is what the viewer
+ * sees at the specified −70°.
+ */
+const BOARD_ROW_VISUAL_TILT = (70 * Math.PI) / 180;
+const BOARD_ROW_TILT = -BOARD_ROW_VISUAL_TILT;
+/** Compensating turn baked into the row card geometry (see above). */
+const BOARD_ROW_GEOMETRY_TILT = BOARD_ROW_VISUAL_TILT - BOARD_ROW_TILT;
+/** Gap between the felt and the bottom edge of the floating row. */
+const BOARD_ROW_HOVER_Y = 0.6;
 /** Table height of the hand row. */
 const HAND_ROW_Y = 0.13;
 /**
@@ -110,6 +128,15 @@ const CARD_DRAG_LIFT = 0.35;
 const CARD_SIZE_MULTIPLIER = 1.5;
 const CARD_W = 1.35 * CARD_SIZE_MULTIPLIER;
 const CARD_H = 2.0 * CARD_SIZE_MULTIPLIER;
+/** Display scale of a card in the shared board row. */
+const BOARD_ROW_CARD_SCALE = 0.62;
+/**
+ * How far a board card's centre sits above the group origin once tilted: its
+ * half height projected onto the vertical axis, so the bottom edge lands on the
+ * hover plane instead of sinking into the felt.
+ */
+const BOARD_ROW_CARD_LIFT =
+  (CARD_H * BOARD_ROW_CARD_SCALE * Math.sin(BOARD_ROW_VISUAL_TILT)) / 2;
 const DECK_CARD_W = 1.25 * CARD_SIZE_MULTIPLIER;
 const DECK_CARD_H = 1.85 * CARD_SIZE_MULTIPLIER;
 /** Native hand-card mesh; the layout width below is its displayed size. */
@@ -472,14 +499,15 @@ export class BoardGameScene {
   private ownHandQuaternion = new THREE.Quaternion();
   private ownHandReady = false;
   /**
-   * The shared dealer area (community row + draw pile). Its pivot is the table
-   * centre; only yaw changes, so the group turns to the camera without sliding
-   * off the table. Cards float inside it.
+   * The revealed board row (community cards). Its pivot is the table centre;
+   * only yaw changes, so the row turns to face the camera without sliding off
+   * the table. The draw pile does **not** live here: a deck is part of the
+   * table and keeps its original bearing and position.
    */
   private dealerAreaGroup = new THREE.Group();
   private dealerAreaActive = false;
   private dealerAreaCardIds = new Set<string>();
-  private dealerAreaFloatItems: { object: THREE.Object3D; baseY: number; phase: number }[] = [];
+  private dealerAreaFloatItems: { object: THREE.Object3D; baseY: number }[] = [];
   private dealerAreaHovered = false;
   private dealerAreaLiftUntil = 0;
   /** Restore record for the card currently lifted out of the table by a drag. */
@@ -680,6 +708,7 @@ export class BoardGameScene {
     this.scene.add(table);
     this.scene.add(this.boardObjectsGroup);
     this.scene.add(this.ownHandGroup);
+    this.dealerAreaGroup.position.y = BOARD_ROW_HOVER_Y;
     this.scene.add(this.dealerAreaGroup);
     this.scene.add(this.dragTargetGroup);
     this.scene.add(this.pokerFxGroup);
@@ -792,9 +821,7 @@ export class BoardGameScene {
     this.raycaster.onHover(data => {
       this.hoveredEntityId = data?.type === 'ENTITY' ? data.id : undefined;
       this.dealerAreaHovered =
-        !!data &&
-        ((data.type === 'ENTITY' && this.dealerAreaCardIds.has(data.id)) ||
-          data.id === 'deck:zone_deck');
+        !!data && data.type === 'ENTITY' && this.dealerAreaCardIds.has(data.id);
       if (this.lastState) this.refreshLabels(this.lastState);
       cb(data);
     });
@@ -2882,18 +2909,21 @@ export class BoardGameScene {
   }
 
   /**
-   * The shared dealer area, when a fixture has one.
+   * The revealed board row that floats and faces the camera, when a fixture has
+   * one.
    *
    * Only a table with both a card `BOARD` row and a `DECK` pile owns this
    * arrangement (poker today). Catan's board is tiles, Sanguosha has only a
-   * draw pile — neither gets a rotating group. The resolver deliberately asks
-   * about zone capabilities, not `gameId`.
+   * draw pile — neither gets a floating row. The deck is the co-signature of a
+   * card table, not a passenger: it stays ordinary table furniture at its own
+   * bearing. The resolver deliberately asks about zone capabilities, not
+   * `gameId`.
    */
-  private resolveDealerArea(state: ProjectedGameState): { boardZoneId: string; deckZoneId: string } | null {
+  private resolveDealerArea(state: ProjectedGameState): { boardZoneId: string } | null {
     const board = state.zones.zone_board;
     const deck = state.zones.zone_deck;
     if (!board || !deck || board.type !== 'BOARD' || deck.type !== 'DECK') return null;
-    return { boardZoneId: board.id, deckZoneId: deck.id };
+    return { boardZoneId: board.id };
   }
 
   private renderEntities(state: ProjectedGameState): void {
@@ -2913,12 +2943,9 @@ export class BoardGameScene {
       if (items.length === 0) return;
 
       if (zone.type === 'DECK' || zone.type === 'DISCARD') {
-        this.renderCardPile(
-          state,
-          zone,
-          items,
-          dealerArea && zone.id === dealerArea.deckZoneId ? this.dealerAreaGroup : this.boardObjectsGroup
-        );
+        // Draw piles are table furniture: they never join the floating row, so
+        // their yaw and position stay exactly where the zone anchor puts them.
+        this.renderCardPile(state, zone, items);
         return;
       }
 
@@ -3584,8 +3611,7 @@ export class BoardGameScene {
   private renderCardPile(
     _state: ProjectedGameState,
     zone: ProjectedGameState['zones'][string],
-    items: (Partial<Entity> & { isMasked?: boolean; id: string })[],
-    parent: THREE.Group = this.boardObjectsGroup
+    items: (Partial<Entity> & { isMasked?: boolean; id: string })[]
   ): void {
     const anchor = zone.anchorPosition ?? [0, 0.06, 0];
     const offset = this.deckVisualOffsets.get(zone.id) ?? { dx: 0, dz: 0 };
@@ -3612,12 +3638,7 @@ export class BoardGameScene {
     // 贴图是 4:1（1024×256），牌面也用 4:1：原来是 5:1，文字被横向拉宽 25%。
     label.scale.set(2.6, 0.65, 1);
     group.add(label);
-    parent.add(group);
-
-    if (parent === this.dealerAreaGroup) {
-      this.dealerAreaFloatItems.push({ object: group, baseY: group.position.y, phase: 0 });
-      this.dealerAreaCardIds.add(`deck:${zone.id}`);
-    }
+    this.boardObjectsGroup.add(group);
 
     // Only draw piles are movable. Discard piles stay mirrored to their zone
     // anchor because their top card is meaningful state, not furniture.
@@ -4129,12 +4150,12 @@ export class BoardGameScene {
   }
 
   /**
-   * Turn + float the dealer area.
+   * Turn + float the revealed board row.
    *
    * The group pivot is the table centre; only `rotation.y` and a small vertical
-   * lift change, so the area never slides across the felt. Each card bobs on a
-   * 4-second sine (static under `prefers-reduced-motion`), clamped above the
-   * table top. A hovered card or a fresh deal raises the whole group by 5 cm.
+   * lift change, so the row never slides across the felt. Every card shares one
+   * 4-second sine bob — static under `prefers-reduced-motion` — and a hovered
+   * card or a fresh deal raises the whole row by 5 cm.
    */
   private updateDealerArea(dt: number, now: number): void {
     if (!this.dealerAreaActive) return;
@@ -4146,16 +4167,18 @@ export class BoardGameScene {
     this.dealerAreaGroup.rotation.y += delta * ease;
 
     const lifted = this.dealerAreaHovered || now < this.dealerAreaLiftUntil;
-    const targetLift = lifted ? DEALER_LIFT : 0;
-    this.dealerAreaGroup.position.y += (targetLift - this.dealerAreaGroup.position.y) * ease;
+    const targetY = BOARD_ROW_HOVER_Y + (lifted ? DEALER_LIFT : 0);
+    this.dealerAreaGroup.position.y += (targetY - this.dealerAreaGroup.position.y) * ease;
 
+    // One shared offset, so the row bobs as a single display rather than as a
+    // handful of independently drifting cards.
     const bob = this.reduceMotionQuery?.matches ? 0 : dealerBobOffset(now);
     const dragged = this.draggedEntityId ? this.entityMeshes.get(this.draggedEntityId) : undefined;
     for (const item of this.dealerAreaFloatItems) {
       if (item.object === dragged) continue;
       const pausedUntil = Number(item.object.userData.dealerFloatPauseUntil ?? 0);
       if (now < pausedUntil) continue;
-      item.object.position.y = clampAboveTable(item.baseY + bob);
+      item.object.position.y = item.baseY + bob;
     }
   }
 
@@ -4966,9 +4989,12 @@ export class BoardGameScene {
     if (!previous) return;
 
     const deckAnchor = state.zones.zone_deck?.anchorPosition ?? [-6, 0.06, -2.2];
-    const deckPointLocal = new THREE.Vector3(deckAnchor[0], deckAnchor[1] + 0.3, deckAnchor[2]);
+    // The draw pile is a fixed table prop, so its world point is the zone
+    // anchor. Board cards live inside the yawed/floating group, which needs the
+    // same point in its local space; every other card uses the world point.
+    const deckPointWorld = new THREE.Vector3(deckAnchor[0], deckAnchor[1] + 0.3, deckAnchor[2]);
     this.dealerAreaGroup.updateWorldMatrix(true, false);
-    const deckPointWorld = this.dealerAreaGroup.localToWorld(deckPointLocal.clone());
+    const deckPointLocal = this.dealerAreaGroup.worldToLocal(deckPointWorld.clone());
 
     /* 1. Deal: hole cards that were not in the hand before. */
     const freshCards: { mesh: THREE.Object3D; to: THREE.Vector3 }[] = [];
@@ -5028,7 +5054,12 @@ export class BoardGameScene {
           mesh.parent === this.dealerAreaGroup ? deckPointLocal.clone() : deckPointWorld.clone();
         const delay = 320 + index * stagger;
         mesh.position.copy(from);
-        mesh.rotation.x = -Math.PI;
+        // Start flat face-down on its flip-start angle, then turn to the
+        // resting pose: +40° → −70° for the baked row cards, −π → 0 for a plain
+        // legacy board row.
+        const restTilt = Number(mesh.userData.restTilt ?? 0);
+        const flipStart = Number(mesh.userData.flipStartTilt ?? -Math.PI);
+        mesh.rotation.x = flipStart;
         // The floating bob must not fight the deal arc.
         mesh.userData.dealerFloatPauseUntil = performance.now() + delay + duration + 80;
         this.animQueue.animateArc(mesh, from, to, 1.4, duration, undefined, delay);
@@ -5037,7 +5068,7 @@ export class BoardGameScene {
           p => {
             // Stay face down for the first third, then turn over.
             const flip = Math.max(0, Math.min(1, (p - 0.3) / 0.7));
-            mesh.rotation.x = -Math.PI * (1 - flip);
+            mesh.rotation.x = flipStart + (restTilt - flipStart) * flip;
           },
           undefined,
           delay
@@ -5455,6 +5486,14 @@ export class BoardGameScene {
       isPkmn ? pokemonCardBackTexture(custom) : null,
       cardStyle
     );
+    // Cards in the floating board row are posed at `rotation.x = −70°`. The
+    // house card mesh paints its face on +Y, so a −70° X rotation alone would
+    // show the back; a compensating +140° turn baked into the row cards'
+    // geometry makes −70° the readable, camera-facing pose.
+    const grouped = parent === this.dealerAreaGroup;
+    if (grouped) {
+      mesh.geometry.rotateX(BOARD_ROW_GEOMETRY_TILT);
+    }
 
     if (isPkmn && (zone.id === 'zone_market_t1' || zone.id === 'zone_market_t2' || zone.id === 'zone_market_t3')) {
       // One row per tier, laid out from the card size: `PKMN_MARKET_PITCH_X`
@@ -5519,14 +5558,13 @@ export class BoardGameScene {
         // used to push the fifth card off to one side. The cards render at hole
         // -card size — half-scale faces turn the pips into unreadable specks.
         //
-        // Orientation: the shared dealer area turns as one group around the
-        // table centre (see `updateDealerArea`), so its cards keep a local yaw
-        // of 0. A plain board row in another game still uses the legacy
-        // `boardFacesViewer` capability / fixed-north path.
+        // Orientation: the shared dealer row turns as one group around the
+        // table centre (see `updateDealerArea`) and its cards stand upright, so
+        // they keep a local yaw of 0. A plain board row in another game still
+        // uses the legacy `boardFacesViewer` capability / fixed-north path.
         const shown = Math.min(totalInZone, 5);
-        mesh.scale.set(0.62, 0.62, 0.62);
+        mesh.scale.setScalar(BOARD_ROW_CARD_SCALE);
         const displayState = this.lastState;
-        const grouped = parent === this.dealerAreaGroup;
         const bearing = grouped ? null : displayState ? this.boardViewerBearing(displayState) : null;
         const row = boardRowFrame({
           count: shown,
@@ -5538,22 +5576,35 @@ export class BoardGameScene {
           pitch: BOARD_ROW_PITCH * CARD_SIZE_MULTIPLIER
         });
         const [px, , pz] = boardCardPosition(row, shown, index, anchor[1]);
-        mesh.position.set(px, anchor[1], pz);
+        // The floating row hangs above the felt: its pivot sits at the hover
+        // plane, and each card is raised by half its tilted height so the
+        // bottom edge — not the centre — is what floats.
+        const restY = grouped ? BOARD_ROW_CARD_LIFT : anchor[1];
+        mesh.position.set(px, restY, pz);
         mesh.rotation.y = row.yaw;
+        // Stand the revealed cards up: −70° about their own X. The compensating
+        // geometry turn above keeps the visible pose an easel — face up and
+        // toward the group's +Z (the camera side), printed top toward +Y.
+        mesh.rotation.x = grouped ? BOARD_ROW_TILT : 0;
         // Yaw first, then the reveal flip about the card's *own* long axis.
         // With the default 'XYZ' order the flip would happen about the world X
         // axis instead, so a board card on the left or right of the row would
         // tumble sideways while it turns over.
         mesh.rotation.order = 'YXZ';
-        // Recorded so the deal/reveal tweens can restore the row's bearing
-        // instead of snapping the card back to north mid-animation.
+        // Recorded so the deal/reveal tweens can restore the row's bearing and
+        // its resting tilt instead of snapping the card flat mid-animation.
         mesh.userData.restYaw = row.yaw;
+        mesh.userData.restTilt = mesh.rotation.x;
+        // Face-down at the deck: the baked row cards lie flat on their back at
+        // +40° (the geometry's 140° turn makes the face point at −Y there); a
+        // legacy plain board row keeps the historical half-turn flip.
+        mesh.userData.flipStartTilt = grouped ? Math.PI - BOARD_ROW_GEOMETRY_TILT : -Math.PI;
         if (grouped) {
           // Stable stacking inside the floating group: higher index draws over
           // its left neighbour, exactly like the fixed felt row did.
           mesh.renderOrder = 10 + index;
           this.dealerAreaCardIds.add(entity.id);
-          this.dealerAreaFloatItems.push({ object: mesh, baseY: anchor[1], phase: index * 0.35 });
+          this.dealerAreaFloatItems.push({ object: mesh, baseY: restY });
         }
       }
     } else if (zone.type === 'HAND' && zone.anchorPosition) {

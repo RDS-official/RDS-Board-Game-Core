@@ -1,19 +1,18 @@
 /**
- * Pure maths for the floating "dealer area" (the shared board row plus the
- * draw pile) and for the camera-attached hand.
+ * Pure maths for the floating "dealer row" (the revealed shared board cards).
  *
  * The renderer owns Three.js objects; everything here is a plain number so the
- * harness can assert the orientation and bob contract without a browser.
+ * harness can assert the orientation and bob contract without a browser. The
+ * draw pile is deliberately not part of this module: a deck is fixed table
+ * furniture and must not turn, float or stand up.
  */
 
-/** Peak vertical bob of a card in the dealer area, in world units. */
+/** Peak vertical bob of a card in the dealer row, in world units. */
 export const DEALER_BOB_AMPLITUDE = 0.02;
 /** One full bob cycle, in milliseconds. */
 export const DEALER_BOB_PERIOD_MS = 4000;
 /** Whole-group lift while hovering or while a card is being dealt. */
 export const DEALER_LIFT = 0.05;
-/** Lowest card face ever allowed above the felt. */
-export const DEALER_MIN_SURFACE_Y = 0.02;
 
 /**
  * Yaw that makes a card row's top edge point away from the camera.
@@ -40,9 +39,4 @@ export function dealerBobOffset(nowMs: number, phase = 0): number {
   const t = Number.isFinite(nowMs) ? nowMs : 0;
   const p = Number.isFinite(phase) ? phase : 0;
   return Math.sin((t / DEALER_BOB_PERIOD_MS) * Math.PI * 2 + p) * DEALER_BOB_AMPLITUDE;
-}
-
-/** Never let a floating card face sink into the felt. */
-export function clampAboveTable(y: number): number {
-  return Math.max(DEALER_MIN_SURFACE_Y, Number.isFinite(y) ? y : DEALER_MIN_SURFACE_Y);
 }

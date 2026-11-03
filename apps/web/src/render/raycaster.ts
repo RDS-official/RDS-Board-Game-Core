@@ -156,6 +156,9 @@ export class BoardRaycaster {
   }
 
   private isDraggable(data: InteractiveObjectData | null): data is InteractiveObjectData {
+    // A surface can opt out of dragging while staying clickable (the viewer's
+    // own hand is a read-only overlay: details on click, never a drag prop).
+    if (data?.metadata?.draggable === false) return false;
     return data?.type === 'ENTITY' || data?.type === 'ZONE';
   }
 
