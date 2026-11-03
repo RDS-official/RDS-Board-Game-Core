@@ -91,6 +91,11 @@ export interface HUDOptions {
   onSwitchGame: (gameId: string) => void;
   /** Restart the current game at a named scenario ('' = plain setup). */
   onSwitchScenario?: (scenarioId: string) => void;
+  /**
+   * Plain-pixel rectangle the shell is covering. The composition root forwards
+   * this to the renderer; the HUD itself never imports render code.
+   */
+  onViewportInsets?: (insets: { left: number; right: number; bottom: number; top: number }) => void;
 }
 
 /**
@@ -186,6 +191,13 @@ export class BoardGameHUD {
   /** Re-runs the fan layout when the dock's width changes (drawer open, tier swap). */
   private dockResizeObserver?: ResizeObserver;
   private shellMedia?: MediaQueryList;
+  /** Keeps inert/ARIA honest even if the drawer attribute is flipped externally. */
+  private shellObserver?: MutationObserver;
+  /** Trigger that opened the current drawer, so Escape can return focus to it. */
+  private drawerOpener: HTMLElement | null = null;
+  /** Latest inset push, skipped when the measured rectangle did not change. */
+  private lastViewportInsets = { left: 0, right: 0, bottom: 0, top: 0 };
+  private insetNotifyFrame = 0;
   /** Action currently held by the hand slot, mirrored on its fan card. */
   private heldActionId: string | null = null;
   private heldIndex = 0;
@@ -307,6 +319,12 @@ export class BoardGameHUD {
     this.dockTraceOverlay = null;
     this.dockResizeObserver?.disconnect();
     this.dockResizeObserver = undefined;
+    this.shellObserver?.disconnect();
+    this.shellObserver = undefined;
+    if (this.insetNotifyFrame) {
+      cancelAnimationFrame(this.insetNotifyFrame);
+      this.insetNotifyFrame = 0;
+    }
     if (this.dockRelayoutFrame) {
       cancelAnimationFrame(this.dockRelayoutFrame);
       this.dockRelayoutFrame = 0;
@@ -767,14 +785,201 @@ export class BoardGameHUD {
     this.unsubNotice = presenter.onNotice(notice => this.renderNotice(notice));
   }
 
-  /** Mirror the slide-over state onto the toggles for assistive tech. */
+  /** Drawers only exist as overlays below 1200px (landscape phones included). */
+  private isOverlayShell(): boolean {
+    return window.matchMedia('(max-width: 1199px), (max-height: 480px) and (min-width: 600px)').matches;
+  }
+
+  private drawerFor(which: 'rail' | 'side'): HTMLElement | null {
+    return this.container.querySelector(which === 'rail' ? '#player-rail' : '#side-column') as HTMLElement | null;
+  }
+
+  private openDrawerWhich(): 'rail' | 'side' | null {
+    if (this.container.getAttribute('data-rail') === 'open') return 'rail';
+    if (this.container.getAttribute('data-side') === 'open') return 'side';
+    return null;
+  }
+
+  /** Buttons/links/tabs reachable with Tab inside one drawer, in DOM order. */
+  private drawerFocusables(drawer: HTMLElement): HTMLElement[] {
+    const selectors = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    return Array.from(drawer.querySelectorAll<HTMLElement>(selectors)).filter(
+      el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+    );
+  }
+
+  /**
+   * Open one slide-over, focus its first control and make the rest of the shell
+   * inert. The ARIA dialog state is applied here rather than in the skeleton so
+   * the desktop persistent panels are not announced as modal dialogs.
+   */
+  private openDrawer(which: 'rail' | 'side', opener?: HTMLElement | null): void {
+    const drawer = this.drawerFor(which);
+    if (!drawer) return;
+    this.container.removeAttribute(which === 'rail' ? 'data-side' : 'data-rail');
+    this.container.setAttribute(which === 'rail' ? 'data-rail' : 'data-side', 'open');
+    this.drawerOpener =
+      opener ?? (this.container.querySelector(`[data-toggle="${which}"]`) as HTMLElement | null);
+    drawer.setAttribute('role', 'dialog');
+    drawer.setAttribute('aria-modal', 'true');
+    drawer.setAttribute('aria-labelledby', which === 'rail' ? 'drawer-rail-title' : 'drawer-side-title');
+    this.syncShellAria();
+    this.syncShellInert();
+    this.notifyViewportInsets();
+    const focusFirst = () => {
+      if (this.openDrawerWhich() !== which) return;
+      // Never steal focus once the user is already inside the drawer.
+      if (drawer.contains(document.activeElement) && document.activeElement !== drawer) return;
+      const first = this.drawerFocusables(drawer)[0];
+      if (first) {
+        first.focus({ preventScroll: true });
+      } else {
+        drawer.tabIndex = -1;
+        drawer.focus({ preventScroll: true });
+      }
+    };
+    // The drawer's just-applied visibility can still be pending in this task.
+    // Focus on the next turn, when its controls are measurable and focusable;
+    // the delayed pass covers reduced-motion style flushes.
+    window.setTimeout(focusFirst, 0);
+    requestAnimationFrame(focusFirst);
+    window.setTimeout(focusFirst, 350);
+  }
+
+  /** Close a drawer, drop inert and hand focus back to the button that opened it. */
+  private closeDrawer(which: 'rail' | 'side', restoreFocus = true): void {
+    const attr = which === 'rail' ? 'data-rail' : 'data-side';
+    if (this.container.getAttribute(attr) !== 'open') return;
+    const drawer = this.drawerFor(which);
+    this.container.removeAttribute(attr);
+    drawer?.removeAttribute('role');
+    drawer?.removeAttribute('aria-modal');
+    drawer?.removeAttribute('aria-labelledby');
+    this.syncShellAria();
+    this.syncShellInert();
+    this.notifyViewportInsets();
+    if (!restoreFocus) return;
+    const opener =
+      this.drawerOpener ?? (this.container.querySelector(`[data-toggle="${which}"]`) as HTMLElement | null);
+    this.drawerOpener = null;
+    opener?.focus({ preventScroll: true });
+  }
+
+  /**
+   * Background is inert while a drawer is a modal surface. The scrim stays
+   * clickable, and the canvas/inspector are inert too so keyboard focus cannot
+   * wander behind the panel.
+   */
+  private syncShellInert(): void {
+    const open = this.openDrawerWhich();
+    const active = open ? this.drawerFor(open) : null;
+    for (const child of Array.from(this.container.children) as HTMLElement[]) {
+      // The topbar keeps its toggles clickable: it is the visible opener/closer
+      // strip above the scrim and is excluded from the Tab trap by the trap
+      // itself. Everything that can hold a board interaction goes inert.
+      if (child === active || child.classList.contains('shell-scrim') || child.classList.contains('topbar')) {
+        child.removeAttribute('inert');
+      } else {
+        child.toggleAttribute('inert', !!open);
+      }
+    }
+    for (const id of ['canvas-container', 'stage-vignette', 'inspector-container']) {
+      document.getElementById(id)?.toggleAttribute('inert', !!open);
+    }
+  }
+
+  /** Keep Tab inside the open drawer and wrap at both ends. */
+  private trapDrawerFocus(event: KeyboardEvent): void {
+    const which = this.openDrawerWhich();
+    if (!which) return;
+    const drawer = this.drawerFor(which);
+    if (!drawer) return;
+    const items = this.drawerFocusables(drawer);
+    const active = document.activeElement as HTMLElement | null;
+    if (items.length === 0) {
+      event.preventDefault();
+      drawer.focus({ preventScroll: true });
+      return;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const outside = !active || active === drawer || !drawer.contains(active);
+    if (event.shiftKey && (outside || active === first)) {
+      event.preventDefault();
+      last.focus({ preventScroll: true });
+    } else if (!event.shiftKey && (outside || active === last)) {
+      event.preventDefault();
+      first.focus({ preventScroll: true });
+    }
+  }
+
+  /**
+   * Publish the rectangle covered by the current overlay to the composition
+   * root. The HUD knows the real CSS box; the renderer only receives numbers.
+   */
+  private notifyViewportInsets(): void {
+    const callback = this.options.onViewportInsets;
+    if (!callback) return;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    let left = 0;
+    let right = 0;
+    let bottom = 0;
+    const top = 0;
+    if (this.isOverlayShell()) {
+      const open = this.openDrawerWhich();
+      if (open) {
+        const drawer = this.drawerFor(open);
+        const measured = drawer ? Math.round(drawer.offsetWidth) : 0;
+        if (open === 'rail') left = Math.max(0, measured);
+        else right = Math.max(0, measured);
+      }
+      const dock = this.container.querySelector('#action-dock') as HTMLElement | null;
+      if (this.dockOpen && dock) {
+        const rect = dock.getBoundingClientRect();
+        bottom = Math.max(0, Math.round(height - rect.top));
+      }
+    }
+    const clamped = {
+      left: Math.min(left, width - 1),
+      right: Math.min(right, Math.max(0, width - left - 1)),
+      bottom: Math.min(bottom, height - 1),
+      top
+    };
+    const last = this.lastViewportInsets;
+    if (
+      Math.abs(clamped.left - last.left) < 0.5 &&
+      Math.abs(clamped.right - last.right) < 0.5 &&
+      Math.abs(clamped.bottom - last.bottom) < 0.5 &&
+      Math.abs(clamped.top - last.top) < 0.5
+    ) {
+      return;
+    }
+    this.lastViewportInsets = clamped;
+    callback(clamped);
+  }
+
+  /** Dock height animates via max-height; re-measure after it settles. */
+  private notifyViewportInsetsSoon(): void {
+    this.notifyViewportInsets();
+    if (this.insetNotifyFrame) cancelAnimationFrame(this.insetNotifyFrame);
+    this.insetNotifyFrame = requestAnimationFrame(() => {
+      this.insetNotifyFrame = 0;
+      this.notifyViewportInsets();
+    });
+    window.setTimeout(() => this.notifyViewportInsets(), 240);
+  }
+
+  /** Mirror slide-over state, controls and labels onto the toggles. */
   private syncShellAria(): void {
-    for (const [attr, sel] of [
-      ['data-side', '[data-toggle="side"]'],
-      ['data-rail', '[data-toggle="rail"]']
+    for (const [attr, sel, target] of [
+      ['data-side', '[data-toggle="side"]', 'side-column'],
+      ['data-rail', '[data-toggle="rail"]', 'player-rail']
     ] as const) {
       const button = this.container.querySelector(sel) as HTMLElement | null;
-      if (button) button.setAttribute('aria-expanded', this.container.getAttribute(attr) === 'open' ? 'true' : 'false');
+      if (!button) continue;
+      button.setAttribute('aria-expanded', this.container.getAttribute(attr) === 'open' ? 'true' : 'false');
+      button.setAttribute('aria-controls', target);
     }
   }
 
@@ -785,9 +990,18 @@ export class BoardGameHUD {
    */
   private applyShellLayout(): void {
     this.applySideTab();
+    // Crossing back to desktop turns the drawers into persistent panels; clear
+    // the modal state so inert/focus trap cannot outlive the overlay layout.
+    if (!this.isOverlayShell()) {
+      const open = this.openDrawerWhich();
+      if (open) this.closeDrawer(open, false);
+    }
     const slot = this.container.querySelector('#side-panel-extras') as HTMLElement | null;
     const actions = this.container.querySelector('.topbar-actions') as HTMLElement | null;
-    if (!slot || !actions) return;
+    if (!slot || !actions) {
+      this.notifyViewportInsets();
+      return;
+    }
 
     const movers = ['.scenario-switch', '.viewer-switch', '.cam-switch']
       .map(sel => this.container.querySelector(sel) as HTMLElement | null)
@@ -815,6 +1029,7 @@ export class BoardGameHUD {
     const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
     if (rail) this.layoutPlayerRail(rail);
     this.relayoutDock();
+    this.notifyViewportInsets();
   }
 
   /**
@@ -1453,11 +1668,20 @@ export class BoardGameHUD {
         </div>
       </header>
 
-      <aside class="player-rail" id="player-rail"></aside>
+      <aside class="player-rail" id="player-rail" aria-label="角色栏">
+        <div class="drawer-head" data-drawer-head="rail">
+          <span class="drawer-title" id="drawer-rail-title">角色栏</span>
+          <button class="drawer-close" type="button" data-drawer-close="rail" aria-label="关闭角色栏">✕</button>
+        </div>
+      </aside>
       <!-- Right-hand panels share one column so they stack instead of
            overlapping; each used to be absolutely positioned with a
            hand-computed top offset. -->
-      <div class="side-column" id="side-column">
+      <div class="side-column" id="side-column" aria-label="信息栏">
+        <div class="drawer-head" data-drawer-head="side">
+          <span class="drawer-title" id="drawer-side-title">信息栏</span>
+          <button class="drawer-close" type="button" data-drawer-close="side" aria-label="关闭信息栏">✕</button>
+        </div>
         <div class="side-panel-extras" id="side-panel-extras"></div>
         <!-- Edition picker: only shown when the game ships several rule sets,
              so a single-variant fixture keeps the column unchanged. -->
@@ -1489,36 +1713,60 @@ export class BoardGameHUD {
       </aside>
       <div class="announcement-banner" id="announce" style="display:none"></div>
       <div class="payload-layer" id="payload-layer" style="display:none"></div>
+      <div class="shell-scrim" data-shell-scrim aria-hidden="true"></div>
     `;
 
     // Tablet/phone slide-overs. Only one panel is open at a time so the board
     // is never covered by two overlays.
     this.applyShellLayout();
     this.syncShellAria();
+    this.syncShellInert();
+    this.notifyViewportInsets();
     window.addEventListener('resize', () => this.applyShellLayout());
     this.shellMedia = window.matchMedia('(max-width: 767px)');
     this.shellMedia.addEventListener('change', () => this.applyShellLayout());
 
-    // Escape closes whatever slide-over is open, so keyboard users are never
-    // trapped behind a panel they cannot see past.
+    this.container.addEventListener('click', event => {
+      const target = event.target as HTMLElement | null;
+      const close = target?.closest<HTMLElement>('[data-drawer-close]');
+      if (!close) return;
+      const which = close.dataset.drawerClose === 'rail' ? 'rail' : 'side';
+      this.closeDrawer(which, true);
+    });
+    this.container.querySelector('[data-shell-scrim]')?.addEventListener('click', () => {
+      const which = this.openDrawerWhich();
+      if (which) this.closeDrawer(which, true);
+    });
+    // Probes and URL/debug tooling can remove [data-rail] directly. Re-sync so
+    // a stale `inert` cannot leave the topbar unclickable.
+    this.shellObserver = new MutationObserver(() => {
+      this.syncShellAria();
+      this.syncShellInert();
+      this.notifyViewportInsets();
+    });
+    this.shellObserver.observe(this.container, {
+      attributes: true,
+      attributeFilter: ['data-rail', 'data-side']
+    });
+
+    // Escape closes whatever slide-over is open, Tab stays inside it, and focus
+    // returns to the toggle that opened it.
     window.addEventListener('keydown', event => {
-      if (event.key !== 'Escape') return;
-      let closed = false;
-      if (this.container.querySelector('.topbar')?.getAttribute('data-menu') === 'open') {
-        this.container.querySelector('.topbar')?.removeAttribute('data-menu');
-        closed = true;
-      }
-      for (const [attr, sel] of [
-        ['data-side', '[data-toggle="side"]'],
-        ['data-rail', '[data-toggle="rail"]']
-      ] as const) {
-        if (this.container.getAttribute(attr) === 'open') {
-          this.container.removeAttribute(attr);
-          (this.container.querySelector(sel) as HTMLElement | null)?.focus();
+      if (event.key === 'Escape') {
+        let closed = false;
+        if (this.container.querySelector('.topbar')?.getAttribute('data-menu') === 'open') {
+          this.container.querySelector('.topbar')?.removeAttribute('data-menu');
           closed = true;
         }
+        const which = this.openDrawerWhich();
+        if (which) {
+          this.closeDrawer(which, true);
+          closed = true;
+        }
+        if (closed) event.preventDefault();
+        return;
       }
-      if (closed) event.preventDefault();
+      if (event.key === 'Tab') this.trapDrawerFocus(event);
     });
 
     // 紧凑模式（桌面 ≥1200px）的二级菜单：☰ 打开，点外面 / Esc 关闭。
@@ -1548,13 +1796,10 @@ export class BoardGameHUD {
     this.container.querySelectorAll<HTMLElement>('[data-toggle]').forEach(button => {
       if (button.dataset.toggle === 'menu') return;
       button.addEventListener('click', () => {
-        const which = button.dataset.toggle === 'rail' ? 'data-rail' : 'data-side';
-        const other = which === 'data-rail' ? 'data-side' : 'data-rail';
-        const isOpen = this.container.getAttribute(which) === 'open';
-        this.container.removeAttribute(other);
-        if (isOpen) this.container.removeAttribute(which);
-        else this.container.setAttribute(which, 'open');
-        this.syncShellAria();
+        const which = button.dataset.toggle === 'rail' ? 'rail' : 'side';
+        const isOpen = this.container.getAttribute(which === 'rail' ? 'data-rail' : 'data-side') === 'open';
+        if (isOpen) this.closeDrawer(which, true);
+        else this.openDrawer(which, button);
       });
     });
 
@@ -2507,6 +2752,10 @@ export class BoardGameHUD {
     // Reconcile instead of rebuilding: a player card holds focus and hover, and
     // the rail holds the scroll position.
     reconcileKeyed(rail, [...playerCards, ...npcCards]);
+    // New keyed cards are inserted before the current first child; put the
+    // drawer header (close button + title) back at the top afterwards.
+    const head = rail.querySelector(':scope > .drawer-head') as HTMLElement | null;
+    if (head && rail.firstElementChild !== head) rail.prepend(head);
     this.layoutPlayerRail(rail);
   }
 
@@ -3670,6 +3919,7 @@ export class BoardGameHUD {
       if (event.target !== dock) return;
       if (event.propertyName !== 'max-height' && event.propertyName !== 'height') return;
       this.relayoutDock();
+      this.notifyViewportInsets();
     });
     const dockHeld = dock.querySelector('[data-dock-held]') as HTMLElement | null;
     if (dockHeld) this.bindHandSlot(dockHeld);
@@ -3690,6 +3940,7 @@ export class BoardGameHUD {
         // The drawer's max-height transition means the row has no usable width
         // in this frame; lay the cards out once the new box exists.
         requestAnimationFrame(() => this.relayoutDock());
+        this.notifyViewportInsetsSoon();
         return;
       }
 

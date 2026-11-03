@@ -260,3 +260,6 @@ node scripts/probe-responsive-audit.mjs
 - PR 3 后 `handSlotVisible=true` 的视口从 5/14 提升到 8/14（5 个桌面 + 3 个 ≥900 平板）；768×1024、手机竖屏/横屏共 6 个视口按 §4.5「<900 不单独占浮层」刻意没有独立 hand-slot，动作改由 dock 首张大卡承载。是否把 8/14 作为该指标的最终目标（而不是 14/14）？
 - 为把手机 320×568 的 4 张动作卡全部留在视口内，<900 的 dock 隐藏了 `.dock-bar` 与 hover-only 的 `.fan-hint`；横屏 phone（≤480px 高）还隐藏了 mission strip，46vh 才能同时容纳 handle + 首张大卡 + 动作行。竖屏保留一行省略的 mission strip。§4.4「动作行横滑时保持当前目标摘要固定在顶部」在横屏 phone 是否可接受该取舍？
 - 平板 dock 右侧预留 208px（180×120 hand-slot + 12px 间距），900px 宽时 dock 实际可用宽约 676px；这是「hand-slot 贴 dock 右侧」的直接结果。是否接受，或希望平板把缩略卡改为浮在 dock 上方以换回 dock 宽度？
+- PR 4 的相机补偿目前只做平移（`setViewportInsets` 按未被遮挡矩形的中心差移动 target/position），不强制缩小棋盘。手机竖屏角色抽屉 320/340px 宽时，未遮挡区只剩 50–70px；若按其宽高重新 fit 会把棋盘缩成一条，故留给后续 `fitCameraToBoard` 的显式重排，而不是在开抽屉瞬间做大幅 zoom。是否接受「平移优先」的取景策略？
+- 抽屉打开时只把画布、dock、hand-slot、另一侧抽屉设为 `inert`，顶栏保留可点击（scrim 从 topbar 下沿开始），这样同一个 toggle 仍能关闭抽屉；键盘 Tab 仍由 focus trap 锁在抽屉内。是否接受这个非严格模态背景（顶栏可点、但不可 Tab 进入）？
+- `env(safe-area-inset-*)` 需要 `viewport-fit=cover`，已在 `index.html` 加上；Playwright/Chromium 模拟不会上报真实刘海值，横屏刘海与 Home Indicator 的最终像素仍建议在 iPhone 真机复核。是否把真机复核列为合入前必做？

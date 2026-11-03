@@ -111,7 +111,10 @@ class BoardGameSimulatorApp {
 
     this.hud = new BoardGameHUD(hudContainer, this.session, this.ports, {
       onSwitchGame: gameId => this.switchGame(gameId),
-      onSwitchScenario: scenarioId => this.restartScenario(scenarioId)
+      onSwitchScenario: scenarioId => this.restartScenario(scenarioId),
+      // The UI measures its own overlay boxes; the renderer only ever sees the
+      // four plain edges. Keeping this wiring here preserves ui → contracts.
+      onViewportInsets: insets => this.scene.setViewportInsets(insets)
     });
 
     this.inspector = new MathematicalInspectorUI(inspectorContainer, this.session, {

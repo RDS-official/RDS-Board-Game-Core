@@ -26,7 +26,19 @@ import { solveHandRowDepth, type ScreenBox } from './handRowDepth';
 
 export type CameraPreset = 'ISOMETRIC' | 'TOP_DOWN' | 'PLAYER_1' | 'PLAYER_2' | 'SEAT';
 
-
+/**
+ * Parts of the canvas covered by the shell, in CSS pixels.
+ *
+ * The renderer owns no UI knowledge: the HUD measures its own drawers/dock and
+ * hands these four plain numbers over. Camera framing keeps the board centred in
+ * the remaining rectangle while the canvas itself still renders full-bleed.
+ */
+export interface ViewportInsets {
+  left: number;
+  right: number;
+  bottom: number;
+  top: number;
+}
 
 /* ---------------------------------------------------------------------- */
 /* Hand row geometry                                                       */
@@ -536,6 +548,8 @@ export class BoardGameScene {
     isoTarget: new THREE.Vector3(1.8, 0, -0.2),
     topHeight: 36
   };
+  /** HUD-covered edges, measured by the shell and pushed down as plain pixels. */
+  private viewportInsets: ViewportInsets = { left: 0, right: 0, bottom: 0, top: 0 };
 
   private onInteractiveClickCallback?: (data: InteractiveObjectData) => void;
 
@@ -1149,6 +1163,81 @@ export class BoardGameScene {
     if (room) {
       this.labels.popBurst([room.position[0], room.position[1] + 0.55, room.position[2]], text, tone);
     }
+  }
+
+  /**
+   * Tell the camera which canvas edges the HUD is covering.
+   *
+   * Called whenever a drawer opens/closes or the action dock expands. The view
+   * only shifts to keep the board in the uncovered rectangle; the canvas keeps
+   * rendering at full size (see `fitCameraToBoard` for later refits). Pure
+   * numbers on purpose — the renderer must not import any UI code.
+   */
+  public setViewportInsets(insets: ViewportInsets): void {
+    if (!this.controls || this.isDestroyed) return;
+    const next = this.clampViewportInsets(insets);
+    const previous = this.viewportInsets;
+    if (
+      Math.abs(next.left - previous.left) < 0.5 &&
+      Math.abs(next.right - previous.right) < 0.5 &&
+      Math.abs(next.bottom - previous.bottom) < 0.5 &&
+      Math.abs(next.top - previous.top) < 0.5
+    ) {
+      return;
+    }
+    this.viewportInsets = next;
+
+    // A drawer on the left moves the visible centre to the right, so the camera
+    // target has to move left; a bottom dock does the opposite vertically. The
+    // delta is incremental so switching left -> right drawer is symmetric and
+    // closing restores the original pose without storing a snapshot.
+    const dxPx = (next.left - next.right - (previous.left - previous.right)) / 2;
+    const dyPx = (next.top - next.bottom - (previous.top - previous.bottom)) / 2;
+    if (Math.abs(dxPx) < 0.5 && Math.abs(dyPx) < 0.5) return;
+
+    const distance = this.camera.position.distanceTo(this.controls.target);
+    const shift = this.screenOffsetToWorld(dxPx, dyPx, distance);
+    if (shift.lengthSq() < 1e-6) return;
+    const target = this.controls.target.clone().add(shift);
+    const position = this.camera.position.clone().add(shift);
+    this.skipFitUntil = performance.now() + 320;
+    if (this.reduceMotionQuery?.matches) {
+      this.camera.position.copy(position);
+      this.controls.target.copy(target);
+      this.controls.update();
+      return;
+    }
+    this.startCameraTween(position, target, 240);
+  }
+
+  /** Clamp arbitrary UI measurements to the current canvas. */
+  private clampViewportInsets(insets: ViewportInsets): ViewportInsets {
+    const width = Math.max(1, this.container.clientWidth);
+    const height = Math.max(1, this.container.clientHeight);
+    const value = (input: number): number =>
+      Number.isFinite(input) ? Math.max(0, input) : 0;
+    const left = Math.min(value(insets.left), width - 1);
+    const right = Math.min(value(insets.right), Math.max(0, width - left - 1));
+    const top = Math.min(value(insets.top), height - 1);
+    const bottom = Math.min(value(insets.bottom), Math.max(0, height - top - 1));
+    return { left, right, bottom, top };
+  }
+
+  /**
+   * Convert a screen-space shift (positive = right/down) into the world-space
+   * shift of the orbit target that produces it. The camera's own right/up axes
+   * keep the correction valid after the user has orbited the board.
+   */
+  private screenOffsetToWorld(dxPx: number, dyPx: number, distance: number): THREE.Vector3 {
+    const height = Math.max(1, this.container.clientHeight);
+    const fov = THREE.MathUtils.degToRad(this.camera.fov);
+    const worldPerPixel = (2 * distance * Math.tan(fov / 2)) / height;
+    this.camera.updateMatrixWorld();
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).normalize();
+    const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1).normalize();
+    return right
+      .multiplyScalar(-dxPx * worldPerPixel)
+      .add(up.multiplyScalar(dyPx * worldPerPixel));
   }
 
   public setCameraPreset(preset: CameraPreset): void {
@@ -2845,15 +2934,22 @@ export class BoardGameScene {
     }
 
     // Fit from the real field of view instead of a fixed multiplier, so the
-    // board fills the viewport whatever its aspect ratio or footprint.
+    // board fills the viewport whatever its aspect ratio or footprint. The
+    // canvas stays full-bleed, but the fit is sized against the rectangle the
+    // HUD leaves uncovered, then the target is nudged so the board centre lands
+    // in that rectangle rather than the canvas centre.
+    const fullW = Math.max(1, this.container.clientWidth);
+    const fullH = Math.max(1, this.container.clientHeight);
+    const safeW = Math.max(1, fullW - this.viewportInsets.left - this.viewportInsets.right);
+    const safeH = Math.max(1, fullH - this.viewportInsets.top - this.viewportInsets.bottom);
     const aspect = this.camera.aspect > 0.1 ? this.camera.aspect : 1.6;
     const fovV = THREE.MathUtils.degToRad(this.camera.fov);
     const fovH = 2 * Math.atan(Math.tan(fovV / 2) * aspect);
     const halfX = spanX / 2;
     const halfZ = spanZ / 2;
     // The tilted camera foreshortens Z, so the vertical requirement is relaxed.
-    const fitHorizontal = halfX / Math.tan(fovH / 2);
-    const fitVertical = (halfZ * 0.72) / Math.tan(fovV / 2);
+    const fitHorizontal = (halfX / Math.tan(fovH / 2)) * (fullW / safeW);
+    const fitVertical = ((halfZ * 0.72) / Math.tan(fovV / 2)) * (fullH / safeH);
     const needed = Math.max(
       layout?.minDistance ?? 14,
       Math.max(fitHorizontal, fitVertical) * 1.1 + 3
@@ -2861,6 +2957,12 @@ export class BoardGameScene {
     // Never zoom in past what the user already chose.
     const distance = Math.min(180, Math.max(this.camera.position.distanceTo(this.controls.target), needed));
 
+    const contentShift = this.screenOffsetToWorld(
+      (this.viewportInsets.left - this.viewportInsets.right) / 2,
+      (this.viewportInsets.top - this.viewportInsets.bottom) / 2,
+      distance
+    );
+    target.add(contentShift);
     this.controls.target.copy(target);
     this.camera.position.copy(target).add(direction.normalize().multiplyScalar(distance));
     this.controls.maxDistance = 190;

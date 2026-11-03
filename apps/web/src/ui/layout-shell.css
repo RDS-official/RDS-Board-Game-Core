@@ -166,6 +166,17 @@
   inset: 0;
 }
 
+/* Drawer title bar. Hidden on desktop, where the same panels are persistent. */
+.drawer-head {
+  display: none;
+}
+
+/* Backdrop for the two narrow-shell drawers. Kept out of the grid flow and
+   below the drawers (z 44 < 45) but above every persistent panel. */
+.shell-scrim {
+  display: none;
+}
+
 /* ---- slide-over controls ---------------------------------------------- */
 
 .shell-toggle {
@@ -294,6 +305,68 @@
   .app-shell[data-rail='open'] > .player-rail,
   .app-shell[data-side='open'] > .side-column {
     transform: translateX(0);
+  }
+
+  /* ---- unified scrim + drawer chrome ---------------------------------- */
+  .shell-scrim {
+    display: block;
+    position: fixed;
+    inset: var(--topbar-h) 0 0;
+    z-index: 44;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    background: rgba(5, 8, 12, 0.58);
+    backdrop-filter: blur(2px);
+    transition: opacity var(--duration-base) var(--ease-standard),
+      visibility var(--duration-base) var(--ease-standard);
+  }
+
+  .app-shell[data-rail='open'] > .shell-scrim,
+  .app-shell[data-side='open'] > .shell-scrim {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  .drawer-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    min-height: 44px;
+    margin: 0 0 var(--space-2);
+    padding: 0 0 var(--space-2);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .drawer-title {
+    color: var(--text-primary);
+    font-family: var(--font-display);
+    font-size: var(--type-md);
+    letter-spacing: 0.06em;
+  }
+
+  .drawer-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-control);
+    color: var(--text-primary);
+    font-size: var(--type-md);
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .drawer-close:hover {
+    border-color: var(--border-accent-soft);
+    background: var(--surface-control-hover);
   }
 
   /* Right column: drawer keeps its own scroll; the tab strip stays pinned so
@@ -1451,5 +1524,76 @@
 
   .app-shell > .action-dock .dock-fan .act {
     height: 56px;
+  }
+}
+/* ---- PR 4: safe area + 44px touch targets -----------------------------
+   `viewport-fit=cover` (index.html) makes env() report notch/home-indicator
+   insets on iOS. Bottom-anchored overlays consume the bottom inset; drawers
+   and the topbar consume left/right in landscape. */
+@media (max-width: 1199px), (max-height: 480px) and (min-width: 600px) {
+  .app-shell > .topbar {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: max(var(--space-2), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--space-2), env(safe-area-inset-right, 0px));
+  }
+
+  .app-shell > .player-rail,
+  .app-shell > .side-column {
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .toast-stack {
+    padding-right: env(safe-area-inset-right, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .announcement-banner {
+    max-width: calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+    padding-left: max(22px, env(safe-area-inset-left, 0px));
+    padding-right: max(22px, env(safe-area-inset-right, 0px));
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (max-width: 899px) {
+  .app-shell > .topbar .icon-btn,
+  .app-shell > .topbar .shell-toggle,
+  .app-shell .side-tab,
+  .app-shell .af-head,
+  .app-shell .drawer-close,
+  .app-shell .dock-handle {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* PR 3 owns the 76x68 card; this is only the floor for the short landscape
+     variant (56px tall) and any future compact rule. */
+  .dock-fan .act {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .app-shell > .action-dock {
+    padding-left: max(8px, env(safe-area-inset-left, 0px));
+    padding-right: max(8px, env(safe-area-inset-right, 0px));
+  }
+}
+
+@media (min-width: 900px) and (max-width: 1199px) and (min-height: 481px) {
+  .app-shell > .topbar {
+    padding-left: max(var(--space-3), env(safe-area-inset-left, 0px));
+    padding-right: max(var(--space-3), env(safe-area-inset-right, 0px));
+  }
+
+  .app-shell > .action-dock {
+    bottom: max(16px, env(safe-area-inset-bottom, 0px));
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  .app-shell > .hand-slot {
+    bottom: max(16px, env(safe-area-inset-bottom, 0px));
   }
 }
