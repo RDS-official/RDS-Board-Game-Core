@@ -607,7 +607,7 @@ try {
           await closeDrawer(page);
         }
 
-        if (vp.width < 768 && (await openDrawer(page, 'rail'))) {
+        if (vp.width < 900 && (await openDrawer(page, 'rail'))) {
           const railReport = await page.evaluate(collectReport, { ...MEASURE_OPTIONS, vw: vp.width, vh: vp.height });
           supplemental.rail = {
             panel: railReport.panels.rail,

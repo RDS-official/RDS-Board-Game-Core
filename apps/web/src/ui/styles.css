@@ -665,6 +665,7 @@ body {
   padding: 2px 6px;
   border-radius: 4px;
   text-transform: uppercase;
+  white-space: nowrap;
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-secondary);
 }
@@ -770,6 +771,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  min-width: 0;
   font-size: var(--type-xs);
   color: var(--text-secondary);
 }
@@ -777,12 +779,16 @@ body {
 .pc-row .k {
   color: var(--text-tertiary);
   letter-spacing: 0.03em;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .pc-row .v {
   color: var(--text-primary);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .pc-pips {
@@ -796,6 +802,8 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  flex: 0 0 auto;
+  white-space: nowrap;
   padding: 2px 6px 2px 4px;
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.045);
@@ -819,6 +827,7 @@ body {
   font-weight: 700;
   color: var(--text-tertiary);
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 /* ---- Betrayal trait ladder: character-sheet style 0..8 track ------------- */
