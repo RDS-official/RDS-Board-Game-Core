@@ -112,6 +112,9 @@ const measure = () => {
     board.push({
       id,
       position: pose.position,
+      // World footprint of the card face. Derived from the geometry so a scale
+      // change cannot leave this probe asserting against a stale hard-coded size.
+      width: Number(mesh.geometry?.parameters?.width ?? 0) * mesh.scale.x,
       tiltX: mesh.rotation.x,
       facing: 0,
       localY: mesh.position.y
@@ -382,11 +385,14 @@ if (!seatView.error && !isoView.error && seatView.groupPose && isoView.groupPose
   );
   const minGap = Math.min(...gaps);
   const maxGap = Math.max(...gaps);
-  console.log(`  spacing: ${gaps.map(gap => round(gap, 3)).join(' / ')} (card width 1.256)`);
+  const cardWidth = Math.min(...seatView.board.map(card => card.width));
+  console.log(
+    `  spacing: ${gaps.map(gap => round(gap, 3)).join(' / ')} (card width ${round(cardWidth, 3)})`
+  );
   pick(
-    gaps.length === 0 || (minGap > 1.2 && maxGap - minGap < 0.01),
-    `board cards keep the row pitch (${round(minGap, 3)} unit gap > card width, uniform)`,
-    `board row spacing broke: gaps ${gaps.map(gap => round(gap, 3)).join(' / ')}`
+    gaps.length === 0 || (minGap > cardWidth && maxGap - minGap < 0.01),
+    `board cards keep the row pitch (${round(minGap, 3)} unit gap > card width ${round(cardWidth, 3)}, uniform)`,
+    `board row spacing broke: gaps ${gaps.map(gap => round(gap, 3)).join(' / ')} / card width ${round(cardWidth, 3)}`
   );
 
   const bobValues = bobHeights.filter(value => typeof value === 'number');
