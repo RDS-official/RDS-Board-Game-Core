@@ -224,8 +224,11 @@
   }
 }
 
-/* Pips: Betrayal dice are printed 0 / 1 / 2. */
-.pip {
+/* Pips: Betrayal dice are printed 0 / 1 / 2.
+   Scoped to the die face: `.pip` is also the player-card pip class, and an
+   unscoped absolute-positioned rule here made every HUD pip overlap the rows
+   below it (the "筹码 01020" smear). */
+.die .pip {
   position: absolute;
   width: 13px;
   height: 13px;
@@ -234,24 +237,24 @@
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.18);
 }
 
-.pip.mid {
+.die .pip.mid {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
 }
 
-.pip.tl {
+.die .pip.tl {
   top: 14px;
   left: 14px;
 }
 
-.pip.br {
+.die .pip.br {
   right: 14px;
   bottom: 14px;
 }
 
 /* A blank Betrayal face is a real face: an engraved ring instead of nothing. */
-.pip.ring {
+.die .pip.ring {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
@@ -535,22 +538,22 @@
   border-radius: 16px;
 }
 
-.pip {
+.die .pip {
   width: 16px;
   height: 16px;
 }
 
-.pip.tl {
+.die .pip.tl {
   top: 17px;
   left: 17px;
 }
 
-.pip.br {
+.die .pip.br {
   right: 17px;
   bottom: 17px;
 }
 
-.pip.ring {
+.die .pip.ring {
   width: 21px;
   height: 21px;
 }

@@ -1770,7 +1770,7 @@ export class BoardGameHUD {
     this.container.classList.add('app-shell');
     this.container.innerHTML = `
       <header class="topbar">
-        <button class="shell-toggle menu-btn" data-toggle="menu" aria-label="主菜单" aria-haspopup="dialog" aria-controls="menu-dialog" aria-expanded="false">☰</button>
+        <button class="shell-toggle menu-btn" data-toggle="menu" aria-label="主菜单" aria-haspopup="dialog" aria-controls="menu-dialog" aria-expanded="false"><span class="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span></button>
 
         <nav class="game-switch" id="game-switch">
           ${GAME_TABS.map(

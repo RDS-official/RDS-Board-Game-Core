@@ -4631,13 +4631,13 @@ select.pf-control {
   color: #ff8f8f;
   background: rgba(255, 96, 96, 0.12);
   font-weight: 700;
+}
 
 /* Phase 2: online presence dot on player cards */
 .pc-avatar { position: relative; }
 .pc-online { position:absolute; right:-2px; bottom:-2px; width:10px; height:10px; border-radius:50%; background:#4b5563; border:2px solid #10151f; opacity:.9; }
 .pc-online.on { background:#2ea86f; box-shadow:0 0 6px rgba(46,168,111,.8); }
 .icon-btn.danger:hover { color:#ff6b6b; }
-}
 
 /* ---------------------------------------------------------------- effects */
 .pc-effects {

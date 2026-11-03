@@ -45,6 +45,10 @@ class BoardGameSimulatorApp {
 
   private currentGameId = 'catan';
   private lastRevision = -1;
+  /** Projection identity; guards against two sessions both starting at revision 0. */
+  private lastBoardSignature = '';
+  /** The first server projection must be painted even when revision is still 0. */
+  private appliedInitialNetSnapshot = false;
   private lastPlacementKey = '';
   /** Net sessions: show the game-over overlay exactly once per session. */
   private netGameOverShown = false;
@@ -170,6 +174,12 @@ class BoardGameSimulatorApp {
         return;
       }
       this.hud.showSeatPeek(null);
+      if (data.type === 'ZONE') {
+        this.hud.showHoverHint(
+          peekView({ key: fixedDetailKey(data.id), title: String(meta.label ?? '牌堆'), desc: '按住拖动，可摆到桌面任意位置' })
+        );
+        return;
+      }
       if (data.type === 'NODE') {
         if (meta?.type === 'ROOM_NAV') {
           const targetName = String(meta.targetName ?? meta.name ?? '相邻房间');
@@ -257,6 +267,7 @@ class BoardGameSimulatorApp {
       this.hud.pushToast('↔', '卡牌位置已调整（仅本视图）');
     });
     this.scene.onEntityDragStart(entityId => {
+      if (entityId.startsWith('deck:')) return;
       const targets = this.session.getPlacementTargets(entityId);
       const entity = this.session.getSnapshot().board.entities[entityId];
       this.freeDragEntityId = targets.length === 0 && entity?.type === 'CARD' ? entityId : undefined;
@@ -312,6 +323,7 @@ class BoardGameSimulatorApp {
       const snapshot = this.pendingSnapshot ?? this.session.getSnapshot();
       this.pendingSnapshot = undefined;
       this.lastRevision = snapshot.revision;
+      this.lastBoardSignature = this.boardSignature(snapshot);
       this.lastPlacementKey = snapshot.placement
         ? `${snapshot.placement.defId}:${snapshot.placement.rotation}`
         : '';
@@ -537,7 +549,13 @@ class BoardGameSimulatorApp {
   }
 
   private bindSession(session: UniversalSession | NetSession): void {
+    let firstSubscription = true;
     session.subscribe(snapshot => {
+      // NetSession.subscribe() immediately replays its placeholder bootstrap
+      // snapshot. That is not the server projection and must not consume the
+      // "apply the first real network frame" allowance.
+      const isNetBootstrap = !!this.netOptions && firstSubscription;
+      firstSubscription = false;
       // Hold every paint until the webfont is usable; the boot promise flushes
       // the newest snapshot it finds.
       if (!this.fontsReady) {
@@ -547,10 +565,24 @@ class BoardGameSimulatorApp {
       const placementKey = snapshot.placement
         ? `${snapshot.placement.defId}:${snapshot.placement.rotation}`
         : '';
+      const boardSignature = this.boardSignature(snapshot);
+      // A networked guest boots from a placeholder projection at revision 0. The
+      // server's first full projection can also be revision 0, so revision alone
+      // would discard it and leave the 3D board (seat lamps, turn arrows) showing
+      // the placeholder until the next action. Force that first server paint.
+      const firstNetProjection =
+        !!this.netOptions && !this.appliedInitialNetSnapshot && !isNetBootstrap;
       // Every kernel transition (including viewer projection changes) bumps the
       // revision. Rotation-only placement previews do not.
-      if (snapshot.revision !== this.lastRevision || placementKey !== this.lastPlacementKey) {
+      if (
+        firstNetProjection ||
+        snapshot.revision !== this.lastRevision ||
+        boardSignature !== this.lastBoardSignature ||
+        placementKey !== this.lastPlacementKey
+      ) {
+        this.appliedInitialNetSnapshot = true;
         this.lastRevision = snapshot.revision;
+        this.lastBoardSignature = boardSignature;
         this.lastPlacementKey = placementKey;
         this.scene.setHighlight(null, false);
         // The dock's footprint changes with the game, the viewer and the
@@ -692,6 +724,11 @@ class BoardGameSimulatorApp {
     card.append(title, winner, reason, roster, row);
     overlay.appendChild(card);
     document.body.appendChild(overlay);
+  }
+
+  /** Identity of the projection slice the 3D board is currently drawing. */
+  private boardSignature(snapshot: GameSnapshot): string {
+    return `${snapshot.viewer}:${snapshot.board?.seq ?? -1}:${snapshot.board?.actionLog?.length ?? 0}`;
   }
 
   private switchGame(gameId: string): void {
@@ -878,6 +915,10 @@ class BoardGameSimulatorApp {
   private lastSeatKey: string | null = null;
 
   private handleBoardPick(data: InteractiveObjectData): void {
+    // Deck zones are draggable furniture, not rule targets. The raycaster already
+    // suppresses clicks after a drag; a plain click should do nothing rather than
+    // fall through to the entity picker with a non-entity id.
+    if (data.type === 'ZONE') return;
     // Clicking a seat nameplate opens that player's sheet: the plaque is the
     // board's stand-in for the player card, and seats are not action targets.
     const seatMeta = data.metadata as { type?: string; playerId?: string } | undefined;

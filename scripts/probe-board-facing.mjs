@@ -1,19 +1,18 @@
 /**
- * Board-facing probe: the shared card row must be readable from *every* seat.
+ * Board-orientation probe: the shared card row keeps ONE fixed world bearing.
  *
- * This is the requirement named directly — "公开的牌在每个玩家自己的视角中，都应该
- * 是正对自己的，不需要旋转视角才能看" — asserted the way a player judges it, in
- * screen space, from each seat's own camera:
+ * The current product rule is deliberately the opposite of the earlier
+ * "turn the row towards every seat" experiment: community cards are physical
+ * table objects, so their yaw must not depend on which seat (or GOD camera) is
+ * looking at them. A seat therefore rotates its *view* around the fixed row,
+ * not the row under the viewer.
  *
- *   1. upright  — the projected text-top of every community card is within
- *                 `MAX_TILT_DEG` of screen-up (a fixed-north row fails five of six
- *                 seats by 85–180°);
- *   2. readable — its projected width is at least `MIN_CARD_PX` (the legacy row
- *                 foreshortens to 16–33px from a seat);
- *   3. left→right — index order reads in order on screen, not mirrored;
- *   4. own hand — the viewer's own hole cards are upright too;
- *   5. capability — the row only turns when the game declared it AND a seat is
- *                 bound; the GOD camera keeps the historical fixed-north row.
+ * Asserted from each seat's camera and from GOD:
+ *
+ *   1. all cards in the row share the same world yaw;
+ *   2. every seat's board yaw matches the GOD baseline;
+ *   3. the game leaves the `boardFacesViewer` capability undeclared, which is
+ *      why the fixed row is the expected behaviour for all viewers.
  *
  * Run: node scripts/probe-board-facing.mjs   (or `pnpm probe:board`)
  */
@@ -22,8 +21,8 @@ import { ensureSoloServer } from './lib/soloserver.mjs';
 
 const SCENARIO = 'ai_table_6';
 const SEATS = 6;
-const MAX_TILT_DEG = 15;
-const MIN_CARD_PX = 60;
+/** World yaw is exact arithmetic; only float round-off is tolerated. */
+const YAW_EPSILON = 1e-6;
 const VIEWPORT = { width: 1400, height: 900 };
 
 const dev = await ensureSoloServer();
@@ -157,12 +156,26 @@ const setViewer = async seat => {
   await page.waitForTimeout(900);
 };
 
-const describe = card => `${card.tilt.toFixed(0)}° ${card.widthPx.toFixed(0)}px`;
+const describe = card => `${(card.yaw * 180 / Math.PI).toFixed(2)}° ${card.widthPx.toFixed(0)}px`;
+/** Smallest absolute angle between two bearings. */
+const angularDistance = (a, b) => Math.abs(((a - b + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
 
-console.log(`board-facing probe · poker/${SCENARIO} · ${VIEWPORT.width}x${VIEWPORT.height}\n`);
+console.log(`board-orientation probe · poker/${SCENARIO} · ${VIEWPORT.width}x${VIEWPORT.height}\n`);
 
 await page.goto(`${dev.url}/?game=poker&scenario=${SCENARIO}`);
 await page.waitForFunction(() => !!window.__boardGameApp?.scene?.lastState, { timeout: 30_000 });
+
+// The fixed row is the behaviour *because* the game does not opt into the
+// viewer-turning capability. Assert the declaration itself, not just its effect.
+const boardFacesViewer = await page.evaluate(async () => {
+  const layout = await import('/packages/app/src/layout.ts');
+  return layout.layoutForGame('poker').boardFacesViewer;
+});
+pick(
+  boardFacesViewer === undefined,
+  'poker leaves boardFacesViewer undeclared (fixed row is the contract)',
+  `poker declared boardFacesViewer=${String(boardFacesViewer)} — expected undeclared`
+);
 
 /**
  * Drive the table to a street that actually has community cards.
@@ -191,40 +204,21 @@ const dealToFlop = async () => {
 };
 
 /** Report one camera's view of the board (used for GOD and every seat). */
-const report = (tag, shot, { expectFixedRow = false } = {}) => {
+const report = (tag, shot, baselineYaw) => {
   if (shot.error) return bad(`${tag}: ${shot.error}`);
   if (shot.board.length === 0) return bad(`${tag}: no community cards on the felt`);
 
   const summary = shot.board.map(describe).join(' · ');
-  const worstTilt = Math.max(...shot.board.map(card => card.tilt));
-  const worstWidth = Math.min(...shot.board.map(card => card.widthPx));
-  const xs = shot.board.map(card => card.screenX);
-
-  if (expectFixedRow) {
-    // The capability is deliberately off for the omniscient camera: the row must
-    // still be the unturned one, or the debug view and screenshot scripts change.
-    return pick(
-      Math.max(...shot.board.map(card => Math.abs(card.yaw))) < 1e-3,
-      `${tag}: fixed-north row kept (${shot.board.length} cards, ${summary})`,
-      `${tag}: row was turned to the camera (expected yaw 0)`
-    );
-  }
-
-  pick(worstTilt <= MAX_TILT_DEG, `${tag}: upright ${worstTilt.toFixed(0)}° — ${summary}`,
-    `${tag}: tilt ${worstTilt.toFixed(0)}° > ${MAX_TILT_DEG}° — ${summary}`);
-  // Reading order left → right: an upright but mirrored row reads 10♠K♥.
-  pick(xs.every((x, i) => i === 0 || x > xs[i - 1]), `${tag}: reads left→right`,
-    `${tag}: mirrored — screen x ${xs.map(v => v.toFixed(0)).join('/')}`);
-  pick(worstWidth >= MIN_CARD_PX, `${tag}: readable (min ${worstWidth.toFixed(0)}px)`,
-    `${tag}: too small — min ${worstWidth.toFixed(0)}px < ${MIN_CARD_PX}px (${summary})`);
-
-  // Own hand: the requirement is about the player's own view of the table. A seat
-  // that folded has no cards left (they are in the muck) — a correct projection.
-  if (shot.handEmpty) return ok(`${tag}: folded, no own cards to measure`);
-  if (shot.own.length === 0) return bad(`${tag}: own hand not projected (binding broken)`);
-  const handTilt = Math.max(...shot.own.map(card => card.tilt));
-  pick(handTilt <= MAX_TILT_DEG, `${tag}: own hand upright (${handTilt.toFixed(0)}°)`,
-    `${tag}: own hand tilt ${handTilt.toFixed(0)}° > ${MAX_TILT_DEG}°`);
+  const yaws = shot.board.map(card => card.yaw);
+  const yawSpread = Math.max(...yaws) - Math.min(...yaws);
+  const maxBaselineDrift = Math.max(...yaws.map(yaw => angularDistance(yaw, baselineYaw)));
+  // The shared row is part of the table, not of the viewer: every camera must
+  // read the same world yaw, and every card in the row must agree with it.
+  pick(
+    yawSpread <= YAW_EPSILON && maxBaselineDrift <= YAW_EPSILON,
+    `${tag}: fixed row yaw ${(baselineYaw * 180 / Math.PI).toFixed(2)}° (${shot.board.length} cards, ${summary})`,
+    `${tag}: yaw drift ${(maxBaselineDrift * 180 / Math.PI).toFixed(2)}° vs GOD / spread ${(yawSpread * 180 / Math.PI).toFixed(2)}° — ${summary}`
+  );
 };
 
 const reachedFlop = await dealToFlop();
@@ -236,7 +230,9 @@ if (!reachedFlop) bad('the probe could not reach the flop — nothing to measure
 // The table opens seated now (the game declares its protagonist), so the
 // omniscient camera has to be asked for explicitly before asserting it.
 await setViewer('GOD');
-report('GOD view', await page.evaluate(measure), { expectFixedRow: true });
+const godView = await page.evaluate(measure);
+const baselineYaw = godView.board?.[0]?.yaw ?? 0;
+report('GOD view', godView, baselineYaw);
 
 for (let seatIndex = 0; seatIndex < SEATS; seatIndex++) {
   const seat = await page.evaluate(async index => {
@@ -249,7 +245,7 @@ for (let seatIndex = 0; seatIndex < SEATS; seatIndex++) {
     continue;
   }
   await setViewer(seat);
-  report(`seat ${seatIndex} (${seat})`, await page.evaluate(measure));
+  report(`seat ${seatIndex} (${seat})`, await page.evaluate(measure), baselineYaw);
 }
 
 await page.close();

@@ -21,7 +21,7 @@ import { PresentationPhysics } from './physics';
 import { BoardGameAudio } from './audio';
 import { CANVAS_FONT_STACK } from './fonts';
 import { handLayout, handRowSpan } from '../ui/handLayout';
-import { boardCardPosition, boardRowFrame, type ViewerBearing } from './boardFacing';
+import { BOARD_ROW_PITCH, boardCardPosition, boardRowFrame, type ViewerBearing } from './boardFacing';
 import { solveHandRowDepth, type ScreenBox } from './handRowDepth';
 
 export type CameraPreset = 'ISOMETRIC' | 'TOP_DOWN' | 'PLAYER_1' | 'PLAYER_2' | 'SEAT';
@@ -49,7 +49,7 @@ export interface ViewportInsets {
  * layout normalises against, so it is the hard budget: however many cards a
  * player holds, they are spread over exactly this strip in front of the seat.
  */
-const HAND_ROW_SPAN = 6.4;
+const HAND_ROW_SPAN = 9.6;
 /**
  * Preferred distance from the seat centre outwards to the hand row.
  *
@@ -71,10 +71,21 @@ const HAND_ROW_DEPTH_MAX = 2.6;
 const BOARD_ROW_Z_OFFSET = 0.85;
 /** Table height of the hand row. */
 const HAND_ROW_Y = 0.13;
-/** World width of a card at layout scale 1. */
-const HAND_CARD_WIDTH = 0.63;
-/** Native width of the card mesh; layout scale maps straight onto mesh.scale. */
-const HAND_CARD_MESH_WIDTH = 1.12;
+/**
+ * Tabletop card faces are 1.5× their previous printed size.
+ *
+ * Hand, community and discard/deck cards all derive from these constants so a
+ * future size change moves every pile together instead of drifting apart.
+ */
+const CARD_SIZE_MULTIPLIER = 1.5;
+const CARD_W = 1.35 * CARD_SIZE_MULTIPLIER;
+const CARD_H = 2.0 * CARD_SIZE_MULTIPLIER;
+const DECK_CARD_W = 1.25 * CARD_SIZE_MULTIPLIER;
+const DECK_CARD_H = 1.85 * CARD_SIZE_MULTIPLIER;
+/** Native hand-card mesh; the layout width below is its displayed size. */
+const HAND_CARD_MESH_WIDTH = 1.12 * CARD_SIZE_MULTIPLIER;
+/** World width of a hand card at layout scale 1. */
+const HAND_CARD_WIDTH = 0.63 * CARD_SIZE_MULTIPLIER;
 /** Total in-plane fan spread (radians) from the left card to the right one. */
 const HAND_FAN_YAW = 0.5;
 /** Fan angle added per card, so a two-card hand stays almost flat. */
@@ -520,6 +531,10 @@ export class BoardGameScene {
     /** 原始朝向：松手后恢复平放，拖动时的"朝向相机"不能留在桌上。 */
     quaternion: THREE.Quaternion;
   };
+  /** Renderer-local deck positions (never written to GameState). */
+  private deckVisualOffsets = new Map<string, { dx: number; dz: number }>();
+  private deckPiles = new Map<string, { group: THREE.Group; baseX: number; baseZ: number }>();
+  private draggedDeckZoneId?: string;
   private draggedHeldY?: number;
   private groupHeldY?: number;
   private cardSettles = new Map<
@@ -620,6 +635,10 @@ export class BoardGameScene {
       }
     });
     this.raycaster.onDragMove((entityId, clientX, clientY) => {
+      if (entityId.startsWith('deck:')) {
+        this.followDeckDrag(entityId.slice('deck:'.length), clientX, clientY);
+        return;
+      }
       this.followCardDrag(entityId, clientX, clientY);
     });
 
@@ -723,8 +742,15 @@ export class BoardGameScene {
 
   public onEntityDragStart(cb: (entityId: string) => void): void {
     this.raycaster.onDragStart(entityId => {
-      // An entity drag is a placement gesture, not a camera orbit gesture.
+      // An entity/deck drag is a placement gesture, not a camera orbit gesture.
       this.controls.enabled = false;
+      if (entityId.startsWith('deck:')) {
+        const zoneId = entityId.slice('deck:'.length);
+        if (!this.deckPiles.has(zoneId)) return;
+        this.draggedDeckZoneId = zoneId;
+        cb(entityId);
+        return;
+      }
       const mesh = this.entityMeshes.get(entityId);
       if (mesh) {
         const offset = this.cardVisualOffsets.get(entityId) ?? { dx: 0, dz: 0 };
@@ -744,7 +770,7 @@ export class BoardGameScene {
   public onEntityDragEnd(cb: () => void): void {
     this.raycaster.onDragEnd(() => {
       this.controls.enabled = true;
-      // 松手：把牌放回原来的朝向。
+      // 松手：把牌放回原来的朝向。牌堆的落点则保留，位置只存在渲染层。
       if (this.draggedEntityId) {
         const mesh = this.entityMeshes.get(this.draggedEntityId);
         if (mesh && this.draggedEntityOrigin) mesh.quaternion.copy(this.draggedEntityOrigin.quaternion);
@@ -752,6 +778,7 @@ export class BoardGameScene {
       cb();
       this.draggedEntityId = undefined;
       this.draggedEntityOrigin = undefined;
+      this.draggedDeckZoneId = undefined;
       this.draggedHeldY = undefined;
     });
   }
@@ -822,6 +849,35 @@ export class BoardGameScene {
       return null;
     }
     return [BoardGameScene._scratchPoint.x, 0.08, BoardGameScene._scratchPoint.z];
+  }
+
+  /**
+   * Move the draw pile on the felt and remember its offset locally. It is a
+   * table gesture, not a rules action: nothing here touches GameState, and the
+   * offset survives board rebuilds because it lives in this renderer instance.
+   */
+  private followDeckDrag(zoneId: string, clientX: number, clientY: number): void {
+    if (zoneId !== this.draggedDeckZoneId) return;
+    const pile = this.deckPiles.get(zoneId);
+    const point = this.screenToTable(clientX, clientY);
+    if (!pile || !point) return;
+    // Keep the whole pile on the wooden tabletop, not just its centre.
+    const margin = DECK_CARD_W * 0.5 + 0.2;
+    const x = THREE.MathUtils.clamp(
+      point[0],
+      -this.tableBounds.rx + margin,
+      this.tableBounds.rx - margin
+    );
+    const z = THREE.MathUtils.clamp(
+      point[2],
+      -this.tableBounds.rz + margin,
+      this.tableBounds.rz - margin
+    );
+    pile.group.position.x = x;
+    pile.group.position.z = z;
+    // Store relative to the logical anchor so a later state sync can place the
+    // rebuilt group at the same visual point without knowing pointer history.
+    this.deckVisualOffsets.set(zoneId, { dx: x - pile.baseX, dz: z - pile.baseZ });
   }
 
   private followCardDrag(entityId: string, clientX: number, clientY: number): void {
@@ -1745,6 +1801,8 @@ export class BoardGameScene {
     this.highlightedMeshes.clear();
     this.navArrowMeshes = [];
     this.handRows.clear();
+    this.deckPiles.clear();
+    this.draggedDeckZoneId = undefined;
     while (this.boardObjectsGroup.children.length > 0) {
       const child = this.boardObjectsGroup.children[0];
       this.boardObjectsGroup.remove(child);
@@ -3353,6 +3411,9 @@ export class BoardGameScene {
     items: (Partial<Entity> & { isMasked?: boolean; id: string })[]
   ): void {
     const anchor = zone.anchorPosition ?? [0, 0.06, 0];
+    const offset = this.deckVisualOffsets.get(zone.id) ?? { dx: 0, dz: 0 };
+    const group = new THREE.Group();
+    group.position.set(anchor[0] + offset.dx, 0, anchor[2] + offset.dz);
     const isDiscard = zone.type === 'DISCARD';
     const visible = Math.min(items.length, 4);
 
@@ -3360,18 +3421,32 @@ export class BoardGameScene {
       const isTop = i === visible - 1;
       const faceUp = isDiscard && isTop;
       const face = faceUp ? items[i].components?.cardFace || { title: 'Discard' } : { title: 'Card' };
-      const mesh = CardMeshBuilder.createCardMesh(face, 1.25, 1.85, !faceUp);
-      mesh.position.set(anchor[0], anchor[1] + i * 0.02, anchor[2]);
+      const mesh = CardMeshBuilder.createCardMesh(face, DECK_CARD_W, DECK_CARD_H, !faceUp);
+      // Local coordinates: the pile's world XZ lives on the group so a drag can
+      // move every layer (and the count label) as one object.
+      mesh.position.set(0, anchor[1] + i * 0.02, 0);
       mesh.rotation.y = i % 2 === 0 ? 0.02 : -0.03;
-      this.boardObjectsGroup.add(mesh);
+      group.add(mesh);
       if (isTop) this.entityMeshes.set(items[i].id, mesh);
     }
 
     const label = this.createLabelSprite(`${zone.name} · ${items.length}`, '#cbb57a');
-    label.position.set(anchor[0], 0.55, anchor[2]);
+    label.position.set(0, 0.55, 0);
     // 贴图是 4:1（1024×256），牌面也用 4:1：原来是 5:1，文字被横向拉宽 25%。
     label.scale.set(2.6, 0.65, 1);
-    this.boardObjectsGroup.add(label);
+    group.add(label);
+    this.boardObjectsGroup.add(group);
+
+    // Only draw piles are movable. Discard piles stay mirrored to their zone
+    // anchor because their top card is meaningful state, not furniture.
+    if (zone.type === 'DECK') {
+      this.deckPiles.set(zone.id, { group, baseX: anchor[0], baseZ: anchor[2] });
+      this.raycaster.registerInteractive(group, {
+        type: 'ZONE',
+        id: `deck:${zone.id}`,
+        metadata: { zoneId: zone.id, label: zone.name, draggable: true }
+      });
+    }
   }
 
   /* ------------------------------------------------------------------ */
@@ -4016,7 +4091,7 @@ export class BoardGameScene {
       const mesh = CardMeshBuilder.createCardMesh(
         face,
         HAND_CARD_MESH_WIDTH,
-        1.68,
+        1.68 * CARD_SIZE_MULTIPLIER,
         !!entity.isMasked,
         null,
         null,
@@ -5159,8 +5234,8 @@ export class BoardGameScene {
     const cardStyle = this.lastState?.gameId === 'poker' ? 'playing' : 'plate';
     const mesh = CardMeshBuilder.createCardMesh(
       face,
-      isPkmn ? PKMN_CARD_W : 1.35,
-      isPkmn ? PKMN_CARD_H : 2.0,
+      isPkmn ? PKMN_CARD_W : CARD_W,
+      isPkmn ? PKMN_CARD_H : CARD_H,
       isMasked,
       isPkmn ? pokemonCardTexture(custom) : null,
       isPkmn ? pokemonCardBackTexture(custom) : null,
@@ -5245,7 +5320,8 @@ export class BoardGameScene {
           // Keeps the historical centre: the poker anchor sits at z = -0.85 and
           // the row is pushed forward by the same amount to land on the felt.
           centerZ: anchor[2] + BOARD_ROW_Z_OFFSET,
-          viewer: bearing
+          viewer: bearing,
+          pitch: BOARD_ROW_PITCH * CARD_SIZE_MULTIPLIER
         });
         const [px, , pz] = boardCardPosition(row, shown, index, anchor[1]);
         mesh.position.set(px, anchor[1], pz);

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 export interface InteractiveObjectData {
-  type: 'ENTITY' | 'NODE' | 'EDGE' | 'DICE';
+  type: 'ENTITY' | 'NODE' | 'EDGE' | 'DICE' | 'ZONE';
   id: string;
   metadata?: any;
 }
@@ -119,10 +119,10 @@ export class BoardRaycaster {
         const wasDragging = this.dragging;
         this.dragging = true;
         this.domElement.style.cursor = 'grabbing';
-        if (!wasDragging && this.pointerDownData?.type === 'ENTITY') {
+        if (!wasDragging && this.isDraggable(this.pointerDownData)) {
           this.onDragStartCallback?.(this.pointerDownData.id);
         }
-        if (this.dragging && this.pointerDownData?.type === 'ENTITY') {
+        if (this.dragging && this.isDraggable(this.pointerDownData)) {
           this.onDragMoveCallback?.(this.pointerDownData.id, event.clientX, event.clientY);
         }
       }
@@ -143,7 +143,7 @@ export class BoardRaycaster {
         this.resetHover();
         this.hoveredObject = topHit;
         this.applyHoverHighlight(topHit);
-        this.domElement.style.cursor = 'pointer';
+        this.domElement.style.cursor = data?.type === 'ZONE' ? 'grab' : 'pointer';
         if (this.onHoverCallback) this.onHoverCallback(data || null);
       }
     } else {
@@ -155,23 +155,24 @@ export class BoardRaycaster {
     }
   }
 
+  private isDraggable(data: InteractiveObjectData | null): data is InteractiveObjectData {
+    return data?.type === 'ENTITY' || data?.type === 'ZONE';
+  }
+
   private onPointerDown(event: PointerEvent): void {
     if (event.button !== 0) return; // Only primary click
     this.pointerDownAt = { x: event.clientX, y: event.clientY };
     this.dragging = false;
     this.pointerDownData = this.pickAt(event.clientX, event.clientY);
 
-    if (this.pointerDownData?.type === 'ENTITY') {
+    if (this.isDraggable(this.pointerDownData)) {
       // Stop OrbitControls from consuming the first few pixels before the
       // drag threshold is crossed.
       this.onEntityPressCallback?.(this.pointerDownData.id);
-    }
-
-    // Capturing an entity drag keeps pointermove/pointerup flowing even when
-    // the cursor leaves the canvas or is released over the HUD. Without this,
-    // the drop callback never runs, the card stays at its lifted height and
-    // OrbitControls can remain disabled.
-    if (this.pointerDownData?.type === 'ENTITY') {
+      // Capturing a drag keeps pointermove/pointerup flowing even when the
+      // cursor leaves the canvas or is released over the HUD. Without this,
+      // the drop callback never runs, the card stays at its lifted height and
+      // OrbitControls can remain disabled.
       try {
         this.domElement.setPointerCapture(event.pointerId);
       } catch {
@@ -198,10 +199,14 @@ export class BoardRaycaster {
 
     const distance = Math.hypot(event.clientX - start.x, event.clientY - start.y);
     if (this.dragging && distance >= 6) {
-      const target = this.pickAt(event.clientX, event.clientY);
-      this.onDropCallback?.(data.id, target, event.clientX, event.clientY);
-      this.domElement.style.cursor = 'default';
-    } else if (this.onClickCallback) {
+      // A ZONE drag is a pure presentation gesture. It must not fall through to
+      // the entity drop/click path (which would open a detail sheet mid-drag).
+      if (data.type !== 'ZONE') {
+        const target = this.pickAt(event.clientX, event.clientY);
+        this.onDropCallback?.(data.id, target, event.clientX, event.clientY);
+      }
+      this.domElement.style.cursor = data.type === 'ZONE' ? 'grab' : 'default';
+    } else if (data.type !== 'ZONE' && this.onClickCallback) {
       this.onClickCallback(data);
     }
     if (this.dragging) this.onDragEndCallback?.();
