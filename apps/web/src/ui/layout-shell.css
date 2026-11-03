@@ -127,23 +127,32 @@
    (1/7 .. 4/7) and the hand slot stands immediately to its right. This
    geometry is intentionally unchanged — PR 3 owns the dock redesign. */
 @media (min-width: 1200px) {
+  /* 操作栏 + 手持区当成一整个整体：整组在视口里水平居中，于是左右页边距相等。 */
+  .app-shell {
+    --dock-w: calc(3 * 100vw / 7);
+    --dock-gap: 48px;
+    --hand-w: calc(var(--dock-h, 217px) * 0.7);
+    --dock-group-w: calc(var(--dock-w) + var(--dock-gap) + var(--hand-w));
+    --dock-group-left: calc((100vw - var(--dock-group-w)) / 2);
+  }
+
   .app-shell > .action-dock {
     /* grid-area would make the abs-positioned containing block the board cell;
        auto lets left/bottom resolve against the full app shell (the viewport). */
     grid-area: auto;
     position: absolute;
-    left: calc(100vw / 7);
+    left: var(--dock-group-left);
     bottom: var(--shell-edge);
-    width: calc(3 * 100vw / 7);
+    width: var(--dock-w);
     margin: 0;
   }
 
   .app-shell > .hand-slot {
     position: absolute;
-    left: calc(4 * 100vw / 7 + 48px);
+    left: calc(var(--dock-group-left) + var(--dock-w) + var(--dock-gap));
     bottom: var(--shell-edge);
     display: block;
-    width: clamp(160px, 11vw, 260px);
+    width: var(--hand-w);
     aspect-ratio: 3 / 4;
     z-index: 26;
     pointer-events: auto;
@@ -1913,7 +1922,7 @@
      the old 3:4 portrait, leaving a clear gap between the two surfaces. */
   .app-shell > .hand-slot {
     width: calc(var(--dock-h, 200px) * 0.7);
-    max-width: calc(100vw - (4 * 100vw / 7 + 48px) - var(--shell-edge));
+    max-width: calc(100vw - (var(--dock-group-left) + var(--dock-w) + var(--dock-gap)) - var(--shell-edge));
     height: var(--dock-h, 200px);
     aspect-ratio: auto;
   }
