@@ -2931,10 +2931,7 @@ export class BoardGameHUD {
     if (count === 0) return;
 
     const desktop = window.matchMedia('(min-width: 1200px)').matches;
-    // 展开状态（拉通整列）用普通列表：鱼眼在这个高度下会把其他玩家压成一条
-    // 细缝，反而读不到名字。
-    const expanded = rail.dataset.expanded === '1';
-    if (!desktop || count <= 4 || expanded) {
+    if (!desktop || count <= 4) {
       rail.dataset.layout = 'list';
       for (const card of cards) {
         card.style.removeProperty('height');
