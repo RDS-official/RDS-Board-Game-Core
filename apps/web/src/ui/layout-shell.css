@@ -296,6 +296,23 @@
     transform: translateX(0);
   }
 
+  /* Right column: drawer keeps its own scroll; the tab strip stays pinned so
+     the three panels never become one tall stack again. */
+  .app-shell .side-tablist {
+    display: flex;
+    gap: 6px;
+    margin-bottom: var(--space-2);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 0 0 var(--space-2);
+    background: var(--surface-panel);
+  }
+
+  .side-tabs > [role='tabpanel'] {
+    min-width: 0;
+  }
+
   /* A closed drawer must not be reachable by tab, and must not be measured
      as an on-screen panel. */
   .app-shell:not([data-rail='open']) > .player-rail,
@@ -524,6 +541,76 @@
   box-sizing: border-box;
 }
 
+/* ---- right column tabs -------------------------------------------------
+   The same three panels are a vertical stack on desktop and a tab set inside
+   the drawer below 1200px. `Hud.applySideTab` only flips `hidden`; it never
+   rebuilds the nodes, so ranking/feed scroll positions survive a tab change. */
+.side-tabs {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.side-tablist {
+  display: none;
+}
+
+.side-tab {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: var(--type-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.side-tab:hover {
+  border-color: var(--border-accent-soft);
+  background: var(--surface-control-hover);
+}
+
+.side-tab[aria-selected='true'] {
+  border-color: var(--border-accent-strong);
+  background: rgba(217, 180, 91, 0.14);
+  color: var(--accent-bright);
+  box-shadow: inset 0 0 0 1px rgba(217, 180, 91, 0.18);
+}
+
+@container rail (max-width: 240px) {
+  /* Narrow desktop rail: the score drops under the identity block so the name
+     keeps a readable run instead of being squeezed to ~3 characters. */
+  .pc-head {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    align-items: start;
+    gap: 4px 10px;
+  }
+  .pc-avatar {
+    grid-row: 1 / span 2;
+    align-self: start;
+  }
+  .pc-id {
+    grid-column: 2;
+  }
+  .pc-score {
+    grid-column: 2;
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+  .pc-score b {
+    font-size: var(--type-lg);
+  }
+}
+
 @container rail (max-width: 190px) {
   .pc {
     padding: var(--space-2) var(--space-3);
@@ -581,7 +668,9 @@
 
 .app-shell > .side-column > .room-card,
 .app-shell > .side-column > .mansion-minimap,
-.app-shell > .side-column > .activity-feed {
+.app-shell > .side-column > .side-tabs > .activity-feed,
+.app-shell > .side-column > .side-tabs > .chip-ranking,
+.app-shell > .side-column > .side-tabs > .observer-rail {
   position: static;
   top: auto;
   right: auto;
@@ -594,51 +683,66 @@
   width: 100%;
 }
 
-/* ---- player rail: fisheye stack (desktop only) -------------------------
-   Ten players do not fit the rail column, so the cards behave like a hand:
-   the rail becomes a positioned box, the cards are absolutely placed by
-   `Hud.layoutPlayerRail` (same `handLayout` fisheye as the action dock, just
-   running down the screen) and the card under the pointer opens up while the
-   rest compress into slivers. These rules must stay *after* the panel-children
-   reset above, which forces every rail child back to `position: static`.
+/* ---- player rail -------------------------------------------------------
+   Cards always size to their content. The fisheye is a desktop-only,
+   >4-player optimisation: `Hud.layoutPlayerRail` tags the rail with
+   `data-layout="fisheye"` only when it actually compresses the stack. In a
+   drawer (and for a normal 2-4 player table) the cards stay in normal flow,
+   so a long trait ladder cannot be sliced by a fixed height. */
+.app-shell > .player-rail > .pc {
+  position: static;
+  flex: 0 0 auto;
+  width: 100%;
+  height: auto;
+  min-height: 112px;
+  transform: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  will-change: auto;
+}
 
-   Below 1200px the rail is a fixed drawer; making it `relative` there
-   overwrote the drawer positioning and collapsed the rail into a 16px grid
-   row (the old probe:ui rail:y regression). */
-@media (min-width: 1200px) {
-  .app-shell > .player-rail {
-    position: relative;
-    overflow: hidden;
+/* Below 1200px the rail is a drawer: a card must still be wide enough to read
+   a name and a score on one line. */
+@media (max-width: 1199px), (max-height: 480px) and (min-width: 600px) {
+  .app-shell > .player-rail > .pc {
+    min-width: 180px;
   }
 }
 
-.app-shell > .player-rail > .pc {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  width: 100%;
-  transform-origin: top center;
-  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1), border-color 0.2s ease,
-    box-shadow 0.2s ease;
-  will-change: transform;
-}
+@media (min-width: 1200px) {
+  .app-shell > .player-rail[data-layout='fisheye'] {
+    position: relative;
+    overflow: hidden;
+  }
 
-/* A compressed card is only a sliver tall: the header row must stay readable,
-   and the cut edge gets a soft shadow so the stack reads as layered cards. */
-.app-shell > .player-rail > .pc .pc-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-}
+  .app-shell > .player-rail[data-layout='fisheye'] > .pc {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    width: 100%;
+    min-height: 0;
+    transform-origin: top center;
+    transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.3, 1), border-color 0.2s ease,
+      box-shadow 0.2s ease;
+    will-change: transform;
+  }
 
-.app-shell > .player-rail > .pc::after {
-  content: '';
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 12px;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.45));
-  pointer-events: none;
+  /* A compressed card is only a sliver tall: the header row must stay readable,
+     and the cut edge gets a soft shadow so the stack reads as layered cards. */
+  .app-shell > .player-rail[data-layout='fisheye'] > .pc .pc-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .app-shell > .player-rail[data-layout='fisheye'] > .pc::after {
+    content: '';
+    position: absolute;
+    inset: auto 0 0 0;
+    height: 12px;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.45));
+    pointer-events: none;
+  }
 }
 
 /* ============================================================

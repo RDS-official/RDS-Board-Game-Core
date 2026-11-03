@@ -52,10 +52,14 @@ interface DockTraceEntry {
 }
 
 /**
- * Base height of one player card in the rail, in px. The rail's fisheye uses it
- * as its "card width" so the compression matches the action dock's.
+ * Minimum height of one player card in the desktop fisheye rail, in px. Cards
+ * size to their content when stacked; the fisheye only needs a uniform floor so
+ * a compressed stack still shows the head and one body row.
  */
-const PLAYER_CARD_HEIGHT = 104;
+const PLAYER_CARD_HEIGHT = 132;
+
+/** Right-column tab keys. The tab strip is only rendered below 1200px. */
+type SideTab = 'ranking' | 'feed' | 'observers';
 
 /** Arbiter owner id for the enlarged seat plaque window. */
 const SEAT_PEEK_OWNER = 'hud.seat';
@@ -133,6 +137,8 @@ export class BoardGameHUD {
   private railFocusY: number | null = null;
   /** Pending animation frame for the rail fisheye (pointer events are coalesced). */
   private railFrame = 0;
+  /** Selected right-column tab (narrow shells only; desktop shows all panels). */
+  private sideTab: SideTab = 'ranking';
   /** 冷却角标的刷新定时器（dock 建好后启动一次）。 */
   private cooldownTimer: number | null = null;
   /**
@@ -766,6 +772,7 @@ export class BoardGameHUD {
    * DOM nodes move, so their listeners and values survive.
    */
   private applyShellLayout(): void {
+    this.applySideTab();
     const slot = this.container.querySelector('#side-panel-extras') as HTMLElement | null;
     const actions = this.container.querySelector('.topbar-actions') as HTMLElement | null;
     if (!slot || !actions) return;
@@ -791,6 +798,36 @@ export class BoardGameHUD {
     if (bar) {
       const h = Math.round(bar.getBoundingClientRect().height);
       if (h > 0) this.container.style.setProperty('--topbar-h', h + 'px');
+    }
+
+    const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
+    if (rail) this.layoutPlayerRail(rail);
+  }
+
+  /**
+   * Right column: one tab strip on narrow shells, a plain stack on desktop.
+   *
+   * The panels stay in the DOM in both cases — only their `hidden` flag moves.
+   * That keeps the ranking/feed/observer renderers (and their scroll positions)
+   * untouched when the shell crosses 1200px.
+   */
+  private applySideTab(): void {
+    const host = this.container.querySelector('#side-tabs') as HTMLElement | null;
+    if (!host) return;
+    const narrow = window.matchMedia('(max-width: 1199px), (max-height: 480px) and (min-width: 600px)').matches;
+    host.dataset.sideTab = this.sideTab;
+    const panels: Array<[SideTab, string]> = [
+      ['ranking', '#chip-ranking'],
+      ['feed', '#activity-feed'],
+      ['observers', '#observer-rail']
+    ];
+    for (const [key, selector] of panels) {
+      const panel = this.container.querySelector(selector) as HTMLElement | null;
+      if (!panel) continue;
+      panel.hidden = narrow && key !== this.sideTab;
+    }
+    for (const button of this.container.querySelectorAll<HTMLElement>('[data-side-tab-target]')) {
+      button.setAttribute('aria-selected', button.dataset.sideTabTarget === this.sideTab ? 'true' : 'false');
     }
   }
 
@@ -1413,11 +1450,21 @@ export class BoardGameHUD {
              so a single-variant fixture keeps the column unchanged. -->
         <aside class="room-card" id="room-card" style="display:none"></aside>
         <aside class="mansion-minimap" id="mansion-minimap" style="display:none"></aside>
-        <!-- 筹码排行（德州扑克）：放在「近期动态」上方 -->
-        <aside class="chip-ranking" id="chip-ranking" style="display:none"></aside>
-        <!-- 观察席：输光但仍在房间里的牌手，等低保 / 等轮末回桌 -->
-        <aside class="observer-rail" id="observer-rail" style="display:none"></aside>
-        <aside class="activity-feed" id="activity-feed"></aside>
+        <!-- Narrow shells put ranking / recent activity / observers behind one
+             tab strip instead of stacking three panels into a drawer. Desktop
+             keeps the same nodes as a vertical stack (no duplicated data). -->
+        <div class="side-tabs" id="side-tabs" data-side-tab="ranking">
+          <div class="side-tablist" role="tablist" aria-label="信息面板">
+            <button class="side-tab" type="button" role="tab" id="side-tab-ranking" aria-controls="chip-ranking" aria-selected="true" data-side-tab-target="ranking">排行</button>
+            <button class="side-tab" type="button" role="tab" id="side-tab-feed" aria-controls="activity-feed" aria-selected="false" data-side-tab-target="feed">近况</button>
+            <button class="side-tab" type="button" role="tab" id="side-tab-observers" aria-controls="observer-rail" aria-selected="false" data-side-tab-target="observers">观察席</button>
+          </div>
+          <!-- 筹码排行（德州扑克）：放在「近期动态」上方 -->
+          <aside class="chip-ranking" id="chip-ranking" role="tabpanel" aria-labelledby="side-tab-ranking" style="display:none"></aside>
+          <aside class="activity-feed" id="activity-feed" role="tabpanel" aria-labelledby="side-tab-feed"></aside>
+          <!-- 观察席：输光但仍在房间里的牌手，等低保 / 等轮末回桌 -->
+          <aside class="observer-rail" id="observer-rail" role="tabpanel" aria-labelledby="side-tab-observers" style="display:none"></aside>
+        </div>
       </div>
       <div class="action-dock" id="action-dock"></div>
       <aside class="hand-slot" id="hand-slot" role="button" tabindex="0" aria-label="手持出牌区">
@@ -1495,6 +1542,15 @@ export class BoardGameHUD {
         if (isOpen) this.container.removeAttribute(which);
         else this.container.setAttribute(which, 'open');
         this.syncShellAria();
+      });
+    });
+
+    this.container.querySelectorAll<HTMLElement>('[data-side-tab-target]').forEach(button => {
+      button.addEventListener('click', () => {
+        const tab = button.dataset.sideTabTarget;
+        if (tab !== 'ranking' && tab !== 'feed' && tab !== 'observers') return;
+        this.sideTab = tab;
+        this.applySideTab();
       });
     });
 
@@ -2442,22 +2498,38 @@ export class BoardGameHUD {
   }
 
   /**
-   * Lay the player rail out like a hand of cards.
+   * Player rail: a plain content-sized stack in drawers, an optional fisheye on
+   * desktop.
    *
-   * Ten players do not fit a fixed column, so the rail reuses the dock's fisheye
-   * (`handLayout`, unit-agnostic — here the "row" runs down the screen): every
-   * card keeps its full height and the pitch compresses around the pointer, so
-   * the rail reads as an overlapping stack and the card under the cursor opens
-   * up. Falls back to a plain stack when there are only a few players.
+   * Drawers never use the fisheye: the cards are normal flow items with
+   * `height:auto`, so a long trait ladder cannot be sliced by a fixed 104px
+   * height. Desktop keeps the compressed hand-of-cards layout only when the
+   * roster is too big to stack (more than four players), and it measures each
+   * card's natural height first so the fisheye never clips one either.
    */
   private layoutPlayerRail(rail: HTMLElement): void {
     const cards = Array.from(rail.querySelectorAll<HTMLElement>('.pc'));
     const count = cards.length;
     if (count === 0) return;
+
+    const desktop = window.matchMedia('(min-width: 1200px)').matches;
+    if (!desktop || count <= 4) {
+      rail.dataset.layout = 'list';
+      for (const card of cards) {
+        card.style.removeProperty('height');
+        card.style.removeProperty('transform');
+        card.style.removeProperty('z-index');
+      }
+      return;
+    }
+
     const height = rail.clientHeight;
     if (height <= 0) return;
 
-    const cardHeight = Math.max(72, Math.min(PLAYER_CARD_HEIGHT, Math.round(height / 2)));
+    // Natural content height: clear the fisheye height before measuring.
+    for (const card of cards) card.style.removeProperty('height');
+    const naturalHeight = Math.max(...cards.map(card => card.scrollHeight));
+    const cardHeight = Math.max(PLAYER_CARD_HEIGHT, naturalHeight);
     const activeIndex = Math.max(
       0,
       cards.findIndex(card => card.classList.contains('active'))
@@ -2471,14 +2543,15 @@ export class BoardGameHUD {
       containerWidth: height,
       cardWidth: cardHeight,
       focusX: count > 1 ? focusIndex / (count - 1) : 0.5,
-      // Three players do not need a fisheye; the compression only earns its keep
-      // once the rail would otherwise overflow.
-      focusStrength: count > 3 ? 1 : 0.3,
+      // Only rosters above four reach this branch, so the compression earns its
+      // keep; a plain stack would overflow the rail.
+      focusStrength: 1,
       hoverIndex: focusIndex,
       lockCardWidth: true,
       maxPitchRatio: 1
     });
 
+    rail.dataset.layout = 'fisheye';
     for (const entry of layout.cards) {
       const card = cards[entry.index];
       if (!card) continue;
