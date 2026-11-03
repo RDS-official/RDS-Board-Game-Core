@@ -10,3 +10,11 @@
 - **模型 / 放置模式**：手持区仍读取 `snapshot.actions`；此时 dock 的 fan 已被放置面板替换，因此可能暂时没有 `data-held` 的 fan 卡片可高亮。手持区仍可查看动作与参数，执行仍走原有 `runAction` 路径。
 - **移动端**：视口 < 1200px 时隐藏手持区，dock 保持原有平板 / 手机底部抽屉行为。
 - **冷却动作**：没有单独实现一套冷却计时；手持区沿用 dock 的 `runAction` / 动作快照语义，避免两套倒计时口径。
+
+## 网络房间立柱状态（2026-11 诊断）
+
+- **现象**：中心模式双人房间里，座位立柱/定位标的颜色与旋转箭头不跟随真实行动者；同一场景单机正常。
+- **投影核验（非根因）**：用 `ServerMatch` 直连复现，`snapshotFor()` 与 `deltaFor()` 都包含 `globalVars.hand.lastActions`、`activePlayerId`，并通过 `applyPatch()` 正确到达来宾快照；`NetSession` 的 `snapshot.board` 字段同样包含它们。没有发现需要补字段或改协议的投影缺口。
+- **根因（前端）**：`main.bindSession` 只按 `snapshot.revision` 判断是否重绘。联机来宾先拿到 revision `0` 的占位投影，服务端首个全量投影也可能仍是 revision `0`，于是被 `revision === lastRevision` 跳过，3D 场景一直画着占位状态，立柱颜色/箭头自然停在旧值。
+- **修复**：网络会话的首个投影强制应用；同时把 `viewer + board.seq + actionLog.length` 纳入投影签名，revision 相同但投影身份变化时也会重绘。未改 GameState、投影或 wire protocol。
+- **牌堆拖动**：位置只保存在 `BoardGameScene.deckVisualOffsets`（渲染层本地 Map），按桌面木沿裁剪，不写回 GameState；射线命中的 `ZONE` 拖动不会触发 click/detail。
