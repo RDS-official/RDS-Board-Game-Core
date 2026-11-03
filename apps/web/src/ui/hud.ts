@@ -65,7 +65,7 @@ type SideTab = 'ranking' | 'feed';
 const SEAT_PEEK_OWNER = 'hud.seat';
 
 /** Hand slot: hold-to-confirm timing, drag cancel distance and cycle pitch. */
-const HAND_LONG_PRESS_MS = 1500;
+const HAND_LONG_PRESS_MS = 500;
 const HAND_PRESS_CANCEL_PX = 14;
 const HAND_DRAG_STEP_PX = 40;
 /** Wheel input is accumulated so a high-resolution trackpad does not skip cards. */
