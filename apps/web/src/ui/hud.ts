@@ -74,6 +74,8 @@ const HAND_WHEEL_STEP_PX = 24;
 interface HandPressState {
   pointerId: number;
   actionId: string;
+  /** Slot that owns the press: the desktop/tablet plaque or the phone dock card. */
+  slot: HTMLElement;
   startX: number;
   startY: number;
   /** Horizontal or vertical drag axis, locked after the first few pixels. */
@@ -179,12 +181,14 @@ export class BoardGameHUD {
   private selectedFloor = 'ALL';
   /** Phone shell: whether the action drawer is expanded. */
   private dockOpen = false;
+  /** Coalesced relayout of the fisheye after the drawer changes size. */
+  private dockRelayoutFrame = 0;
+  /** Re-runs the fan layout when the dock's width changes (drawer open, tier swap). */
+  private dockResizeObserver?: ResizeObserver;
   private shellMedia?: MediaQueryList;
   /** Action currently held by the hand slot, mirrored on its fan card. */
   private heldActionId: string | null = null;
   private heldIndex = 0;
-  /** Key of the card painted in the hand stage, to avoid restarting its animation. */
-  private handRenderedKey = '';
   private handPress: HandPressState | null = null;
   private handSuppressClick = false;
   private handWheelDelta = 0;
@@ -301,8 +305,16 @@ export class BoardGameHUD {
 
     this.dockTraceOverlay?.remove();
     this.dockTraceOverlay = null;
+    this.dockResizeObserver?.disconnect();
+    this.dockResizeObserver = undefined;
+    if (this.dockRelayoutFrame) {
+      cancelAnimationFrame(this.dockRelayoutFrame);
+      this.dockRelayoutFrame = 0;
+    }
     const hand = this.container.querySelector('#hand-slot') as HTMLElement | null;
     if (hand) this.cancelHandPress(hand);
+    const dockHeld = this.container.querySelector('[data-dock-held]') as HTMLElement | null;
+    if (dockHeld) this.cancelHandPress(dockHeld);
   }
 
   /** 观察席倒计时的本地刷新：只做减法，不动游戏状态。 */
@@ -802,6 +814,7 @@ export class BoardGameHUD {
 
     const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
     if (rail) this.layoutPlayerRail(rail);
+    this.relayoutDock();
   }
 
   /**
@@ -2642,14 +2655,18 @@ export class BoardGameHUD {
   private resetHandSlot(): void {
     const slot = this.container.querySelector('#hand-slot') as HTMLElement | null;
     if (slot) this.cancelHandPress(slot);
+    const dockHeld = this.container.querySelector('[data-dock-held]') as HTMLElement | null;
+    if (dockHeld) this.cancelHandPress(dockHeld);
     this.heldActionId = null;
     this.heldIndex = 0;
-    this.handRenderedKey = '';
     this.handWheelDelta = 0;
     this.handSuppressClick = false;
-    const stage = this.container.querySelector('.hs-stage') as HTMLElement | null;
-    if (stage) stage.innerHTML = '';
+    this.container.querySelectorAll<HTMLElement>('.hs-stage').forEach(stage => {
+      stage.innerHTML = '';
+      delete stage.dataset.handKey;
+    });
     slot?.classList.remove('pressing');
+    dockHeld?.classList.remove('pressing');
   }
 
   private currentHeldAction(): UiAction | null {
@@ -2662,33 +2679,63 @@ export class BoardGameHUD {
 
   private renderHandSlot(snapshot: GameSnapshot, direction: -1 | 0 | 1 = 0): void {
     const slot = this.container.querySelector('#hand-slot') as HTMLElement | null;
-    const stage = slot?.querySelector('.hs-stage') as HTMLElement | null;
-    if (!slot || !stage) return;
+    const dockHeld = this.container.querySelector('[data-dock-held]') as HTMLElement | null;
+    const slotStage = slot?.querySelector('.hs-stage') as HTMLElement | null;
+    const dockStage = dockHeld?.querySelector('.hs-stage') as HTMLElement | null;
+    if (!slotStage && !dockStage) return;
 
     const action = snapshot.actions[this.heldIndex] ?? null;
     const total = snapshot.actions.length;
     this.heldActionId = action?.id ?? null;
-    slot.dataset.empty = action ? '0' : '1';
-    slot.dataset.tone = action?.tone ?? 'neutral';
-    slot.setAttribute(
-      'aria-label',
-      action
-        ? `手持出牌区：${action.label}，第 ${this.heldIndex + 1} / ${total} 个。点击查看，长按执行，左右方向键切换。`
-        : '手持出牌区：无可执行动作'
-    );
+
     // A snapshot may replace the list mid-press; never dispatch the stale card.
     if (this.handPress && action?.id !== this.handPress.actionId) {
-      this.cancelHandPress(slot);
+      this.cancelHandPress(this.handPress.slot);
       this.suppressHandClick();
     }
 
+    if (slot && slotStage) this.paintHandCard(slot, slotStage, action, total, direction, false);
+    if (dockHeld && dockStage) this.paintHandCard(dockHeld, dockStage, action, total, direction, true);
+    this.syncHeldHighlight();
+
+    const live = this.container.querySelector('[data-held-live]') as HTMLElement | null;
+    if (live) {
+      const text = action
+        ? `当前动作：${action.label}，第 ${this.heldIndex + 1} / ${total} 个`
+        : '当前无可执行动作';
+      if (live.textContent !== text) live.textContent = text;
+    }
+  }
+
+  /**
+   * Paint one held-action surface. The desktop/tablet plaque and the phone
+   * dock's first card share the same data and gesture handling; only their CSS
+   * layouts differ.
+   */
+  private paintHandCard(
+    target: HTMLElement,
+    stage: HTMLElement,
+    action: UiAction | null,
+    total: number,
+    direction: -1 | 0 | 1,
+    dock: boolean
+  ): void {
+    target.dataset.empty = action ? '0' : '1';
+    target.dataset.tone = action?.tone ?? 'neutral';
+    const where = dock ? '当前选中动作' : '手持出牌区';
+    target.setAttribute(
+      'aria-label',
+      action
+        ? `${where}：${action.label}，第 ${this.heldIndex + 1} / ${total} 个。点击查看，长按执行，左右方向键切换。`
+        : `${where}：无可执行动作`
+    );
+
     const key = action?.id ?? '';
-    const content = this.handCardHtml(action, this.heldIndex, total);
+    const content = this.handCardHtml(action, this.heldIndex, total, dock);
     const current = stage.querySelector<HTMLElement>('.hs-card:not(.hs-leaving)');
-    if (current && key === this.handRenderedKey) {
-      current.dataset.tone = slot.dataset.tone;
+    if (current && key === stage.dataset.handKey) {
+      current.dataset.tone = target.dataset.tone;
       current.innerHTML = content;
-      this.syncHeldHighlight();
       return;
     }
 
@@ -2697,7 +2744,7 @@ export class BoardGameHUD {
     });
     const next = document.createElement('div');
     next.className = 'hs-card';
-    next.dataset.tone = slot.dataset.tone;
+    next.dataset.tone = target.dataset.tone;
     next.innerHTML = content;
 
     if (current && direction !== 0 && action) {
@@ -2712,11 +2759,10 @@ export class BoardGameHUD {
       current?.remove();
       stage.append(next);
     }
-    this.handRenderedKey = key;
-    this.syncHeldHighlight();
+    stage.dataset.handKey = key;
   }
 
-  private handCardHtml(action: UiAction | null, index: number, total: number): string {
+  private handCardHtml(action: UiAction | null, index: number, total: number, dock = false): string {
     if (!action) {
       return `
         <span class="hs-empty-ico" aria-hidden="true">◌</span>
@@ -2726,7 +2772,7 @@ export class BoardGameHUD {
     }
     return `
       <div class="hs-top">
-        <span class="hs-kicker">手持出牌</span>
+        <span class="hs-kicker">${dock ? '当前动作' : '手持出牌'}</span>
         <span class="hs-count">${index + 1} / ${total}</span>
       </div>
       <span class="hs-icon" aria-hidden="true">${action.icon}</span>
@@ -2828,6 +2874,7 @@ export class BoardGameHUD {
     const press: HandPressState = {
       pointerId: event.pointerId,
       actionId: action.id,
+      slot,
       startX: event.clientX,
       startY: event.clientY,
       axis: null,
@@ -3110,8 +3157,19 @@ export class BoardGameHUD {
               <span class="m" data-bar="legal"></span>
             </span>
           </div>
+          <div class="dock-held" data-dock-held role="button" tabindex="0" aria-label="当前选中动作">
+            <div class="hs-stage"></div>
+            <div class="dock-held-ring" aria-hidden="true">
+              <svg class="hs-ring" viewBox="0 0 100 100">
+                <circle class="hs-ring-track" cx="50" cy="50" r="47"></circle>
+                <circle class="hs-ring-fill" cx="50" cy="50" r="47" pathLength="100"></circle>
+              </svg>
+              <span class="dhr-label">长按执行</span>
+            </div>
+          </div>
           <div class="dock-actions" data-slot="actions"></div>
         </div>
+        <span class="sr-only" data-held-live aria-live="polite"></span>
       `;
       this.bindDockEvents(dock);
       this.bindPlayerRail();
@@ -3274,15 +3332,41 @@ export class BoardGameHUD {
   }
 
   /**
+   * Coalesce every dock geometry change into one layout pass on the next frame.
+   * Called from the toggle, ResizeObserver, transitionend and shell resize.
+   */
+  private relayoutDock(): void {
+    if (this.dockRelayoutFrame) return;
+    this.dockRelayoutFrame = requestAnimationFrame(() => {
+      this.dockRelayoutFrame = 0;
+      const fan = this.container.querySelector('#action-dock [data-fan]') as HTMLElement | null;
+      if (fan) this.layoutActionFan(fan);
+    });
+  }
+
+  /**
    * Re-position the action cards as a fisheye row.
    *
    * The cards keep their size and the gaps carry the fisheye: `lockCardWidth`
    * plus a low context ratio stacks the far end almost on top of itself, which is
-   * what lets an unbounded number of actions stay inside one row.
+   * what lets an unbounded number of actions stay inside one row. Tablet and
+   * phone dock rows are flow layouts (horizontal scroll), so this pass clears any
+   * desktop inline geometry before returning.
    */
   private layoutActionFan(fan: HTMLElement): void {
     const cards = [...fan.querySelectorAll<HTMLElement>('.act')];
     if (cards.length === 0) return;
+
+    if (!window.matchMedia('(min-width: 1200px) and (min-height: 481px)').matches) {
+      for (const card of cards) {
+        card.style.removeProperty('--fan-x');
+        card.style.removeProperty('--fan-scale');
+        card.style.removeProperty('--fan-lift');
+        card.style.zIndex = '';
+        delete card.dataset.fanLayout;
+      }
+      return;
+    }
 
     const cardWidth = cards[0].offsetWidth || 76;
     if (cardWidth <= 0) return;
@@ -3568,10 +3652,27 @@ export class BoardGameHUD {
       this.fanFocusStrength = 0;
       this.layoutActionFan(fan);
     });
-    window.addEventListener('resize', () => {
-      const fan = dock.querySelector('[data-fan]') as HTMLElement | null;
-      if (fan) this.layoutActionFan(fan);
+    window.addEventListener('resize', () => this.relayoutDock());
+    // The drawer animates its max-height; a resize observer catches every
+    // intermediate width, and transitionend catches the settled state. Both
+    // funnel into the same coalesced rAF so the fan is never measured while a
+    // drawer is half-open (the measured reason all four cards sat at x=1).
+    let lastDockWidth = Math.round(dock.clientWidth);
+    this.dockResizeObserver?.disconnect();
+    this.dockResizeObserver = new ResizeObserver(() => {
+      const width = Math.round(dock.clientWidth);
+      if (width === lastDockWidth) return;
+      lastDockWidth = width;
+      this.relayoutDock();
     });
+    this.dockResizeObserver.observe(dock);
+    dock.addEventListener('transitionend', event => {
+      if (event.target !== dock) return;
+      if (event.propertyName !== 'max-height' && event.propertyName !== 'height') return;
+      this.relayoutDock();
+    });
+    const dockHeld = dock.querySelector('[data-dock-held]') as HTMLElement | null;
+    if (dockHeld) this.bindHandSlot(dockHeld);
     dock.addEventListener('click', event => {
       // 冷却角标每 250ms 刷一次：到点自动摘掉 disabled，不需要一次状态同步。
       const target = event.target as HTMLElement | null;
@@ -3586,6 +3687,9 @@ export class BoardGameHUD {
           const label = handle.querySelector('.dh-label');
           if (label) label.textContent = this.dockOpen ? '收起动作' : '展开动作';
         }
+        // The drawer's max-height transition means the row has no usable width
+        // in this frame; lay the cards out once the new box exists.
+        requestAnimationFrame(() => this.relayoutDock());
         return;
       }
 

@@ -143,7 +143,7 @@
     left: calc(4 * 100vw / 7 + 48px);
     bottom: var(--shell-edge);
     display: block;
-    width: clamp(150px, min(11vw, 26vh), 260px);
+    width: clamp(160px, 11vw, 260px);
     aspect-ratio: 3 / 4;
     z-index: 26;
     pointer-events: auto;
@@ -948,4 +948,508 @@
    though the markup marks it hidden. */
 [hidden] {
   display: none !important;
+}
+
+/* ============================================================
+   PR 3 · dock & hand-slot tiers
+   ------------------------------------------------------------
+   Desktop keeps the 1/7 -> 4/7 dock and the portrait 3:4 plaque.
+   Tablet turns the dock into a bottom bar and the plaque into a
+   horizontal 180x120 thumbnail. Phone merges the held card into the
+   expanded drawer as its first (large) card; the rest of the actions
+   sit in a horizontal row underneath.
+   ============================================================ */
+
+/* The phone-only held card is created for every tier but only shown <900px. */
+.dock-held {
+  display: none;
+}
+
+/* The phone/tablet drawer grabber is not part of the desktop dock. */
+.dock-handle {
+  display: none;
+}
+
+/* <1200px action rows are flow layouts, not the desktop fisheye. */
+@media (max-width: 1199px), (max-height: 480px) and (min-width: 600px) {
+  .dock-handle {
+    display: flex;
+  }
+
+  /* A collapsed drawer is just its 72px grabber: hiding the content also
+     stops `scrollHeight > clientHeight` from flagging the dock as clipped. */
+  .app-shell > .action-dock:not([data-dock='open']) > [data-slot],
+  .app-shell > .action-dock:not([data-dock='open']) > .dock-shell {
+    display: none;
+  }
+
+  .app-shell > .action-dock:not([data-dock='open']) {
+    height: calc(72px + env(safe-area-inset-bottom, 0px));
+    min-height: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-shell > .action-dock:not([data-dock='open']) > .dock-handle {
+    height: 100%;
+    min-height: 44px;
+  }
+
+  .dock-actions .dock-fan {
+    position: static;
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-end;
+    gap: 10px;
+    height: auto;
+    min-height: 88px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: thin;
+  }
+
+  .dock-fan .act {
+    position: relative;
+    left: auto;
+    bottom: auto;
+    flex: 0 0 auto;
+    width: 76px;
+    height: 68px;
+    margin: 0;
+    translate: none;
+    transform: none;
+    scroll-snap-align: start;
+  }
+
+  .dock-fan .act:hover,
+  .dock-fan .act:focus-visible {
+    margin: 0;
+    transform: translateY(-6px) scale(1.06);
+    z-index: 40;
+  }
+
+  .dock-fan .act:active {
+    transform: translateY(-3px) scale(1.02);
+  }
+}
+
+/* Below 1200px the hint bar is hover-only (touch cannot use it) and the
+   mission/status strips must stay compact so the action row is never pushed
+   below the drawer's max-height. */
+@media (max-width: 1199px), (max-height: 480px) and (min-width: 600px) {
+  .app-shell > .action-dock .fan-hint {
+    display: none;
+  }
+
+  .app-shell > .action-dock .alert-strip.mission {
+    padding: 3px 10px;
+    gap: 8px;
+  }
+
+  .app-shell > .action-dock .alert-strip.mission .al-ico {
+    width: 22px;
+    height: 22px;
+    flex-basis: 22px;
+    font-size: var(--type-xs);
+  }
+
+  .app-shell > .action-dock .alert-strip.mission .al-body {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .app-shell > .action-dock .alert-strip.mission .al-desc {
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    -webkit-line-clamp: 1;
+  }
+
+  .app-shell > .action-dock .dock-bar {
+    padding: 2px 10px;
+  }
+}
+
+/* The hold ring is a state indicator, not an entrance animation: show it on
+   the same frame as pointerdown (the long press is only 1.5s). */
+.hand-slot.pressing .hs-ring,
+.dock-held.pressing .hs-ring {
+  opacity: 1;
+  transition: none;
+}
+
+/* ---- tablet 900-1199: dock pinned to the bottom, hand-slot right --- */
+@media (min-width: 900px) and (max-width: 1199px) {
+  .app-shell > .action-dock {
+    position: fixed;
+    grid-area: auto;
+    justify-self: auto;
+    align-self: auto;
+    left: 16px;
+    right: calc(16px + 180px + 12px);
+    bottom: 16px;
+    width: auto;
+    max-height: 212px;
+    margin: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    backdrop-filter: blur(24px) saturate(140%);
+    box-shadow: var(--shadow-3);
+    z-index: 40;
+  }
+
+  .app-shell > .hand-slot {
+    display: block;
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    left: auto;
+    width: 180px;
+    height: 120px;
+    aspect-ratio: auto;
+    z-index: 41;
+    pointer-events: auto;
+    outline: none;
+    touch-action: none;
+    user-select: none;
+    perspective: 720px;
+  }
+
+  .app-shell > .hand-slot .hs-card {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 4px 10px;
+    padding: 9px 12px;
+    text-align: left;
+  }
+
+  .app-shell > .hand-slot .hs-top {
+    position: static;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    color: var(--text-tertiary);
+  }
+
+  .app-shell > .hand-slot .hs-icon {
+    grid-column: 1;
+    grid-row: 2;
+    width: 40px;
+    font-size: 2rem;
+  }
+
+  .app-shell > .hand-slot .hs-label {
+    grid-column: 2;
+    grid-row: 2;
+    font-family: var(--font-display);
+    font-size: var(--type-md);
+    line-height: 1.25;
+    text-align: left;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+
+  .app-shell > .hand-slot .hs-hint,
+  .app-shell > .hand-slot .hs-foot {
+    display: none;
+  }
+
+  .app-shell > .hand-slot .hs-ring {
+    width: 138px;
+    height: 138px;
+    aspect-ratio: auto;
+  }
+
+  .app-shell > .hand-slot[data-empty='1'] .hs-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+  }
+}
+
+/* ---- phone <900 (landscape phones included by the height clause) --- */
+@media (max-width: 899px), (max-height: 480px) and (min-width: 600px) {
+  .app-shell > .action-dock {
+    position: fixed;
+    grid-area: auto;
+    justify-self: auto;
+    align-self: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    max-height: calc(min(46vh, 340px) + env(safe-area-inset-bottom, 0px));
+    margin: 0;
+    padding-left: max(8px, env(safe-area-inset-left, 0px));
+    padding-right: max(8px, env(safe-area-inset-right, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border: 1px solid var(--border-subtle);
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    background: var(--surface-panel);
+    backdrop-filter: blur(24px) saturate(140%);
+    box-shadow: var(--shadow-3);
+    z-index: 50;
+    transition: max-height 180ms var(--ease-standard);
+  }
+
+  .app-shell > .action-dock:not([data-dock='open']) {
+    max-height: calc(72px + env(safe-area-inset-bottom, 0px));
+    overflow: hidden;
+  }
+
+  .app-shell > .action-dock[data-dock='open'] {
+    max-height: calc(min(46vh, 340px) + env(safe-area-inset-bottom, 0px));
+  }
+
+  .app-shell > .hand-slot {
+    display: none;
+  }
+
+  .app-shell > .action-dock .dock-bar {
+    display: none;
+    padding: 4px 12px;
+  }
+
+  .app-shell > .action-dock .dock-actions .dock-fan {
+    min-height: 78px;
+    padding: 5px 8px;
+    gap: 8px;
+  }
+
+  .dock-held {
+    display: none;
+    position: relative;
+    align-items: center;
+    gap: 10px;
+    min-height: 68px;
+    margin: 5px 8px 0;
+    padding: 5px 8px 5px 10px;
+    border: 1px solid var(--border-accent-soft);
+    border-radius: var(--radius-md);
+    background: radial-gradient(120% 86% at 50% 0%, var(--surface-accent-wash), transparent 62%),
+      var(--gradient-chrome);
+    color: var(--text-primary);
+    cursor: pointer;
+    touch-action: none;
+    user-select: none;
+    outline: none;
+  }
+
+  .app-shell > .action-dock[data-dock='open'] .dock-held {
+    display: flex;
+  }
+
+  .dock-held:focus-visible {
+    outline: 2px solid var(--accent-bright);
+    outline-offset: 2px;
+  }
+
+  .dock-held .hs-stage {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 56px;
+  }
+
+  .dock-held .hs-card {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    text-align: left;
+  }
+
+  .dock-held .hs-top {
+    position: static;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    color: var(--text-tertiary);
+    font-size: var(--type-xs);
+    letter-spacing: 0.04em;
+  }
+
+  .dock-held .hs-icon {
+    flex: 0 0 auto;
+    width: 34px;
+    font-size: 1.75rem;
+  }
+
+  .dock-held .hs-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--font-display);
+    font-size: var(--type-md);
+    font-weight: var(--weight-bold);
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .dock-held .hs-hint,
+  .dock-held .hs-foot {
+    display: none;
+  }
+
+  .dock-held .hs-empty-ico {
+    font-size: var(--type-xl);
+  }
+
+  .dock-held .hs-empty-label {
+    font-size: var(--type-sm);
+  }
+
+  .dock-held .hs-empty-hint {
+    display: none;
+  }
+
+  .dock-held-ring {
+    position: relative;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    width: 58px;
+    height: 58px;
+    color: var(--text-tertiary);
+  }
+
+  .dock-held-ring .dhr-label {
+    max-width: 52px;
+    font-size: var(--type-xs);
+    line-height: 1.15;
+    text-align: center;
+    color: var(--text-tertiary);
+  }
+
+  .dock-held .hs-ring {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+    opacity: 0.45;
+    transform: none;
+    pointer-events: none;
+  }
+
+  .dock-held.pressing .hs-ring {
+    opacity: 1;
+  }
+
+  .dock-held.pressing .dhr-label {
+    color: var(--accent-bright);
+  }
+
+  .dock-held .hs-ring * {
+    fill: none;
+    stroke-width: 2.6;
+  }
+
+  .dock-held .hs-ring-track {
+    stroke: var(--border-strong);
+    opacity: 0.45;
+  }
+
+  .dock-held .hs-ring-fill {
+    stroke: var(--accent);
+    stroke-linecap: round;
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+    filter: drop-shadow(0 0 5px var(--accent));
+  }
+
+  .dock-held[data-tone='danger'] .hs-ring-fill {
+    stroke: var(--status-danger);
+    filter: drop-shadow(0 0 5px var(--status-danger));
+  }
+}
+
+/* Compact phones: four cards must fit one row without clipping at 320px. */
+@media (max-width: 599px) {
+  .app-shell > .action-dock .dock-actions .dock-fan {
+    gap: 6px;
+    padding: 5px 6px;
+  }
+
+  .app-shell > .action-dock .dock-fan .act {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 56px;
+    max-width: 76px;
+  }
+}
+
+/* Landscape phones: keep the centred 520px drawer from PR 1 and drop the
+   chrome that cannot fit inside 46vh. */
+@media (max-height: 480px) and (min-width: 600px) {
+  .app-shell > .action-dock {
+    gap: 2px;
+    grid-area: auto;
+    justify-self: auto;
+    align-self: auto;
+    left: 50%;
+    right: auto;
+    bottom: 8px;
+    width: min(520px, calc(100% - 24px));
+    transform: translateX(-50%);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+  }
+
+  .app-shell > .action-dock .dock-bar,
+  .app-shell > .action-dock .fan-hint,
+  .app-shell > .action-dock .alert-strip.mission {
+    display: none;
+  }
+
+  .app-shell > .action-dock .dock-held {
+    min-height: 50px;
+    margin-top: 2px;
+    padding: 2px 8px;
+  }
+
+  .app-shell > .action-dock .dock-held .hs-stage {
+    height: 42px;
+  }
+
+  .app-shell > .action-dock .dock-held-ring {
+    width: 42px;
+    height: 42px;
+  }
+
+  .app-shell > .action-dock .dock-held-ring .dhr-label {
+    font-size: var(--type-xs);
+  }
+
+  .app-shell > .action-dock .dock-actions .dock-fan {
+    min-height: 60px;
+    padding: 2px 6px;
+  }
+
+  .app-shell > .action-dock .dock-fan .act {
+    height: 56px;
+  }
 }
