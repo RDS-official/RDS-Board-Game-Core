@@ -22,7 +22,13 @@ import { BoardGameAudio } from './audio';
 import { CANVAS_FONT_STACK } from './fonts';
 import { handLayout, handRowSpan } from '../ui/handLayout';
 import { BOARD_ROW_PITCH, boardCardPosition, boardRowFrame, type ViewerBearing } from './boardFacing';
-import { solveHandRowDepth, type ScreenBox } from './handRowDepth';
+import {
+  clampAboveTable,
+  DEALER_LIFT,
+  dealerAreaYaw,
+  dealerBobOffset,
+  shortestAngleDelta
+} from './dealerArea';
 
 export type CameraPreset = 'ISOMETRIC' | 'TOP_DOWN' | 'PLAYER_1' | 'PLAYER_2' | 'SEAT';
 
@@ -38,6 +44,13 @@ export interface ViewportInsets {
   right: number;
   bottom: number;
   top: number;
+  /**
+   * Height of the bottom action dock in CSS pixels, or 0 when no dock is
+   * painted. `bottom` is only sent while the dock is open; the camera-attached
+   * hand needs the persistent desktop dock too, so the HUD publishes its
+   * measured height separately.
+   */
+  dockHeight?: number;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -51,17 +64,14 @@ export interface ViewportInsets {
  */
 const HAND_ROW_SPAN = 9.6;
 /**
- * Preferred distance from the seat centre outwards to the hand row.
+ * Fixed distance from the seat centre outwards to a hand row.
  *
- * This is a *starting* depth, not a fixed one: the HUD paints panels over the
- * bottom of the canvas and how much it covers depends on the viewport, so the
- * row is re-solved against those panels (see `render/handRowDepth.ts`).
+ * The depth is deliberately a constant: the old per-frame "dodge the HUD"
+ * solver was removed (2026-11). The viewer's own hand is now drawn as a
+ * camera-attached overlay group (see `updateCameraAttachedHand`), so nothing in
+ * the render loop moves a hand row to chase a panel.
  */
 const HAND_ROW_DEPTH = 2.0;
-/** Closest the row may come to the table centre before it hits the board. */
-const HAND_ROW_DEPTH_MIN = 0.35;
-/** Furthest the row may go before it hangs off the felt. */
-const HAND_ROW_DEPTH_MAX = 2.6;
 /**
  * Push applied to a plain BOARD anchor before the row is laid out. Poker anchors
  * the board at z = -0.85 precisely so that this offset lands the row on the felt;
@@ -71,6 +81,26 @@ const HAND_ROW_DEPTH_MAX = 2.6;
 const BOARD_ROW_Z_OFFSET = 0.85;
 /** Table height of the hand row. */
 const HAND_ROW_Y = 0.13;
+/**
+ * The viewer's own hand is a screen-space overlay: one group placed in front of
+ * the camera, sized in world units at that distance. The numbers below are the
+ * only knobs; the group position is derived from the live camera each frame.
+ */
+const OWN_HAND_DISTANCE = 7;
+/** Displayed width of one own-hand card at distance `OWN_HAND_DISTANCE`. */
+const OWN_HAND_CARD_WIDTH = 0.62;
+/** Card aspect (mesh width 1.12 → height 1.68). */
+const OWN_HAND_CARD_HEIGHT = OWN_HAND_CARD_WIDTH * 1.5;
+/** Maximum strip the own-hand fan may occupy, in world units at that distance. */
+const OWN_HAND_MAX_SPAN = 4.6;
+/** Space between the hand's bottom edge and the dock top. */
+const OWN_HAND_DOCK_GAP_PX = 14;
+/** The row centre never leaves the lower half of the viewport. */
+const OWN_HAND_MIN_CENTER = 0.56;
+/** ...and never floats up towards the middle of the screen either. */
+const OWN_HAND_MAX_CENTER = 0.74;
+/** Drag clearance above the first surface under the card. */
+const CARD_DRAG_LIFT = 0.35;
 /**
  * Tabletop card faces are 1.5× their previous printed size.
  *
@@ -103,17 +133,16 @@ interface HandRow {
   ids: string[];
   /**
    * The seat this row belongs to and the direction leading away from the table.
-   * Kept so the row's depth can be re-solved when the HUD's reserved area
-   * changes (a resize, the dock opening, the hand slot appearing), without
-   * rebuilding the meshes.
+   * Kept as stable metadata even for the viewer's camera-attached row, so the
+   * row's logical anchor never depends on where the camera happens to be.
    */
   seatX: number;
   seatZ: number;
   outX: number;
   outZ: number;
-  /** Current distance from the seat centre out to the row, in world units. */
+  /** Fixed outward distance from the seat centre. */
   depth: number;
-  /** Row centre in world XZ, derived from the seat and `depth`. */
+  /** Stable seat-frame anchor, independent of viewport/camera. */
   originX: number;
   originZ: number;
   axisX: number;
@@ -121,6 +150,8 @@ interface HandRow {
   facing: number;
   /** Width of the strip this hand is laid out in (see `handRowSpan`). */
   span: number;
+  /** `true` for the viewer's own hand: meshes live in `ownHandGroup`. */
+  cameraAttached: boolean;
   /** Eased fisheye state: pointer position along the row (0..1) + strength. */
   focus: { x: number; strength: number };
   /** Where `focus` is heading; the pointer sets it, the loop eases towards it. */
@@ -430,6 +461,35 @@ export class BoardGameScene {
   private boardObjectsGroup = new THREE.Group();
   private dragTargetGroup = new THREE.Group();
   /**
+   * The viewer's own hand, drawn as a camera-attached overlay group. Its cards
+   * are laid out in the group's local XY plane; the group itself is positioned
+   * in front of the camera and shares its quaternion, so the fan always faces
+   * the screen centre and follows every pan/tilt without a world-space race.
+   */
+  private ownHandGroup = new THREE.Group();
+  /** Last smoothed camera forward used by the attached hand. */
+  private ownHandForward = new THREE.Vector3(0, 0, -1);
+  private ownHandQuaternion = new THREE.Quaternion();
+  private ownHandReady = false;
+  /**
+   * The shared dealer area (community row + draw pile). Its pivot is the table
+   * centre; only yaw changes, so the group turns to the camera without sliding
+   * off the table. Cards float inside it.
+   */
+  private dealerAreaGroup = new THREE.Group();
+  private dealerAreaActive = false;
+  private dealerAreaCardIds = new Set<string>();
+  private dealerAreaFloatItems: { object: THREE.Object3D; baseY: number; phase: number }[] = [];
+  private dealerAreaHovered = false;
+  private dealerAreaLiftUntil = 0;
+  /** Restore record for the card currently lifted out of the table by a drag. */
+  private draggedVisual?: {
+    mesh: THREE.Mesh;
+    renderOrder: number;
+    materials: THREE.Material[];
+    depthTests: boolean[];
+  };
+  /**
    * Poker effect layer: chip flights, floating amounts and the cards that are
    * still travelling. It survives the per-sync rebuild of `boardObjectsGroup`
    * only for the duration of one animation and is emptied at the start of every
@@ -619,6 +679,8 @@ export class BoardGameScene {
     const table = GameTableBuilder.createTable();
     this.scene.add(table);
     this.scene.add(this.boardObjectsGroup);
+    this.scene.add(this.ownHandGroup);
+    this.scene.add(this.dealerAreaGroup);
     this.scene.add(this.dragTargetGroup);
     this.scene.add(this.pokerFxGroup);
 
@@ -729,6 +791,10 @@ export class BoardGameScene {
   public onInteractiveHover(cb: (data: InteractiveObjectData | null) => void): void {
     this.raycaster.onHover(data => {
       this.hoveredEntityId = data?.type === 'ENTITY' ? data.id : undefined;
+      this.dealerAreaHovered =
+        !!data &&
+        ((data.type === 'ENTITY' && this.dealerAreaCardIds.has(data.id)) ||
+          data.id === 'deck:zone_deck');
       if (this.lastState) this.refreshLabels(this.lastState);
       cb(data);
     });
@@ -756,12 +822,16 @@ export class BoardGameScene {
         const offset = this.cardVisualOffsets.get(entityId) ?? { dx: 0, dz: 0 };
         this.draggedEntityId = entityId;
         const surfaceY = this.surfaceYAt(mesh.position.x, mesh.position.z, entityId);
-        this.draggedHeldY = surfaceY + 0.45;
+        this.draggedHeldY = surfaceY + CARD_DRAG_LIFT;
         this.draggedEntityOrigin = {
           position: [mesh.position.x, mesh.position.y, mesh.position.z],
           quaternion: mesh.quaternion.clone(),
           offset: { ...offset }
         };
+        this.raiseDraggedCard(mesh);
+        // Lift immediately: the drag probe (and the player) should never see the
+        // enlarged 1.5× card slice through the felt on the first moved frame.
+        if (mesh.position.y < this.draggedHeldY) mesh.position.y = this.draggedHeldY;
       }
       cb(entityId);
     });
@@ -775,6 +845,7 @@ export class BoardGameScene {
         const mesh = this.entityMeshes.get(this.draggedEntityId);
         if (mesh && this.draggedEntityOrigin) mesh.quaternion.copy(this.draggedEntityOrigin.quaternion);
       }
+      this.restoreDraggedCard();
       cb();
       this.draggedEntityId = undefined;
       this.draggedEntityOrigin = undefined;
@@ -783,7 +854,47 @@ export class BoardGameScene {
     });
   }
 
-  /** Show non-authoritative target rings while dragging an entity. */
+  /**
+   * Lift a dragged card above its surface and force it to draw over everything.
+   *
+   * The card is 1.5× larger than before, so a flat drag at table height either
+   * clips the felt or disappears behind a neighbour. Both the material and the
+   * render order are restored the moment the pointer is released.
+   */
+  private raiseDraggedCard(mesh: THREE.Object3D): void {
+    const materials: THREE.Material[] = [];
+    const depthTests: boolean[] = [];
+    mesh.traverse(child => {
+      if (!(child as THREE.Mesh).isMesh) return;
+      const material = (child as THREE.Mesh).material;
+      for (const entry of Array.isArray(material) ? material : [material]) {
+        if (!entry || materials.includes(entry)) continue;
+        materials.push(entry);
+        depthTests.push(entry.depthTest);
+        entry.depthTest = false;
+      }
+    });
+    this.draggedVisual = {
+      mesh: mesh as THREE.Mesh,
+      renderOrder: mesh.renderOrder,
+      materials,
+      depthTests
+    };
+    mesh.renderOrder = 10000;
+  }
+
+  /** Put a dragged card's materials/render order back exactly as they were. */
+  private restoreDraggedCard(): void {
+    const visual = this.draggedVisual;
+    if (!visual) return;
+    for (let i = 0; i < visual.materials.length; i += 1) {
+      visual.materials[i].depthTest = visual.depthTests[i];
+    }
+    visual.mesh.renderOrder = visual.renderOrder;
+    this.draggedVisual = undefined;
+  }
+
+
   public setDropTargets(nodeIds: string[]): void {
     this.clearDropTargets();
     const unique = new Set(nodeIds);
@@ -828,14 +939,35 @@ export class BoardGameScene {
     const old = this.cardVisualOffsets.get(entityId) ?? { dx: 0, dz: 0 };
     const baseX = origin ? origin.position[0] - origin.offset.dx : mesh.position.x - old.dx;
     const baseZ = origin ? origin.position[2] - origin.offset.dz : mesh.position.z - old.dz;
-    const dx = point[0] - baseX;
-    const dz = point[2] - baseZ;
+    const local = this.pointInParentSpace(mesh.parent, point);
+    const dx = local.x - baseX;
+    const dz = local.z - baseZ;
     this.cardVisualOffsets.set(entityId, { dx, dz });
     mesh.position.x = baseX + dx;
     mesh.position.z = baseZ + dz;
     this.settleCard(entityId);
     if (this.lastState) this.refreshLabels(this.lastState);
     return true;
+  }
+
+  /**
+   * Convert a world-space table point into the local space of `parent`.
+   *
+   * Ordinary board cards live directly under the identity-space board group,
+   * so this is a no-op. Community cards live in the rotated dealer group and
+   * dragged deck piles in the same group: assigning a world coordinate to their
+   * local position would make the card jump when the group turns.
+   */
+  private pointInParentSpace(
+    parent: THREE.Object3D | null,
+    point: [number, number, number]
+  ): THREE.Vector3 {
+    const local = new THREE.Vector3(point[0], point[1], point[2]);
+    if (parent && parent !== this.scene && parent !== this.boardObjectsGroup) {
+      parent.updateWorldMatrix(true, false);
+      parent.worldToLocal(local);
+    }
+    return local;
   }
 
   private screenToTable(clientX: number, clientY: number): [number, number, number] | null {
@@ -873,11 +1005,12 @@ export class BoardGameScene {
       -this.tableBounds.rz + margin,
       this.tableBounds.rz - margin
     );
-    pile.group.position.x = x;
-    pile.group.position.z = z;
+    const local = this.pointInParentSpace(pile.group.parent, [x, 0, z]);
+    pile.group.position.x = local.x;
+    pile.group.position.z = local.z;
     // Store relative to the logical anchor so a later state sync can place the
     // rebuilt group at the same visual point without knowing pointer history.
-    this.deckVisualOffsets.set(zoneId, { dx: x - pile.baseX, dz: z - pile.baseZ });
+    this.deckVisualOffsets.set(zoneId, { dx: local.x - pile.baseX, dz: local.z - pile.baseZ });
   }
 
   private followCardDrag(entityId: string, clientX: number, clientY: number): void {
@@ -897,10 +1030,11 @@ export class BoardGameScene {
       mesh.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(localX, normal, fixedZ));
     }
     this.cardSettles.delete(entityId);
-    mesh.position.x = point[0];
-    mesh.position.z = point[2];
+    const local = this.pointInParentSpace(mesh.parent, point);
+    mesh.position.x = local.x;
+    mesh.position.z = local.z;
     const surfaceY = this.surfaceYAt(point[0], point[2], entityId);
-    this.draggedHeldY = surfaceY + 0.45;
+    this.draggedHeldY = surfaceY + CARD_DRAG_LIFT;
   }
 
   /** Highest mesh top under an x/z point, excluding specified entity/entities. */
@@ -924,7 +1058,10 @@ export class BoardGameScene {
     // matrixWorld directly, so refresh it before querying the surface or a
     // freshly discarded card lands on the table height and clips the room tile.
     this.scene.updateMatrixWorld(true);
-    const hits = BoardGameScene._scratchRaycaster.intersectObjects(this.boardObjectsGroup.children, true);
+    const hits = BoardGameScene._scratchRaycaster.intersectObjects(
+      [...this.boardObjectsGroup.children, ...this.dealerAreaGroup.children],
+      true
+    );
 
     const hit = hits.find(entry => {
       if (!(entry.object as THREE.Mesh).isMesh) return false;
@@ -1080,7 +1217,7 @@ export class BoardGameScene {
       const maxSurface = Math.max(
         ...[...bases.values()].map(([x, , z]) => this.surfaceYAt(x, z, ids))
       );
-      this.groupHeldY = maxSurface + 0.45;
+      this.groupHeldY = maxSurface + CARD_DRAG_LIFT;
       this.groupDrag = { groupId, startWorld, bases, offsets };
       return;
     }
@@ -1585,6 +1722,7 @@ export class BoardGameScene {
   ): { id: string; mesh: THREE.Object3D }[][] {
     const remaining = new Set(members.map((_, index) => index));
     const clusters: { id: string; mesh: THREE.Object3D }[][] = [];
+    const world = new THREE.Vector3();
     while (remaining.size > 0) {
       const seed = remaining.values().next().value as number;
       remaining.delete(seed);
@@ -1592,10 +1730,12 @@ export class BoardGameScene {
       const queue = [seed];
       while (queue.length > 0) {
         const current = members[queue.shift()!];
+        const currentWorld = current.mesh.getWorldPosition(world).clone();
         for (const index of [...remaining]) {
           const candidate = members[index];
-          const dx = current.mesh.position.x - candidate.mesh.position.x;
-          const dz = current.mesh.position.z - candidate.mesh.position.z;
+          const candidateWorld = candidate.mesh.getWorldPosition(world);
+          const dx = currentWorld.x - candidateWorld.x;
+          const dz = currentWorld.z - candidateWorld.z;
           if (dx * dx + dz * dz <= threshold * threshold) {
             remaining.delete(index);
             cluster.push(candidate);
@@ -1680,6 +1820,10 @@ export class BoardGameScene {
       // cards in one row share a name (two 蚊香蝌蚪 at different tiers, say),
       // so that pass is skipped for this game.
       if (state.gameId === 'splendor') continue;
+      // The viewer's own hand rides the camera; a world-anchored label would
+      // detach from it as soon as the camera moves. Its cards are large and
+      // face-on, so the generic cluster chip is unnecessary.
+      if (this.handRows.get(zone.id)?.cameraAttached) continue;
       const groups = buildCardGroups(zone, state.entities as Record<string, any>);
       for (const group of groups) {
         if (group.count < 2) continue;
@@ -1689,12 +1833,12 @@ export class BoardGameScene {
         if (members.length < 2) continue;
         for (const cluster of this.clusterMeshes(members, 2.4)) {
           if (cluster.length < 2) continue;
+          const world = new THREE.Vector3();
           const center = cluster.reduce<[number, number, number]>(
-            (sum, member) => [
-              sum[0] + member.mesh.position.x,
-              sum[1] + member.mesh.position.y,
-              sum[2] + member.mesh.position.z
-            ],
+            (sum, member) => {
+              member.mesh.getWorldPosition(world);
+              return [sum[0] + world.x, sum[1] + world.y, sum[2] + world.z];
+            },
             [0, 0, 0]
           );
           const first = state.entities[group.topId];
@@ -1728,10 +1872,11 @@ export class BoardGameScene {
       const text =
         entity.components?.cardFace?.title ??
         String(entity.components?.custom?.zh ?? entity.components?.custom?.name ?? entity.id);
+      const world = mesh.getWorldPosition(new THREE.Vector3());
       labels.push({
         id: `card:${id}`,
         text,
-        world: [mesh.position.x, mesh.position.y + 0.4, mesh.position.z],
+        world: [world.x, world.y + 0.4, world.z],
         priority: 95,
         kind: 'card'
       });
@@ -1741,12 +1886,13 @@ export class BoardGameScene {
       const entity = state.entities[this.hoveredEntityId];
       const mesh = this.entityMeshes.get(this.hoveredEntityId);
       if (entity && mesh) {
+        const world = mesh.getWorldPosition(new THREE.Vector3());
         labels.push({
           id: `card:${this.hoveredEntityId}`,
           text:
             entity.components?.cardFace?.title ??
             String(entity.components?.custom?.zh ?? entity.components?.custom?.name ?? entity.id),
-          world: [mesh.position.x, mesh.position.y + 0.4, mesh.position.z],
+          world: [world.x, world.y + 0.4, world.z],
           priority: 96,
           kind: 'card'
         });
@@ -1800,13 +1946,20 @@ export class BoardGameScene {
     this.physics.clear();
     this.highlightedMeshes.clear();
     this.navArrowMeshes = [];
+    this.restoreDraggedCard();
     this.handRows.clear();
     this.deckPiles.clear();
     this.draggedDeckZoneId = undefined;
-    while (this.boardObjectsGroup.children.length > 0) {
-      const child = this.boardObjectsGroup.children[0];
-      this.boardObjectsGroup.remove(child);
-      this.disposeObject3D(child);
+    this.dealerAreaCardIds.clear();
+    this.dealerAreaFloatItems = [];
+    this.dealerAreaHovered = false;
+    this.ownHandReady = false;
+    for (const group of [this.boardObjectsGroup, this.ownHandGroup, this.dealerAreaGroup]) {
+      while (group.children.length > 0) {
+        const child = group.children[0];
+        group.remove(child);
+        this.disposeObject3D(child);
+      }
     }
   }
 
@@ -2728,9 +2881,26 @@ export class BoardGameScene {
     }
   }
 
+  /**
+   * The shared dealer area, when a fixture has one.
+   *
+   * Only a table with both a card `BOARD` row and a `DECK` pile owns this
+   * arrangement (poker today). Catan's board is tiles, Sanguosha has only a
+   * draw pile — neither gets a rotating group. The resolver deliberately asks
+   * about zone capabilities, not `gameId`.
+   */
+  private resolveDealerArea(state: ProjectedGameState): { boardZoneId: string; deckZoneId: string } | null {
+    const board = state.zones.zone_board;
+    const deck = state.zones.zone_deck;
+    if (!board || !deck || board.type !== 'BOARD' || deck.type !== 'DECK') return null;
+    return { boardZoneId: board.id, deckZoneId: deck.id };
+  }
+
   private renderEntities(state: ProjectedGameState): void {
     // ---------- Card zones ----------
     const isPkmnSplendor = state.gameId === 'splendor';
+    const dealerArea = this.resolveDealerArea(state);
+    this.dealerAreaActive = !!dealerArea;
     Object.values(state.zones).forEach(zone => {
       // Pokémon Splendor owns deck / tableau / buried / rare / legend layout
       // below; skipping them here keeps one renderer per zone.
@@ -2743,7 +2913,12 @@ export class BoardGameScene {
       if (items.length === 0) return;
 
       if (zone.type === 'DECK' || zone.type === 'DISCARD') {
-        this.renderCardPile(state, zone, items);
+        this.renderCardPile(
+          state,
+          zone,
+          items,
+          dealerArea && zone.id === dealerArea.deckZoneId ? this.dealerAreaGroup : this.boardObjectsGroup
+        );
         return;
       }
 
@@ -2763,7 +2938,8 @@ export class BoardGameScene {
           zone,
           index,
           items.length,
-          !zone.id.startsWith('zone_room_') || index === items.length - 1
+          !zone.id.startsWith('zone_room_') || index === items.length - 1,
+          dealerArea && zone.id === dealerArea.boardZoneId ? this.dealerAreaGroup : this.boardObjectsGroup
         );
       });
     });
@@ -3408,7 +3584,8 @@ export class BoardGameScene {
   private renderCardPile(
     _state: ProjectedGameState,
     zone: ProjectedGameState['zones'][string],
-    items: (Partial<Entity> & { isMasked?: boolean; id: string })[]
+    items: (Partial<Entity> & { isMasked?: boolean; id: string })[],
+    parent: THREE.Group = this.boardObjectsGroup
   ): void {
     const anchor = zone.anchorPosition ?? [0, 0.06, 0];
     const offset = this.deckVisualOffsets.get(zone.id) ?? { dx: 0, dz: 0 };
@@ -3435,7 +3612,12 @@ export class BoardGameScene {
     // 贴图是 4:1（1024×256），牌面也用 4:1：原来是 5:1，文字被横向拉宽 25%。
     label.scale.set(2.6, 0.65, 1);
     group.add(label);
-    this.boardObjectsGroup.add(group);
+    parent.add(group);
+
+    if (parent === this.dealerAreaGroup) {
+      this.dealerAreaFloatItems.push({ object: group, baseY: group.position.y, phase: 0 });
+      this.dealerAreaCardIds.add(`deck:${zone.id}`);
+    }
 
     // Only draw piles are movable. Discard piles stay mirrored to their zone
     // anchor because their top card is meaningful state, not furniture.
@@ -3855,159 +4037,126 @@ export class BoardGameScene {
   /* Hands around the table                                              */
   /* ------------------------------------------------------------------ */
 
-  /* ------------------------------------------------------------------ */
-  /* Hand row depth vs. the HUD                                          */
-  /* ------------------------------------------------------------------ */
-
-  /** Screen rectangles the shell paints over the canvas (see the HUD). */
-  private reservedBoxes: ScreenBox[] = [];
-
   /**
-   * Tell the renderer which parts of the canvas the HUD is covering.
+   * Width available to the own-hand fan, in world units at its camera distance.
    *
-   * The player's own cards must stay legible, and the dock now owns a variable
-   * slice of the bottom edge (a third of it on desktop, all of it as a drawer
-   * below 1200px), so the safe area is measured by the UI layer and pushed down
-   * here instead of being hard-coded. Cheap and idempotent: rows are re-solved
-   * only when the boxes actually change.
+   * The overlay has no seat to spread along, so it uses the visible viewport
+   * (minus drawer insets) as its budget. Keeping the cards readable on a phone
+   * therefore compresses the fan instead of pushing it off-screen.
    */
-  public setReservedScreenBoxes(boxes: ScreenBox[]): void {
-    const signature = boxes
-      .map(box => `${Math.round(box.x)},${Math.round(box.y)},${Math.round(box.width)},${Math.round(box.height)}`)
-      .join('|');
-    if (signature === this.reservedSignature) return;
-    this.reservedSignature = signature;
-    this.reservedBoxes = boxes;
-    // Every row may need a new depth; re-solve and re-place them in one pass.
-    for (const row of this.handRows.values()) this.refreshHandRowDepth(row);
+  private ownHandSpan(count: number): number {
+    const width = Math.max(1, this.container.clientWidth);
+    const height = Math.max(1, this.container.clientHeight);
+    const visiblePx = Math.max(
+      OWN_HAND_CARD_WIDTH * 4,
+      width - this.viewportInsets.left - this.viewportInsets.right - 32
+    );
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const worldPerPixel = (2 * OWN_HAND_DISTANCE * tanHalf) / height;
+    return handRowSpan(
+      count,
+      Math.min(OWN_HAND_MAX_SPAN, visiblePx * worldPerPixel),
+      OWN_HAND_CARD_WIDTH
+    );
   }
 
-  private reservedSignature = '';
-
-  /**
-   * Project the box a hand row's cards occupy at a given outward depth.
-   *
-   * The row runs along the seat tangent; its cards are one card wide and tall,
-   * so a single box around the strip is enough to decide whether the HUD is
-   * covering it. Returns null when the strip is behind the camera.
-   */
-  private projectHandRowBox(row: HandRow, depth: number): ScreenBox | null {
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    this.camera.updateMatrixWorld();
-    const halfSpan = row.span / 2;
-    const halfDepth = HAND_CARD_WIDTH * 0.8;
-    const centreX = row.seatX + row.outX * depth;
-    const centreZ = row.seatZ + row.outZ * depth;
-    const point = BoardGameScene._scratchPoint;
-
-    let minX = Number.POSITIVE_INFINITY;
-    let minY = Number.POSITIVE_INFINITY;
-    let maxX = Number.NEGATIVE_INFINITY;
-    let maxY = Number.NEGATIVE_INFINITY;
-
-    for (const along of [-halfSpan, halfSpan]) {
-      for (const outward of [-halfDepth, halfDepth]) {
-        point.set(
-          centreX + row.axisX * along + row.outX * outward,
-          HAND_ROW_Y,
-          centreZ + row.axisZ * along + row.outZ * outward
-        );
-        point.applyMatrix4(this.camera.matrixWorldInverse);
-        // At or behind the camera plane: no usable rectangle.
-        if (point.z > -0.2) return null;
-        point.applyMatrix4(this.camera.projectionMatrix);
-        const px = rect.left + (point.x * 0.5 + 0.5) * rect.width;
-        const py = rect.top + (-point.y * 0.5 + 0.5) * rect.height;
-        minX = Math.min(minX, px);
-        maxX = Math.max(maxX, px);
-        minY = Math.min(minY, py);
-        maxY = Math.max(maxY, py);
-      }
+  /** Keep the own-hand fan fitted after a viewport/drawer resize. */
+  private layoutCameraHandRows(): void {
+    for (const row of this.handRows.values()) {
+      if (!row.cameraAttached) continue;
+      row.span = this.ownHandSpan(row.ids.length);
+      this.layoutHandRow(row);
     }
-    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
   }
 
   /**
-   * The outward depth a hand row should sit at, given the HUD's footprint.
+   * Downward offset that puts the attached hand just above the dock.
    *
-   * With nothing reserved this is the historical constant, so a game whose HUD
-   * leaves the felt alone is unchanged. With something reserved the pure solver
-   * walks outward and picks the closest depth whose projection clears it.
+   * The dock height comes from the HUD's measured insets (the persistent
+   * desktop dock does not set `bottom`, hence the separate `dockHeight`), with
+   * the row centre clamped to the lower half of the viewport. The vertical
+   * offset is in camera-space world units at `OWN_HAND_DISTANCE`.
    */
-  private handRowDepth(ownerId: string | undefined, span: number): number {
-    if (this.reservedBoxes.length === 0) return HAND_ROW_DEPTH;
-    const frame = this.lastState ? this.seatFrame(this.lastState, ownerId) : null;
-    if (!frame) return HAND_ROW_DEPTH;
-    const probe: HandRow = {
-      zoneId: '',
-      ids: [],
-      seatX: frame.x,
-      seatZ: frame.z,
-      outX: frame.outX,
-      outZ: frame.outZ,
-      depth: HAND_ROW_DEPTH,
-      originX: frame.x + frame.outX * HAND_ROW_DEPTH,
-      originZ: frame.z + frame.outZ * HAND_ROW_DEPTH,
-      axisX: -frame.outZ,
-      axisZ: frame.outX,
-      facing: frame.facing,
-      span,
-      focus: { x: 0.5, strength: 0 },
-      target: { x: 0.5, strength: 0 }
-    };
-    // 手牌行固定停在基础深度：不再为了躲操作栏而被「推着走」（用户 2026-11 反馈）。
-    // 求解器保留在 render/handRowDepth.ts 里，传空障碍即退化成常量。
-    const { depth } = solveHandRowDepth({
-      current: HAND_ROW_DEPTH,
-      min: HAND_ROW_DEPTH_MIN,
-      max: HAND_ROW_DEPTH_MAX,
-      project: (candidate: number) => this.projectHandRowBox(probe, candidate),
-      obstacles: []
-    });
-    return depth;
+  private ownHandDrop(): number {
+    const height = Math.max(1, this.container.clientHeight);
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const dock = Math.max(0, this.viewportInsets.dockHeight ?? this.viewportInsets.bottom);
+    const halfCard = OWN_HAND_CARD_HEIGHT / (2 * OWN_HAND_DISTANCE * tanHalf);
+    const safeCentre = (height - dock) / height - OWN_HAND_DOCK_GAP_PX / height - halfCard;
+    const centre = THREE.MathUtils.clamp(
+      Math.max(OWN_HAND_MIN_CENTER, safeCentre),
+      OWN_HAND_MIN_CENTER,
+      OWN_HAND_MAX_CENTER
+    );
+    // Screen y fraction → camera-space y at distance D (negative is lower).
+    return -(1 - 2 * centre) * OWN_HAND_DISTANCE * tanHalf;
   }
 
   /**
-   * Re-solve the hand rows whenever the camera has moved.
+   * Place the viewer's hand group in front of the camera.
    *
-   * The depth that clears the HUD depends on where the camera is: at the isometric
-   * framing the row projects near the middle of the felt, and from a seat camera
-   * it projects low and wide — right where the dock sits. Solving only on a
-   * snapshot would freeze the answer computed before the seat tween ran, so the
-   * rows are re-checked whenever the view actually changes. Comparing the camera
-   * matrix is enough and costs nothing when nothing moved.
+   * Position is always derived from the *current* camera position plus a
+   * smoothed view direction: translation follows immediately (no rubber-banding
+   * against the dock), while orbit/tilt is eased at ~0.2/frame so the hand does
+   * not snap when the camera flies to a seat. The group uses the camera's
+   * quaternion, so every card plane is parallel to the screen and the fan is
+   * permanently centred on the frustum apex.
    */
-  private refreshHandDepthsForCamera(): void {
-    if (this.handRows.size === 0 || this.reservedBoxes.length === 0) return;
-    const e = this.camera.matrixWorld.elements;
-    const signature = `${e[12].toFixed(2)},${e[13].toFixed(2)},${e[14].toFixed(2)}`;
-    if (signature === this.handDepthCameraSignature) return;
-    this.handDepthCameraSignature = signature;
-    this.camera.updateMatrixWorld();
-    for (const row of this.handRows.values()) this.refreshHandRowDepth(row);
-  }
-
-  private handDepthCameraSignature = '';
-
-  /** Re-solve one live row's depth and re-place it if the answer moved. */
-  private refreshHandRowDepth(row: HandRow): void {
-    if (this.reservedBoxes.length === 0) {
-      if (row.depth === HAND_ROW_DEPTH) return;
-      row.depth = HAND_ROW_DEPTH;
+  private updateCameraAttachedHand(dt: number): void {
+    if (this.ownHandGroup.children.length === 0) {
+      this.ownHandReady = false;
+      return;
+    }
+    const direction = this.camera.getWorldDirection(BoardGameScene._scratchPoint);
+    direction.normalize();
+    const snap = !this.ownHandReady || this.reduceMotionQuery?.matches === true;
+    if (snap) {
+      this.ownHandForward.copy(direction);
+      this.ownHandQuaternion.copy(this.camera.quaternion);
     } else {
-      const { depth } = solveHandRowDepth({
-        current: HAND_ROW_DEPTH,
-        min: HAND_ROW_DEPTH_MIN,
-        max: HAND_ROW_DEPTH_MAX,
-        project: (candidate: number) => this.projectHandRowBox(row, candidate),
-        obstacles: this.reservedBoxes
-      });
-      if (Math.abs(depth - row.depth) < 1e-4) return;
-      row.depth = depth;
+      const alpha = 1 - Math.exp(-Math.max(0, dt) * 12);
+      this.ownHandForward.lerp(direction, alpha).normalize();
+      this.ownHandQuaternion.slerp(this.camera.quaternion, alpha);
     }
-    row.originX = row.seatX + row.outX * row.depth;
-    row.originZ = row.seatZ + row.outZ * row.depth;
-    this.layoutHandRow(row);
+    this.ownHandReady = true;
+
+    const drop = this.ownHandDrop();
+    this.ownHandGroup.position
+      .copy(this.camera.position)
+      .addScaledVector(this.ownHandForward, OWN_HAND_DISTANCE);
+    this.ownHandGroup.position.y -= drop;
+    this.ownHandGroup.quaternion.copy(this.ownHandQuaternion);
+  }
+
+  /**
+   * Turn + float the dealer area.
+   *
+   * The group pivot is the table centre; only `rotation.y` and a small vertical
+   * lift change, so the area never slides across the felt. Each card bobs on a
+   * 4-second sine (static under `prefers-reduced-motion`), clamped above the
+   * table top. A hovered card or a fresh deal raises the whole group by 5 cm.
+   */
+  private updateDealerArea(dt: number, now: number): void {
+    if (!this.dealerAreaActive) return;
+    const targetYaw = dealerAreaYaw(this.camera.position.x, this.camera.position.z);
+    const delta = shortestAngleDelta(this.dealerAreaGroup.rotation.y, targetYaw);
+    const ease = this.reduceMotionQuery?.matches
+      ? 1
+      : Math.min(1, Math.max(0, dt) * 10);
+    this.dealerAreaGroup.rotation.y += delta * ease;
+
+    const lifted = this.dealerAreaHovered || now < this.dealerAreaLiftUntil;
+    const targetLift = lifted ? DEALER_LIFT : 0;
+    this.dealerAreaGroup.position.y += (targetLift - this.dealerAreaGroup.position.y) * ease;
+
+    const bob = this.reduceMotionQuery?.matches ? 0 : dealerBobOffset(now);
+    const dragged = this.draggedEntityId ? this.entityMeshes.get(this.draggedEntityId) : undefined;
+    for (const item of this.dealerAreaFloatItems) {
+      if (item.object === dragged) continue;
+      const pausedUntil = Number(item.object.userData.dealerFloatPauseUntil ?? 0);
+      if (now < pausedUntil) continue;
+      item.object.position.y = clampAboveTable(item.baseY + bob);
+    }
   }
 
   /**
@@ -4071,18 +4220,21 @@ export class BoardGameScene {
     items: (Partial<Entity> & { isMasked?: boolean; id: string })[]
   ): void {
     const frame = this.seatFrame(state, zone.ownerId);
+    // The reader's own hand is a camera-attached overlay; every other seat's
+    // hand is still a physical row on the felt at the fixed HAND_ROW_DEPTH.
+    const cameraAttached =
+      state.viewerId !== 'GOD' && !!state.viewerId && zone.ownerId === state.viewerId;
     // The row runs along the seat's tangent: +row is the seat's left-hand side,
     // so index order reads left-to-right for the player sitting there.
     const axisX = -frame.outZ;
     const axisZ = frame.outX;
-    const span = handRowSpan(items.length, HAND_ROW_SPAN, HAND_CARD_WIDTH);
-    // The outward depth is re-solved against the HUD's reserved area; this is the
-    // preferred value, not a fixed one. It has to be solved for the width this
-    // hand actually occupies: a two-card row is a fifth of the nominal strip, so
-    // measuring the strip would under-read how much of a *card* is covered.
-    const depth = this.handRowDepth(zone.ownerId, span);
+    const span = cameraAttached
+      ? this.ownHandSpan(items.length)
+      : handRowSpan(items.length, HAND_ROW_SPAN, HAND_CARD_WIDTH);
+    const depth = HAND_ROW_DEPTH;
     const originX = frame.x + frame.outX * depth;
     const originZ = frame.z + frame.outZ * depth;
+    const parent = cameraAttached ? this.ownHandGroup : this.boardObjectsGroup;
 
     // Every card in the hand gets a mesh. There is no count cap any more: the
     // fisheye layout below normalises the whole hand into one strip, so a
@@ -4099,13 +4251,29 @@ export class BoardGameScene {
         null,
         this.lastState?.gameId === 'poker' ? 'playing' : 'plate'
       );
-      mesh.rotation.y = frame.facing;
-      // The deal tween spins a fresh card and must land on the row's bearing,
-      // not on world north; `layoutHandRow` rewrites this every frame anyway.
-      mesh.userData.restYaw = frame.facing;
-      this.boardObjectsGroup.add(mesh);
+      if (cameraAttached) {
+        // A screen-space card starts as a vertical quad: +Y (face) → +Z
+        // (towards the camera), and its printed top (−Z) → +Y (screen up).
+        mesh.rotation.order = 'ZYX';
+        mesh.rotation.set(Math.PI / 2, 0, 0);
+        mesh.userData.restYaw = 0;
+        mesh.castShadow = false;
+        mesh.receiveShadow = false;
+      } else {
+        mesh.rotation.y = frame.facing;
+        // The deal tween spins a fresh card and must land on the row's bearing,
+        // not on world north; `layoutHandRow` rewrites this every frame anyway.
+        mesh.userData.restYaw = frame.facing;
+      }
+      parent.add(mesh);
       this.entityMeshes.set(entity.id, mesh);
-      this.raycaster.registerInteractive(mesh, { type: 'ENTITY', id: entity.id, metadata: face });
+      this.raycaster.registerInteractive(mesh, {
+        type: 'ENTITY',
+        id: entity.id,
+        // A hand is a read-only HUD surface: still clickable for details, but
+        // never a drag prop (the raycaster checks this flag before arming a drag).
+        metadata: { ...face, draggable: false }
+      });
       ids.push(entity.id);
     }
 
@@ -4123,6 +4291,7 @@ export class BoardGameScene {
       axisZ,
       facing: frame.facing,
       span,
+      cameraAttached,
       // Start where the pointer already is, so rebuilding the board does not
       // make the hand re-expand under a stationary cursor.
       focus: { ...this.handPointerTarget },
@@ -4146,10 +4315,11 @@ export class BoardGameScene {
 
     const hoveredId = this.hoveredEntityId;
     const hoverIndex = hoveredId ? row.ids.indexOf(hoveredId) : -1;
+    const cardWidth = row.cameraAttached ? OWN_HAND_CARD_WIDTH : HAND_CARD_WIDTH;
     const layout = handLayout({
       count,
       containerWidth: row.span,
-      cardWidth: HAND_CARD_WIDTH,
+      cardWidth,
       focusX: row.focus.x,
       focusStrength: row.focus.strength,
       hoverIndex: hoverIndex >= 0 ? hoverIndex : null
@@ -4163,7 +4333,8 @@ export class BoardGameScene {
       const mesh = this.entityMeshes.get(id);
       if (!mesh) continue;
       // A card the user is dragging (or that is settling after a drop) owns its
-      // own position; the layout must not fight it.
+      // own position; the layout must not fight it. Own-hand cards are not
+      // draggable, so this only matters for the seat rows.
       if (
         id === this.draggedEntityId ||
         this.cardSettles.has(id) ||
@@ -4173,12 +4344,32 @@ export class BoardGameScene {
       }
 
       const along = card.x - row.span / 2;
+      if (row.cameraAttached) {
+        // Local to `ownHandGroup`: X is screen-right, Y screen-up, +Z towards
+        // the camera. Cards share the plane; renderOrder plus a 1 mm depth
+        // step keeps the fan deterministic at any camera angle.
+        mesh.position.set(
+          along,
+          card.index * HAND_CARD_STACK_STEP + card.lift * 0.03,
+          card.index * 0.001
+        );
+        mesh.scale.setScalar((card.scale * cardWidth) / HAND_CARD_MESH_WIDTH);
+        mesh.rotation.set(
+          Math.PI / 2,
+          0,
+          (card.x / row.span - 0.5) * yawSpread,
+          'ZYX'
+        );
+        mesh.renderOrder = 100 + card.z;
+        continue;
+      }
+
       mesh.position.set(
         row.originX + row.axisX * along,
         HAND_ROW_Y + card.index * HAND_CARD_STACK_STEP + card.lift * HAND_HOVER_LIFT,
         row.originZ + row.axisZ * along
       );
-      mesh.scale.setScalar((card.scale * HAND_CARD_WIDTH) / HAND_CARD_MESH_WIDTH);
+      mesh.scale.setScalar((card.scale * cardWidth) / HAND_CARD_MESH_WIDTH);
       mesh.rotation.y = row.facing + (card.x / row.span - 0.5) * yawSpread;
       // Overlapping cards are coplanar; renderOrder plus the tiny height step
       // keeps the fan stacking stable instead of z-fighting.
@@ -4193,11 +4384,17 @@ export class BoardGameScene {
     along: number,
     rect: DOMRect
   ): { x: number; y: number } | null {
-    const point = BoardGameScene._scratchPoint.set(
-      row.originX + row.axisX * along,
-      HAND_ROW_Y,
-      row.originZ + row.axisZ * along
-    );
+    const point = BoardGameScene._scratchPoint;
+    if (row.cameraAttached) {
+      this.ownHandGroup.updateWorldMatrix(true, false);
+      point.set(along, 0, 0).applyMatrix4(this.ownHandGroup.matrixWorld);
+    } else {
+      point.set(
+        row.originX + row.axisX * along,
+        HAND_ROW_Y,
+        row.originZ + row.axisZ * along
+      );
+    }
     point.applyMatrix4(this.camera.matrixWorldInverse);
     if (point.z > -0.2) return null; // at or behind the camera plane
     point.applyMatrix4(this.camera.projectionMatrix);
@@ -4769,7 +4966,9 @@ export class BoardGameScene {
     if (!previous) return;
 
     const deckAnchor = state.zones.zone_deck?.anchorPosition ?? [-6, 0.06, -2.2];
-    const deckPoint = new THREE.Vector3(deckAnchor[0], deckAnchor[1] + 0.3, deckAnchor[2]);
+    const deckPointLocal = new THREE.Vector3(deckAnchor[0], deckAnchor[1] + 0.3, deckAnchor[2]);
+    this.dealerAreaGroup.updateWorldMatrix(true, false);
+    const deckPointWorld = this.dealerAreaGroup.localToWorld(deckPointLocal.clone());
 
     /* 1. Deal: hole cards that were not in the hand before. */
     const freshCards: { mesh: THREE.Object3D; to: THREE.Vector3 }[] = [];
@@ -4780,13 +4979,18 @@ export class BoardGameScene {
         if (before.includes(id)) continue;
         const mesh = this.entityMeshes.get(id);
         if (!mesh) continue;
+        // The viewer's own hand is a camera-attached overlay; flying a card in
+        // from a world-space deck point would use the wrong coordinate space.
+        // It is laid out immediately instead.
+        if (mesh.parent === this.ownHandGroup) continue;
         freshCards.push({ mesh, to: mesh.position.clone() });
       }
     }
     if (freshCards.length > 0) {
       const stagger = Math.max(90, Math.min(300, 2400 / freshCards.length));
       freshCards.forEach(({ mesh, to }, index) => {
-        const from = deckPoint.clone();
+        const from =
+          mesh.parent === this.dealerAreaGroup ? deckPointLocal.clone() : deckPointWorld.clone();
         mesh.position.copy(from);
         const delay = index * stagger;
         // A card keeps its resting bearing (a hand card faces its owner's seat,
@@ -4812,14 +5016,21 @@ export class BoardGameScene {
       const bigStreet = freshBoard.length >= 3;
       const duration = bigStreet ? 780 : 1700;
       const stagger = bigStreet ? 480 : 0;
+      this.dealerAreaLiftUntil = Math.max(
+        this.dealerAreaLiftUntil,
+        performance.now() + 320 + (freshBoard.length - 1) * stagger + duration + 120
+      );
       freshBoard.forEach((id, index) => {
         const mesh = this.entityMeshes.get(id);
         if (!mesh) return;
         const to = mesh.position.clone();
-        const from = deckPoint.clone();
+        const from =
+          mesh.parent === this.dealerAreaGroup ? deckPointLocal.clone() : deckPointWorld.clone();
         const delay = 320 + index * stagger;
         mesh.position.copy(from);
         mesh.rotation.x = -Math.PI;
+        // The floating bob must not fight the deal arc.
+        mesh.userData.dealerFloatPauseUntil = performance.now() + delay + duration + 80;
         this.animQueue.animateArc(mesh, from, to, 1.4, duration, undefined, delay);
         this.animQueue.animate(
           duration,
@@ -5225,7 +5436,8 @@ export class BoardGameScene {
     zone: ProjectedGameState['zones'][string],
     index: number,
     totalInZone: number,
-    interactive = true
+    interactive = true,
+    parent: THREE.Group = this.boardObjectsGroup
   ): void {
     const face = entity.components?.cardFace || { title: 'Card' };
     const isMasked = !!entity.isMasked;
@@ -5307,15 +5519,15 @@ export class BoardGameScene {
         // used to push the fifth card off to one side. The cards render at hole
         // -card size — half-scale faces turn the pips into unreadable specks.
         //
-        // Orientation: a game that declares `boardFacesViewer` gets the row laid
-        // along the viewer seat's tangent with the card tops pointing away from
-        // that seat, so the seat camera reads the board upright without orbiting.
-        // Everything else (GOD camera, spectator, a game without the capability)
-        // keeps the historical fixed-north row.
+        // Orientation: the shared dealer area turns as one group around the
+        // table centre (see `updateDealerArea`), so its cards keep a local yaw
+        // of 0. A plain board row in another game still uses the legacy
+        // `boardFacesViewer` capability / fixed-north path.
         const shown = Math.min(totalInZone, 5);
         mesh.scale.set(0.62, 0.62, 0.62);
         const displayState = this.lastState;
-        const bearing = displayState ? this.boardViewerBearing(displayState) : null;
+        const grouped = parent === this.dealerAreaGroup;
+        const bearing = grouped ? null : displayState ? this.boardViewerBearing(displayState) : null;
         const row = boardRowFrame({
           count: shown,
           centerX: anchor[0],
@@ -5336,6 +5548,13 @@ export class BoardGameScene {
         // Recorded so the deal/reveal tweens can restore the row's bearing
         // instead of snapping the card back to north mid-animation.
         mesh.userData.restYaw = row.yaw;
+        if (grouped) {
+          // Stable stacking inside the floating group: higher index draws over
+          // its left neighbour, exactly like the fixed felt row did.
+          mesh.renderOrder = 10 + index;
+          this.dealerAreaCardIds.add(entity.id);
+          this.dealerAreaFloatItems.push({ object: mesh, baseY: anchor[1], phase: index * 0.35 });
+        }
       }
     } else if (zone.type === 'HAND' && zone.anchorPosition) {
       const anchor = zone.anchorPosition;
@@ -5349,7 +5568,7 @@ export class BoardGameScene {
     }
 
     this.applyCardVisualOffset(entity.id, mesh);
-    this.boardObjectsGroup.add(mesh);
+    parent.add(mesh);
     this.entityMeshes.set(entity.id, mesh);
     if (interactive) {
       this.raycaster.registerInteractive(mesh, {
@@ -5367,6 +5586,7 @@ export class BoardGameScene {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    this.layoutCameraHandRows();
   }
 
   /**
@@ -5724,7 +5944,8 @@ export class BoardGameScene {
     this.physics.step(dt);
     this.updateFocusLight();
     this.updateHandFocus(dt);
-    this.refreshHandDepthsForCamera();
+    this.updateCameraAttachedHand(dt);
+    this.updateDealerArea(dt, now);
     this.updateCardSettles(now);
     this.updateRoomSettles(now);
     this.updateNavArrows(now);

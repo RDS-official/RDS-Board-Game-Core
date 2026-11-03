@@ -327,7 +327,6 @@ class BoardGameSimulatorApp {
       this.lastPlacementKey = snapshot.placement
         ? `${snapshot.placement.defId}:${snapshot.placement.rotation}`
         : '';
-      this.syncReservedScreenBoxes();
       this.scene.syncState(snapshot.board, snapshot.placement, layoutForGame(this.currentGameId));
       // 每名玩家的默认机位：站在自己的立牌后面看牌桌。上帝视角保持等轴俯视。
       this.applyDefaultView();
@@ -341,7 +340,6 @@ class BoardGameSimulatorApp {
     this.wireKeyboard();
     // The dock swaps between a bottom strip, a left third and a full-width
     // drawer across breakpoints; the hand row has to follow it.
-    window.addEventListener('resize', () => this.syncReservedScreenBoxes());
 
     if (import.meta.env.DEV) {
       (window as unknown as Record<string, unknown>).__boardGameApp = this;
@@ -588,8 +586,7 @@ class BoardGameSimulatorApp {
         // The dock's footprint changes with the game, the viewer and the
         // viewport, and it decides how far out the player's own cards can sit
         // without being covered. Measured from the live DOM, not a breakpoint.
-        this.syncReservedScreenBoxes();
-        this.scene.syncState(snapshot.board, snapshot.placement, layoutForGame(this.currentGameId));
+          this.scene.syncState(snapshot.board, snapshot.placement, layoutForGame(this.currentGameId));
       }
 
       // 切到某名玩家的认知滤镜时，镜头也跟着坐到他那一侧：这就是「每个玩家自己
@@ -822,14 +819,6 @@ class BoardGameSimulatorApp {
     this.hud.showAnnouncement(`剧本已重开 · ${label}`);
   }
 
-  /**
-   * Hand the renderer the shell's real footprint so the player's own cards can
-   * dodge it (see `render/handRowDepth.ts`). Cheap: the scene ignores an
-   * unchanged rectangle set.
-   */
-  private syncReservedScreenBoxes(): void {
-    this.scene.setReservedScreenBoxes(this.hud.reservedScreenBoxes());
-  }
 
   private toggleInspector(): void {
     this.inspector.toggleCollapse();
