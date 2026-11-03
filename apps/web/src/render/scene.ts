@@ -3955,12 +3955,14 @@ export class BoardGameScene {
       focus: { x: 0.5, strength: 0 },
       target: { x: 0.5, strength: 0 }
     };
+    // 手牌行固定停在基础深度：不再为了躲操作栏而被「推着走」（用户 2026-11 反馈）。
+    // 求解器保留在 render/handRowDepth.ts 里，传空障碍即退化成常量。
     const { depth } = solveHandRowDepth({
       current: HAND_ROW_DEPTH,
       min: HAND_ROW_DEPTH_MIN,
       max: HAND_ROW_DEPTH_MAX,
       project: (candidate: number) => this.projectHandRowBox(probe, candidate),
-      obstacles: this.reservedBoxes
+      obstacles: []
     });
     return depth;
   }
