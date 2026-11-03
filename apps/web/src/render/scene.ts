@@ -2519,7 +2519,9 @@ export class BoardGameScene {
         // per-seat random offset of ±30°: perfectly aligned boards hide the
         // structure of the table and read as a HUD, not as objects. The offset is
         // hashed from the seat id, so a rebuilt sync keeps the same pose.
-        const jitter = (((fnv1a(seatId) % 1000) / 1000) - 0.5) * (Math.PI / 3);
+        // 朝向随镜头（立牌面向观察者），但每座只带 ±20° 的固定偏摆，
+        // 免得整桌板子像复制粘贴一样整齐。
+        const jitter = (((fnv1a(seatId) % 1000) / 1000) - 0.5) * ((Math.PI * 2) / 9);
         group.rotation.y = Math.atan2(-outward.x, -outward.y) + jitter;
         this.seatStandees.push({ group, jitter, lamp, seatId });
         this.boardObjectsGroup.add(group);
@@ -5534,10 +5536,11 @@ export class BoardGameScene {
       | { street?: string; readyForNext?: string[]; lastActions?: Record<string, string>; folded?: string[] }
       | undefined;
     const isSettlement = hand?.street === 'COMPLETE';
-    // 立牌不跟镜头转：朝向在生成时按座位方向定死（见 renderMapGraph 的
-    // `Math.atan2(-outward.x, -outward.y) + jitter`）。之前每帧把板子转向相机，
-    // 换个视角整桌牌都跟着摆头，像在看 HUD 而不是桌上的实物。
-    for (const { lamp, seatId } of this.seatStandees) {
+    for (const { group, jitter, lamp, seatId } of this.seatStandees) {
+      const dx = cam.x - group.position.x;
+      const dz = cam.z - group.position.z;
+      if (Math.abs(dx) < 1e-4 && Math.abs(dz) < 1e-4) continue;
+      group.rotation.y = Math.atan2(dx, dz) + jitter;
       if (!lamp) continue;
       const material = lamp.material as THREE.MeshBasicMaterial;
 

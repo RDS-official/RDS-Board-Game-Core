@@ -852,7 +852,8 @@ test('presentation: a shared board row turns to the seated viewer, and only then
 });
 
 test('presentation: only a game that declares board facing turns its board row', () => {
-  assertEqual(layoutForGame('poker').boardFacesViewer, true, 'poker declares the capability');
+  // 2026-11 用户反馈：桌上的牌不跟着视角转，能力位保留但无人声明。
+  assertEqual(layoutForGame('poker').boardFacesViewer, undefined, 'poker keeps the fixed row');
   for (const gameId of ['catan', 'betrayal', 'splendor', 'sanguosha', 'dune_mahjong', '__nope__']) {
     assertEqual(layoutForGame(gameId).boardFacesViewer, undefined, `${gameId} keeps the fixed row`);
   }

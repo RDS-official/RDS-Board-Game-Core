@@ -32,14 +32,12 @@ const PRESENTATION: Record<string, LayoutHints> = {
   splendor: { padding: 4, cameraDirection: [0.05, 0.7, 0.9], minDistance: 15 },
   betrayal: { padding: 4, cameraDirection: [0.03, 0.68, 0.9], minDistance: 18 },
   dune_mahjong: { padding: 4, cameraDirection: [0.05, 0.7, 0.9], minDistance: 15 },
-  // 牌桌从自己的座位看：公共牌要正对我，所以这一桌声明「牌行随观察者转向」。
-  // 声明写在能力位上，渲染层因此不认识扑克；上帝视角不绑定座位，牌行保持原来的
-  // 固定朝向，调试与截图脚本看到的仍是旧画面。
+  // 牌行固定朝北：桌上的牌是实物，不随观察者座位转向（2026-11 用户反馈）。
+  // `boardFacesViewer` 能力保留在契约里，但目前没有任何模组声明它。
   poker: {
     padding: 6,
     cameraDirection: [0.02, 0.86, 0.5],
-    minDistance: 16,
-    boardFacesViewer: true
+    minDistance: 16
   }
 };
 
