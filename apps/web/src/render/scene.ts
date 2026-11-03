@@ -107,7 +107,7 @@ const HAND_ROW_Y = 0.13;
 const OWN_HAND_DISTANCE = 7;
 /** Displayed width of one own-hand card at distance `OWN_HAND_DISTANCE`. */
 const OWN_HAND_CARD_WIDTH = 0.62;
-/** Card aspect (mesh width 1.12 → height 1.68). */
+/** Card aspect (the hand mesh keeps the 1.12 : 1.68 face ratio). */
 const OWN_HAND_CARD_HEIGHT = OWN_HAND_CARD_WIDTH * 1.5;
 /** Maximum strip the own-hand fan may occupy, in world units at that distance. */
 const OWN_HAND_MAX_SPAN = 4.6;
@@ -117,15 +117,36 @@ const OWN_HAND_DOCK_GAP_PX = 14;
 const OWN_HAND_MIN_CENTER = 0.56;
 /** ...and never floats up towards the middle of the screen either. */
 const OWN_HAND_MAX_CENTER = 0.74;
+/** Adjacent own-hand cards overlap by 18% of their displayed width. */
+const OWN_HAND_OVERLAP = 0.18;
+/** Tilt added per card either side of the fan centre. */
+const OWN_HAND_FAN_TILT = (2.5 * Math.PI) / 180;
+/** Vertical rise of the centre card over the outer cards. */
+const OWN_HAND_ARC_RISE = 0.035;
+/** Hovered card enlargement and lift. */
+const OWN_HAND_HOVER_SCALE = 1.12;
+const OWN_HAND_HOVER_LIFT = 0.03;
+/** Cut animation: gather, split and spring-back timings (milliseconds). */
+const OWN_HAND_CUT_GATHER_MS = 140;
+const OWN_HAND_CUT_SPLIT_MS = 70;
+const OWN_HAND_CUT_RETURN_MS = 150;
+/** Per-card animation stagger. */
+const OWN_HAND_CUT_STAGGER_MS = 12;
+/** Lift while the hand is gathered into one pile. */
+const OWN_HAND_CUT_LIFT = 0.05;
+/** Left/right displacement of the two cut piles. */
+const OWN_HAND_CUT_SPLIT = 0.12;
+/** Shadow softness / colour, kept below the card's own opacity budget. */
+const OWN_HAND_SHADOW_OPACITY = 0.28;
 /** Drag clearance above the first surface under the card. */
 const CARD_DRAG_LIFT = 0.35;
 /**
- * Tabletop card faces are 1.5× their previous printed size.
+ * Tabletop card faces are 1.2× their previous printed size.
  *
  * Hand, community and discard/deck cards all derive from these constants so a
  * future size change moves every pile together instead of drifting apart.
  */
-const CARD_SIZE_MULTIPLIER = 1.5;
+const CARD_SIZE_MULTIPLIER = 1.2;
 const CARD_W = 1.35 * CARD_SIZE_MULTIPLIER;
 const CARD_H = 2.0 * CARD_SIZE_MULTIPLIER;
 /** Display scale of a card in the shared board row. */
@@ -183,6 +204,31 @@ interface HandRow {
   focus: { x: number; strength: number };
   /** Where `focus` is heading; the pointer sets it, the loop eases towards it. */
   target: { x: number; strength: number };
+}
+
+/** One card's desk in the own-hand cut animation, captured after fan layout. */
+interface OwnHandCutCard {
+  id: string;
+  mesh: THREE.Object3D;
+  shadow?: THREE.Mesh;
+  fanX: number;
+  fanY: number;
+  fanZ: number;
+  fanRotation: number;
+  delay: number;
+  /** -1 for the left pile, +1 for the right pile. */
+  side: -1 | 1;
+}
+
+interface OwnHandCutState {
+  /** False until the expensive rebuild render has completed once. */
+  warmedUp: boolean;
+  /** Set after the warm-up frame; null until then. */
+  startedAt: number | null;
+  /** Gather + split + spring-back, including the last card's stagger. */
+  duration: number;
+  zoneId: string;
+  cards: OwnHandCutCard[];
 }
 
 export interface PlacementPreview {
@@ -423,6 +469,15 @@ const PKMN_MARKET_Z1 = PKMN_DECK_Z_TOP;
 const PKMN_MARKET_PITCH_X = PKMN_CARD_W + 0.34;
 const PKMN_MARKET_PITCH_Z = PKMN_CARD_H + 0.52;
 
+/** Ease used by every phase of the own-hand cut. */
+function easeOutCubic(value: number): number {
+  return 1 - (1 - value) ** 3;
+}
+
+function mix(from: number, to: number, progress: number): number {
+  return from + (to - from) * progress;
+}
+
 /**
  * FNV-1a 32-bit hash. Used for stable per-seat jitter: the standees are rebuilt
  * on every sync, so a `Math.random()` tilt would flicker.
@@ -466,6 +521,8 @@ export class BoardGameScene {
   private static readonly _scratchPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.2);
   private static readonly _scratchRayOrigin = new THREE.Vector3();
   private static readonly _scratchRayDir = new THREE.Vector3(0, -1, 0);
+  /** One soft radial shadow texture shared by every own-hand card. */
+  private static ownHandShadowTexture?: THREE.CanvasTexture;
 
   private container: HTMLElement;
   private renderer: THREE.WebGLRenderer;
@@ -603,6 +660,10 @@ export class BoardGameScene {
    */
   private handPointerTarget = { x: 0.5, strength: 0 };
   private lastHandHoverId: string | null = null;
+  /** Soft planes that follow each own-hand card; one per card. */
+  private ownHandShadows = new Map<string, THREE.Mesh>();
+  /** Current one-shot cut animation for the camera-attached hand. */
+  private ownHandCut?: OwnHandCutState;
   private reduceMotionQuery?: MediaQueryList;
   private cardVisualOffsets = new Map<string, { dx: number; dz: number }>();
   private groupMembers = new Map<string, string[]>();
@@ -1981,6 +2042,8 @@ export class BoardGameScene {
     this.dealerAreaFloatItems = [];
     this.dealerAreaHovered = false;
     this.ownHandReady = false;
+    this.ownHandCut = undefined;
+    this.ownHandShadows.clear();
     for (const group of [this.boardObjectsGroup, this.ownHandGroup, this.dealerAreaGroup]) {
       while (group.children.length > 0) {
         const child = group.children[0];
@@ -4058,6 +4121,53 @@ export class BoardGameScene {
   /* Hands around the table                                              */
   /* ------------------------------------------------------------------ */
 
+  /** Soft alpha mask for the own-hand shadows; one canvas texture for all cards. */
+  private static getOwnHandShadowTexture(): THREE.CanvasTexture {
+    if (BoardGameScene.ownHandShadowTexture) return BoardGameScene.ownHandShadowTexture;
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const context = canvas.getContext('2d');
+    if (context) {
+      const gradient = context.createRadialGradient(32, 32, 1, 32, 32, 31);
+      gradient.addColorStop(0, 'rgba(0,0,0,0.92)');
+      gradient.addColorStop(0.52, 'rgba(0,0,0,0.55)');
+      gradient.addColorStop(1, 'rgba(0,0,0,0)');
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, 64, 64);
+    }
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.name = 'own-hand-shadow';
+    BoardGameScene.ownHandShadowTexture = texture;
+    return texture;
+  }
+
+  /**
+   * A soft elliptical shadow rendered as an ordinary transparent plane.
+   *
+   * It lives in `ownHandGroup` alongside (not parented to) its card, so the
+   * layout and cut animation can keep it exactly 0.01 behind the card without
+   * paying for a real-time shadow map. It is deliberately excluded from the
+   * raycaster.
+   */
+  private createOwnHandShadow(cardWidth: number): THREE.Mesh {
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      map: BoardGameScene.getOwnHandShadowTexture(),
+      transparent: true,
+      opacity: OWN_HAND_SHADOW_OPACITY,
+      depthWrite: false,
+      toneMapped: false,
+      side: THREE.DoubleSide
+    });
+    const shadow = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+    shadow.scale.set(cardWidth * 0.94, OWN_HAND_CARD_HEIGHT * 0.14, 1);
+    shadow.castShadow = false;
+    shadow.receiveShadow = false;
+    shadow.userData.ownHandShadow = true;
+    return shadow;
+  }
+
   /**
    * Width available to the own-hand fan, in world units at its camera distance.
    *
@@ -4065,7 +4175,7 @@ export class BoardGameScene {
    * (minus drawer insets) as its budget. Keeping the cards readable on a phone
    * therefore compresses the fan instead of pushing it off-screen.
    */
-  private ownHandSpan(count: number): number {
+  private ownHandMaxWidth(): number {
     const width = Math.max(1, this.container.clientWidth);
     const height = Math.max(1, this.container.clientHeight);
     const visiblePx = Math.max(
@@ -4074,11 +4184,29 @@ export class BoardGameScene {
     );
     const tanHalf = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
     const worldPerPixel = (2 * OWN_HAND_DISTANCE * tanHalf) / height;
-    return handRowSpan(
-      count,
-      Math.min(OWN_HAND_MAX_SPAN, visiblePx * worldPerPixel),
-      OWN_HAND_CARD_WIDTH
+    return Math.max(
+      OWN_HAND_CARD_WIDTH * 1.6,
+      Math.min(OWN_HAND_MAX_SPAN, visiblePx * worldPerPixel)
     );
+  }
+
+  /**
+   * Card step for the own-hand fan.
+   *
+   * The 18% overlap is the resting target; only a hand too wide for the viewport
+   * is compressed further, so a large hand still fits without changing the
+   * normal two-to-seven-card look.
+   */
+  private ownHandFanMetrics(count: number): { cardWidth: number; step: number; span: number } {
+    const cardWidth = OWN_HAND_CARD_WIDTH;
+    const desiredStep = cardWidth * (1 - OWN_HAND_OVERLAP);
+    const maxStep = count > 1 ? Math.max(0, (this.ownHandMaxWidth() - cardWidth) / (count - 1)) : 0;
+    const step = count > 1 ? Math.min(desiredStep, maxStep) : 0;
+    return { cardWidth, step, span: cardWidth + Math.max(0, count - 1) * step };
+  }
+
+  private ownHandSpan(count: number): number {
+    return this.ownHandFanMetrics(count).span;
   }
 
   /** Keep the own-hand fan fitted after a viewport/drawer resize. */
@@ -4280,6 +4408,7 @@ export class BoardGameScene {
         mesh.rotation.order = 'ZYX';
         mesh.rotation.set(Math.PI / 2, 0, 0);
         mesh.userData.restYaw = 0;
+        mesh.userData.ownHandCardId = entity.id;
         mesh.castShadow = false;
         mesh.receiveShadow = false;
       } else {
@@ -4290,6 +4419,13 @@ export class BoardGameScene {
       }
       parent.add(mesh);
       this.entityMeshes.set(entity.id, mesh);
+      if (cameraAttached) {
+        const shadow = this.createOwnHandShadow(OWN_HAND_CARD_WIDTH);
+        shadow.userData.ownHandCardId = entity.id;
+        shadow.renderOrder = 80 + ids.length;
+        this.ownHandGroup.add(shadow);
+        this.ownHandShadows.set(entity.id, shadow);
+      }
       this.raycaster.registerInteractive(mesh, {
         type: 'ENTITY',
         id: entity.id,
@@ -4322,23 +4458,28 @@ export class BoardGameScene {
     };
     this.handRows.set(zone.id, row);
     this.layoutHandRow(row);
+    if (row.cameraAttached) this.startOwnHandCut(row);
   }
 
   /**
-   * Place one hand row with the pure fisheye layout.
+   * Place one hand row.
    *
-   * The layout module owns the maths (see apps/web/src/ui/handLayout.ts); this
-   * method only maps "centre + scale along a 1-D row" onto world coordinates.
-   * It is idempotent, so the render loop can call it on every frame while the
-   * fisheye eases towards the pointer without rebuilding a single mesh.
+   * Other seats use the pure fisheye layout in `ui/handLayout.ts`; the viewer's
+   * own hand uses a fixed 18%-overlap fan so it reads as cards held in a hand.
+   * Both paths are idempotent, so the render loop can re-run them without
+   * rebuilding a mesh.
    */
   private layoutHandRow(row: HandRow): void {
     const count = row.ids.length;
     if (count === 0) return;
+    if (row.cameraAttached) {
+      this.layoutOwnHandRow(row);
+      return;
+    }
 
     const hoveredId = this.hoveredEntityId;
     const hoverIndex = hoveredId ? row.ids.indexOf(hoveredId) : -1;
-    const cardWidth = row.cameraAttached ? OWN_HAND_CARD_WIDTH : HAND_CARD_WIDTH;
+    const cardWidth = HAND_CARD_WIDTH;
     const layout = handLayout({
       count,
       containerWidth: row.span,
@@ -4367,26 +4508,6 @@ export class BoardGameScene {
       }
 
       const along = card.x - row.span / 2;
-      if (row.cameraAttached) {
-        // Local to `ownHandGroup`: X is screen-right, Y screen-up, +Z towards
-        // the camera. Cards share the plane; renderOrder plus a 1 mm depth
-        // step keeps the fan deterministic at any camera angle.
-        mesh.position.set(
-          along,
-          card.index * HAND_CARD_STACK_STEP + card.lift * 0.03,
-          card.index * 0.001
-        );
-        mesh.scale.setScalar((card.scale * cardWidth) / HAND_CARD_MESH_WIDTH);
-        mesh.rotation.set(
-          Math.PI / 2,
-          0,
-          (card.x / row.span - 0.5) * yawSpread,
-          'ZYX'
-        );
-        mesh.renderOrder = 100 + card.z;
-        continue;
-      }
-
       mesh.position.set(
         row.originX + row.axisX * along,
         HAND_ROW_Y + card.index * HAND_CARD_STACK_STEP + card.lift * HAND_HOVER_LIFT,
@@ -4398,6 +4519,192 @@ export class BoardGameScene {
       // keeps the fan stacking stable instead of z-fighting.
       mesh.renderOrder = card.z;
       this.applyCardVisualOffset(id, mesh);
+    }
+  }
+
+  /** Fan position/angle for card `index`, in `ownHandGroup` local space. */
+  private ownHandFanPose(
+    index: number,
+    count: number,
+    step: number
+  ): { x: number; y: number; rotation: number } {
+    const centre = (count - 1) / 2;
+    const offset = index - centre;
+    const edge = centre > 0 ? Math.abs(offset) / centre : 0;
+    return {
+      x: offset * step,
+      // A shallow rainbow: the middle of the hand sits higher than its ends.
+      y: (1 - edge * edge) * OWN_HAND_ARC_RISE,
+      // Left cards lean left, right cards lean right, like a held hand.
+      rotation: -offset * OWN_HAND_FAN_TILT
+    };
+  }
+
+  /**
+   * Apply an own-hand card's local pose and keep its soft shadow one centimetre
+   * behind it. The shadow is an ordinary mesh in the same group, not a real-time
+   * shadow-map caster, so moving cards stay cheap.
+   */
+  private poseOwnHandCard(
+    mesh: THREE.Object3D,
+    shadow: THREE.Mesh | undefined,
+    x: number,
+    y: number,
+    z: number,
+    rotation: number
+  ): void {
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(Math.PI / 2, 0, rotation, 'ZYX');
+    if (!shadow) return;
+
+    const displayWidth = mesh.scale.x * HAND_CARD_MESH_WIDTH;
+    const displayHeight = displayWidth * 1.5;
+    shadow.position.set(x, y - displayHeight * 0.52, z - 0.01);
+    shadow.scale.set(displayWidth * 0.94, displayHeight * 0.14, 1);
+    shadow.rotation.set(0, 0, rotation);
+  }
+
+  /** Resting 18%-overlap fan for the viewer's camera-attached hand. */
+  private layoutOwnHandRow(row: HandRow): void {
+    const count = row.ids.length;
+    const metrics = this.ownHandFanMetrics(count);
+    row.span = metrics.span;
+    const hoveredId = this.hoveredEntityId;
+
+    row.ids.forEach((id, index) => {
+      const mesh = this.entityMeshes.get(id);
+      if (!mesh) return;
+      const hovered = hoveredId === id;
+      const displayScale = hovered ? OWN_HAND_HOVER_SCALE : 1;
+      const displayWidth = metrics.cardWidth * displayScale;
+      const pose = this.ownHandFanPose(index, count, metrics.step);
+      const y = pose.y + (hovered ? OWN_HAND_HOVER_LIFT : 0);
+
+      mesh.scale.setScalar(displayWidth / HAND_CARD_MESH_WIDTH);
+      // Left-to-right stacking is explicit, so overlapping cards never swap
+      // draw order as the camera or pointer moves.
+      mesh.renderOrder = 100 + index;
+      const shadow = this.ownHandShadows.get(id);
+      if (shadow) shadow.renderOrder = 80 + index;
+      this.poseOwnHandCard(mesh, shadow, pose.x, y, index * 0.001, pose.rotation);
+    });
+  }
+
+  /**
+   * Capture the resting fan and start one cut animation.
+   *
+   * Called after every own-hand rebuild/deal, so the hand visibly re-settles.
+   * Reduced-motion users skip the sequence and keep the final fan immediately.
+   */
+  private startOwnHandCut(row: HandRow): void {
+    this.ownHandCut = undefined;
+    if (row.ids.length === 0) return;
+    if (this.reduceMotionQuery?.matches === true) {
+      this.layoutHandRow(row);
+      return;
+    }
+
+    const count = row.ids.length;
+    const cards: OwnHandCutCard[] = [];
+    row.ids.forEach((id, index) => {
+      const mesh = this.entityMeshes.get(id);
+      if (!mesh) return;
+      cards.push({
+        id,
+        mesh,
+        shadow: this.ownHandShadows.get(id),
+        fanX: mesh.position.x,
+        fanY: mesh.position.y,
+        fanZ: mesh.position.z,
+        fanRotation: mesh.rotation.z,
+        delay: index * OWN_HAND_CUT_STAGGER_MS,
+        side: index < count / 2 ? -1 : 1
+      });
+    });
+    if (cards.length === 0) return;
+
+    const lastDelay = Math.max(...cards.map(card => card.delay));
+    this.ownHandCut = {
+      // The rebuild that created these meshes may spend its first frame
+      // compiling GPU resources. Starting the clock then would swallow the
+      // whole effect, so one full render warms up before the clock starts.
+      warmedUp: false,
+      startedAt: null,
+      duration:
+        OWN_HAND_CUT_GATHER_MS + OWN_HAND_CUT_SPLIT_MS + OWN_HAND_CUT_RETURN_MS + lastDelay,
+      zoneId: row.zoneId,
+      cards
+    };
+  }
+
+  /** Advance the current cut; runs after the hover layout so it owns the pose. */
+  private updateOwnHandCut(now: number): void {
+    const cut = this.ownHandCut;
+    if (!cut) return;
+    const row = this.handRows.get(cut.zoneId);
+    if (this.reduceMotionQuery?.matches === true) {
+      this.ownHandCut = undefined;
+      if (row) this.layoutHandRow(row);
+      return;
+    }
+
+    if (!cut.warmedUp) {
+      // The first frame after a rebuild compiles the new card programs; run it
+      // with the resting fan (already laid out) and start the clock next frame.
+      cut.warmedUp = true;
+      return;
+    }
+    if (cut.startedAt === null) {
+      cut.startedAt = now;
+      for (const card of cut.cards) {
+        this.poseOwnHandCard(card.mesh, card.shadow, card.fanX, card.fanY, card.fanZ, card.fanRotation);
+      }
+      return;
+    }
+    const startedAt = cut.startedAt;
+    const springMs = OWN_HAND_CUT_SPLIT_MS + OWN_HAND_CUT_RETURN_MS;
+    for (const card of cut.cards) {
+      const local = now - startedAt - card.delay;
+      let x = card.fanX;
+      let y = card.fanY;
+      let rotation = card.fanRotation;
+
+      if (local > 0 && local < OWN_HAND_CUT_GATHER_MS + springMs) {
+        const gather = easeOutCubic(
+          Math.min(1, Math.max(0, local / OWN_HAND_CUT_GATHER_MS))
+        );
+        x = mix(card.fanX, 0, gather);
+        y = mix(card.fanY, OWN_HAND_CUT_LIFT, gather);
+        rotation = mix(card.fanRotation, 0, gather);
+
+        if (local > OWN_HAND_CUT_GATHER_MS) {
+          const spring = local - OWN_HAND_CUT_GATHER_MS;
+          const splitX = card.side * OWN_HAND_CUT_SPLIT;
+          const splitY = OWN_HAND_CUT_LIFT - OWN_HAND_CUT_SPLIT;
+          const splitRotation = card.side * 0.1;
+          const splitProgress = easeOutCubic(
+            Math.min(1, spring / OWN_HAND_CUT_SPLIT_MS)
+          );
+          x = mix(0, splitX, splitProgress);
+          y = mix(OWN_HAND_CUT_LIFT, splitY, splitProgress);
+          rotation = mix(0, splitRotation, splitProgress);
+
+          if (spring > OWN_HAND_CUT_SPLIT_MS) {
+            const returnProgress = easeOutCubic(
+              Math.min(1, (spring - OWN_HAND_CUT_SPLIT_MS) / OWN_HAND_CUT_RETURN_MS)
+            );
+            x = mix(splitX, card.fanX, returnProgress);
+            y = mix(splitY, card.fanY, returnProgress);
+            rotation = mix(splitRotation, card.fanRotation, returnProgress);
+          }
+        }
+      }
+      this.poseOwnHandCard(card.mesh, card.shadow, x, y, card.fanZ, rotation);
+    }
+
+    if (now >= startedAt + cut.duration) {
+      this.ownHandCut = undefined;
+      if (row) this.layoutHandRow(row);
     }
   }
 
@@ -5995,6 +6302,7 @@ export class BoardGameScene {
     this.physics.step(dt);
     this.updateFocusLight();
     this.updateHandFocus(dt);
+    this.updateOwnHandCut(now);
     this.updateCameraAttachedHand(dt);
     this.updateDealerArea(dt, now);
     this.updateCardSettles(now);
