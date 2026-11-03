@@ -31,7 +31,6 @@
   > 例如：`users/zooter/optimize-catan-ai`、`users/xhopo/fix-poker-settle-timer`
 - `<task-name>` 用**小写连字符、单一意图**，禁止 `fix`、`wip`、`test`、`update` 这类无语义名。
   一个分支只做一件事；想顺手重构，另开分支。
-- **寿命 ≤ 3 天，改动 ≤ 400 行**；契约类改动（§3.1 的公共文件）≤ 150 行。超出就拆成多个 PR。
 - 每天开工先 `git fetch --prune`，分支上 `git rebase origin/main`；
   **禁止把 `main` 合并进功能分支**（`git merge origin/main` 会制造交叉历史，让 squash 回滚失效）。
 - 只有自己的 `users/*` 分支允许 `git push --force-with-lease` 改写历史；
