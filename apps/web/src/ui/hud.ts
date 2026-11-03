@@ -58,8 +58,8 @@ interface DockTraceEntry {
  */
 const PLAYER_CARD_HEIGHT = 132;
 
-/** Right-column tab keys. The tab strip is only rendered below 1200px. */
-type SideTab = 'ranking' | 'feed' | 'observers';
+/** Right-column tab keys for the shared leaderboard / activity card. */
+type SideTab = 'ranking' | 'feed';
 
 /** Arbiter owner id for the enlarged seat plaque window. */
 const SEAT_PEEK_OWNER = 'hud.seat';
@@ -144,8 +144,10 @@ export class BoardGameHUD {
   private railFocusY: number | null = null;
   /** Pending animation frame for the rail fisheye (pointer events are coalesced). */
   private railFrame = 0;
-  /** Selected right-column tab (narrow shells only; desktop shows all panels). */
+  /** Selected right-column tab (shared leaderboard / recent activity card). */
   private sideTab: SideTab = 'ranking';
+  /** Once the player picks a tab, automatic fallback must not override them. */
+  private sideTabTouched = false;
   /** 冷却角标的刷新定时器（dock 建好后启动一次）。 */
   private cooldownTimer: number | null = null;
   /**
@@ -195,6 +197,11 @@ export class BoardGameHUD {
   private shellObserver?: MutationObserver;
   /** Trigger that opened the current drawer, so Escape can return focus to it. */
   private drawerOpener: HTMLElement | null = null;
+  /** Centered hamburger dialog state and the controls temporarily moved into it. */
+  private menuOpen = false;
+  private menuOpener: HTMLElement | null = null;
+  private menuRoot: HTMLElement | null = null;
+  private readonly menuMoved = new Set<HTMLElement>();
   /** Latest inset push, skipped when the measured rectangle did not change. */
   private lastViewportInsets = { left: 0, right: 0, bottom: 0, top: 0 };
   private insetNotifyFrame = 0;
@@ -286,6 +293,8 @@ export class BoardGameHUD {
     this.accountRankingPending = false;
     this.hasAccountRanking = false;
     this.rankingTab = 'table';
+    this.sideTab = 'ranking';
+    this.sideTabTouched = false;
     this.overlays.closeAll();
     this.resetHandSlot();
     this.container.querySelector('#card-sheet-layer')?.remove();
@@ -304,6 +313,7 @@ export class BoardGameHUD {
   }
 
   public dispose(): void {
+    if (this.menuOpen) this.closeMenu(false);
     this.unsubSnapshot?.();
     this.unsubNotice?.();
     if (this.observerTimer !== null) {
@@ -355,6 +365,7 @@ export class BoardGameHUD {
   }
 
   public closePayload(): void {
+    if (this.menuOpen) this.closeMenu(false);
     const layer = this.container.querySelector('#payload-layer') as HTMLElement | null;
     if (!layer) return;
     layer.style.display = 'none';
@@ -808,6 +819,162 @@ export class BoardGameHUD {
     );
   }
 
+  /** Buttons/links/tabs reachable with Tab inside the centered menu. */
+  private menuFocusables(): HTMLElement[] {
+    if (!this.menuRoot) return [];
+    const selectors =
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    return Array.from(this.menuRoot.querySelectorAll<HTMLElement>(selectors)).filter(
+      el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+    );
+  }
+
+  /** Keep Tab inside the menu dialog and wrap at both ends. */
+  private trapMenuFocus(event: KeyboardEvent): void {
+    const items = this.menuFocusables();
+    if (items.length === 0) {
+      event.preventDefault();
+      this.menuRoot?.focus({ preventScroll: true });
+      return;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    const outside = !active || !this.menuRoot?.contains(active);
+    if (event.shiftKey && (outside || active === first)) {
+      event.preventDefault();
+      last.focus({ preventScroll: true });
+    } else if (!event.shiftKey && (outside || active === last)) {
+      event.preventDefault();
+      first.focus({ preventScroll: true });
+    }
+  }
+
+  /** The menu is modal; put the rest of the shell and the canvas out of reach. */
+  private syncMenuInert(): void {
+    const layer = this.container.querySelector('#payload-layer') as HTMLElement | null;
+    if (this.menuOpen) {
+      for (const child of Array.from(this.container.children) as HTMLElement[]) {
+        child.toggleAttribute('inert', child !== layer);
+      }
+      for (const id of ['canvas-container', 'stage-vignette', 'inspector-container']) {
+        document.getElementById(id)?.setAttribute('inert', '');
+      }
+      return;
+    }
+    // Closing the menu may have been caused by a drawer toggle. Re-derive the
+    // drawer's inert state instead of clearing everything blindly.
+    this.syncShellInert();
+  }
+
+  /**
+   * Centered hamburger dialog. It reuses the existing payload modal layer (one
+   * backdrop, one focus trap), and moves the live topbar controls inside rather
+   * than cloning them.
+   */
+  private openMenu(opener: HTMLElement): void {
+    if (this.menuOpen) return;
+    const layer = this.container.querySelector('#payload-layer') as HTMLElement | null;
+    const topbar = this.container.querySelector('.topbar') as HTMLElement | null;
+    const games = topbar?.querySelector('.game-switch') as HTMLElement | null;
+    const actions = topbar?.querySelector('.topbar-actions') as HTMLElement | null;
+    if (!layer || !topbar || !games || !actions) return;
+
+    const open = this.openDrawerWhich();
+    if (open) this.closeDrawer(open, false);
+    this.closeAbout();
+    this.closeAccountDetail();
+    this.closePayload();
+
+    layer.innerHTML = `
+      <div class="payload-backdrop" data-menu-backdrop></div>
+      <div class="menu-card" id="menu-dialog" role="dialog" aria-modal="true" aria-labelledby="menu-dialog-title" tabindex="-1">
+        <header class="menu-head">
+          <div class="menu-heading">
+            <span class="menu-kicker">UNIVERSAL GAME KERNEL</span>
+            <h2 class="menu-title" id="menu-dialog-title">主菜单</h2>
+          </div>
+          <button class="menu-close" type="button" data-menu-close aria-label="关闭菜单">×</button>
+        </header>
+        <div class="menu-body">
+          <section class="menu-section" aria-labelledby="menu-games-title">
+            <h3 class="menu-section-title" id="menu-games-title">游戏</h3>
+            <div class="menu-slot" data-menu-slot="games"></div>
+          </section>
+          <section class="menu-section" aria-labelledby="menu-controls-title">
+            <h3 class="menu-section-title" id="menu-controls-title">对局与视图</h3>
+            <div class="menu-slot" data-menu-slot="controls"></div>
+          </section>
+        </div>
+      </div>
+    `;
+    const root = layer.querySelector('.menu-card') as HTMLElement | null;
+    const gamesSlot = layer.querySelector('[data-menu-slot="games"]') as HTMLElement | null;
+    const controlsSlot = layer.querySelector('[data-menu-slot="controls"]') as HTMLElement | null;
+    if (!root || !gamesSlot || !controlsSlot) {
+      layer.innerHTML = '';
+      return;
+    }
+
+    this.menuMoved.clear();
+    this.menuMoved.add(games);
+    this.menuMoved.add(actions);
+    gamesSlot.append(games);
+    controlsSlot.append(actions);
+
+    this.menuRoot = root;
+    this.menuOpener = opener;
+    this.menuOpen = true;
+    layer.style.display = 'flex';
+    opener.setAttribute('aria-expanded', 'true');
+
+    layer.querySelector('.payload-backdrop')?.addEventListener('click', () => this.closeMenu(true));
+    layer.querySelector('[data-menu-close]')?.addEventListener('click', () => this.closeMenu(true));
+    layer.onclick = event => {
+      const target = event.target as HTMLElement | null;
+      if (!target || target.closest('[data-menu-backdrop], [data-menu-close]')) return;
+      if (
+        target.closest(
+          '.game-pill, #btn-about, #btn-undo, #btn-inspector, #btn-diagnostics, [data-toggle="rail"], [data-toggle="side"]'
+        )
+      ) {
+        this.closeMenu(false);
+      }
+    };
+    layer.onchange = event => {
+      if ((event.target as HTMLElement | null)?.closest('#scenario-select')) this.closeMenu(false);
+    };
+
+    this.syncMenuInert();
+    requestAnimationFrame(() => {
+      const first = (root.querySelector('.menu-body .game-pill') as HTMLElement | null) ?? this.menuFocusables()[0];
+      (first ?? this.menuRoot)?.focus({ preventScroll: true });
+    });
+  }
+
+  /** Restore the topbar controls and return focus to the ☰ button. */
+  private closeMenu(restoreFocus: boolean): void {
+    if (!this.menuOpen) return;
+    const layer = this.container.querySelector('#payload-layer') as HTMLElement | null;
+    const topbar = this.container.querySelector('.topbar') as HTMLElement | null;
+    const moved = [...this.menuMoved];
+    this.menuMoved.clear();
+    this.menuOpen = false;
+    this.menuRoot = null;
+    if (topbar && moved.length > 0) topbar.append(...moved);
+    if (layer) {
+      layer.style.display = 'none';
+      layer.innerHTML = '';
+      layer.onclick = null;
+      layer.onchange = null;
+    }
+    this.syncMenuInert();
+    const opener = this.menuOpener;
+    this.menuOpener = null;
+    opener?.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) opener?.focus({ preventScroll: true });
+  }
+
   /**
    * Open one slide-over, focus its first control and make the rest of the shell
    * inert. The ARIA dialog state is applied here rather than in the skeleton so
@@ -977,16 +1144,22 @@ export class BoardGameHUD {
       ['data-rail', '[data-toggle="rail"]', 'player-rail']
     ] as const) {
       const button = this.container.querySelector(sel) as HTMLElement | null;
+      const drawer = this.container.querySelector(`#${target}`) as HTMLElement | null;
       if (!button) continue;
-      button.setAttribute('aria-expanded', this.container.getAttribute(attr) === 'open' ? 'true' : 'false');
+      const overlayOpen = this.container.getAttribute(attr) === 'open';
+      const expanded = !this.isOverlayShell() && drawer?.getAttribute('data-expanded') === '1';
+      const open = overlayOpen || expanded;
+      button.setAttribute('aria-expanded', open ? 'true' : 'false');
       button.setAttribute('aria-controls', target);
+      const label = attr === 'data-rail' ? '角色栏' : '信息栏';
+      button.setAttribute('aria-label', `${open ? '收起' : '展开'}${label}`);
     }
   }
 
   /**
-   * Phone shell: the topbar cannot fit the scenario/viewer/camera controls, so
-   * they are relocated into the side panel instead of being dropped. The same
-   * DOM nodes move, so their listeners and values survive.
+   * Keep shell-owned geometry in sync when the viewport or drawer state changes.
+   * Controls stay in the topbar DOM (hidden) and are only moved into the
+   * hamburger dialog while it is open, so there is still one source of state.
    */
   private applyShellLayout(): void {
     this.applySideTab();
@@ -995,27 +1168,6 @@ export class BoardGameHUD {
     if (!this.isOverlayShell()) {
       const open = this.openDrawerWhich();
       if (open) this.closeDrawer(open, false);
-    }
-    const slot = this.container.querySelector('#side-panel-extras') as HTMLElement | null;
-    const actions = this.container.querySelector('.topbar-actions') as HTMLElement | null;
-    if (!slot || !actions) {
-      this.notifyViewportInsets();
-      return;
-    }
-
-    const movers = ['.scenario-switch', '.viewer-switch', '.cam-switch']
-      .map(sel => this.container.querySelector(sel) as HTMLElement | null)
-      .filter((el): el is HTMLElement => !!el);
-
-    const phone = window.matchMedia('(max-width: 767px)').matches;
-    for (const el of movers) {
-      if (phone) {
-        if (el.parentElement !== slot) slot.append(el);
-      } else if (el.parentElement !== actions) {
-        // Restore the original order: before the first icon button.
-        const anchor = actions.querySelector('.icon-btn');
-        actions.insertBefore(el, anchor);
-      }
     }
 
     // 顶栏可能因换行而变高：把真实高度写回 --topbar-h，侧栏/角色栏据此定位。
@@ -1026,6 +1178,8 @@ export class BoardGameHUD {
       if (h > 0) this.container.style.setProperty('--topbar-h', h + 'px');
     }
 
+    this.syncRailExpandedGeometry();
+    this.syncHandSlotGeometry();
     const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
     if (rail) this.layoutPlayerRail(rail);
     this.relayoutDock();
@@ -1033,26 +1187,22 @@ export class BoardGameHUD {
   }
 
   /**
-   * Right column: one tab strip on narrow shells, a plain stack on desktop.
-   *
-   * The panels stay in the DOM in both cases — only their `hidden` flag moves.
-   * That keeps the ranking/feed/observer renderers (and their scroll positions)
-   * untouched when the shell crosses 1200px.
+   * The right column is one tabbed card at every width: leaderboard and recent
+   * activity are two views of the same window, so only one panel is visible.
+   * Observer rows live outside this card and stay independent.
    */
   private applySideTab(): void {
     const host = this.container.querySelector('#side-tabs') as HTMLElement | null;
     if (!host) return;
-    const narrow = window.matchMedia('(max-width: 1199px), (max-height: 480px) and (min-width: 600px)').matches;
     host.dataset.sideTab = this.sideTab;
     const panels: Array<[SideTab, string]> = [
       ['ranking', '#chip-ranking'],
-      ['feed', '#activity-feed'],
-      ['observers', '#observer-rail']
+      ['feed', '#activity-feed']
     ];
     for (const [key, selector] of panels) {
       const panel = this.container.querySelector(selector) as HTMLElement | null;
       if (!panel) continue;
-      panel.hidden = narrow && key !== this.sideTab;
+      panel.hidden = key !== this.sideTab;
     }
     for (const button of this.container.querySelectorAll<HTMLElement>('[data-side-tab-target]')) {
       button.setAttribute('aria-selected', button.dataset.sideTabTarget === this.sideTab ? 'true' : 'false');
@@ -1604,7 +1754,10 @@ export class BoardGameHUD {
     if (!button) return;
     const on = this.ports.isSoundOn();
     button.classList.toggle('active', on);
-    button.textContent = on ? '♪' : '✕';
+    const glyph = button.querySelector<HTMLElement>('.ico-glyph');
+    if (glyph) glyph.textContent = on ? '♪' : '✕';
+    else button.textContent = on ? '♪' : '✕';
+    button.setAttribute('aria-label', on ? '关闭音效' : '开启音效');
   }
 
   /** 阶段二：设置在线玩家并刷新玩家卡在线点（未知 playerId 视为离线）。 */
@@ -1617,13 +1770,7 @@ export class BoardGameHUD {
     this.container.classList.add('app-shell');
     this.container.innerHTML = `
       <header class="topbar">
-        <div class="brand">
-          <div class="brand-mark">𝒢</div>
-          <div class="brand-text">
-            <div class="brand-title">通用桌游内核</div>
-            <div class="brand-sub">UNIVERSAL GAME KERNEL</div>
-          </div>
-        </div>
+        <button class="shell-toggle menu-btn" data-toggle="menu" aria-label="主菜单" aria-haspopup="dialog" aria-controls="menu-dialog" aria-expanded="false">☰</button>
 
         <nav class="game-switch" id="game-switch">
           ${GAME_TABS.map(
@@ -1634,10 +1781,6 @@ export class BoardGameHUD {
           `
           ).join('')}
         </nav>
-
-        <button class="shell-toggle compact-menu-btn" data-toggle="menu" aria-label="主菜单">☰ 菜单</button>
-
-        <button class="shell-toggle" data-toggle="rail" aria-label="显示角色栏">☰ 角色</button>
 
         <div class="topbar-actions">
           <div class="scenario-switch" id="scenario-switch" style="display:none" title="切换局内场景 · 会重开牌局">
@@ -1658,13 +1801,12 @@ export class BoardGameHUD {
 
           <button class="icon-btn" id="btn-undo" aria-label="撤销上一步">↶<span class="tip">撤销上一步动作</span></button>
           <button class="icon-btn danger" id="btn-exit-net" aria-label="退出对局" hidden>⎋<span class="tip">退出对局</span></button>
-          <button class="icon-btn" id="btn-audio" aria-label="音效">♪<span class="tip">音效开关</span></button>
+          <button class="icon-btn" id="btn-audio" aria-label="音效"><span class="ico-glyph">♪</span><span class="tip">音效开关</span></button>
           <button class="icon-btn" id="btn-inspector" aria-label="数学模型">𝒢<span class="tip">内核检查器 · I</span></button>
           <button class="icon-btn" id="btn-diagnostics" aria-label="导出诊断日志">⤓<span class="tip">导出诊断日志（问题反馈用）</span></button>
           <button class="icon-btn" id="btn-about" aria-label="关于">ⓘ<span class="tip">关于 · 版本信息</span></button>
-          <button class="shell-toggle" data-toggle="side" aria-label="显示信息栏">▤ 信息</button>
-          <button class="shell-toggle compact-only" data-expand="rail" aria-label="展开角色栏">⤢ 展开角色栏</button>
-          <button class="shell-toggle compact-only" data-expand="side" aria-label="展开信息栏">⤢ 展开信息栏</button>
+          <button class="shell-toggle panel-toggle" data-toggle="rail" aria-label="展开角色栏">⤢ 展开角色栏</button>
+          <button class="shell-toggle panel-toggle" data-toggle="side" aria-label="展开信息栏">▤ 展开信息栏</button>
         </div>
       </header>
 
@@ -1687,21 +1829,18 @@ export class BoardGameHUD {
              so a single-variant fixture keeps the column unchanged. -->
         <aside class="room-card" id="room-card" style="display:none"></aside>
         <aside class="mansion-minimap" id="mansion-minimap" style="display:none"></aside>
-        <!-- Narrow shells put ranking / recent activity / observers behind one
-             tab strip instead of stacking three panels into a drawer. Desktop
-             keeps the same nodes as a vertical stack (no duplicated data). -->
+        <!-- Ranking and recent activity share one card with two tabs, at every
+             width. The observer rail stays an independent panel. -->
         <div class="side-tabs" id="side-tabs" data-side-tab="ranking">
-          <div class="side-tablist" role="tablist" aria-label="信息面板">
-            <button class="side-tab" type="button" role="tab" id="side-tab-ranking" aria-controls="chip-ranking" aria-selected="true" data-side-tab-target="ranking">排行</button>
-            <button class="side-tab" type="button" role="tab" id="side-tab-feed" aria-controls="activity-feed" aria-selected="false" data-side-tab-target="feed">近况</button>
-            <button class="side-tab" type="button" role="tab" id="side-tab-observers" aria-controls="observer-rail" aria-selected="false" data-side-tab-target="observers">观察席</button>
+          <div class="side-tablist" role="tablist" aria-label="排行榜与近期动态">
+            <button class="side-tab" type="button" role="tab" id="side-tab-ranking" aria-controls="chip-ranking" aria-selected="true" data-side-tab-target="ranking">排行榜</button>
+            <button class="side-tab" type="button" role="tab" id="side-tab-feed" aria-controls="activity-feed" aria-selected="false" data-side-tab-target="feed">近期动态</button>
           </div>
-          <!-- 筹码排行（德州扑克）：放在「近期动态」上方 -->
           <aside class="chip-ranking" id="chip-ranking" role="tabpanel" aria-labelledby="side-tab-ranking" style="display:none"></aside>
           <aside class="activity-feed" id="activity-feed" role="tabpanel" aria-labelledby="side-tab-feed"></aside>
-          <!-- 观察席：输光但仍在房间里的牌手，等低保 / 等轮末回桌 -->
-          <aside class="observer-rail" id="observer-rail" role="tabpanel" aria-labelledby="side-tab-observers" style="display:none"></aside>
         </div>
+        <!-- 观察席：输光但仍在房间里的牌手，等低保 / 等轮末回桌 -->
+        <aside class="observer-rail" id="observer-rail" aria-label="观察席" style="display:none"></aside>
       </div>
       <div class="action-dock" id="action-dock"></div>
       <aside class="hand-slot" id="hand-slot" role="button" tabindex="0" aria-label="手持出牌区">
@@ -1749,65 +1888,69 @@ export class BoardGameHUD {
       attributeFilter: ['data-rail', 'data-side']
     });
 
-    // Escape closes whatever slide-over is open, Tab stays inside it, and focus
-    // returns to the toggle that opened it.
+    // Escape closes the centered menu first, then any slide-over. Tab stays
+    // inside the active modal surface, and focus returns to its opener.
     window.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
-        let closed = false;
-        if (this.container.querySelector('.topbar')?.getAttribute('data-menu') === 'open') {
-          this.container.querySelector('.topbar')?.removeAttribute('data-menu');
-          closed = true;
+        if (this.menuOpen) {
+          event.preventDefault();
+          this.closeMenu(true);
+          return;
         }
         const which = this.openDrawerWhich();
         if (which) {
           this.closeDrawer(which, true);
-          closed = true;
+          event.preventDefault();
         }
-        if (closed) event.preventDefault();
         return;
       }
-      if (event.key === 'Tab') this.trapDrawerFocus(event);
+      if (event.key === 'Tab') {
+        if (this.menuOpen) this.trapMenuFocus(event);
+        else this.trapDrawerFocus(event);
+      }
     });
 
-    // 紧凑模式（桌面 ≥1200px）的二级菜单：☰ 打开，点外面 / Esc 关闭。
-    const topbar = this.container.querySelector('.topbar') as HTMLElement | null;
-    this.container.querySelector('[data-toggle="menu"]')?.addEventListener('click', event => {
+    // The ☰ button is the only topbar control. Its dialog reuses the existing
+    // payload modal layer and temporarily moves the real controls inside, so
+    // listeners and current state survive the trip.
+    const menuButton = this.container.querySelector('[data-toggle="menu"]') as HTMLElement | null;
+    menuButton?.addEventListener('click', event => {
       event.stopPropagation();
-      if (!topbar) return;
-      const open = topbar.getAttribute('data-menu') === 'open';
-      if (open) topbar.removeAttribute('data-menu');
-      else topbar.setAttribute('data-menu', 'open');
-    });
-    window.addEventListener('click', event => {
-      if (!topbar || topbar.getAttribute('data-menu') !== 'open') return;
-      if (topbar.contains(event.target as Node)) return;
-      topbar.removeAttribute('data-menu');
-    });
-    this.container.querySelectorAll<HTMLElement>('[data-expand]').forEach(button => {
-      button.addEventListener('click', () => {
-        const which = button.dataset.expand === 'rail' ? '#player-rail' : '#side-column';
-        const panel = this.container.querySelector(which) as HTMLElement | null;
-        if (!panel) return;
-        if (panel.getAttribute('data-expanded') === '1') panel.removeAttribute('data-expanded');
-        else panel.setAttribute('data-expanded', '1');
-      });
+      if (this.menuOpen) this.closeMenu(true);
+      else this.openMenu(menuButton);
     });
 
-    this.container.querySelectorAll<HTMLElement>('[data-toggle]').forEach(button => {
-      if (button.dataset.toggle === 'menu') return;
+    this.container.querySelectorAll<HTMLElement>('[data-toggle="rail"], [data-toggle="side"]').forEach(button => {
       button.addEventListener('click', () => {
         const which = button.dataset.toggle === 'rail' ? 'rail' : 'side';
+        if (!this.isOverlayShell()) {
+          // Desktop keeps its persistent panels: the same menu entry expands
+          // them in place instead of opening a drawer.
+          const panel = this.drawerFor(which);
+          if (!panel) return;
+          const expanded = panel.getAttribute('data-expanded') === '1';
+          if (expanded) panel.removeAttribute('data-expanded');
+          else panel.setAttribute('data-expanded', '1');
+          this.syncShellAria();
+          requestAnimationFrame(() => {
+            this.syncRailExpandedGeometry();
+            const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
+            if (rail) this.layoutPlayerRail(rail);
+          });
+          return;
+        }
         const isOpen = this.container.getAttribute(which === 'rail' ? 'data-rail' : 'data-side') === 'open';
         if (isOpen) this.closeDrawer(which, true);
-        else this.openDrawer(which, button);
+        else this.openDrawer(which, this.menuOpen ? this.menuOpener : button);
       });
     });
 
     this.container.querySelectorAll<HTMLElement>('[data-side-tab-target]').forEach(button => {
       button.addEventListener('click', () => {
         const tab = button.dataset.sideTabTarget;
-        if (tab !== 'ranking' && tab !== 'feed' && tab !== 'observers') return;
+        if (tab !== 'ranking' && tab !== 'feed') return;
         this.sideTab = tab;
+        this.sideTabTouched = true;
         this.applySideTab();
       });
     });
@@ -2122,8 +2265,21 @@ export class BoardGameHUD {
     if (!panel) return;
     const rows = snapshot.chipRanking;
     if (!rows || rows.length === 0) {
-      panel.style.display = 'none';
-      panel.dataset.signature = '';
+      panel.style.display = '';
+      if (panel.dataset.signature !== 'empty') {
+        panel.dataset.signature = 'empty';
+        panel.innerHTML = `
+          <div class="cr-head">
+            <span class="cr-title">排行榜</span>
+            <span class="cr-total">—</span>
+          </div>
+          <div class="cr-empty">本局暂无排行榜数据</div>
+        `;
+      }
+      if (!this.sideTabTouched && this.sideTab === 'ranking') {
+        this.sideTab = 'feed';
+        this.applySideTab();
+      }
       return;
     }
     panel.style.display = '';
@@ -2775,7 +2931,10 @@ export class BoardGameHUD {
     if (count === 0) return;
 
     const desktop = window.matchMedia('(min-width: 1200px)').matches;
-    if (!desktop || count <= 4) {
+    // 展开状态（拉通整列）用普通列表：鱼眼在这个高度下会把其他玩家压成一条
+    // 细缝，反而读不到名字。
+    const expanded = rail.dataset.expanded === '1';
+    if (!desktop || count <= 4 || expanded) {
       rail.dataset.layout = 'list';
       for (const card of cards) {
         card.style.removeProperty('height');
@@ -2821,6 +2980,40 @@ export class BoardGameHUD {
       card.style.transform = `translateY(${(entry.x - cardHeight / 2).toFixed(2)}px)`;
       card.style.zIndex = String(10 + Math.round(entry.z));
     }
+  }
+
+  /**
+   * Expanded desktop rail: start at the topbar and stop 16px above the dock.
+   * Height is measured from the live dock rect because the dock grows and
+   * shrinks with the action set.
+   */
+  private syncRailExpandedGeometry(): void {
+    if (!window.matchMedia('(min-width: 1200px)').matches) {
+      this.container.style.removeProperty('--rail-expanded-h');
+      return;
+    }
+    const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
+    const dock = this.container.querySelector('#action-dock') as HTMLElement | null;
+    if (!rail || !dock || rail.getAttribute('data-expanded') !== '1') {
+      this.container.style.removeProperty('--rail-expanded-h');
+      return;
+    }
+    const top = rail.getBoundingClientRect().top;
+    const dockTop = dock.getBoundingClientRect().top;
+    const height = Math.max(0, Math.floor(dockTop - top - 16));
+    if (height > 0) this.container.style.setProperty('--rail-expanded-h', `${height}px`);
+  }
+
+  /** Desktop hand plaque: exactly as tall as the dock, slightly slimmer than 3:4. */
+  private syncHandSlotGeometry(): void {
+    const desktop = window.matchMedia('(min-width: 1200px) and (min-height: 481px)').matches;
+    const dock = this.container.querySelector('#action-dock') as HTMLElement | null;
+    if (!desktop || !dock) {
+      this.container.style.removeProperty('--dock-h');
+      return;
+    }
+    const height = dock.offsetHeight;
+    if (height > 0) this.container.style.setProperty('--dock-h', `${height}px`);
   }
 
   /** 记一条操作栏事件（环形缓冲，最多 240 条）。 */
@@ -3578,6 +3771,8 @@ export class BoardGameHUD {
       });
     }
     if (!this.dockTraceOverlay) this.mountDockTrace();
+    this.syncHandSlotGeometry();
+    this.syncRailExpandedGeometry();
   }
 
   /**
@@ -3588,6 +3783,8 @@ export class BoardGameHUD {
     if (this.dockRelayoutFrame) return;
     this.dockRelayoutFrame = requestAnimationFrame(() => {
       this.dockRelayoutFrame = 0;
+      this.syncHandSlotGeometry();
+      this.syncRailExpandedGeometry();
       const fan = this.container.querySelector('#action-dock [data-fan]') as HTMLElement | null;
       if (fan) this.layoutActionFan(fan);
     });
@@ -3906,12 +4103,12 @@ export class BoardGameHUD {
     // intermediate width, and transitionend catches the settled state. Both
     // funnel into the same coalesced rAF so the fan is never measured while a
     // drawer is half-open (the measured reason all four cards sat at x=1).
-    let lastDockWidth = Math.round(dock.clientWidth);
+    let lastDockSize = `${Math.round(dock.clientWidth)}x${Math.round(dock.clientHeight)}`;
     this.dockResizeObserver?.disconnect();
     this.dockResizeObserver = new ResizeObserver(() => {
-      const width = Math.round(dock.clientWidth);
-      if (width === lastDockWidth) return;
-      lastDockWidth = width;
+      const size = `${Math.round(dock.clientWidth)}x${Math.round(dock.clientHeight)}`;
+      if (size === lastDockSize) return;
+      lastDockSize = size;
       this.relayoutDock();
     });
     this.dockResizeObserver.observe(dock);

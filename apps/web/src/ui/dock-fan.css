@@ -564,27 +564,35 @@
 .hand-slot.pressing .hs-card { border-color: var(--accent-bright); }
 .hand-slot[data-tone='danger'].pressing .hs-card { border-color: var(--status-danger); }
 
-/* Direction-of-travel swap: incoming springs in, outgoing tilts away. */
+/* Diagonal spring swap: the incoming card flies up from the lower-left, the
+   outgoing card retraces that path. Both are framed in transform (not the
+   independent `translate` property) so reduced-motion and probes agree. */
 .hand-slot .hs-card.hs-entering,
 .hand-slot .hs-card.hs-leaving { will-change: transform, opacity; }
-.hand-slot .hs-enter-next { --hs-dir: 1; animation: hs-enter 220ms cubic-bezier(0.18, 0.89, 0.32, 1.18) both; }
-.hand-slot .hs-enter-prev { --hs-dir: -1; animation: hs-enter 220ms cubic-bezier(0.18, 0.89, 0.32, 1.18) both; }
-.hand-slot .hs-leave-next { --hs-dir: 1; animation: hs-leave 200ms var(--ease-out) both; }
-.hand-slot .hs-leave-prev { --hs-dir: -1; animation: hs-leave 200ms var(--ease-out) both; }
+.hand-slot .hs-enter-next,
+.hand-slot .hs-enter-prev { animation: hs-enter 220ms cubic-bezier(0.18, 0.89, 0.32, 1.18) both; }
+.hand-slot .hs-leave-next,
+.hand-slot .hs-leave-prev { animation: hs-leave 220ms cubic-bezier(0.18, 0.89, 0.32, 1.18) both; }
 
 @keyframes hs-enter {
   from {
     opacity: 0;
-    transform: translateX(calc(var(--hs-dir) * 46%)) rotateY(calc(var(--hs-dir) * -24deg)) scale(0.92);
+    transform: translate(-32px, 36px) rotate(-6deg);
   }
-  to { opacity: 1; transform: none; }
+  to {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0);
+  }
 }
 
 @keyframes hs-leave {
-  from { opacity: 1; transform: none; }
+  from {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0);
+  }
   to {
     opacity: 0;
-    transform: translateX(calc(var(--hs-dir) * -42%)) rotateY(calc(var(--hs-dir) * 18deg)) scale(0.9);
+    transform: translate(-32px, 36px) rotate(-6deg);
   }
 }
 
