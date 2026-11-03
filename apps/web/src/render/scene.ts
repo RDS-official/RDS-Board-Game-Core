@@ -5534,11 +5534,10 @@ export class BoardGameScene {
       | { street?: string; readyForNext?: string[]; lastActions?: Record<string, string>; folded?: string[] }
       | undefined;
     const isSettlement = hand?.street === 'COMPLETE';
-    for (const { group, jitter, lamp, seatId } of this.seatStandees) {
-      const dx = cam.x - group.position.x;
-      const dz = cam.z - group.position.z;
-      if (Math.abs(dx) < 1e-4 && Math.abs(dz) < 1e-4) continue;
-      group.rotation.y = Math.atan2(dx, dz) + jitter;
+    // 立牌不跟镜头转：朝向在生成时按座位方向定死（见 renderMapGraph 的
+    // `Math.atan2(-outward.x, -outward.y) + jitter`）。之前每帧把板子转向相机，
+    // 换个视角整桌牌都跟着摆头，像在看 HUD 而不是桌上的实物。
+    for (const { lamp, seatId } of this.seatStandees) {
       if (!lamp) continue;
       const material = lamp.material as THREE.MeshBasicMaterial;
 
