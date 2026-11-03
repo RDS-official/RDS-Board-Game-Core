@@ -537,6 +537,50 @@ export class BoardGameHUD {
   }
 
   /**
+   * Screen areas the shell is currently painting over the 3D canvas.
+   *
+   * The renderer needs this to keep the player's own cards out from under the
+   * dock (see `render/handRowDepth.ts`). The HUD is the only layer that knows
+   * where its panels actually land — at 1920×1080 the dock owns the left third
+   * of the bottom edge, below 1200px it becomes a full-width drawer, and on a
+   * phone it collapses again — so the geometry is measured here and handed over
+   * as plain rectangles instead of being guessed from a breakpoint.
+   *
+   * Only opaque, interactive panels count. Decorative washes and the hover chip
+   * are excluded: reserving them would push the cards around for no reason.
+   */
+  public reservedScreenBoxes(): { x: number; y: number; width: number; height: number }[] {
+    const boxes: { x: number; y: number; width: number; height: number }[] = [];
+    const selectors = [
+      '#action-dock',
+      '.app-shell > .hand-slot',
+      '#player-rail',
+      '#activity-feed',
+      '#room-card'
+    ];
+    for (const selector of selectors) {
+      const el = this.container.querySelector(selector) as HTMLElement | null;
+      if (!el) continue;
+      // A collapsed slide-over / hidden panel reserves nothing.
+      let node: HTMLElement | null = el;
+      let hidden = false;
+      while (node) {
+        const style = getComputedStyle(node);
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+          hidden = true;
+          break;
+        }
+        node = node.parentElement;
+      }
+      if (hidden) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) continue;
+      boxes.push({ x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+    }
+    return boxes;
+  }
+
+  /**
    * Lightweight hover chip for the 3D board: shows what the cursor is over and
    * what a click will do, without stealing focus from the action dock.
    *

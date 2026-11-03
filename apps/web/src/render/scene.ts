@@ -22,6 +22,7 @@ import { BoardGameAudio } from './audio';
 import { CANVAS_FONT_STACK } from './fonts';
 import { handLayout, handRowSpan } from '../ui/handLayout';
 import { boardCardPosition, boardRowFrame, type ViewerBearing } from './boardFacing';
+import { solveHandRowDepth, type ScreenBox } from './handRowDepth';
 
 export type CameraPreset = 'ISOMETRIC' | 'TOP_DOWN' | 'PLAYER_1' | 'PLAYER_2' | 'SEAT';
 
@@ -37,8 +38,18 @@ export type CameraPreset = 'ISOMETRIC' | 'TOP_DOWN' | 'PLAYER_1' | 'PLAYER_2' | 
  * player holds, they are spread over exactly this strip in front of the seat.
  */
 const HAND_ROW_SPAN = 6.4;
-/** Distance from the seat centre outwards to the hand row. */
+/**
+ * Preferred distance from the seat centre outwards to the hand row.
+ *
+ * This is a *starting* depth, not a fixed one: the HUD paints panels over the
+ * bottom of the canvas and how much it covers depends on the viewport, so the
+ * row is re-solved against those panels (see `render/handRowDepth.ts`).
+ */
 const HAND_ROW_DEPTH = 2.0;
+/** Closest the row may come to the table centre before it hits the board. */
+const HAND_ROW_DEPTH_MIN = 0.35;
+/** Furthest the row may go before it hangs off the felt. */
+const HAND_ROW_DEPTH_MAX = 2.6;
 /**
  * Push applied to a plain BOARD anchor before the row is laid out. Poker anchors
  * the board at z = -0.85 precisely so that this offset lands the row on the felt;
@@ -67,6 +78,19 @@ const HAND_FOCUS_BAND_PX = 160;
 interface HandRow {
   zoneId: string;
   ids: string[];
+  /**
+   * The seat this row belongs to and the direction leading away from the table.
+   * Kept so the row's depth can be re-solved when the HUD's reserved area
+   * changes (a resize, the dock opening, the hand slot appearing), without
+   * rebuilding the meshes.
+   */
+  seatX: number;
+  seatZ: number;
+  outX: number;
+  outZ: number;
+  /** Current distance from the seat centre out to the row, in world units. */
+  depth: number;
+  /** Row centre in world XZ, derived from the seat and `depth`. */
   originX: number;
   originZ: number;
   axisX: number;
@@ -3652,6 +3676,159 @@ export class BoardGameScene {
   /* Hands around the table                                              */
   /* ------------------------------------------------------------------ */
 
+  /* ------------------------------------------------------------------ */
+  /* Hand row depth vs. the HUD                                          */
+  /* ------------------------------------------------------------------ */
+
+  /** Screen rectangles the shell paints over the canvas (see the HUD). */
+  private reservedBoxes: ScreenBox[] = [];
+
+  /**
+   * Tell the renderer which parts of the canvas the HUD is covering.
+   *
+   * The player's own cards must stay legible, and the dock now owns a variable
+   * slice of the bottom edge (a third of it on desktop, all of it as a drawer
+   * below 1200px), so the safe area is measured by the UI layer and pushed down
+   * here instead of being hard-coded. Cheap and idempotent: rows are re-solved
+   * only when the boxes actually change.
+   */
+  public setReservedScreenBoxes(boxes: ScreenBox[]): void {
+    const signature = boxes
+      .map(box => `${Math.round(box.x)},${Math.round(box.y)},${Math.round(box.width)},${Math.round(box.height)}`)
+      .join('|');
+    if (signature === this.reservedSignature) return;
+    this.reservedSignature = signature;
+    this.reservedBoxes = boxes;
+    // Every row may need a new depth; re-solve and re-place them in one pass.
+    for (const row of this.handRows.values()) this.refreshHandRowDepth(row);
+  }
+
+  private reservedSignature = '';
+
+  /**
+   * Project the box a hand row's cards occupy at a given outward depth.
+   *
+   * The row runs along the seat tangent; its cards are one card wide and tall,
+   * so a single box around the strip is enough to decide whether the HUD is
+   * covering it. Returns null when the strip is behind the camera.
+   */
+  private projectHandRowBox(row: HandRow, depth: number): ScreenBox | null {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.camera.updateMatrixWorld();
+    const halfSpan = row.span / 2;
+    const halfDepth = HAND_CARD_WIDTH * 0.8;
+    const centreX = row.seatX + row.outX * depth;
+    const centreZ = row.seatZ + row.outZ * depth;
+    const point = BoardGameScene._scratchPoint;
+
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+
+    for (const along of [-halfSpan, halfSpan]) {
+      for (const outward of [-halfDepth, halfDepth]) {
+        point.set(
+          centreX + row.axisX * along + row.outX * outward,
+          HAND_ROW_Y,
+          centreZ + row.axisZ * along + row.outZ * outward
+        );
+        point.applyMatrix4(this.camera.matrixWorldInverse);
+        // At or behind the camera plane: no usable rectangle.
+        if (point.z > -0.2) return null;
+        point.applyMatrix4(this.camera.projectionMatrix);
+        const px = rect.left + (point.x * 0.5 + 0.5) * rect.width;
+        const py = rect.top + (-point.y * 0.5 + 0.5) * rect.height;
+        minX = Math.min(minX, px);
+        maxX = Math.max(maxX, px);
+        minY = Math.min(minY, py);
+        maxY = Math.max(maxY, py);
+      }
+    }
+    return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+  }
+
+  /**
+   * The outward depth a hand row should sit at, given the HUD's footprint.
+   *
+   * With nothing reserved this is the historical constant, so a game whose HUD
+   * leaves the felt alone is unchanged. With something reserved the pure solver
+   * walks outward and picks the closest depth whose projection clears it.
+   */
+  private handRowDepth(ownerId: string | undefined, span: number): number {
+    if (this.reservedBoxes.length === 0) return HAND_ROW_DEPTH;
+    const frame = this.lastState ? this.seatFrame(this.lastState, ownerId) : null;
+    if (!frame) return HAND_ROW_DEPTH;
+    const probe: HandRow = {
+      zoneId: '',
+      ids: [],
+      seatX: frame.x,
+      seatZ: frame.z,
+      outX: frame.outX,
+      outZ: frame.outZ,
+      depth: HAND_ROW_DEPTH,
+      originX: frame.x + frame.outX * HAND_ROW_DEPTH,
+      originZ: frame.z + frame.outZ * HAND_ROW_DEPTH,
+      axisX: -frame.outZ,
+      axisZ: frame.outX,
+      facing: frame.facing,
+      span,
+      focus: { x: 0.5, strength: 0 },
+      target: { x: 0.5, strength: 0 }
+    };
+    const { depth } = solveHandRowDepth({
+      current: HAND_ROW_DEPTH,
+      min: HAND_ROW_DEPTH_MIN,
+      max: HAND_ROW_DEPTH_MAX,
+      project: (candidate: number) => this.projectHandRowBox(probe, candidate),
+      obstacles: this.reservedBoxes
+    });
+    return depth;
+  }
+
+  /**
+   * Re-solve the hand rows whenever the camera has moved.
+   *
+   * The depth that clears the HUD depends on where the camera is: at the isometric
+   * framing the row projects near the middle of the felt, and from a seat camera
+   * it projects low and wide — right where the dock sits. Solving only on a
+   * snapshot would freeze the answer computed before the seat tween ran, so the
+   * rows are re-checked whenever the view actually changes. Comparing the camera
+   * matrix is enough and costs nothing when nothing moved.
+   */
+  private refreshHandDepthsForCamera(): void {
+    if (this.handRows.size === 0 || this.reservedBoxes.length === 0) return;
+    const e = this.camera.matrixWorld.elements;
+    const signature = `${e[12].toFixed(2)},${e[13].toFixed(2)},${e[14].toFixed(2)}`;
+    if (signature === this.handDepthCameraSignature) return;
+    this.handDepthCameraSignature = signature;
+    this.camera.updateMatrixWorld();
+    for (const row of this.handRows.values()) this.refreshHandRowDepth(row);
+  }
+
+  private handDepthCameraSignature = '';
+
+  /** Re-solve one live row's depth and re-place it if the answer moved. */
+  private refreshHandRowDepth(row: HandRow): void {
+    if (this.reservedBoxes.length === 0) {
+      if (row.depth === HAND_ROW_DEPTH) return;
+      row.depth = HAND_ROW_DEPTH;
+    } else {
+      const { depth } = solveHandRowDepth({
+        current: HAND_ROW_DEPTH,
+        min: HAND_ROW_DEPTH_MIN,
+        max: HAND_ROW_DEPTH_MAX,
+        project: (candidate: number) => this.projectHandRowBox(row, candidate),
+        obstacles: this.reservedBoxes
+      });
+      if (Math.abs(depth - row.depth) < 1e-4) return;
+      row.depth = depth;
+    }
+    row.originX = row.seatX + row.outX * row.depth;
+    row.originZ = row.seatZ + row.outZ * row.depth;
+    this.layoutHandRow(row);
+  }
+
   /**
    * Which way the seated viewer faces, for laying out a shared board row.
    *
@@ -3717,8 +3894,14 @@ export class BoardGameScene {
     // so index order reads left-to-right for the player sitting there.
     const axisX = -frame.outZ;
     const axisZ = frame.outX;
-    const originX = frame.x + frame.outX * HAND_ROW_DEPTH;
-    const originZ = frame.z + frame.outZ * HAND_ROW_DEPTH;
+    const span = handRowSpan(items.length, HAND_ROW_SPAN, HAND_CARD_WIDTH);
+    // The outward depth is re-solved against the HUD's reserved area; this is the
+    // preferred value, not a fixed one. It has to be solved for the width this
+    // hand actually occupies: a two-card row is a fifth of the nominal strip, so
+    // measuring the strip would under-read how much of a *card* is covered.
+    const depth = this.handRowDepth(zone.ownerId, span);
+    const originX = frame.x + frame.outX * depth;
+    const originZ = frame.z + frame.outZ * depth;
 
     // Every card in the hand gets a mesh. There is no count cap any more: the
     // fisheye layout below normalises the whole hand into one strip, so a
@@ -3748,12 +3931,17 @@ export class BoardGameScene {
     const row: HandRow = {
       zoneId: zone.id,
       ids,
+      seatX: frame.x,
+      seatZ: frame.z,
+      outX: frame.outX,
+      outZ: frame.outZ,
+      depth,
       originX,
       originZ,
       axisX,
       axisZ,
       facing: frame.facing,
-      span: handRowSpan(ids.length, HAND_ROW_SPAN, HAND_CARD_WIDTH),
+      span,
       // Start where the pointer already is, so rebuilding the board does not
       // make the hand re-expand under a stationary cursor.
       focus: { ...this.handPointerTarget },
@@ -5354,6 +5542,7 @@ export class BoardGameScene {
     this.physics.step(dt);
     this.updateFocusLight();
     this.updateHandFocus(dt);
+    this.refreshHandDepthsForCamera();
     this.updateCardSettles(now);
     this.updateRoomSettles(now);
     this.updateNavArrows(now);

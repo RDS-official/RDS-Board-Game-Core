@@ -48,6 +48,12 @@ import { layoutRoom, hashString as layoutHash } from '@rds/web/render/procedural
 import { PROPS } from '@rds/web/render/procedural/props';
 import { boardCardPosition, boardRowFrame, BOARD_ROW_PITCH } from '@rds/web/render/boardFacing';
 import { layoutForGame } from '@rds/app/layout';
+import {
+  coveredFraction,
+  HAND_DEPTH_STEP,
+  HAND_OCCLUSION_TOLERANCE,
+  solveHandRowDepth
+} from '@rds/web/render/handRowDepth';
 import { definePresentation } from '@rds/kernel/module';
 import { test, assert, assertEqual } from '../testKit';
 import { counterModule } from '../suiteHelpers';
@@ -858,4 +864,66 @@ test('presentation: only a game that declares board facing turns its board row',
     assert(!facing.includes(word), `the facing path infers the game from ${word}`);
   }
   assert(facing.includes('boardFacesViewer') && facing.includes("'GOD'"), 'capability in, omniscient camera out');
+});
+
+test('presentation: an own hand row dodges the HUD, and only as far as it must', () => {
+  // 自己手牌的可见性（PR3）：手牌行铺在座位上，动作坞压在画布左下。两者的重叠
+  // 取决于视口——桌面端 dock 占 1/7…4/7，1200px 以下整条底部抽屉——所以手牌行的
+  // 外推深度是**按帧求解**的，不是一个常数。这里守求解器，浏览器里的真实遮挡由
+  // scripts/probe-hand-visibility.mjs 负责。
+  const card = (y: number) => ({ x: 400, y, width: 120, height: 80 });
+  // 屏幕越往下 dock 越高：把「牌行外推」建模成一条斜线，depth 越大越靠下。
+  // 深度 2.0 时整张牌落在 dock 里；退到 1.70 时刚好从 dock 上沿露出。
+  const project = (depth: number) => card(300 + depth * 80);
+  const dock = { x: 200, y: 520, width: 600, height: 200 };
+
+  // 没有 HUD 占位时保持原深度：不遮挡的手牌绝不能被挪动。
+  assertEqual(
+    solveHandRowDepth({ current: 2, min: 0.35, max: 2.6, project, obstacles: [] }).depth,
+    2,
+    'nothing reserved keeps the historical depth'
+  );
+
+  // 有占位时往回收，且收得刚好够用——不是一路退到桌心。
+  const solved = solveHandRowDepth({ current: 2, min: 0.35, max: 2.6, project, obstacles: [dock] });
+  assertEqual(solved.clear, true, 'a clear depth exists for this row');
+  assert(solved.depth < 2, 'the row retreats when the HUD covers it');
+  assert(
+    solved.depth > 0.5,
+    `the row stops as soon as it clears instead of collapsing onto the board (got ${solved.depth})`
+  );
+  // 解答确实是「最大可行深度」：再往外挪一步就应该重新被遮住。
+  const oneStepOut = solved.depth + HAND_DEPTH_STEP;
+  assert(
+    coveredFraction(project(oneStepOut), [dock]) > HAND_OCCLUSION_TOLERANCE,
+    'one step further out is covered again — the answer is the largest clear depth'
+  );
+
+  // 无处可躲时如实报告，而不是假装看得见。
+  const hopeless = solveHandRowDepth({
+    current: 2,
+    min: 0.35,
+    max: 2.6,
+    project: () => card(600),
+    obstacles: [dock]
+  });
+  assertEqual(hopeless.clear, false, 'an impossible viewport is reported, not faked');
+
+  // 盒子在相机背后（project 返回 null）时不能当成「空」，否则会误判为可见。
+  const behind = solveHandRowDepth({
+    current: 2,
+    min: 0.35,
+    max: 2.6,
+    project: () => null,
+    obstacles: [dock]
+  });
+  assertEqual(behind.clear, false, 'a row behind the camera is never "clear"');
+
+  // 面积计算按「最大的那一块遮挡」算，不是累加：两块各盖 40% 不等于盖 80%。
+  const half = { x: 400, y: 300, width: 60, height: 80 };
+  assertEqual(
+    Math.round(coveredFraction(card(300), [half, { ...half, x: 460 }]) * 100),
+    50,
+    'overlap is the worst single panel, not the sum'
+  );
 });
