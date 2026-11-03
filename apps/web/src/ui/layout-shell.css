@@ -1,28 +1,43 @@
 /* ============================================================
    Phase 2 · app shell
    ------------------------------------------------------------
-   Replaces the absolute-positioning layout with a CSS Grid whose named areas
-   describe the product structure. Panels are grid items, so "two panels
-   overlap" stops being something a developer has to remember and becomes
-   structurally impossible.
+   The shell is a CSS Grid whose named areas describe the product
+   structure. Panels are grid items, so "two panels overlap" stops being
+   something a developer has to remember and becomes structurally
+   impossible.
 
-   Three shells, chosen by viewport *shape* as well as width, because the
-   product targets 16:10 / 16:9 / 3:2 / 4:3 and 4:3 leaves much less horizontal
-   room at the same height:
+   Four width tiers (see docs/UI-RESPONSIVE-PLAN.md §3.2):
 
-     desktop  >= 1200px   topbar / rail / board / side
-     tablet   768-1199px  topbar / rail / board, side is a slide-over
-     phone    < 768px     topbar / board, rail and side are slide-overs,
-                          the action dock becomes a bottom drawer
+     compact  < 600px    topbar / board, both panels are drawers,
+                         dock is a bottom sheet
+     phone    600-899px  same topology as compact, wider drawers
+     tablet   900-1199px same topology, the dock becomes a centred
+                         bottom bar
+     desktop  >= 1200px  topbar / rail / board / side, both panels
+                         persistent, dock keeps 1/7 -> 4/7
 
-   The 3D canvas lives behind this layer; the `board` cell is deliberately empty
-   so the scene shows through it.
+   Landscape phones are a width-independent exception: any viewport that
+   is at most 480px tall and at least 600px wide is treated as phone
+   behaviour, so 844×390 and 915×412 never fall into the tablet branch.
+
+   The 3D canvas lives behind this layer; the `board` cell is deliberately
+   empty so the scene shows through it.
    ============================================================ */
 
 :root {
-  --topbar-h: 68px;
-  --rail-w: clamp(180px, 15vw, 216px);
-  --side-w: clamp(196px, 16vw, 254px);
+  --topbar-h: 64px;
+  /* Desktop panels stay inside the first/seventh column budget. The width
+     keeps the 1/7 rule but is capped so ultrawide screens do not grow a
+     365px information column; the height is capped independently because
+     1/7 of the viewport leaves ranking/activity headers invisible. */
+  --panel-cap-w: min(calc(100vw / 7), 260px);
+  --panel-cap-h: min(42vh, 420px);
+  --rail-w: min(clamp(200px, 15vw, 236px), var(--panel-cap-w));
+  --side-w: min(clamp(248px, 16vw, 288px), var(--panel-cap-w));
+  /* Drawer widths per tier. Tablet values are the defaults because the
+     shared drawer block below is also the tablet rule. */
+  --drawer-rail-w: min(360px, 78vw);
+  --drawer-side-w: min(380px, 84vw);
   --shell-edge: var(--space-6);
   --shell-gap: var(--space-3);
   /* Horizontal room the dock must leave for the rail and the side column. */
@@ -42,6 +57,11 @@
   column-gap: var(--shell-gap);
   /* The layer stays click-through; only the panels below take the pointer. */
   pointer-events: none;
+  /* The shell must never scroll. A closed slide-over sticks out past the
+     viewport edge; without this the layer becomes a horizontal scroll
+     container and the browser scrolls it when a drawer opens, shifting the
+     whole grid sideways. */
+  overflow: clip;
 }
 
 /* ---- panels become grid items ----------------------------------------- */
@@ -49,9 +69,12 @@
 .app-shell > .topbar {
   grid-area: topbar;
   position: static;
+  width: var(--panel-cap-w);
   height: auto;
   min-height: var(--topbar-h);
+  max-height: none;
   align-self: stretch;
+  justify-self: start;
 }
 
 .app-shell > .player-rail {
@@ -60,7 +83,7 @@
   width: auto;
   top: auto;
   left: auto;
-  max-height: none;
+  max-height: var(--panel-cap-h);
   min-height: 0;
   margin: 0 0 var(--shell-edge) var(--shell-edge);
   overflow-y: auto;
@@ -74,9 +97,12 @@
   width: auto;
   top: auto;
   right: auto;
-  max-height: none;
+  max-height: var(--panel-cap-h);
   min-height: 0;
-  margin: 0 var(--shell-edge) var(--shell-edge) 0;
+  /* No margin on the right: with the width capped by --panel-cap-w the
+     grid track already ends at the viewport edge. An extra margin here is
+     what pushed the column past 1920/2560 and hid its right edge. */
+  margin: 0 0 var(--shell-edge) 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -98,8 +124,8 @@
 }
 
 /* Desktop: the dock owns exactly the second quarter of the viewport width
-   (1/7 .. 4/7) and the hand slot stands immediately to its right. Below
-   1200px the old grid/bottom-drawer rules above stay in charge. */
+   (1/7 .. 4/7) and the hand slot stands immediately to its right. This
+   geometry is intentionally unchanged — PR 3 owns the dock redesign. */
 @media (min-width: 1200px) {
   .app-shell > .action-dock {
     /* grid-area would make the abs-positioned containing block the board cell;
@@ -163,63 +189,25 @@
   background: var(--surface-control-hover);
 }
 
-/* ---- tablet: 768-1199px ------------------------------------------------
-   The rail keeps its column; the side panels become a slide-over so the board
-   is not squeezed by two permanent columns. */
-
-@media (max-width: 1199px) {
-  :root {
-    --rail-w: clamp(160px, 18vw, 190px);
-    --side-w: min(300px, 34vw);
-  }
-
-  .ui-layer.app-shell {
-    grid-template-columns: var(--rail-w) minmax(0, 1fr);
-    grid-template-areas:
-      'topbar topbar'
-      'rail   board';
-  }
-
-  .app-shell > .side-column {
-    /* slide-over：脱离网格，避免占用 track。 */
-    grid-area: auto;
-    position: fixed;
-    top: var(--topbar-h);
-    right: 0;
-    bottom: 0;
-    width: var(--side-w);
-    max-height: none;
-    margin: 0;
-    padding: var(--shell-edge);
-    background: var(--surface-panel);
-    backdrop-filter: blur(24px) saturate(140%);
-    border-left: 1px solid var(--border-subtle);
-    box-shadow: var(--shadow-3);
-    transform: translateX(100%);
-    transition: transform var(--duration-base) var(--ease-standard);
-    z-index: 45;
-  }
-
-  .app-shell[data-side='open'] > .side-column {
-    transform: translateX(0);
-  }
-
-  .shell-toggle[data-toggle='side'] {
-    display: inline-flex;
-  }
+/* Desktop-only affordances; individual shell tiers opt back in below. */
+.compact-menu-btn,
+.compact-only {
+  display: none;
 }
 
-/* ---- phone: < 768px ----------------------------------------------------
-   Single column. The rail and the side panels are both slide-overs, and the
-   action dock collapses into a bottom drawer that only shows a handle until it
-   is opened. */
+/* ============================================================
+   Non-desktop shell: single column + two drawers
+   ------------------------------------------------------------
+   Applies to every viewport below 1200px, plus the landscape-phone
+   exception above 1200px. Rail and side never participate in the grid
+   here; both are fixed, translated out of view until their existing
+   [data-rail] / [data-side] state is set by the shell toggles.
+   ============================================================ */
 
-@media (max-width: 767px) {
+@media (max-width: 1199px), (max-height: 480px) and (min-width: 600px) {
   :root {
-    --rail-w: 0px;
-    --side-w: min(320px, 86vw);
-    --topbar-h: 56px;
-    --shell-edge: var(--space-3);
+    --topbar-h: 60px;
+    --shell-edge: 16px;
   }
 
   .ui-layer.app-shell {
@@ -227,71 +215,139 @@
     grid-template-areas:
       'topbar'
       'board';
+    column-gap: 0;
   }
 
-  .app-shell > .player-rail {
-    /* 移出网格流：否则 grid-area:rail 会在单列网格里生成隐式轨道，
-       把顶栏挤成 94px（390px 视口的实测值）。 */
+  .app-shell > .topbar {
+    width: auto;
+    justify-self: stretch;
+    position: relative;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    min-height: var(--topbar-h);
+  }
+
+  .app-shell > .topbar .brand-text {
+    display: none;
+  }
+
+  .app-shell > .topbar > .game-switch {
+    display: none;
+  }
+
+  /* The side toggle stays a first-class bar control instead of being
+     buried in the collapsed action menu: both panels are drawers here,
+     so both need a visible opener. Other topbar actions are only shown
+     while the ☰ menu is open (rules below). */
+  .app-shell > .topbar > .topbar-actions {
+    display: flex;
+    flex: 0 0 auto;
+    position: static;
+    width: auto;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .app-shell > .topbar:not([data-menu='open']) > .topbar-actions > :not([data-toggle='side']) {
+    display: none;
+  }
+
+  .app-shell > .player-rail,
+  .app-shell > .side-column {
     grid-area: auto;
     position: fixed;
     top: var(--topbar-h);
-    left: 0;
     bottom: 0;
-    width: min(280px, 84vw);
+    max-height: none;
+    min-height: 0;
     margin: 0;
-    padding: var(--shell-edge);
+    padding: 16px;
     background: var(--surface-panel);
     backdrop-filter: blur(24px) saturate(140%);
-    border-right: 1px solid var(--border-subtle);
     box-shadow: var(--shadow-3);
-    transform: translateX(-100%);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
     transition: transform var(--duration-base) var(--ease-standard);
     z-index: 45;
   }
 
-  .app-shell[data-rail='open'] > .player-rail {
-    transform: translateX(0);
+  .app-shell > .player-rail {
+    left: 0;
+    width: var(--drawer-rail-w);
+    border-right: 1px solid var(--border-subtle);
+    transform: translateX(-100%);
   }
 
   .app-shell > .side-column {
-    /* 同上：slide-over 面板不属于任何网格单元格。 */
-    grid-area: auto;
-    top: var(--topbar-h);
+    right: 0;
+    width: var(--drawer-side-w);
+    border-left: 1px solid var(--border-subtle);
+    transform: translateX(100%);
   }
 
-  .shell-toggle[data-toggle='rail'] {
-    display: inline-flex;
+  .app-shell[data-rail='open'] > .player-rail,
+  .app-shell[data-side='open'] > .side-column {
+    transform: translateX(0);
   }
 
+  /* A closed drawer must not be reachable by tab, and must not be measured
+     as an on-screen panel. */
+  .app-shell:not([data-rail='open']) > .player-rail,
+  .app-shell:not([data-side='open']) > .side-column {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .shell-toggle[data-toggle='rail'],
   .shell-toggle[data-toggle='side'] {
     display: inline-flex;
   }
 
-  /* ---- dock as a bottom drawer ---- */
+  .compact-menu-btn {
+    display: inline-flex;
+    margin-left: 0;
+  }
+
+  /* ---- dock as a bottom bar ------------------------------------------- */
   .app-shell > .action-dock {
-    width: 100%;
-    margin: 0;
-    max-height: 60dvh;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    grid-area: board;
+    position: static;
+    left: auto;
+    bottom: auto;
+    transform: none;
+    justify-self: center;
+    align-self: end;
+    width: min(860px, calc(100% - 32px));
+    margin: 0 auto 16px;
+    max-height: 212px;
     background: var(--surface-panel);
     backdrop-filter: blur(24px) saturate(140%);
-    border-top: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow-3);
     z-index: 40;
   }
 
-  /* Collapsed: only the handle and the one-line hint stay visible. */
+  .dock-handle {
+    display: flex;
+  }
+
   .app-shell > .action-dock:not([data-dock='open']) > .dock-shell > .dock-actions > .dock-fan {
     display: none;
   }
 
   .app-shell > .action-dock:not([data-dock='open']) {
-    max-height: 96px;
+    max-height: 72px;
+    overflow: hidden;
   }
 
   .dock-handle {
-    display: flex;
     align-items: center;
     justify-content: center;
     gap: var(--space-3);
@@ -316,16 +372,125 @@
   .dock-handle .dh-count {
     font-variant-numeric: tabular-nums;
   }
-}
 
-/* The handle only exists in the phone shell. */
-.dock-handle {
-  display: none;
-}
-
-@media (max-width: 767px) {
-  .dock-handle {
+  /* ---- ☰ menu popover -------------------------------------------------- */
+  .app-shell > .topbar[data-menu='open'] > .game-switch,
+  .app-shell > .topbar[data-menu='open'] > .topbar-actions {
     display: flex;
+    position: absolute;
+    right: var(--space-2);
+    top: calc(100% + var(--space-2));
+    left: auto;
+    z-index: 90;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+    width: min(340px, 88vw);
+    max-height: 68vh;
+    overflow-y: auto;
+    padding: var(--space-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface-panel-solid);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  }
+
+  .app-shell > .topbar[data-menu='open'] > .game-switch {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+/* ---- tier tokens ------------------------------------------------------- */
+
+/* tablet: 900-1199px */
+@media (min-width: 900px) and (max-width: 1199px) {
+  :root {
+    --topbar-h: 60px;
+    --drawer-rail-w: min(360px, 78vw);
+    --drawer-side-w: min(380px, 84vw);
+  }
+}
+
+/* phone: 600-899px */
+@media (max-width: 899px) {
+  :root {
+    --topbar-h: 56px;
+    --drawer-rail-w: min(340px, 88vw);
+    --drawer-side-w: min(360px, 92vw);
+    --shell-edge: var(--space-3);
+  }
+
+  .app-shell > .topbar {
+    padding: 0 var(--space-2);
+  }
+
+  .app-shell > .topbar .icon-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .app-shell > .action-dock {
+    width: calc(100% - 24px);
+    margin: 0 auto 12px;
+    max-height: 58dvh;
+  }
+}
+
+/* compact: < 600px */
+@media (max-width: 599px) {
+  :root {
+    --topbar-h: 52px;
+    --drawer-rail-w: min(320px, 92vw);
+    --drawer-side-w: min(340px, 94vw);
+  }
+
+  .app-shell > .topbar {
+    padding: 4px var(--space-2);
+  }
+
+  .app-shell > .action-dock {
+    width: 100%;
+    margin: 0;
+    max-height: 62dvh;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .app-shell > .action-dock:not([data-dock='open']) {
+    max-height: 64px;
+  }
+}
+
+/* Landscape phones: width is no longer a reliable signal (844/915 would
+   otherwise land in tablet), so height decides. Compact the chrome enough
+   that the board keeps the majority of a 390px-tall viewport. */
+@media (max-height: 480px) and (min-width: 600px) {
+  :root {
+    --topbar-h: 48px;
+    --drawer-rail-w: min(340px, 88vw);
+    --drawer-side-w: min(360px, 92vw);
+    --shell-edge: var(--space-2);
+  }
+
+  .app-shell > .topbar {
+    padding: 0 var(--space-2);
+    min-height: 48px;
+  }
+
+  .app-shell > .action-dock {
+    width: min(520px, calc(100% - 24px));
+    margin: 0 auto 8px;
+    max-height: 72px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+  }
+
+  .app-shell > .action-dock[data-dock='open'] {
+    max-height: 58dvh;
   }
 }
 
@@ -382,25 +547,27 @@
 
 /* ---- squarer viewports -------------------------------------------------
    4:3 (1.333) and 3:2 (1.5) leave far less horizontal room than 16:9 at the
-   same height. Narrow the bands before the board shrinks. */
+   same height. Narrow the bands before the board shrinks. Every override
+   still honours the 1/7 cap. */
 
 @media (min-width: 1200px) and (max-aspect-ratio: 3/2) {
   :root {
-    --rail-w: clamp(160px, 13vw, 190px);
-    --side-w: clamp(176px, 14vw, 216px);
+    --rail-w: min(clamp(160px, 13vw, 190px), var(--panel-cap-w));
+    --side-w: min(clamp(176px, 14vw, 216px), var(--panel-cap-w));
   }
 }
 
 @media (min-width: 1200px) and (max-aspect-ratio: 4/3) {
   :root {
-    --rail-w: 158px;
-    --side-w: 184px;
+    --rail-w: min(158px, var(--panel-cap-w));
+    --side-w: min(184px, var(--panel-cap-w));
   }
 }
 
-/* Short viewports (e.g. 1366x768 at 16:9) need the panels to scroll rather
-   than push the dock off-screen. */
-@media (max-height: 800px) {
+/* Short desktop viewports (e.g. 1366x768 at 16:9) need the panels to scroll
+   rather than push the dock off-screen. Drawers are excluded: they are
+   anchored to the bottom edge and must not leave a gap. */
+@media (min-width: 1200px) and (max-height: 800px) {
   .app-shell > .player-rail,
   .app-shell > .side-column {
     margin-bottom: var(--space-3);
@@ -427,19 +594,18 @@
   width: 100%;
 }
 
-/* ---- player rail: fisheye stack ---------------------------------------
+/* ---- player rail: fisheye stack (desktop only) -------------------------
    Ten players do not fit the rail column, so the cards behave like a hand:
    the rail becomes a positioned box, the cards are absolutely placed by
    `Hud.layoutPlayerRail` (same `handLayout` fisheye as the action dock, just
    running down the screen) and the card under the pointer opens up while the
    rest compress into slivers. These rules must stay *after* the panel-children
-   reset above, which forces every rail child back to `position: static`. */
+   reset above, which forces every rail child back to `position: static`.
 
-/* 鱼眼布局需要 relative 作为绝对定位子卡的容器；但手机上角色栏是 slide-over
-   抽屉，必须是 fixed。之前的书写顺序让这条覆盖掉了手机断点的 fixed，
-   角色栏掉进网格隐式行、高度塌成 16px（probe:ui 报 rail:y 溢出的真因）。
-   这里用 :not() 把鱼眼规则限定在非手机外壳。 */
-@media (min-width: 768px) {
+   Below 1200px the rail is a fixed drawer; making it `relative` there
+   overwrote the drawer positioning and collapsed the rail into a 16px grid
+   row (the old probe:ui rail:y regression). */
+@media (min-width: 1200px) {
   .app-shell > .player-rail {
     position: relative;
     overflow: hidden;
@@ -475,29 +641,98 @@
   pointer-events: none;
 }
 
-/* ---- closed slide-overs -----------------------------------------------
-   A closed drawer must not be reachable by tab, and must not be measured as an
-   on-screen panel. */
+/* ============================================================
+   Desktop compact panels (>= 1200px)
+   ------------------------------------------------------------
+   The 1/7 width budget stays, but the height cap is now independent:
+   min(42vh, 420px) instead of 1/7 of the viewport height, so ranking and
+   activity at least expose their headers on 720-1080px tall screens.
+   ============================================================ */
 
-@media (max-width: 1199px) {
-  .app-shell:not([data-side='open']) > .side-column {
-    visibility: hidden;
-    pointer-events: none;
+@media (min-width: 1200px) {
+  .app-shell > .topbar {
+    position: relative;
+    width: var(--panel-cap-w);
+    max-height: none;
+    justify-self: start;
+    padding: var(--space-2) var(--space-3);
   }
-}
 
-@media (max-width: 767px) {
-  .app-shell:not([data-rail='open']) > .player-rail {
-    visibility: hidden;
-    pointer-events: none;
+  .app-shell > .topbar .brand-text,
+  .app-shell > .topbar .game-switch,
+  .app-shell > .topbar .topbar-actions {
+    display: none;
   }
-}
 
-/* The shell must never scroll. A closed slide-over sticks out past the viewport
-   edge; without this the layer becomes a horizontal scroll container and the
-   browser scrolls it when a drawer opens, shifting the whole grid sideways. */
-.ui-layer.app-shell {
-  overflow: clip;
+  .app-shell > .topbar .brand-mark {
+    font-size: 22px;
+  }
+
+  .compact-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+  }
+
+  /* 二级菜单：原地弹出（不改变面板占位） */
+  .app-shell > .topbar[data-menu='open'] .game-switch,
+  .app-shell > .topbar[data-menu='open'] .topbar-actions {
+    display: flex;
+    position: absolute;
+    top: calc(100% + var(--space-2));
+    left: 0;
+    z-index: 90;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+    width: max-content;
+    max-width: min(420px, 72vw);
+    padding: var(--space-3);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface-panel-solid);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  }
+
+  /* 两段都贴着顶栏右侧弹出：游戏页签先一行铺开，动作区接在它下面。 */
+  .app-shell > .topbar[data-menu='open'] .game-switch {
+    left: calc(var(--panel-cap-w) + var(--space-2));
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: max-content;
+    max-width: min(420px, 72vw);
+  }
+
+  .app-shell > .topbar[data-menu='open'] .topbar-actions {
+    left: calc(var(--panel-cap-w) + var(--space-2));
+    top: calc(100% + var(--space-2) + 56px);
+    max-height: min(62vh, 480px);
+    overflow-y: auto;
+  }
+
+  /* 角色栏 / 信息栏：宽高按 1/7 预算，内容自滚动；菜单里可原地展开 */
+  .app-shell > .player-rail,
+  .app-shell > .side-column {
+    max-height: var(--panel-cap-h);
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  .app-shell > .player-rail[data-expanded='1'],
+  .app-shell > .side-column[data-expanded='1'] {
+    width: min(330px, 36vw);
+    max-height: min(74vh, 660px);
+    z-index: 75;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    background: var(--surface-panel-solid);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  }
+
+  .compact-only {
+    display: inline-flex;
+  }
 }
 
 /* ---- topbar responsiveness --------------------------------------------
@@ -527,18 +762,8 @@
   /* Phone: brand mark, toggles and the icon buttons only. The camera switch
      needs a touch-sized row of its own and does not fit; it is surfaced in the
      side panel instead (see `.cam-switch` placement below). */
-  .app-shell > .topbar {
-    padding: 0 var(--space-2);
-    gap: var(--space-2);
-  }
-
   .app-shell > .topbar .cam-switch {
     display: none;
-  }
-
-  .app-shell > .topbar .icon-btn {
-    min-width: 44px;
-    min-height: 44px;
   }
 
   /* Keep the camera controls reachable: they render inside the side panel on
@@ -563,9 +788,9 @@
 }
 
 /* ---- topbar: compact the wide switches --------------------------------
-   `.scenario-switch` (260px) and `.viewer-switch` (168px) dominate the cluster.
-   Shrink them on narrow shells, and on the phone shell move them into the side
-   panel (see `applyShellLayout` in hud.ts) so nothing is lost. */
+   `.scenario-switch` and `.viewer-switch` dominate the cluster. They are hidden
+   on narrow shells and moved into the side panel by `applyShellLayout` in
+   hud.ts, so nothing is lost. */
 
 @media (max-width: 1199px) {
   .app-shell > .topbar .scenario-switch .vs-label,
@@ -616,356 +841,7 @@
 /* ---- [hidden] must actually hide --------------------------------------
    `.icon-btn { display: flex }` is more specific than the UA's
    `[hidden] { display: none }`, so #btn-exit-net rendered on every screen even
-   though the markup marks it hidden. That extra 44px is what pushed the phone
-   topbar past the viewport edge once another icon button was added. */
+   though the markup marks it hidden. */
 [hidden] {
   display: none !important;
-}
-
-/* ============================================================
-   顶栏按可用宽度自适应（不重叠、不挤压、不溢出）
-   ------------------------------------------------------------
-   实测旧布局：1610px 溢出 139px，1440/1280 溢出近 300px，
-   390px 顶栏被压到 94px 宽。
-
-   动作区各件的实测宽度预算（含 gap）：
-     品牌 250 · 游戏页签 610 · 局内场景 250 · 滤镜 190 · 相机 190
-     · 6 个图标按钮 6×44 · 信息/角色开关 90
-   1200px 以上必须开始做减法，否则一定换行或溢出。
-   ============================================================ */
-
-.app-shell > .topbar {
-  flex-wrap: wrap;
-  row-gap: 6px;
-  min-width: 0;
-  /* 顶栏可能换行，高度交给内容决定（grid 行已是 auto）。 */
-  min-height: var(--topbar-h);
-}
-
-.app-shell > .topbar > * {
-  min-width: 0;
-}
-
-.app-shell > .topbar .topbar-actions {
-  flex: 0 1 auto;
-  min-width: 0;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-/* 游戏页签过多时横向滚动，而不是把顶栏撑爆。 */
-.app-shell > .topbar .game-switch {
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.app-shell > .topbar .game-switch::-webkit-scrollbar {
-  display: none;
-}
-
-/* --- 1799px 以下：中等桌面开始一级压缩 ---------------------------------
-   实测单行预算（全展开）：品牌 266 + 页签 647 + 场景 260 + 滤镜 168
-   + 相机 184 + 6×36 图标 + 开关 90 + 间距 ≈ 1880px。
-   所以 1800px 起就要做减法，否则必然换行。
-
-   压缩顺序（越靠后越激进）：① 隐藏「局内场景 / 滤镜」两个文字标签（省 112px）
-   ② 收窄两个下拉 ③ 收窄页签内边距 ④ 缩图标按钮。
-   所有被隐藏的文字都有 title 提示与 select 自身内容兜底。 */
-@media (max-width: 1799px) {
-  .app-shell > .topbar {
-    gap: 12px;
-    padding: 0 14px;
-  }
-
-  .app-shell > .topbar .scenario-switch .vs-label,
-  .app-shell > .topbar .viewer-switch .vs-label {
-    display: none;
-  }
-
-  .app-shell > .topbar .scenario-switch,
-  .app-shell > .topbar .viewer-switch {
-    padding: 0 4px 0 6px;
-  }
-
-  .app-shell > .topbar .scenario-switch select {
-    max-width: 150px;
-  }
-
-  .app-shell > .topbar .viewer-switch select {
-    max-width: 120px;
-  }
-
-  .app-shell > .topbar .game-pill {
-    padding: 0 9px;
-    gap: 5px;
-  }
-
-  .app-shell > .topbar .cam-btn {
-    padding: 0 8px;
-  }
-
-  .app-shell > .topbar .icon-btn {
-    width: 32px;
-    height: 32px;
-  }
-
-  .app-shell > .topbar .topbar-actions {
-    gap: 6px;
-  }
-}
-
-/* --- 1459px 以下：再压一档（页签只留图标） ----------------------------- */
-@media (max-width: 1459px) {
-  .app-shell > .topbar {
-    gap: 14px;
-  }
-
-  .app-shell > .topbar .game-pill {
-    padding: 0 9px;
-    gap: 5px;
-  }
-
-  .app-shell > .topbar .cam-btn {
-    padding: 0 8px;
-  }
-
-  .app-shell > .topbar .icon-btn {
-    width: 32px;
-    height: 32px;
-  }
-
-  /* 再省一档：品牌副标题与页签文字在窄桌面不再必需。 */
-  .app-shell > .topbar {
-    gap: 10px;
-  }
-
-  .app-shell > .topbar .topbar-actions {
-    gap: 6px;
-  }
-
-  .app-shell > .topbar .game-pill span:not(.gp-ico) {
-    display: none;
-  }
-
-  .app-shell > .topbar .game-pill {
-    padding: 0 8px;
-  }
-}
-
-/* --- 1280px 以下：隐藏相机按钮文字，只留图标字形 ------------------------ */
-@media (max-width: 1319px) {
-  .app-shell > .topbar .game-pill span:not(.gp-ico) {
-    display: none;
-  }
-
-  /* 只留图标后必须保住触控面积：probe:ui 要求 >= 44x44，否则手机上点不中。
-     用 min-width/min-height 撑住，而不是靠 padding 猜。 */
-  .app-shell > .topbar .game-pill {
-    padding: 0 8px;
-    min-width: 44px;
-    min-height: 44px;
-    justify-content: center;
-  }
-
-  .app-shell > .topbar .cam-btn {
-    padding: 0 7px;
-    /* 不要低于 12px：probe:ui 的可读性底线就是 12px，压到 11px 会被门禁
-       判为回归（真机上也确实难读）。省宽度靠 padding，不靠缩字。 */
-    font-size: var(--type-xs);
-    letter-spacing: 0;
-  }
-
-  .app-shell > .topbar .brand {
-    padding-right: 12px;
-  }
-}
-
-/* --- 1100px 以下：动作区整体换到第二行（此时已放不下一行） --------------
-   同时让游戏页签独占一行并可横向滚动：否则它会被动作区挤成 0 宽，
-   用户就再也切不了游戏了（900px 实测）。 */
-@media (max-width: 1099px) {
-  .app-shell > .topbar {
-    padding-top: 6px;
-    padding-bottom: 6px;
-    gap: 8px;
-  }
-
-  .app-shell > .topbar .game-switch {
-    order: 3;
-    flex: 1 1 100%;
-    min-width: 0;
-  }
-
-  .app-shell > .topbar .topbar-actions {
-    order: 2;
-    flex: 1 1 100%;
-    justify-content: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .app-shell > .topbar .brand {
-    order: 1;
-  }
-
-  /* 品牌副标题在窄屏没有信息量，省下 150px 给页签。 */
-  .app-shell > .topbar .brand-sub {
-    display: none;
-  }
-}
-
-/* --- 767px 以下：手机，交给 slide-over -------------------------------- */
-@media (max-width: 767px) {
-  .app-shell > .topbar .topbar-actions {
-    gap: 6px;
-  }
-
-  .app-shell > .topbar .brand {
-    border-right: 0;
-    padding-right: 0;
-  }
-}
-
-/* ============================================================
-   紧凑面板（桌面 ≥1200px）
-   ------------------------------------------------------------
-   顶栏 / 左角色栏 / 右信息栏的宽和高都不超过视口的 1/7；放不下的内容
-   折进「☰ 菜单」里的原地弹出浮层，不再常驻占位。平板与手机沿用原有
-   的抽屉逻辑，下面这些规则不生效。
-   ============================================================ */
-.compact-menu-btn,
-.compact-only {
-  display: none;
-}
-
-@media (min-width: 1200px) {
-  .ui-layer.app-shell {
-    --panel-cap-w: calc(100vw / 7);
-    --panel-cap-h: calc(100vh / 7);
-  }
-
-  .app-shell > .topbar {
-    position: relative;
-    width: var(--panel-cap-w);
-    max-height: var(--panel-cap-h);
-    justify-self: start;
-    padding: var(--space-2) var(--space-3);
-  }
-  .app-shell > .topbar .brand-text,
-  .app-shell > .topbar .game-switch,
-  .app-shell > .topbar .topbar-actions {
-    display: none;
-  }
-  .app-shell > .topbar .brand-mark {
-    font-size: 22px;
-  }
-  .compact-menu-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: auto;
-  }
-
-  /* 二级菜单：原地弹出（不改变面板占位） */
-  .app-shell > .topbar[data-menu='open'] .game-switch,
-  .app-shell > .topbar[data-menu='open'] .topbar-actions {
-    display: flex;
-    position: absolute;
-    top: calc(100% + var(--space-2));
-    left: 0;
-    z-index: 90;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--space-2);
-    width: max-content;
-    max-width: min(420px, 72vw);
-    padding: var(--space-3);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-    background: var(--surface-panel-solid);
-    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
-  }
-  /* 两段都贴着顶栏右侧弹出：游戏页签先一行铺开，动作区接在它下面。 */
-  .app-shell > .topbar[data-menu='open'] .game-switch {
-    left: calc(var(--panel-cap-w) + var(--space-2));
-    flex-direction: row;
-    flex-wrap: wrap;
-    width: max-content;
-    max-width: min(420px, 72vw);
-  }
-  .app-shell > .topbar[data-menu='open'] .topbar-actions {
-    left: calc(var(--panel-cap-w) + var(--space-2));
-    top: calc(100% + var(--space-2) + 56px);
-    max-height: min(62vh, 480px);
-    overflow-y: auto;
-  }
-
-  /* 角色栏 / 信息栏：宽高压在 1/7，内容滚动；菜单里可原地展开 */
-  .app-shell > .player-rail,
-  .app-shell > .side-column {
-    width: var(--panel-cap-w);
-    max-height: var(--panel-cap-h);
-    overflow-y: auto;
-    scrollbar-width: thin;
-  }
-  .app-shell > .player-rail[data-expanded='1'],
-  .app-shell > .side-column[data-expanded='1'] {
-    width: min(330px, 36vw);
-    max-height: min(74vh, 660px);
-    z-index: 75;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-    background: var(--surface-panel-solid);
-    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
-  }
-  .compact-only {
-    display: inline-flex;
-  }
-}
-
-/* ============================================================
-   窄屏（<1200px，含手机横竖屏）的顶栏收敛
-   ------------------------------------------------------------
-   手机上把 6 个游戏页签、场景/滤镜/机位、图标按钮全部摊在顶栏，会换行成
-   三四米高的一堵墙，把棋盘挤到屏幕外（横屏尤其严重）。这里沿用桌面紧凑
-   模式的做法：顶栏只留 𝒢 + ☰，其余折进同一个原地弹出菜单。
-   ============================================================ */
-@media (max-width: 1199px) {
-  .app-shell > .topbar {
-    position: relative;
-    flex-wrap: nowrap;
-    align-items: center;
-    padding: var(--space-2) var(--space-3);
-    min-height: 52px;
-  }
-  .app-shell > .topbar .brand { order: 0; }
-  .app-shell > .topbar .brand-text { display: none; }
-  .app-shell > .topbar > .game-switch,
-  .app-shell > .topbar > .topbar-actions { display: none; }
-  .compact-menu-btn { display: inline-flex; margin-left: auto; }
-
-  .app-shell > .topbar[data-menu='open'] > .game-switch,
-  .app-shell > .topbar[data-menu='open'] > .topbar-actions {
-    display: flex;
-    position: absolute;
-    right: var(--space-2);
-    top: calc(100% + var(--space-2));
-    left: auto;
-    z-index: 90;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--space-2);
-    width: min(340px, 88vw);
-    max-height: 68vh;
-    overflow-y: auto;
-    padding: var(--space-3);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-    background: var(--surface-panel-solid);
-    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
-  }
-  .app-shell > .topbar[data-menu='open'] > .game-switch {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
 }
