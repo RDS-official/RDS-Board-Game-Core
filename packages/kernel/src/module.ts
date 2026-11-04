@@ -304,6 +304,12 @@ export interface MomentPresentationHints {
   /** How long the curtain stays up. */
   durationMs?: number;
   /**
+   * 手动关闭保护期（毫秒）：幕布出现后这段时间内，遮罩、Esc 和幕布上的
+   * 按钮都不得关闭它；倒计时结束后恢复所有关闭方式。游戏状态自行撤下幕布
+   * （例如结算后自动发下一手）不受此锁影响。
+   */
+  closeLockMs?: number;
+  /**
    * 幕布不自动消失：由游戏在状态变化时撤下（例如结算画面要等所有人准备）。
    * 点击仍然可以手动关闭——点幕布本身关闭，点按钮执行对应能力。
    */

@@ -3915,6 +3915,19 @@ select.pf-control {
   opacity: 0.45;
 }
 
+/* Settlement close-lock: nothing on the curtain may dismiss it early. The
+   countdown is plain text, so reduced-motion does not shorten or hide it. */
+.moment-cine.locked {
+  cursor: default;
+}
+
+.mc-btn.mc-close {
+  min-width: 118px;
+  border-color: rgba(236, 226, 206, 0.32);
+  color: rgba(244, 232, 207, 0.92);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ============================================================
    Recent activity feed
    ============================================================ */

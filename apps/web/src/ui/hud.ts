@@ -182,6 +182,12 @@ export class BoardGameHUD {
   /** False until the first snapshot has been observed. */
   private momentArmed = false;
   private momentTimer: number | null = null;
+  /** Moment key whose manual-close lock is running, and its wall-clock deadline. */
+  private momentLockKey?: string;
+  private momentLockUntil = 0;
+  private momentLockTimer: number | null = null;
+  /** The currently mounted curtain's click handler. */
+  private momentClickHandler?: (event: Event) => void;
   /** Activity feed starts open and remembers the player's choice. */
   private historyCollapsed = false;
   /** Active isolated floor in the 3D scene ('ALL' displays all floors). */
@@ -1640,11 +1646,7 @@ export class BoardGameHUD {
     const moment = this.presenter.moment?.() ?? null;
     if (!moment) {
       // 游戏撤下了幕布（例如结算结束）：正在挂起的幕布要一起收起。
-      const open = this.container.querySelector('#moment-cine');
-      if (open?.classList.contains('open')) {
-        open.classList.remove('open');
-        open.innerHTML = '';
-      }
+      this.teardownMoment();
       this.lastMomentKey = undefined;
       this.momentArmed = true;
       return;
@@ -1663,6 +1665,15 @@ export class BoardGameHUD {
     if (this.lastMomentKey === signature) return;
     this.lastMomentKey = signature;
 
+    const lockMs = Math.max(0, Number(moment.closeLockMs ?? 0) || 0);
+    if (lockMs > 0 && this.momentLockKey !== moment.key) {
+      this.momentLockKey = moment.key;
+      this.momentLockUntil = Date.now() + lockMs;
+    } else if (lockMs <= 0) {
+      this.clearMomentLock();
+    }
+    const locked = this.momentLockUntil > Date.now();
+
     let layer = this.container.querySelector('#moment-cine') as HTMLElement | null;
     if (!layer) {
       layer = document.createElement('div');
@@ -1670,6 +1681,7 @@ export class BoardGameHUD {
       layer.className = 'moment-cine';
       this.container.appendChild(layer);
     }
+    if (this.momentClickHandler) layer.removeEventListener('click', this.momentClickHandler);
     const cast = (moment.cast ?? [])
       .map(entry => `<div class="mc-cast">${escHtml(entry.label)} · <b>${escHtml(entry.name)}</b></div>`)
       .join('');
@@ -1696,18 +1708,28 @@ export class BoardGameHUD {
           })
           .join('')}</div>`
       : '';
-    const buttons = moment.actions?.length
-      ? `<div class="mc-actions">${moment.actions
-          .map(
-            action => `
+    const actionButtons = (moment.actions ?? [])
+      .map(
+        action => `
           <button type="button" class="mc-btn ${escHtml(action.tone ?? 'normal')}"
-                  data-moment-action="${escapeAttr(action.id)}"${action.enabled ? '' : ' disabled'}
+                  data-moment-action="${escapeAttr(action.id)}"
+                  data-moment-enabled="${action.enabled ? '1' : '0'}"
+                  ${action.enabled && !locked ? '' : 'disabled'}
                   title="${escapeAttr(action.hint ?? action.label)}">
             ${escHtml(action.label)}${action.enabled ? '' : `<small>${escHtml(action.hint ?? '')}</small>`}
           </button>`
-          )
-          .join('')}</div>`
-      : '';
+      )
+      .join('');
+    const closeButton =
+      lockMs > 0
+        ? `<button type="button" class="mc-btn mc-close" id="mc-close" data-lock-until="${this.momentLockUntil}"${
+            locked ? ' disabled' : ''
+          }>${locked ? `${Math.ceil((this.momentLockUntil - Date.now()) / 1000)}s 后可关闭` : '关闭'}</button>`
+        : '';
+    const buttons =
+      actionButtons || closeButton
+        ? `<div class="mc-actions">${actionButtons}${closeButton}</div>`
+        : '';
     layer.innerHTML = `
       <div class="mc-vignette"></div>
       <div class="mc-inner">
@@ -1723,13 +1745,16 @@ export class BoardGameHUD {
       </div>
     `;
     layer.classList.add('open');
+    layer.classList.toggle('locked', locked);
 
-    const close = () => {
-      layer!.classList.remove('open');
-      layer!.innerHTML = '';
-      layer!.removeEventListener('click', onLayerClick);
-    };
     const onLayerClick = (event: Event) => {
+      // 锁定期间连遮罩与按钮一起吞掉：关闭只能由倒计时结束或游戏撤销幕布
+      // 触发，避免玩家在结果出来的一瞬间误触跳过。
+      if (this.momentLockUntil > Date.now()) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const button = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-moment-action]');
       if (button) {
         // 按钮自己派发能力；点空白处仍然只是收起幕布。
@@ -1741,12 +1766,86 @@ export class BoardGameHUD {
           return;
         }
       }
-      close();
+      this.closeMoment();
     };
+    this.momentClickHandler = onLayerClick;
     layer.addEventListener('click', onLayerClick);
+    this.startMomentLockCountdown(layer, lockMs);
+
     if (this.momentTimer) window.clearTimeout(this.momentTimer);
-    // hold 的幕布不自动消失：等游戏自己撤下，或玩家点一下。
-    if (!moment.hold) this.momentTimer = window.setTimeout(close, moment.durationMs ?? 9000);
+    // hold 的幕布不自动消失：等游戏自己撤下，或玩家点一下。普通幕布若设了
+    // 关闭锁，自动消失也不得早于锁的结束。
+    if (!moment.hold) {
+      const delay = Math.max(moment.durationMs ?? 9000, this.momentLockUntil - Date.now(), 0);
+      this.momentTimer = window.setTimeout(() => this.closeMoment(), delay);
+    }
+  }
+
+  /** Tear down the curtain even if a close-lock is still running (game state moved on). */
+  private teardownMoment(): void {
+    const layer = this.container.querySelector('#moment-cine') as HTMLElement | null;
+    if (layer) {
+      if (this.momentClickHandler) layer.removeEventListener('click', this.momentClickHandler);
+      layer.classList.remove('open', 'locked');
+      layer.innerHTML = '';
+    }
+    this.momentClickHandler = undefined;
+    if (this.momentTimer) {
+      window.clearTimeout(this.momentTimer);
+      this.momentTimer = null;
+    }
+    this.clearMomentLock();
+  }
+
+  private clearMomentLock(): void {
+    if (this.momentLockTimer !== null) {
+      window.clearInterval(this.momentLockTimer);
+      this.momentLockTimer = null;
+    }
+    this.momentLockKey = undefined;
+    this.momentLockUntil = 0;
+  }
+
+  /** Close the curtain if it exists and is past its lock; false while locked. */
+  private closeMoment(): boolean {
+    const layer = this.container.querySelector('#moment-cine') as HTMLElement | null;
+    if (!layer?.classList.contains('open')) return false;
+    if (this.momentLockUntil > Date.now()) return false;
+    this.teardownMoment();
+    return true;
+  }
+
+  /**
+   * The lock countdown is wall-clock, not a CSS animation: it must keep ticking
+   * under `prefers-reduced-motion: reduce`. The close button and every moment
+   * action stay disabled until the last second has elapsed.
+   */
+  private startMomentLockCountdown(layer: HTMLElement, lockMs: number): void {
+    if (lockMs <= 0) return;
+    if (this.momentLockTimer !== null) window.clearInterval(this.momentLockTimer);
+    const tick = () => {
+      const left = Math.max(0, this.momentLockUntil - Date.now());
+      const locked = left > 0;
+      const close = layer.querySelector<HTMLButtonElement>('#mc-close');
+      if (close) {
+        close.disabled = locked;
+        close.textContent = locked ? `${Math.ceil(left / 1000)}s 后可关闭` : '关闭';
+      }
+      layer.classList.toggle('locked', locked);
+      layer.querySelectorAll<HTMLButtonElement>('[data-moment-action]').forEach(button => {
+        const enabled = button.dataset.momentEnabled === '1';
+        button.disabled = locked || !enabled;
+        button.classList.toggle('is-locked', locked && enabled);
+      });
+      if (!locked) {
+        if (this.momentLockTimer !== null) window.clearInterval(this.momentLockTimer);
+        this.momentLockTimer = null;
+      }
+    };
+    tick();
+    if (this.momentLockUntil > Date.now()) {
+      this.momentLockTimer = window.setInterval(tick, 250);
+    }
   }
 
   private syncSoundButton(): void {
@@ -1892,6 +1991,15 @@ export class BoardGameHUD {
     // inside the active modal surface, and focus returns to its opener.
     window.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
+        const moment = this.container.querySelector('#moment-cine.open');
+        if (moment) {
+          // A locked settlement curtain swallows Esc just like it swallows
+          // backdrop and button clicks; once unlocked Esc closes it normally.
+          event.preventDefault();
+          event.stopPropagation();
+          this.closeMoment();
+          return;
+        }
         if (this.menuOpen) {
           event.preventDefault();
           this.closeMenu(true);
