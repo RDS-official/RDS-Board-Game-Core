@@ -594,6 +594,8 @@ export interface UiMoment {
   /** Buttons under the ledger; the curtain stays inert without them. */
   actions?: UiMomentAction[];
   durationMs?: number;
+  /** 手动关闭保护期：这段时间内遮罩、Esc 与按钮都不能关闭幕布。 */
+  closeLockMs?: number;
   /** 幕布不自动消失，等游戏撤下（状态变化）或玩家点击。 */
   hold?: boolean;
 }

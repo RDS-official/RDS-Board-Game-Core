@@ -116,6 +116,8 @@ export function pokerSettlementMoment(state: MomentPresentationState): MomentPre
       { id: 'leave-table', label: '退出牌桌', leave: true, tone: 'danger' }
     ],
     durationMs: 4200,
+    // 一手的结果至少留 10 秒给所有座位读完；期间任何手动关闭都不生效。
+    closeLockMs: 10000,
     // 结算要读到玩家自己按按钮为止：没有 20 秒冷却时也要停留，不能自己消失。
     hold: true
   };

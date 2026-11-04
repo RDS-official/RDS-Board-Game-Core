@@ -283,6 +283,7 @@ export function buildMoment(
       hint: action.unavailableHint
     })),
     durationMs: moment.durationMs,
+    closeLockMs: moment.closeLockMs,
     hold: moment.hold
   };
 }
