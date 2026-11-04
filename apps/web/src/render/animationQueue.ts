@@ -3,10 +3,24 @@ import { VisualTraceEvent } from '@rds/kernel/types';
 import { BoardGameAudio } from './audio';
 
 export interface ActiveTween {
-  update: (progress: number) => void;
+  update: (progress: number, linearProgress: number) => void;
   onComplete?: () => void;
-  startTime: number;
+  /**
+   * Epoch milliseconds. `null` until the first rendered frame after enqueueing:
+   * a board rebuild can block the main thread long enough for a wall-clock start
+   * time to expire before anything is painted, which silently skipped every
+   * animation on the receiving peer. Starting lazily guarantees the full
+   * duration stays visible.
+   */
+  startTime: number | null;
   duration: number;
+  delayMs: number;
+  /**
+   * Render frames to skip before the clock starts. One frame lets a freshly
+   * rebuilt board finish its first (shader/texture-heavy) render, so the tween
+   * is not already over when that frame finally reaches the screen.
+   */
+  warmupFrames: number;
 }
 
 export class TransactionalAnimationQueue {
@@ -42,12 +56,19 @@ export class TransactionalAnimationQueue {
     const now = performance.now();
     for (let i = this.activeTweens.length - 1; i >= 0; i--) {
       const tween = this.activeTweens[i];
+      if (tween.startTime === null) {
+        if (tween.warmupFrames > 0) {
+          tween.warmupFrames -= 1;
+          continue;
+        }
+        tween.startTime = now + tween.delayMs;
+      }
       const elapsed = now - tween.startTime;
       const progress = Math.min(1, Math.max(0, elapsed / tween.duration));
 
       // Ease out cubic
       const eased = 1 - Math.pow(1 - progress, 3);
-      tween.update(eased);
+      tween.update(eased, progress);
 
       if (progress >= 1) {
         if (tween.onComplete) tween.onComplete();
@@ -123,6 +144,8 @@ export class TransactionalAnimationQueue {
     const shakeTween: ActiveTween = {
       startTime,
       duration: durationMs,
+      delayMs: 0,
+      warmupFrames: 0,
       update: (p) => {
         const intensity = (1 - p) * 0.18;
         this.camera.position.set(
@@ -173,13 +196,15 @@ export class TransactionalAnimationQueue {
    */
   public animate(
     durationMs: number,
-    update: (progress: number) => void,
+    update: (progress: number, linearProgress: number) => void,
     onComplete?: () => void,
     delayMs = 0
   ): void {
     this.activeTweens.push({
-      startTime: performance.now() + Math.max(0, delayMs),
+      startTime: null,
+      delayMs: Math.max(0, delayMs),
       duration: Math.max(1, durationMs),
+      warmupFrames: 1,
       update,
       onComplete
     });

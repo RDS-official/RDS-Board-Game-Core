@@ -209,6 +209,19 @@ const ZONE_LABEL_TYPE_OFFSETS: Record<string, { x: number; y: number; z: number 
 const POKER_POT_X = -0.3;
 const POKER_POT_LABEL_Y = 0.33;
 const POKER_POT_LABEL_SCALE = 0.6;
+/**
+ * Per-sync visual budget for state-derived tabletop actions. A reconnect can
+ * deliver a batch of cards, chips and folds at once; the first twelve get a
+ * tween and the rest land on their resting pose immediately.
+ */
+const TABLE_ACTION_ANIMATION_LIMIT = 12;
+/** Hole-card deal flight: short enough to overlap, long enough to read. */
+const DEAL_ANIMATION_MS = 320;
+/** Chips keep the existing unhurried arc while the cards get the shorter beat. */
+const CHIP_FLIGHT_MS = 460;
+/** Folded hole cards slide to the muck and fade inside this window. */
+const FOLD_ANIMATION_MS = 320;
+const FOLD_STAGGER_MS = 35;
 /** How long each face (avatar / current-street bet) stays on a seat beacon. */
 const BEACON_FACE_MS = 2000;
 /** Native hand-card mesh; the layout width below is its displayed size. */
@@ -671,6 +684,15 @@ export class BoardGameScene {
     streetBets: Record<string, number>;
     holeCards: Record<string, string[]>;
   } | null = null;
+  /**
+   * Cards that currently own their pose through a state-derived tween. The
+   * per-frame hand layout must not snap them back to the row while they fly.
+   */
+  private animatingActionCardIds = new Set<string>();
+  /** Logical animation slots used by the current sync (max twelve). */
+  private actionAnimationSlots = 0;
+  /** Fold meshes detached before the board rebuild, consumed by the next FX pass. */
+  private pendingPokerFoldVisuals: THREE.Object3D[] = [];
   private isDestroyed = false;
   private lastRawState: ProjectedGameState | null = null;
   private lastState: ProjectedGameState | null = null;
@@ -1478,6 +1500,10 @@ export class BoardGameScene {
     this.lastActorId = undefined;
     this.visibleFloor = 'ALL';
     this.prePlacementCamera = undefined;
+    this.pokerFxPrev = null;
+    this.animatingActionCardIds.clear();
+    this.actionAnimationSlots = 0;
+    this.disposePendingPokerFoldVisuals();
     this.cancelCameraTween();
   }
 
@@ -1751,6 +1777,7 @@ export class BoardGameScene {
     layout?: LayoutHints
   ): void {
     const syncStarted = performance.now();
+    const previousState = this.lastState;
     this.lastRawState = rawState;
     const { state, placementPosition } = this.projectForDisplay(rawState, placement);
     const displayPlacement: PlacementPreview | undefined = placement
@@ -1798,6 +1825,10 @@ export class BoardGameScene {
 
     this.lastBoardKey = boardKey;
     this.raycaster.clearInteractive();
+    // Folded hole cards must leave the table through an animation, but the new
+    // projection has already moved them to the muck. Capture their old meshes
+    // before the rebuild disposes them; this is a render-only copy.
+    this.capturePokerFoldVisuals(previousState, state);
 
     // Clear previous board objects (dispose GPU resources; keep cached textures).
     this.clearBoardObjects();
@@ -2095,6 +2126,7 @@ export class BoardGameScene {
     this.navArrowMeshes = [];
     this.restoreDraggedCard();
     this.handRows.clear();
+    this.animatingActionCardIds.clear();
     this.deckPiles.clear();
     this.draggedDeckZoneId = undefined;
     this.dealerAreaCardIds.clear();
@@ -4612,6 +4644,7 @@ export class BoardGameScene {
       // draggable, so this only matters for the seat rows.
       if (
         id === this.draggedEntityId ||
+        this.animatingActionCardIds.has(id) ||
         this.cardSettles.has(id) ||
         this.groupDrag?.bases.has(id)
       ) {
@@ -5367,15 +5400,20 @@ export class BoardGameScene {
         // material.dispose() 不会释放贴图：标签精灵的 CanvasTexture 必须单独 dispose，
         // 否则每手牌泄漏一批 1024x256 纹理。静态共享的桌面呢绒纹理除外。
         const maps: THREE.Texture[] = [];
+        const keepMap = (entry: THREE.Material): boolean => entry.userData?.keepTexture === true;
         if (Array.isArray(material)) {
           for (const entry of material) {
             entry.dispose();
-            if ((entry as THREE.MeshStandardMaterial).map) maps.push((entry as THREE.MeshStandardMaterial).map!);
+            if (!keepMap(entry) && (entry as THREE.MeshStandardMaterial).map) {
+              maps.push((entry as THREE.MeshStandardMaterial).map!);
+            }
           }
         } else if (material) {
           material.dispose();
-          const map = (material as THREE.SpriteMaterial | THREE.MeshStandardMaterial).map;
-          if (map) maps.push(map);
+          if (!keepMap(material)) {
+            const map = (material as THREE.SpriteMaterial | THREE.MeshStandardMaterial).map;
+            if (map) maps.push(map);
+          }
         }
         for (const map of maps) {
           if (map !== BoardGameScene.pokerCloth) map.dispose();
@@ -5387,13 +5425,20 @@ export class BoardGameScene {
   /**
    * Animate what changed since the previous poker snapshot.
    *
-   * Three beats, each sized to be readable (roughly 2–4s):
-   *  1. **deal** — hole cards arc out of the deck, one at a time, clockwise;
-   *  2. **reveal** — community cards fly in face-down and flip over on arrival;
-   *  3. **chips** — a raise or call sends a pile of chips from the seat to the
-   *     pot, with the amount floating up over the felt.
+   * Everything is derived from the projected state itself, never from "who
+   * clicked": both the host and every guest run the same diff, so a network
+   * update gets the same beats as a local action.
+   *
+   *  1. **fold** — hole cards slide to the muck and fade;
+   *  2. **deal** — hole cards arc out of the deck with a light turn;
+   *  3. **reveal** — community cards fly in face-down and flip over on arrival;
+   *  4. **chips** — bets fly from the seat to the pot.
+   *
+   * All four share a twelve-slot budget per sync; excess visuals land in their
+   * resting pose immediately.
    */
   private animatePokerDeltas(state: ProjectedGameState): void {
+    this.actionAnimationSlots = 0;
     const hand = state.globalVars.hand as
       | {
           handNo?: number;
@@ -5417,7 +5462,10 @@ export class BoardGameScene {
     };
     const previous = this.pokerFxPrev;
     this.pokerFxPrev = current;
-    if (!previous) return;
+    if (!previous) {
+      this.disposePendingPokerFoldVisuals();
+      return;
+    }
 
     const deckAnchor = state.zones.zone_deck?.anchorPosition ?? [-6, 0.06, -2.2];
     // The draw pile is a fixed table prop, so its world point is the zone
@@ -5427,8 +5475,10 @@ export class BoardGameScene {
     this.dealerAreaGroup.updateWorldMatrix(true, false);
     const deckPointLocal = this.dealerAreaGroup.worldToLocal(deckPointWorld.clone());
 
+    this.animatePendingPokerFolds(state);
+
     /* 1. Deal: hole cards that were not in the hand before. */
-    const freshCards: { mesh: THREE.Object3D; to: THREE.Vector3 }[] = [];
+    const freshCards: { id: string; mesh: THREE.Object3D; to: THREE.Vector3 }[] = [];
     const newHand = current.handNo !== previous.handNo;
     for (const pid of state.playerOrder) {
       const before = newHand ? [] : (previous.holeCards[pid] ?? []);
@@ -5440,28 +5490,38 @@ export class BoardGameScene {
         // from a world-space deck point would use the wrong coordinate space.
         // It is laid out immediately instead.
         if (mesh.parent === this.ownHandGroup) continue;
-        freshCards.push({ mesh, to: mesh.position.clone() });
+        freshCards.push({ id, mesh, to: mesh.position.clone() });
       }
     }
     if (freshCards.length > 0) {
-      const stagger = Math.max(90, Math.min(300, 2400 / freshCards.length));
-      freshCards.forEach(({ mesh, to }, index) => {
+      const stagger = Math.max(60, Math.min(120, 800 / Math.max(1, freshCards.length)));
+      let animated = 0;
+      freshCards.forEach(({ id, mesh, to }) => {
+        if (!this.takeActionAnimationSlot()) return;
         const from =
           mesh.parent === this.dealerAreaGroup ? deckPointLocal.clone() : deckPointWorld.clone();
+        const delay = animated * stagger;
+        animated += 1;
         mesh.position.copy(from);
-        const delay = index * stagger;
         // A card keeps its resting bearing (a hand card faces its owner's seat,
-        // a board card faces the viewer's); only the extra spin of the deal is
+        // a board card faces the viewer's); only the extra turn of the deal is
         // animated. Writing the absolute spin here would snap the card back to
         // world north for the rest of the animation.
         const restYaw = Number(mesh.userData.restYaw ?? 0);
-        this.animQueue.animateArc(mesh, from, to, 1.1, 520, undefined, delay);
+        this.animatingActionCardIds.add(id);
         this.animQueue.animate(
-          520,
+          DEAL_ANIMATION_MS,
           p => {
-            mesh.rotation.y = restYaw + (1 - p) * Math.PI * 2;
+            mesh.position.x = THREE.MathUtils.lerp(from.x, to.x, p);
+            mesh.position.z = THREE.MathUtils.lerp(from.z, to.z, p);
+            mesh.position.y = THREE.MathUtils.lerp(from.y, to.y, p) + Math.sin(Math.PI * p) * 1.1;
+            mesh.rotation.y = restYaw + (1 - p) * 0.42;
           },
-          undefined,
+          () => {
+            mesh.position.copy(to);
+            mesh.rotation.y = restYaw;
+            this.animatingActionCardIds.delete(id);
+          },
           delay
         );
       });
@@ -5480,23 +5540,27 @@ export class BoardGameScene {
       freshBoard.forEach((id, index) => {
         const mesh = this.entityMeshes.get(id);
         if (!mesh) return;
+        if (!this.takeActionAnimationSlot()) return;
         const to = mesh.position.clone();
         const from =
           mesh.parent === this.dealerAreaGroup ? deckPointLocal.clone() : deckPointWorld.clone();
-        const delay = 320 + index * stagger;
-        mesh.position.copy(from);
         // Start flat face-down on its flip-start angle, then turn to the
         // resting pose: +40° → −70° for the baked row cards, −π → 0 for a plain
         // legacy board row.
         const restTilt = Number(mesh.userData.restTilt ?? 0);
         const flipStart = Number(mesh.userData.flipStartTilt ?? -Math.PI);
+        const delay = 320 + index * stagger;
+        mesh.position.copy(from);
         mesh.rotation.x = flipStart;
         // The floating bob must not fight the deal arc.
         mesh.userData.dealerFloatPauseUntil = performance.now() + delay + duration + 80;
-        this.animQueue.animateArc(mesh, from, to, 1.4, duration, undefined, delay);
         this.animQueue.animate(
           duration,
           p => {
+            mesh.position.x = THREE.MathUtils.lerp(from.x, to.x, p);
+            mesh.position.z = THREE.MathUtils.lerp(from.z, to.z, p);
+            mesh.position.y =
+              THREE.MathUtils.lerp(from.y, to.y, p) + Math.sin(Math.PI * p) * 1.4;
             // Stay face down for the first third, then turn over.
             const flip = Math.max(0, Math.min(1, (p - 0.3) / 0.7));
             mesh.rotation.x = flipStart + (restTilt - flipStart) * flip;
@@ -5519,15 +5583,19 @@ export class BoardGameScene {
       const length = Math.max(0.0001, Math.hypot(x, z));
       const from = new THREE.Vector3(x - (x / length) * 1.9, 0.06, z - (z / length) * 1.9);
       const chips = ChipMeshBuilder.decompose(delta, 6);
-      chips.forEach((value, index) => {
+      let chipIndex = 0;
+      chips.forEach(value => {
+        if (!this.takeActionAnimationSlot()) return;
         const chip = ChipMeshBuilder.createChip(value, 0.2);
         chip.position.copy(from);
         this.pokerFxGroup.add(chip);
-        const delay = index * 80;
-        this.animQueue.animateArc(chip, from, potPoint, 0.85, 460, undefined, delay);
+        const delay = chipIndex * 80;
+        chipIndex += 1;
+        this.animQueue.animateArc(chip, from, potPoint, 0.85, CHIP_FLIGHT_MS, undefined, delay);
       });
 
       // The amount floats up over the felt so a 200-chip raise is unmistakable.
+      if (!this.takeActionAnimationSlot()) continue;
       const float = this.createLabelSprite(`+${delta}`, '#f6dc9c', 52);
       const startY = 0.9;
       float.position.set(from.x, startY, from.z);
@@ -5547,6 +5615,154 @@ export class BoardGameScene {
         220
       );
     }
+  }
+
+  /** Returns false once this sync has already queued twelve visible motions. */
+  private takeActionAnimationSlot(): boolean {
+    if (this.reduceMotionQuery?.matches === true) return false;
+    if (this.actionAnimationSlots >= TABLE_ACTION_ANIMATION_LIMIT) return false;
+    this.actionAnimationSlots += 1;
+    return true;
+  }
+
+  /**
+   * Capture the old hole-card meshes for players who just folded.
+   *
+   * This runs before the board rebuild. The new projection has already moved
+   * those cards to the muck, so a render-only deep clone is the only way to
+   * show them travelling there. It is deliberately a visual difference: the
+   * game state changes immediately, the animation never gates it.
+   */
+  private capturePokerFoldVisuals(
+    previous: ProjectedGameState | null,
+    next: ProjectedGameState
+  ): void {
+    this.disposePendingPokerFoldVisuals();
+    if (!previous || previous.gameId !== 'poker' || next.gameId !== 'poker') return;
+    if (this.reduceMotionQuery?.matches === true) return;
+
+    const priorHand = previous.globalVars.hand as { folded?: string[] } | undefined;
+    const nextHand = next.globalVars.hand as { folded?: string[] } | undefined;
+    const wasFolded = new Set(priorHand?.folded ?? []);
+    const nowFolded = new Set(nextHand?.folded ?? []);
+    for (const pid of next.playerOrder) {
+      if (!nowFolded.has(pid) || wasFolded.has(pid)) continue;
+      for (const id of previous.zones[`zone_hand_${pid}`]?.orderedEntities ?? []) {
+        if (this.pendingPokerFoldVisuals.length >= TABLE_ACTION_ANIMATION_LIMIT) return;
+        const mesh = this.entityMeshes.get(id);
+        if (mesh) this.pendingPokerFoldVisuals.push(this.cloneActionFxObject(mesh, id, pid));
+      }
+    }
+  }
+
+  /** Deep copy a card for a one-shot effect, without sharing disposables. */
+  private cloneActionFxObject(source: THREE.Object3D, cardId: string, seatId: string): THREE.Object3D {
+    source.updateWorldMatrix(true, false);
+    const clone = source.clone(true);
+    clone.matrixAutoUpdate = true;
+    source.matrixWorld.decompose(clone.position, clone.quaternion, clone.scale);
+    clone.userData.actionFx = true;
+    clone.userData.actionFxKind = 'fold';
+    clone.userData.actionFxCardId = cardId;
+    clone.userData.actionFxSeatId = seatId;
+    const materialCopies = new Map<THREE.Material, THREE.Material>();
+    clone.traverse(child => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.geometry = mesh.geometry.clone();
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      const copyMaterial = (sourceMaterial: THREE.Material): THREE.Material => {
+        const existing = materialCopies.get(sourceMaterial);
+        if (existing) return existing;
+        const material = sourceMaterial.clone();
+        material.transparent = true;
+        material.depthWrite = false;
+        material.userData = { ...material.userData, actionFxBaseOpacity: sourceMaterial.opacity, keepTexture: true };
+        materialCopies.set(sourceMaterial, material);
+        return material;
+      };
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map(copyMaterial)
+        : copyMaterial(mesh.material);
+    });
+    return clone;
+  }
+
+  private actionFxMaterials(object: THREE.Object3D): THREE.Material[] {
+    const materials = new Set<THREE.Material>();
+    object.traverse(child => {
+      const material = (child as THREE.Mesh).material;
+      if (!material) return;
+      const entries = Array.isArray(material) ? material : [material];
+      for (const entry of entries) materials.add(entry);
+    });
+    return [...materials];
+  }
+
+  /** Slide pending folded hands into the muck and fade them out. */
+  private animatePendingPokerFolds(state: ProjectedGameState): void {
+    const pending = this.pendingPokerFoldVisuals;
+    this.pendingPokerFoldVisuals = [];
+    if (pending.length === 0) return;
+    const anchor = state.zones.zone_muck?.anchorPosition ?? [-6, 0.06, 2.2];
+    const target = new THREE.Vector3(anchor[0], anchor[1] + 0.03, anchor[2]);
+    pending.forEach((object, index) => {
+      if (!this.takeActionAnimationSlot()) {
+        this.disposeActionFxObject(object);
+        return;
+      }
+      const cardId = String(object.userData.actionFxCardId ?? '');
+      const restingMesh = cardId ? this.entityMeshes.get(cardId) : undefined;
+      if (cardId) this.entityMeshes.set(cardId, object);
+      const restoreRestingMesh = () => {
+        if (!cardId || this.entityMeshes.get(cardId) !== object) return;
+        if (restingMesh) this.entityMeshes.set(cardId, restingMesh);
+        else this.entityMeshes.delete(cardId);
+      };
+      this.pokerFxGroup.add(object);
+      object.renderOrder = 220 + index;
+      const start = object.position.clone();
+      const startYaw = object.rotation.y;
+      const materials = this.actionFxMaterials(object);
+      this.animQueue.animate(
+        FOLD_ANIMATION_MS,
+        (p, linear) => {
+          object.position.x = THREE.MathUtils.lerp(start.x, target.x, p);
+          object.position.z = THREE.MathUtils.lerp(start.z, target.z, p);
+          object.position.y =
+            THREE.MathUtils.lerp(start.y, target.y, p) + Math.sin(Math.PI * p) * 0.18;
+          object.rotation.y = startYaw + p * 0.55;
+          for (const material of materials) {
+            const base = Number(material.userData.actionFxBaseOpacity ?? 1);
+            material.opacity =
+              base * Math.max(0, Math.min(1, 1 - Math.max(0, linear - 0.5) / 0.5));
+          }
+        },
+        () => {
+          restoreRestingMesh();
+          this.pokerFxGroup.remove(object);
+          this.disposeActionFxObject(object);
+        },
+        index * FOLD_STAGGER_MS
+      );
+    });
+  }
+
+  private disposePendingPokerFoldVisuals(): void {
+    for (const object of this.pendingPokerFoldVisuals) this.disposeActionFxObject(object);
+    this.pendingPokerFoldVisuals = [];
+  }
+
+  /** Dispose a render-only clone; shared card textures stay alive. */
+  private disposeActionFxObject(object: THREE.Object3D): void {
+    object.removeFromParent();
+    const materials = new Set(this.actionFxMaterials(object));
+    object.traverse(child => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+    });
+    for (const material of materials) material.dispose();
   }
 
   /** Z of the pot pile, matching `renderPokerDecor`. */
