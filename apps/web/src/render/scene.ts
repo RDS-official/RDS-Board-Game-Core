@@ -114,21 +114,21 @@ const OWN_HAND_MAX_SPAN = 4.6;
 /**
  * Beyond the standard framing distance the overlay starts to recede as well.
  *
- * It trails the orbit by 30%: normal seated and isometric views keep the old
- * seven-unit attachment, while a deliberately pulled-back overview gives the
- * partial compensation below enough depth to read slightly smaller instead of
- * growing against the shrinking board.
+ * It trails the orbit by half: normal seated views keep the old seven-unit
+ * attachment, while pulled-back overviews gain enough depth to shrink sooner
+ * and further without letting the hand race away from the camera.
  */
-const OWN_HAND_TRACK_START = 35;
-const OWN_HAND_DISTANCE_TRACK = 0.3;
+const OWN_HAND_TRACK_START = 33;
+const OWN_HAND_DISTANCE_TRACK = 0.5;
 /** Furthest the overlay may sit from the camera, in world units. */
-const OWN_HAND_MAX_DISTANCE = 15;
+const OWN_HAND_MAX_DISTANCE = 17;
 /** Partial compensation: screen height falls as `d ** -0.4` between the clamps. */
 const OWN_HAND_SCALE_EXPONENT = 0.6;
 const OWN_HAND_SCALE_MIN = 0.75;
 const OWN_HAND_SCALE_MAX = 1.5;
-/** Frame-rate independent damping for the overlay scale (~0.15/frame at 60 Hz). */
-const OWN_HAND_SCALE_DAMPING = 10;
+/** Frame-rate independent damping (~0.11/frame at 60 Hz for both). */
+const OWN_HAND_SCALE_DAMPING = 7;
+const OWN_HAND_DISTANCE_DAMPING = 7;
 /** Space between the hand's bottom edge and the dock top. */
 const OWN_HAND_DOCK_GAP_PX = 14;
 /** The row centre never leaves the lower half of the viewport. */
@@ -606,6 +606,8 @@ export class BoardGameScene {
   private ownHandReady = false;
   /** Smoothed whole-group scale; 1 is the seated reference size. */
   private ownHandScale = 1;
+  /** Smoothed attachment depth, so pulled-back framing eases in instead of popping. */
+  private ownHandDepth = OWN_HAND_DISTANCE;
   /**
    * The revealed board row (community cards). Its pivot is the table centre;
    * only yaw changes, so the row turns to face the camera without sliding off
@@ -4345,16 +4347,18 @@ export class BoardGameScene {
     // preserving the camera-attached feel while giving the scale compensation
     // some depth to work with.
     const orbitDistance = this.camera.position.distanceTo(this.controls.target);
-    const attachDistance = THREE.MathUtils.clamp(
+    const targetDepth = THREE.MathUtils.clamp(
       OWN_HAND_DISTANCE +
         Math.max(0, orbitDistance - OWN_HAND_TRACK_START) * OWN_HAND_DISTANCE_TRACK,
       OWN_HAND_DISTANCE,
       OWN_HAND_MAX_DISTANCE
     );
+    const depthAlpha = snap ? 1 : 1 - Math.exp(-Math.max(0, dt) * OWN_HAND_DISTANCE_DAMPING);
+    this.ownHandDepth = THREE.MathUtils.lerp(this.ownHandDepth, targetDepth, depthAlpha);
     const baseDrop = this.ownHandDrop();
     this.ownHandGroup.position
       .copy(this.camera.position)
-      .addScaledVector(this.ownHandForward, attachDistance);
+      .addScaledVector(this.ownHandForward, this.ownHandDepth);
     this.ownHandGroup.quaternion.copy(this.ownHandQuaternion);
     // `ownHandDrop` is measured in camera-space units, so move along the
     // camera's own up axis. World-down would collapse into depth in a top view.
