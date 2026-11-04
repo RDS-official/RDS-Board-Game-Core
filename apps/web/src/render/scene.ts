@@ -1948,7 +1948,10 @@ export class BoardGameScene {
         if (group.count < 2) continue;
         const members = group.entityIds
           .map(id => ({ id, mesh: this.entityMeshes.get(id) }))
-          .filter((entry): entry is { id: string; mesh: THREE.Object3D } => !!entry.mesh);
+          .filter((entry): entry is { id: string; mesh: THREE.Object3D } => !!entry.mesh)
+          // 牌背/被遮挡的牌不挂 `卡名 ×N` 标签：它只会显示成 "Hi… ×2" 这种
+          // 被截断的占位文案，既没信息量又挡住桌面（用户 2026-11 反馈）。
+          .filter(entry => !state.entities[entry.id]?.isMasked);
         if (members.length < 2) continue;
         for (const cluster of this.clusterMeshes(members, 2.4)) {
           if (cluster.length < 2) continue;
