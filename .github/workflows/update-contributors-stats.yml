@@ -1,0 +1,178 @@
+name: update-contributors-stats
+
+# 每 4 小时从 git 历史重算 README 的「代码贡献量统计」，并自动更新到 main。
+#
+# 为什么不直接 push main：
+#   AGENTS.md §2.3 规定 main 只接受 PR 的 squash 合并。工作流把 README 推到
+#   users/github-actions/update-contributors-stats，开 PR 后显式 dispatch ci.yml，
+#   等 gate 通过再 squash 合并，全程不需要人工。
+#
+# 为什么手动 dispatch ci：
+#   GITHUB_TOKEN 创建的 PR 不会触发 pull_request workflow，必须在这里补一次
+#   gate；否则分支保护会一直拦着合并。
+#
+# 前提：
+#   仓库设置 Actions → General → Workflow permissions 需要允许
+#   "Allow GitHub Actions to create and approve pull requests"，或者提供
+#   README_STATS_TOKEN（PAT）secret。否则 gh pr create 会明确失败。
+
+on:
+  schedule:
+    # GitHub 的 cron 可能有数分钟延迟；每 4 小时一次，避免把定时任务堆在整点。
+    - cron: '17 */4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  checks: read
+
+concurrency:
+  group: update-contributors-stats
+  cancel-in-progress: false
+
+env:
+  BRANCH: users/github-actions/update-contributors-stats
+  GH_TOKEN: ${{ secrets.README_STATS_TOKEN || secrets.GITHUB_TOKEN }}
+  NO_COLOR: '1'
+
+jobs:
+  update:
+    name: refresh README stats
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Recompute stats
+        id: stats
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/update-readme-stats.mjs
+          if git diff --quiet -- README.md; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Close stale pull request when stats are current
+        if: steps.stats.outputs.changed == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$pr" ]; then
+            echo "统计已是最新，关闭残留 PR #$pr"
+            gh pr close "$pr" --delete-branch --comment "main 的统计区块已是最新，关闭过期的自动更新 PR。" || true
+          else
+            echo "统计已是最新，无残留 PR"
+          fi
+
+      - name: Push branch and open/reuse pull request
+        if: steps.stats.outputs.changed == 'true'
+        id: pr
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add README.md
+          git commit -m "docs(readme): 自动更新代码贡献量统计"
+          # 只允许改写本 workflow 自己的 users/ 分支（AGENTS.md §2.1）。
+          git fetch origin "$BRANCH" || true
+          git push --force-with-lease origin "$BRANCH"
+          pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if [ -z "$pr" ]; then
+            if ! url=$(gh pr create --base main --head "$BRANCH" \
+              --title "docs(readme): 自动更新代码贡献量统计" \
+              --body '由 `.github/workflows/update-contributors-stats.yml` 每 4 小时自动生成。统计口径见 `scripts/update-readme-stats.mjs`。' 2>&1); then
+              echo "::error::gh pr create 失败: $url"
+              echo "::error::如果提示 'GitHub Actions is not permitted to create or approve pull requests'："
+              echo "::error::1. 请组织管理员在 Org Settings -> Actions -> General -> Workflow permissions 勾选 'Allow GitHub Actions to create and approve pull requests'；"
+              echo "::error::2. 或在仓库 Secrets 添加具有 repo 权限的 README_STATS_TOKEN (PAT)。"
+              exit 1
+            fi
+            pr=${url##*/}
+          fi
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Run CI gate and merge
+        if: steps.stats.outputs.changed == 'true'
+        shell: bash
+        env:
+          PR: ${{ steps.pr.outputs.number }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          attempt=1
+          while [ "$attempt" -le 3 ]; do
+            echo "::group::attempt $attempt — CI for $HEAD_SHA"
+
+            gh workflow run ci.yml --ref "$BRANCH"
+            run_id=""
+            for _ in $(seq 1 60); do
+              run_id=$(gh run list --workflow ci.yml --branch "$BRANCH" --limit 20 \
+                --json databaseId,headSha \
+                --jq "[.[] | select(.headSha == \"$HEAD_SHA\")][0].databaseId // empty")
+              [ -n "$run_id" ] && break
+              sleep 5
+            done
+            if [ -z "$run_id" ]; then
+              echo "找不到 $HEAD_SHA 的 ci 运行"
+              exit 1
+            fi
+            gh run watch "$run_id" --exit-status
+            echo "::endgroup::"
+
+            gate=""
+            for _ in $(seq 1 12); do
+              gate=$(gh pr checks "$PR" --json name,state \
+                --jq '.[] | select(.name == "gate") | .state' | tail -1)
+              [ "$gate" = "SUCCESS" ] && break
+              sleep 5
+            done
+            echo "gate=$gate"
+            if [ "$gate" != "SUCCESS" ]; then
+              echo "gate 未通过：$gate"
+              exit 1
+            fi
+
+            state=$(gh pr view "$PR" --json state --jq .state)
+            if [ "$state" = "MERGED" ]; then
+              echo "PR #$PR 已合并"
+              gh workflow run deploy.yml --ref main || true
+              exit 0
+            fi
+
+            if gh pr merge "$PR" --squash --delete-branch || [ "$(gh pr view "$PR" --json state --jq .state)" = "MERGED" ]; then
+              echo "已 squash 合并 PR #$PR"
+              gh workflow run deploy.yml --ref main || true
+              exit 0
+            fi
+
+            # strict 保护要求分支基于最新 main；只允许 rebase，禁止把 main merge 进分支。
+            git fetch origin main
+            if git merge-base --is-ancestor origin/main HEAD; then
+              echo "合并失败且分支并未落后于 main，请人工检查 PR #$PR"
+              exit 1
+            fi
+            echo "main 已前进，rebase 后重试"
+            git rebase origin/main
+            git fetch origin "$BRANCH" || true
+            git push --force-with-lease origin "$BRANCH"
+            HEAD_SHA=$(git rev-parse HEAD)
+            attempt=$((attempt + 1))
+          done
+          echo "3 次尝试后仍未合并，请人工检查 PR #$PR"
+          exit 1

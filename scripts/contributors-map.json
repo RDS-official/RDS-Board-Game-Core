@@ -1,0 +1,17 @@
+{
+  "$comment": "README 贡献统计的邮箱 → GitHub 身份映射。新增贡献者时把其 git 邮箱加到这里；未登记的 noreply 邮箱会自动解析登录名。",
+  "repo": "RDS-official/RDS-Board-Game-Core",
+  "aliases": {
+    "xhopo@users.noreply.github.com": "Xhopo",
+    "43365117+xhopo@users.noreply.github.com": "Xhopo",
+    "xionghaohao88@gmail.com": "Xhopo-hk",
+    "zzc1368129224@qq.com": "1368129224",
+    "964193177@qq.com": "QSanSi",
+    "46770563+qsansi@users.noreply.github.com": "QSanSi",
+    "qsansi@users.noreply.github.com": "QSanSi",
+    "aidev@local.dev": {
+      "name": "AI Developer",
+      "note": "本地智能体，未关联 GitHub"
+    }
+  }
+}
