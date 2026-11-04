@@ -42,6 +42,8 @@
     "probe:grid": "node scripts/probe-room-grid.mjs",
     "probe:dead": "node scripts/probe-dead-state.mjs",
     "docs:check": "node scripts/check-doc-paths.mjs",
+    "stats:readme": "node scripts/update-readme-stats.mjs",
+    "stats:readme:check": "node scripts/update-readme-stats.mjs --check",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write --unsafe .",
     "format": "biome format --write .",

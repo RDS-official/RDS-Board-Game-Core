@@ -78,6 +78,12 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="origin/${{ github.base_ref }}"
             head="HEAD"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            # 手动触发非 main 分支（例如统计机器人的 PR）：按与 main 的差集裁剪。
+            # 机器人用 GITHUB_TOKEN 创建的 PR 不会触发 pull_request workflow，
+            # 只能由定时任务显式 dispatch 这一次；不按差集算会白跑全量 UI 矩阵。
+            base="origin/main"
+            head="HEAD"
           else
             # push 到 main：比较前后两个 commit。
             base="${{ github.event.before }}"
