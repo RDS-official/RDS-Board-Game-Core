@@ -160,6 +160,37 @@ const BOARD_ROW_CARD_LIFT =
   (CARD_H * BOARD_ROW_CARD_SCALE * Math.sin(BOARD_ROW_VISUAL_TILT)) / 2;
 const DECK_CARD_W = 1.25 * CARD_SIZE_MULTIPLIER;
 const DECK_CARD_H = 1.85 * CARD_SIZE_MULTIPLIER;
+/** Base canvas font size for table labels (before the zone-label shrink). */
+const TABLE_LABEL_FONT_SIZE = 52;
+/** Table labels were too large after the 1.2x card pass: draw them at 60%. */
+const ZONE_LABEL_SCALE = 0.6;
+/**
+ * Zone labels use a 2048x512 backing canvas. The extra pixels are downsampled
+ * to the 0.6x footprint, so the smaller text keeps clean antialiased edges.
+ */
+const ZONE_LABEL_SUPERSAMPLE = 2;
+const ZONE_LABEL_BASE_Y = 0.55;
+/**
+ * Fixed per-role offsets (parent-local X/Y/Z) keep the three piles legible
+ * instead of stacking their labels over the same centre point.
+ */
+const ZONE_LABEL_OFFSETS: Record<string, { x: number; y: number; z: number }> = {
+  zone_deck: { x: -0.4, y: 0.2, z: -0.2 },
+  zone_burn: { x: 0.3, y: 0.2, z: 0.4 },
+  zone_muck: { x: 0, y: -0.22, z: 0 }
+};
+/** Type-level fallbacks for every non-poker draw/discard pile. */
+const ZONE_LABEL_TYPE_OFFSETS: Record<string, { x: number; y: number; z: number }> = {
+  DECK: { x: -0.4, y: 0.2, z: -0.2 },
+  DISCARD: { x: 0, y: -0.22, z: 0 }
+};
+/**
+ * Pot readout: sit just above the chip pile (y <= 0.45), and use the same 0.6x
+ * footprint as the table labels so the 390 px seat view does not crop it.
+ */
+const POKER_POT_X = -0.3;
+const POKER_POT_LABEL_Y = 0.33;
+const POKER_POT_LABEL_SCALE = 0.6;
 /** Native hand-card mesh; the layout width below is its displayed size. */
 const HAND_CARD_MESH_WIDTH = 1.12 * CARD_SIZE_MULTIPLIER;
 /** World width of a hand card at layout scale 1. */
@@ -3696,10 +3727,27 @@ export class BoardGameScene {
       if (isTop) this.entityMeshes.set(items[i].id, mesh);
     }
 
-    const label = this.createLabelSprite(`${zone.name} · ${items.length}`, '#cbb57a');
-    label.position.set(0, 0.55, 0);
-    // 贴图是 4:1（1024×256），牌面也用 4:1：原来是 5:1，文字被横向拉宽 25%。
-    label.scale.set(2.6, 0.65, 1);
+    const labelOffset =
+      ZONE_LABEL_OFFSETS[zone.id] ??
+      ZONE_LABEL_TYPE_OFFSETS[zone.type] ??
+      { x: 0, y: 0, z: 0 };
+    const label = this.createLabelSprite(
+      `${zone.name} · ${items.length}`,
+      '#cbb57a',
+      TABLE_LABEL_FONT_SIZE,
+      ZONE_LABEL_SUPERSAMPLE
+    );
+    label.position.set(
+      labelOffset.x,
+      ZONE_LABEL_BASE_Y + labelOffset.y,
+      labelOffset.z
+    );
+    // 贴图是 4:1（1024×256）；0.6x 后保留同样比例，文字与胶囊一起缩小。
+    label.scale.set(2.6 * ZONE_LABEL_SCALE, 0.65 * ZONE_LABEL_SCALE, 1);
+    label.userData.labelRole = 'zone';
+    label.userData.zoneId = zone.id;
+    label.userData.text = `${zone.name} · ${items.length}`;
+    label.userData.fontScale = ZONE_LABEL_SCALE;
     group.add(label);
     this.boardObjectsGroup.add(group);
 
@@ -5188,15 +5236,28 @@ export class BoardGameScene {
       0
     );
     const pot = Number(hand?.pot ?? 0) + street;
-    const potLabel = this.createLabelSprite(`POT · 底池 ${pot}`, '#f6dc9c', 46);
-    potLabel.position.set(0, 0.78, rz * 0.24);
-    potLabel.scale.set(3.4, 0.85, 1);
+    const potZ = this.pokerPotZ(state);
+    const potLabel = this.createLabelSprite(
+      `POT · 底池 ${pot}`,
+      '#f6dc9c',
+      46,
+      ZONE_LABEL_SUPERSAMPLE
+    );
+    potLabel.position.set(POKER_POT_X, POKER_POT_LABEL_Y, potZ);
+    potLabel.scale.set(
+      3.4 * POKER_POT_LABEL_SCALE,
+      0.85 * POKER_POT_LABEL_SCALE,
+      1
+    );
+    potLabel.userData.labelRole = 'pot';
+    potLabel.userData.text = `POT · 底池 ${pot}`;
+    potLabel.userData.fontScale = POKER_POT_LABEL_SCALE;
     this.boardObjectsGroup.add(potLabel);
 
-    // The pot itself: a real pile of chips under the readout.
+    // The pot itself: a real pile of chips directly under the readout.
     if (pot > 0) {
       const potChips = ChipMeshBuilder.createStack(pot);
-      potChips.position.set(0, 0.03, rz * 0.24);
+      potChips.position.set(POKER_POT_X, 0.03, potZ);
       this.boardObjectsGroup.add(potChips);
     }
 
@@ -5385,7 +5446,7 @@ export class BoardGameScene {
 
     /* 3. Chips: money that moved into the pot this step. */
     const seats = Object.values(state.mapGraph.nodes).filter(node => node.type === 'SEAT');
-    const potPoint = new THREE.Vector3(0, 0.06, this.pokerPotZ(state));
+    const potPoint = new THREE.Vector3(POKER_POT_X, 0.06, this.pokerPotZ(state));
     for (const pid of state.playerOrder) {
       const delta = Number(current.streetBets[pid] ?? 0) - Number(previous.streetBets[pid] ?? 0);
       if (delta <= 0) continue;
@@ -5711,11 +5772,20 @@ export class BoardGameScene {
     return tex;
   }
 
-  private createLabelSprite(text: string, color = '#ffffff', fontSize = 52): THREE.Sprite {
+  private createLabelSprite(
+    text: string,
+    color = '#ffffff',
+    fontSize = TABLE_LABEL_FONT_SIZE,
+    canvasSupersample = 1
+  ): THREE.Sprite {
     const canvas = document.createElement('canvas');
-    canvas.width = 1024;
-    canvas.height = 256;
+    const supersample = Math.max(1, Math.floor(canvasSupersample));
+    canvas.width = 1024 * supersample;
+    canvas.height = 256 * supersample;
     const ctx = canvas.getContext('2d')!;
+    // Keep all drawing coordinates in the original 1024x256 space. The extra
+    // backing pixels are real supersampling, not a larger layout.
+    ctx.scale(supersample, supersample);
 
     ctx.clearRect(0, 0, 1024, 256);
     ctx.fillStyle = 'rgba(10,13,19,0.72)';
@@ -5759,6 +5829,9 @@ export class BoardGameScene {
     const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
     const sprite = new THREE.Sprite(material);
     sprite.userData.ownedTexture = true;
+    sprite.userData.labelText = text;
+    sprite.userData.labelFontSize = fontSize;
+    sprite.userData.labelSupersample = supersample;
     return sprite;
   }
 
