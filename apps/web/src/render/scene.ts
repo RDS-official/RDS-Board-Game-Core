@@ -209,6 +209,8 @@ const ZONE_LABEL_TYPE_OFFSETS: Record<string, { x: number; y: number; z: number 
 const POKER_POT_X = -0.3;
 const POKER_POT_LABEL_Y = 0.33;
 const POKER_POT_LABEL_SCALE = 0.6;
+/** How long each face (avatar / current-street bet) stays on a seat beacon. */
+const BEACON_FACE_MS = 2000;
 /** Native hand-card mesh; the layout width below is its displayed size. */
 const HAND_CARD_MESH_WIDTH = 1.12 * CARD_SIZE_MULTIPLIER;
 /** World width of a hand card at layout scale 1. */
@@ -655,6 +657,7 @@ export class BoardGameScene {
     arrow: THREE.Mesh;
     line: THREE.Mesh;
     avatarSprite: THREE.Sprite;
+    betSprite: THREE.Sprite;
     seatCamPos: THREE.Vector3;
     defaultOutward: { x: number; y: number };
     seatId: string;
@@ -2835,6 +2838,7 @@ export class BoardGameScene {
               lastActions?: Record<string, string>;
               folded?: string[];
               street?: string;
+              streetBets?: Record<string, number>;
               readyForNext?: string[];
             }
           | undefined;
@@ -2902,7 +2906,8 @@ export class BoardGameScene {
             clamped.x,
             clamped.z,
             eye,
-            seatPlayer
+            seatPlayer,
+            Number(handState?.streetBets?.[seatId] ?? 0)
           );
           this.seatBeacons.push({
             ...beacon,
@@ -6225,11 +6230,98 @@ export class BoardGameScene {
     return sprite;
   }
 
+  /** Paint the current-street bet onto an existing beacon coin canvas. */
+  private drawBeaconBetFace(canvas: HTMLCanvasElement, amount: number, color?: string): void {
+    const size = canvas.width;
+    const centre = size / 2;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, size, size);
+
+    const disc = ctx.createRadialGradient(centre, centre - 18, 12, centre, centre, 114);
+    disc.addColorStop(0, '#25313b');
+    disc.addColorStop(1, '#0b1117');
+    ctx.beginPath();
+    ctx.arc(centre, centre, 114, 0, Math.PI * 2);
+    ctx.fillStyle = disc;
+    ctx.fill();
+
+    // Keep the seat accent visible, so the coin still says whose bet it is.
+    ctx.beginPath();
+    ctx.arc(centre, centre, 104, 0, Math.PI * 2);
+    ctx.strokeStyle = color || '#334155';
+    ctx.lineWidth = 8;
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#d8bd78';
+    ctx.font = `600 29px ${CANVAS_FONT_STACK}`;
+    ctx.fillText('本轮已下注', centre, 88);
+
+    const text = String(Math.max(0, Math.floor(amount)));
+    let fontSize = 112;
+    ctx.font = `700 ${fontSize}px ${CANVAS_FONT_STACK}`;
+    while (ctx.measureText(text).width > 178 && fontSize > 54) {
+      fontSize -= 4;
+      ctx.font = `700 ${fontSize}px ${CANVAS_FONT_STACK}`;
+    }
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillText(text, centre, 154);
+
+    // Match the avatar coin's brass rim exactly.
+    ctx.beginPath();
+    ctx.arc(centre, centre, 114, 0, Math.PI * 2);
+    ctx.strokeStyle = '#c9a24a';
+    ctx.lineWidth = 12;
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+  }
+
+  private createBeaconBetSprite(amount: number, color?: string): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    this.drawBeaconBetFace(canvas, amount, color);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.generateMipmaps = true;
+    texture.minFilter = THREE.LinearMipmapLinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(1.25, 1.25, 1);
+    sprite.visible = false;
+    sprite.userData.ownedTexture = true;
+    sprite.userData.betAmount = Math.max(0, Math.floor(amount));
+    sprite.userData.betColor = color ?? '';
+    return sprite;
+  }
+
+  private updateBeaconBetSprite(sprite: THREE.Sprite, amount: number): void {
+    const next = Math.max(0, Math.floor(amount));
+    if (sprite.userData.betAmount === next) return;
+    const material = sprite.material as THREE.SpriteMaterial;
+    const canvas = material.map?.image as HTMLCanvasElement | undefined;
+    if (canvas) this.drawBeaconBetFace(canvas, next, String(sprite.userData.betColor ?? ''));
+    if (material.map) material.map.needsUpdate = true;
+    sprite.userData.betAmount = next;
+  }
+
   private createSeatBeacon(
     x: number,
     z: number,
     height: number,
-    player?: { name?: string; avatar?: string; avatarUrl?: string; color?: string }
+    player?: { name?: string; avatar?: string; avatarUrl?: string; color?: string },
+    streetBet = 0
   ): {
     group: THREE.Group;
     ring: THREE.Mesh;
@@ -6237,6 +6329,7 @@ export class BoardGameScene {
     arrow: THREE.Mesh;
     line: THREE.Mesh;
     avatarSprite: THREE.Sprite;
+    betSprite: THREE.Sprite;
   } {
     const group = new THREE.Group();
     // 大方桌木沿上表面在 y = 0.19
@@ -6310,17 +6403,30 @@ export class BoardGameScene {
     avatarSprite.position.set(0, height - 0.65, 0);
     group.add(avatarSprite);
 
-    return { group, ring, spinner, arrow, line, avatarSprite };
+    const betSprite = this.createBeaconBetSprite(streetBet, player?.color);
+    betSprite.position.copy(avatarSprite.position);
+    group.add(betSprite);
+
+    return { group, ring, spinner, arrow, line, avatarSprite, betSprite };
   }
 
   private updateSeatStandees(dt: number): void {
     const cam = this.camera.position;
-    const pulse = 0.55 + Math.sin(performance.now() / 320) * 0.25;
+    const now = performance.now();
+    const pulse = 0.55 + Math.sin(now / 320) * 0.25;
+    /** Avatar for 2 s, then this street's committed amount for 2 s. */
+    const showBetFace = Math.floor(now / BEACON_FACE_MS) % 2 === 1;
     // 半圆环灯每帧按**当前**牌局刷新：节点是增量复用的，建牌那一刻的状态不可靠。
     const live = this.lastState;
     const actor = live ? (live.activeActorId ?? live.activePlayerId) : undefined;
     const hand = live?.globalVars.hand as
-      | { street?: string; readyForNext?: string[]; lastActions?: Record<string, string>; folded?: string[] }
+      | {
+          street?: string;
+          readyForNext?: string[];
+          lastActions?: Record<string, string>;
+          folded?: string[];
+          streetBets?: Record<string, number>;
+        }
       | undefined;
     const isSettlement = hand?.street === 'COMPLETE';
     for (const { group, jitter, lamp, seatId } of this.seatStandees) {
@@ -6385,8 +6491,12 @@ export class BoardGameScene {
       const isOther = seatId !== viewerId;
       const nearCamera =
         Math.hypot(cam.x - beacon.group.position.x, cam.z - beacon.group.position.z) < 3;
+      const streetBet = Number(hand?.streetBets?.[seatId] ?? 0);
+      this.updateBeaconBetSprite(beacon.betSprite, streetBet);
+      const showBet = isOther && !nearCamera && showBetFace && streetBet > 0;
       beacon.line.visible = isOther && !nearCamera;
-      beacon.avatarSprite.visible = isOther && !nearCamera;
+      beacon.avatarSprite.visible = isOther && !nearCamera && !showBet;
+      beacon.betSprite.visible = showBet;
 
       const ringMat = beacon.ring.material as THREE.MeshBasicMaterial;
       const arrowMat = beacon.arrow.material as THREE.MeshBasicMaterial;
