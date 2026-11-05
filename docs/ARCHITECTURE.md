@@ -406,7 +406,7 @@ Action {
 }
 ```
 
-`fields` 是**声明式参数表单**：HUD 据此渲染下拉/数字/布尔输入；`selection` 是**声明式目标选择器**：HUD 从 `engine.getSelectionCandidates` 渲染候选，提交为 `targets`。动作合法性分三层：
+`fields` 是**声明式参数表单**：HUD 据此渲染下拉/数字/布尔输入（`kind: 'number'` 的字段可用 `widget: 'slider'` 请求滑动条 + 同步数字框，`marks` 携带游戏自己声明的快捷档——通用层只渲染，不认识任何游戏词汇）；`selection` 是**声明式目标选择器**：HUD 从 `engine.getSelectionCandidates` 渲染候选，提交为 `targets`。动作合法性分三层：
 
 1. `validateActionShape`：结构、枚举、范围、`targets` 数组结构；
 2. `isLegal`：与模块 `legalActions` 的绑定匹配（带 `fields` 或 `selection` 的动作允许 payload/targets 后填）；
@@ -1169,7 +1169,7 @@ SETUP_SETTLEMENT → SETUP_ROAD → ... → ROLL → ACTION
 - 52 张牌是 `card_<suit><rank>` 实体（`card_s14` = A♠），一手结束时全部回到 `zone_deck`，用 `DeterministicPRNG.shuffle(state.prngState, …)` 重洗并把 `nextSeed` 写回状态；
 - 底牌是 `zone_hand_pN` 里的普通 CARD 实体（`OWNER_ONLY`），因此投影自动打码，夹具不需要 `project` 钩子；摊牌时把可见性改成 `PUBLIC`，弃牌进 `HIDDEN` 的 `zone_muck`；
 - 下注状态放在 `globalVars.hand`（街、底池、`streetBets`/`handBets`、`currentBet`、`lastRaiseSize`、`actedSinceRaise`、弃牌/全押名单），只含公开信息；
-- 动作：`START_HAND` / `FOLD` / `CHECK` / `CALL` / `RAISE`（声明式 `fields.amount` 数字输入）/ `ALL_IN`；
+- 动作：`START_HAND` / `FOLD` / `CHECK` / `CALL` / `RAISE`（声明式 `fields.amount` 数字输入，`widget: 'slider'` 滑动条：最小加注 → 全押）/ `ALL_IN`；
 - 一次 `reduce` 内可以连续收注、发街、摊牌（全押后自动跑完剩余公共牌），状态机保持单调且可逐位回放；
 - 边池由 `betting.buildPots` 按 `handBets` 分层计算，最高层只有一名贡献者时即为未跟注部分自动退回；平分余数按庄家左手顺位发放；
 - 短全押（不足最小加注）不更新 `lastRaiseSize`、不清空 `actedSinceRaise`，已行动者不再获得加注权；

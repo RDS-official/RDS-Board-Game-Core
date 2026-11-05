@@ -251,6 +251,62 @@ test('poker: raises below the minimum are rejected', () => {
   assertEqual(hand(engine.getRawState()).currentBet, 20, 'the table is raised to 20');
 });
 
+test('poker: the raise field declares a slider from min raise to all-in', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 7, { scenario: 'seats_4' });
+  startHand(engine);
+  const actor = engine.getActiveActorId();
+
+  const raise = engine.getLegalActions(actor).find(action => action.type === 'RAISE');
+  assert(!!raise, 'a fresh seat may raise');
+  const field = raise!.fields?.find(candidate => candidate.key === 'amount');
+  assert(!!field, 'the raise exposes a declarative amount field');
+  assertEqual(field!.widget, 'slider', 'the amount field requests the slider widget');
+
+  const handState = hand(engine.getRawState());
+  assertEqual(field!.min, handState.currentBet + handState.lastRaiseSize, 'slider starts at the min raise');
+  const stack = Number(engine.getRawState().players[actor]?.customProps?.chips ?? 0);
+  assertEqual(field!.max, (handState.streetBets[actor] ?? 0) + stack, 'slider ends at all-in');
+  assertEqual(field!.default, field!.min, 'the slider defaults to the min raise');
+
+  const marks = field!.marks ?? [];
+  const labels = marks.map(mark => mark.label);
+  assert(labels.includes('最小加注'), `marks carry the min raise: ${labels.join('/')}`);
+  assert(labels.includes('全押'), `marks carry all-in: ${labels.join('/')}`);
+  for (const mark of marks) {
+    assert(
+      mark.value >= field!.min! && mark.value <= field!.max!,
+      `mark ${mark.label}=${mark.value} stays inside [${field!.min}, ${field!.max}]`
+    );
+  }
+  const values = marks.map(mark => mark.value);
+  assert(values.length === new Set(values).size, 'marks are deduplicated');
+  for (let index = 1; index < values.length; index++) {
+    assert(values[index] > values[index - 1], 'marks ascend');
+  }
+});
+
+test('poker: slider marks clamp pot-size stops to the stack', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 7, { scenario: 'short_stack' });
+  const raw = engine.getRawState();
+  startHand(engine);
+
+  // 逼出一张足够大的底池：翻前跟注一圈再有人加注，短码座位的滑动条上限很低。
+  act(engine, 'CALL', { amount: 10 });
+  act(engine, 'CALL', { amount: 10 });
+  const shortSeat = engine.getActiveActorId();
+  const shortStack = Number(engine.getRawState().players[shortSeat]?.customProps?.chips ?? 0);
+
+  const raise = engine.getLegalActions(shortSeat).find(action => action.type === 'RAISE');
+  if (!raise) return; // 短码不足以加注时本条退化：上一条测试已覆盖标记结构。
+  const field = raise.fields?.find(candidate => candidate.key === 'amount');
+  assert(!!field, 'the short stack still gets a slider field');
+  for (const mark of field!.marks ?? []) {
+    assert(mark.value <= field!.max!, `mark ${mark.label} clamps to the short stack (${field!.max})`);
+    assert(mark.value >= field!.min!, `mark ${mark.label} stays above the min raise (${field!.min})`);
+  }
+  assert(shortStack > 0, 'the short seat still holds chips');
+});
+
 test('poker: a short all-in raise does not reopen the betting', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 7, { scenario: 'seats_4' });
   const raw = engine.getRawState();
