@@ -55,6 +55,7 @@ import {
   UiSpatialInfo,
   ViewerId
 } from './contracts';
+import { applyActionCooldowns } from './actionCooldown';
 import { buildEntityInspectNotice, buildMoment, buildNodeDiscoveryView } from './inspect';
 import { buildObserverRoster } from './observers';
 import {
@@ -168,6 +169,8 @@ export class NetSession implements GamePresenter {
   private state?: ProjectedGameState;
   private guestTransport?: WebRtcGuestTransport;
   private netRevision = 0;
+  /** 动作类型 -> 第一次出现在视图里的时刻（冷却用）。 */
+  private readonly actionSeenAt = new Map<string, number>();
   private appliedRevision = -1;
   private snapshot?: GameSnapshot;
   private bound: BoundAction[] = [];
@@ -1150,6 +1153,15 @@ export class NetSession implements GamePresenter {
         entry => !String(entry.action?.type ?? entry.ui.actionType ?? '').startsWith('DEBUG_')
       );
     }
+
+    // 联机也要吃同一套动作冷却（issue #198）：以前只有单机在做，客户端在联机房里
+    // 点「下一手」可以完全无视 20 秒阅读时间。
+    applyActionCooldowns(
+      this.bound,
+      this.netRevision === 0 ? undefined : this.module.driver?.actionCooldownMs,
+      this.actionSeenAt,
+      Date.now()
+    );
 
     const isSettlement =
       state.phase === 'HAND_OVER' ||
