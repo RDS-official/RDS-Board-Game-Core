@@ -278,16 +278,18 @@ test('charter C-6: chip conservation catches a booking error the structural chec
       ...raw.players,
       [victim]: {
         ...raw.players[victim],
-        customProps: { ...raw.players[victim].customProps, chips: Number(raw.players[victim].customProps?.chips ?? 0) + 250 }
+        // 半分筹码：分池取整错误 / 重复记账的真实症状就是小数，不是「非 1000 的倍数」
+        // （房间买入来自账号余额，本来就不是整千，见 issue #180）。
+        customProps: { ...raw.players[victim].customProps, chips: Number(raw.players[victim].customProps?.chips ?? 0) + 250.5 }
       }
     }
   };
 
   const messages = module.checkInvariants!(tampered);
-  // 不假设总额是常量（破产补位会让总额增长），断言的是"整除性被破坏"。
+  // 不假设总额是常量（破产补位会让总额增长），断言的是"半份筹码被检出"。
   assert(
-    messages.some(m => /not a multiple of the \d+-chip buy-in/.test(m)),
-    `a 250-chip booking error must break the buy-in invariant, got: ${JSON.stringify(messages)}`
+    messages.some(m => /chip total .* is fractional/.test(m)),
+    `a half-chip booking error must break the chip-total invariant, got: ${JSON.stringify(messages)}`
   );
 });
 

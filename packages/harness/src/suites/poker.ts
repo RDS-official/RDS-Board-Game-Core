@@ -1290,6 +1290,24 @@ test('poker: the settlement continue button follows its declared action priority
   assert(result.ok, 'the button resolves to some action');
   assertEqual(dispatched[0], 'ready', 'the declared priority wins over the bind order');
 });
+test('poker: non-default buy-ins do not trip the chip-total invariant', () => {
+  // 房间买入来自账号余额，可以是 700 / 900 / 1100 / 1500 这种非标准值。
+  // 之前的判据是「总额必须是 startingStack 的整数倍」，这种桌子会被误报 C-6。
+  const poker = GAME_REGISTRY.poker;
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 61, {
+    scenario: 'seats_4',
+    stacks: [700, 900, 1100, 1500]
+  });
+  startHand(engine);
+  for (let street = 0; street < 2; street++) callAround(engine, 4);
+
+  const issues = poker.checkInvariants!(engine.getRawState());
+  assertEqual(
+    issues.filter(line => line.includes('chip total')).length,
+    0,
+    'non-standard buy-ins are not reported as chip-creation'
+  );
+});
 /* -------------------------------------------------------------------------- */
 /* 生涯统计的逐手事实                                                          */
 /* -------------------------------------------------------------------------- */
