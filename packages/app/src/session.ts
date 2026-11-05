@@ -2212,9 +2212,14 @@ export function takeMomentButton(
 ): { ok: boolean; error?: string } {
   if (!button) return { ok: false, error: '未知的结算按钮' };
   if (!button.enabled) return { ok: false, error: button.hint ?? '现在还不能这么做' };
-  const target = bound.find(candidate =>
-    (button.actionTypes ?? []).includes(String(candidate.ui.actionType ?? candidate.action?.type ?? ''))
-  );
+  // 按**按钮声明的优先级**找，而不是按绑定顺序找：结算按钮的 actionTypes 是
+  // `['READY', 'START_HAND', 'FORCE_START']`，但绑定表里 FORCE_START 可能排前面，
+  // 按绑定顺序找就会永远先命中 FORCE_START——绕过 READY 与冷却（issue #177）。
+  const target = (button.actionTypes ?? [])
+    .map(type =>
+      bound.find(candidate => String(candidate.ui.actionType ?? candidate.action?.type ?? '') === type)
+    )
+    .find(candidate => !!candidate);
   if (target) return dispatch(target.ui.id);
   if (button.leave) {
     if (!leave) return { ok: false, error: '当前入口不支持离开牌桌' };
