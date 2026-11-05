@@ -6,6 +6,7 @@ import { UniversalGameEngine } from '@rds/kernel/engine';
 import { withDefaultPayload } from '@rds/kernel/actionPayload';
 import type { GameState } from '@rds/kernel/types';
 import { GAME_REGISTRY } from '@rds/games/registry';
+import { phaseLabelOf } from '@rds/app/session';
 import { buildPots, splitAmount } from '@rds/games/poker/betting';
 import type { Card, Suit } from '@rds/games/poker/cards';
 import { evaluateSeven } from '@rds/games/poker/handEval';
@@ -1307,6 +1308,22 @@ test('poker: non-default buy-ins do not trip the chip-total invariant', () => {
     0,
     'non-standard buy-ins are not reported as chip-creation'
   );
+});
+test('poker: the headline shows what the viewer still owes, not the table bet', () => {
+  // 小盲投 5、注额 10：小盲看到的「需跟」必须是 5。之前直接显示 currentBet（10），
+  // 小盲和大盲都会看到比实际多一截的数字（issue #192）。
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 37, { scenario: 'seats_4' });
+  startHand(engine);
+  const smallBlind = engine.getRawState().playerOrder.find(
+    pid => Number(engine.getRawState().globalVars.hand && (engine.getRawState().globalVars.hand as any).streetBets?.[pid]) === 5
+  );
+  assert(!!smallBlind, 'a seat posted the small blind');
+  const view = engine.getProjectedStateFor(smallBlind!);
+  assertEqual(phaseLabelOf(view).includes('需跟 5'), true, `small blind still owes 5, got: ${phaseLabelOf(view)}`);
+  // 没有投入的座位看到的仍是完整注额。
+  const other = engine.getRawState().playerOrder.find(pid => pid !== smallBlind);
+  const otherView = engine.getProjectedStateFor(other!);
+  assertEqual(phaseLabelOf(otherView).includes('需跟 10'), true, `a fresh seat owes the full bet, got: ${phaseLabelOf(otherView)}`);
 });
 /* -------------------------------------------------------------------------- */
 /* 生涯统计的逐手事实                                                          */

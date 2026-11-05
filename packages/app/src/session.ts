@@ -1527,7 +1527,10 @@ export function phaseLabelOf(state: ProjectedGameState): string {
           0
         );
         const pot = Number(hand.pot ?? 0) + streetChips;
-        const owed = Number(hand.currentBet ?? 0);
+        // 「需跟」是**还差多少**，不是当前注额：小盲已投 5、注额 10 时应显示 5。
+        // 之前直接显示 currentBet，小盲和大盲都会看到比实际多一截的数字（issue #192）。
+        const mine = Number((hand.streetBets as Record<string, number> | undefined)?.[state.viewerId] ?? 0);
+        const owed = Math.max(0, Number(hand.currentBet ?? 0) - (Number.isFinite(mine) ? mine : 0));
         return `${streetLabels[street] ?? street} · 底池 ${pot} · 需跟 ${owed}`;
       }
       default:
