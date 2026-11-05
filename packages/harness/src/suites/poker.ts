@@ -1325,6 +1325,24 @@ test('poker: the headline shows what the viewer still owes, not the table bet', 
   const otherView = engine.getProjectedStateFor(other!);
   assertEqual(phaseLabelOf(otherView).includes('需跟 10'), true, `a fresh seat owes the full bet, got: ${phaseLabelOf(otherView)}`);
 });
+test('poker: a solo table starts seated, not omniscient', async () => {
+  const { UniversalSession } = await import('@rds/app/session');
+  const session = new UniversalSession(GAME_REGISTRY.poker, 91, 'seats_4');
+  const snapshot = session.getSnapshot() as { viewer?: string };
+  assert(!!snapshot.viewer && snapshot.viewer !== 'GOD', `solo play binds a seat, got ${snapshot.viewer}`);
+
+  // 投影对比：上帝视角能看到全部牌面，绑定座位后必须少一大截（别人的底牌 + 牌堆）。
+  const engine = (session as unknown as { engine: { getProjectedStateFor(id: string): any } }).engine;
+  const countFaces = (state: any): number =>
+    Object.values(state.entities ?? {}).filter(
+      (entity: any) => entity?.components?.cardFace && !entity.isMasked
+    ).length;
+  const asGod = countFaces(engine.getProjectedStateFor('GOD'));
+  const asSeat = countFaces(engine.getProjectedStateFor(snapshot.viewer as string));
+  assert(asGod > asSeat, `a seated viewer sees fewer faces (god ${asGod} vs seat ${asSeat})`);
+
+  session.dispose();
+});
 /* -------------------------------------------------------------------------- */
 /* 生涯统计的逐手事实                                                          */
 /* -------------------------------------------------------------------------- */
