@@ -158,3 +158,15 @@ test('room: secret decision submissions are collapsed in deltas', () => {
     'the raw submission object must never reach the client patch'
   );
 });
+
+test('net: centre-mode sessions never mint host-only secrets', async () => {
+  const { NetSession } = await import('@rds/app/netSession');
+  const { GAME_REGISTRY } = await import('@rds/games/registry');
+  const base = { hub: 'http://127.0.0.1:9', roomId: 'r_net', token: 't', playerId: 'p1' as const };
+  // 中心模式客户端从不建权威引擎：seed / aliasSecret 都是房主专属，构造时不该生成。
+  const guest = new NetSession(GAME_REGISTRY.poker, { ...base, role: 'guest', authority: 'server' } as never);
+  assertEqual((guest as unknown as { hostSeed?: number }).hostSeed, undefined, 'centre-mode guest has no host seed');
+  assertEqual((guest as unknown as { aliasSecret?: string }).aliasSecret, undefined, 'centre-mode guest has no alias secret');
+  guest.dispose();
+});
+

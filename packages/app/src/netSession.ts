@@ -188,8 +188,12 @@ export class NetSession implements GamePresenter {
   private disposed = false;
 
   // --- host-only: random seed + alias secret, generated once per session (S5/S6) ---
-  private readonly hostSeed: number;
-  private readonly aliasSecret: string;
+  //
+  // 只有 P2P 房主需要它们。中心模式下客户端从不建权威引擎，以前却照样在构造
+  // 时生成一份随机 seed 与 alias secret —— 纯死代码，还让审计误以为中心模式
+  // 在本地做了权威（issue #232）。
+  private readonly hostSeed?: number;
+  private readonly aliasSecret?: string;
 
   constructor(module: GameModule, options: NetSessionOptions) {
     this.module = module;
@@ -199,10 +203,9 @@ export class NetSession implements GamePresenter {
     this.isLocalAuthority = options.role === 'host' && this.authority === 'p2p';
     this.viewer = options.playerId;
 
-    this.hostSeed = options.seed ?? randomSeed32();
-    this.aliasSecret = randomHex(32);
-
     if (this.isLocalAuthority) {
+      this.hostSeed = options.seed ?? randomSeed32();
+      this.aliasSecret = randomHex(32);
       const seed = this.hostSeed;
       // 中期项 A2：房主侧只有唯一一个权威引擎。HUD（UniversalSession）与
       // 权威房间（GameRoom）共用它，因此本地 dispatch 直接就是权威跃迁，
@@ -218,7 +221,7 @@ export class NetSession implements GamePresenter {
         seed,
         Object.keys(engineOptions).length > 0 ? engineOptions : undefined
       );
-      engine.setAliasSecret(this.aliasSecret);
+      engine.setAliasSecret(this.aliasSecret as string);
       const room = new GameRoom(module, seed, this.seatAuthorizer(), options.scenario, engine);
       const inner = new UniversalSession(module, seed, options.scenario, engine);
       inner.setViewer(options.playerId);
@@ -233,10 +236,14 @@ export class NetSession implements GamePresenter {
       // delta 推送由 WebRtcHostTransport 构造时订阅 room.onChange 统一完成。
     } else {
       // Bootstrap a plausible viewer projection without keeping an engine.
-      // The placeholder engine uses a FIXED public seed (never the host's real
-      // one — the real seed would leak the shuffle order, S6); the first full
-      // room-update from the host replaces this projection wholesale.
-      const boot = new UniversalGameEngine(module, 42, options.scenario ? { scenario: options.scenario } : undefined);
+      // 用一次性随机种子（绝不是房主的真种子 —— 真种子会泄露洗牌顺序，S6）；
+      // 之前写死 42，看起来像「本地权威用固定种子」，误导性很强。这个投影只
+      // 存在到第一帧真实房间状态抵达为止。
+      const boot = new UniversalGameEngine(
+        module,
+        randomSeed32(),
+        options.scenario ? { scenario: options.scenario } : undefined
+      );
       this.state = boot.getProjectedStateFor(options.playerId);
       this.bootstrapDependencyErrors = boot.getRules().dependencyErrors();
       this.rebuild();
