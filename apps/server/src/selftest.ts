@@ -362,6 +362,18 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
   ok(board[0].chips >= board[1].chips, 'the leaderboard is sorted by chips');
   ok(board.every(row => row.bankroll + row.onTable === row.chips), 'bankroll plus table stakes equals the ranked total');
   ok(board.some(row => row.isAi), 'the leaderboard includes AI heroes');
+  // 排行榜是公开 GET：绝不能给内置名将**新建**账本档案（issue #186 的写放大）。
+  // 前面的救济/买入用例会合法写掉个别 AI 账号，所以只断言「没碰过的名将保持空档」。
+  const { allAccounts } = await import('./pokerLedger.ts');
+  const untouched = ['ai:hero:夏侯惇', 'ai:hero:马超', 'ai:hero:甘宁'];
+  ok(
+    untouched.every(id => !allAccounts().some(acct => acct.userId === id)),
+    'ranking never materializes untouched built-in AI accounts into the ledger'
+  );
+  ok(
+    board.some(row => row.userId === 'ai:hero:夏侯惇' && row.name === '夏侯惇 (AI)'),
+    'untouched AI hero rows still appear with their display name'
+  );
   matches.closeAll();
 
   // 房间重建 / 服务端重启：同一房间重复买入不能二次扣款。
