@@ -592,6 +592,12 @@ test('poker: a short all-in still has to be matched before the next street', () 
   const legal = engine.getLegalActions(engine.getActiveActorId()).map(action => action.type);
   assert(legal.includes('CALL'), 'the raiser must call the remaining 5');
   assert(!legal.includes('RAISE'), 'but the incomplete raise does not reopen raising');
+  // ALL_IN 若会把 currentBet 抬到 45 以上就是一次加注，同样不能出现在这里：
+  // 之前只给 RAISE 加了门禁，全押按钮能绕过短全押不重开的规则（issue #175）。
+  assert(!legal.includes('ALL_IN'), 'and the all-in button cannot re-open the betting either');
+  const illegal = engine.dispatch({ type: 'ALL_IN', playerId: engine.getActiveActorId() });
+  assert(!!illegal.error, 'a re-opening all-in submitted anyway is rejected');
+  assertEqual(hand(engine.getRawState()).streetBets[engine.getActiveActorId()], 40, 'the rejected action left the bet unchanged');
 
   callAround(engine, 1); // p1 calls the last 5
   const stillOpen = engine.getRawState();

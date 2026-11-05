@@ -532,7 +532,12 @@ export class PokerRules {
     }
 
     if (chips > 0 && (owed > 0 || maxRaiseTo > hand.currentBet)) {
-      actions.push({ type: 'ALL_IN', playerId });
+      // 短全押不重开叫注时，已经行动过的人只能跟/弃：ALL_IN 如果会抬高
+      // currentBet，就是一次加注，必须和 RAISE 用同一道 mayRaise 闸门。
+      const allInRaises = maxRaiseTo > hand.currentBet;
+      if (!allInRaises || mayRaise(hand, playerId)) {
+        actions.push({ type: 'ALL_IN', playerId });
+      }
     }
 
     return actions;
@@ -863,6 +868,11 @@ export class PokerRules {
             : Number(action.payload?.amount ?? 0);
         const delta = target - (streetBets[playerId] ?? 0);
         if (!Number.isFinite(target) || delta <= 0 || delta > chips) return state;
+        // 防御性校验：ALL_IN 若会把 currentBet 抬高就是一次加注，已行动过的座位
+        // 在短全押之后没有重开叫注权，直接拒绝（非法动作不改状态）。
+        if (action.type === 'ALL_IN' && target > hand.currentBet && !mayRaise(hand, playerId)) {
+          return state;
+        }
         spent = delta;
         streetBets[playerId] = target;
         handBets[playerId] = (handBets[playerId] ?? 0) + delta;
