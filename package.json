@@ -47,7 +47,8 @@
     "lint": "biome lint .",
     "lint:fix": "biome lint --write --unsafe .",
     "format": "biome format --write .",
-    "format:check": "biome format ."
+    "format:check": "biome format .",
+    "qa": "node scripts/qa.mjs"
   },
   "keywords": [],
   "author": "",
