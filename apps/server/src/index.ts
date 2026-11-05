@@ -19,7 +19,7 @@ import { listRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoomInfo,
 import { GAMES } from './games.ts';
 import { SignalHub } from './signal.ts';
 import { MatchBroker } from './matchBroker.ts';
-import { removeAccount } from './pokerLedger.ts';
+import { ledgerHealth, removeAccount } from './pokerLedger.ts';
 import { log, saveDiagnostics, pruneLogs, recentLogs } from './log.ts';
 
 pruneLogs();
@@ -393,7 +393,15 @@ app.post('/api/rooms/:id/ai', async c => {
   const r = setAiSeats(u.sub, c.req.param('id'), Number(body.aiSeats ?? 0));
   return 'error' in r ? c.json({ error: r.error }, 400) : c.json(r);
 });
-app.get('/healthz', c => c.json({ ok: true }));
+app.get('/healthz', c => {
+  const ledger = ledgerHealth();
+  return c.json({
+    ok: true,
+    // 账本损坏时服务仍然可用（写空账本），但健康检查必须把这件事报出来。
+    pokerLedger: ledger.ok ? 'ok' : 'degraded',
+    ...(ledger.ok ? {} : { pokerLedgerBackup: ledger.backup })
+  });
+});
 // ---- 中心模式（服务器权威）：对局观察端点 ----
 // 房间成员可看到自己房间的服务端对局概况（座位、revision、在线订阅者）。
 app.get('/api/rooms/:id/match', c => {

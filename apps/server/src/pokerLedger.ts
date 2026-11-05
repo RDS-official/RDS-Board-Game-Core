@@ -110,11 +110,22 @@ function load(): PokerLedgerShape {
       /* 只读文件系统等极端情况：仍然继续，只是没留备份 */
     }
     console.error('[poker-ledger] 账本损坏，已备份并重置（备份 → ' + backup + '）：', String(error));
+    degraded = { backup, error: String(error) };
     return { version: 1, accounts: {} };
   }
 }
 
 let ledger: PokerLedgerShape = load();
+
+/**
+ * 账本是否在启动时损坏过。损坏会备份原文件并从空账本继续（站点可用优先），
+ * 但必须让运维看得见 —— 否则就是"余额悄悄回滚"（issue #187）。
+ */
+let degraded: { backup: string; error: string } | null = null;
+
+export function ledgerHealth(): { ok: boolean; backup?: string } {
+  return degraded ? { ok: false, backup: degraded.backup } : { ok: true };
+}
 
 function save(): void {
   fs.mkdirSync(DATA_DIR, { recursive: true });

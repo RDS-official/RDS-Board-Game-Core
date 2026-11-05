@@ -489,6 +489,16 @@ ok(deleteRes.ok === true, 'adminDeleteUser works');
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* #187：账本健康状态必须能从 /healthz 看见                                       */
+/* -------------------------------------------------------------------------- */
+{
+  const res = await app.fetch(new Request('http://127.0.0.1/healthz', { headers: { host: '127.0.0.1' } }));
+  const body: any = await res.json();
+  ok(res.status === 200 && body.ok === true, 'healthz still answers ok');
+  ok(body.pokerLedger === 'ok', 'a healthy ledger is reported as ok');
+}
+
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');
 try { fs.rmSync(process.env.HUB_DATA_DIR!, { recursive: true, force: true }); } catch { /* 临时目录清理失败无所谓 */ }
 process.exit(failed ? 1 : 0);
