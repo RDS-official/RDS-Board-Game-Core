@@ -188,6 +188,9 @@ export class BoardGameHUD {
   private momentLockTimer: number | null = null;
   /** The currently mounted curtain's click handler. */
   private momentClickHandler?: (event: Event) => void;
+  /** 结算幕布打开前的焦点，关闭时还回去（a11y）。 */
+  private momentReturnFocus: HTMLElement | null = null;
+  private momentKeyHandler?: (event: KeyboardEvent) => void;
   /** Activity feed starts open and remembers the player's choice. */
   private historyCollapsed = false;
   /** Active isolated floor in the 3D scene ('ALL' displays all floors). */
@@ -1796,12 +1799,16 @@ export class BoardGameHUD {
       actionButtons || closeButton
         ? `<div class="mc-actions">${actionButtons}${closeButton}</div>`
         : '';
+    layer.setAttribute('role', 'dialog');
+    layer.setAttribute('aria-modal', 'true');
+    layer.setAttribute('aria-labelledby', 'mc-title');
     layer.innerHTML = `
       <div class="mc-vignette"></div>
-      <div class="mc-inner">
+      <div class="mc-inner" tabindex="-1">
+        <div class="mc-live" aria-live="assertive" aria-atomic="true">${escHtml(moment.title)}</div>
         ${moment.kicker ? `<div class="mc-kicker">${escHtml(moment.kicker)}</div>` : ''}
         ${moment.caption ? `<div class="mc-caption">${escHtml(moment.caption)}</div>` : ''}
-        <h1 class="mc-title">${escHtml(moment.title)}</h1>
+        <h1 class="mc-title" id="mc-title">${escHtml(moment.title)}</h1>
         <div class="mc-rule"></div>
         ${moment.story ? `<p class="mc-story">${escHtml(moment.story)}</p>` : ''}
         ${cast}
@@ -1812,6 +1819,34 @@ export class BoardGameHUD {
     `;
     layer.classList.add('open');
     layer.classList.toggle('locked', locked);
+    // a11y：把焦点移进幕布，并在幕布内循环 Tab；关闭时还原（issue #194）。
+    this.momentReturnFocus = (document.activeElement as HTMLElement | null) ?? null;
+    if (this.momentKeyHandler) layer.removeEventListener('keydown', this.momentKeyHandler);
+    this.momentKeyHandler = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const focusables = Array.from(
+        layer!.querySelectorAll<HTMLElement>('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')
+      ).filter(node => node.getClientRects().length > 0);
+      // 锁定期间按钮全 disabled，此时把焦点钉在幕布容器上，Tab 也不能跑出去。
+      if (focusables.length === 0) {
+        event.preventDefault();
+        (layer!.querySelector('.mc-inner') as HTMLElement | null)?.focus();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      } else if (event.shiftKey && (active === first || !layer!.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      }
+    };
+    layer.addEventListener('keydown', this.momentKeyHandler);
+    const firstEnabled = layer.querySelector<HTMLElement>('[data-moment-action]:not([disabled])');
+    (firstEnabled ?? layer.querySelector<HTMLElement>('.mc-inner'))?.focus();
 
     const onLayerClick = (event: Event) => {
       // 锁定期间连遮罩与按钮一起吞掉：关闭只能由倒计时结束或游戏撤销幕布
@@ -1852,9 +1887,16 @@ export class BoardGameHUD {
     const layer = this.container.querySelector('#moment-cine') as HTMLElement | null;
     if (layer) {
       if (this.momentClickHandler) layer.removeEventListener('click', this.momentClickHandler);
+      if (this.momentKeyHandler) layer.removeEventListener('keydown', this.momentKeyHandler);
       layer.classList.remove('open', 'locked');
       layer.innerHTML = '';
+      layer.removeAttribute('aria-modal');
+      layer.removeAttribute('aria-labelledby');
     }
+    this.momentKeyHandler = undefined;
+    const back = this.momentReturnFocus;
+    this.momentReturnFocus = null;
+    if (back && document.contains(back)) back.focus();
     this.momentClickHandler = undefined;
     if (this.momentTimer) {
       window.clearTimeout(this.momentTimer);
@@ -3661,6 +3703,8 @@ export class BoardGameHUD {
                 data-action-id="${action.id}"
                 data-fan-label="${action.label}"
                 data-fan-hint="${action.hint}"${coolAttr}
+                aria-label="${escapeAttr(action.label)}${action.hint ? ` · ${escapeAttr(action.hint)}` : ''}"
+                aria-keyshortcuts="${index + 1}"
                 style="--i:${index};--off:${offset.toFixed(2)};--abs:${Math.abs(offset).toFixed(2)}"
                 title="${action.label}">
           <span class="act-ico">${action.icon}</span>
@@ -3912,6 +3956,8 @@ export class BoardGameHUD {
                   data-action-id="${action.id}"
                   data-fan-label="${action.label}"
                   data-fan-hint="${action.hint}"
+                  aria-label="${escapeAttr(action.label)}${action.hint ? ` · ${escapeAttr(action.hint)}` : ''}"
+                  aria-keyshortcuts="${index + 1}"
                   ${index === this.heldIndex ? 'data-held="1"' : ''}
                   style="--i:${index};--off:${offset.toFixed(2)};--abs:${Math.abs(offset).toFixed(2)}"
                   title="${action.label}">
