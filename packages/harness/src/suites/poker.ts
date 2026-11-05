@@ -398,10 +398,17 @@ test('poker: folded and end-of-hand cards go to the muck face-down', () => {
   act(engine, 'FOLD'); // p2 — hand over, p3 takes it blinds-fold
   const state = engine.getRawState();
   assertEqual(hand(state).street, 'COMPLETE', 'the hand is over');
-  assertEqual(state.zones.zone_muck.orderedEntities.length, 8, 'every hole card ends in the muck');
+  // 收牌例外：弃牌获胜者的底牌留作「待亮牌」，MUCK 或下一手才开始才进暗弃区
+  // （issue #178）——所以只有三家弃牌的 6 张在 muck，赢家 2 张留在手牌区。
+  assertEqual(state.zones.zone_muck.orderedEntities.length, 6, 'folded hole cards end in the muck');
   assertEqual(state.zones.zone_board.orderedEntities.length, 0, 'community cards return to the deck');
+  const foldWinner = (state.globalVars.lastHand as { pots: { winners: string[] }[] }).pots[0].winners[0];
   for (const pid of state.playerOrder) {
-    assertEqual(state.zones[`zone_hand_${pid}`].orderedEntities.length, 0, `${pid} hand zone is empty`);
+    const inHand = state.zones[`zone_hand_${pid}`].orderedEntities.length;
+    assertEqual(inHand, pid === foldWinner ? 2 : 0, `${pid} keeps only the pending-show hole cards`);
+  }
+  for (const id of state.zones[`zone_hand_${foldWinner}`].orderedEntities) {
+    assertEqual(state.entities[id].visibility.type, 'HIDDEN', `kept card ${id} stays face down`);
   }
 });
 
@@ -1008,6 +1015,66 @@ test('poker: a showdown keeps the surviving hands face up', () => {
     const shown = kept.filter(id => settled.entities[id]?.visibility?.type === 'PUBLIC');
     assertEqual(shown.length, 4, 'both surviving hands stay face up');
   }
+});
+
+test('poker: an early fold winner SHOW actually reveals two cards (issue 178)', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 74, { scenario: 'seats_4' });
+  startHand(engine);
+
+  // 一路弃牌到 p1：这手早结束，赢家 p1 还没选 SHOW / MUCK。
+  act(engine, 'FOLD'); // p4
+  act(engine, 'FOLD'); // p1
+  act(engine, 'FOLD'); // p2
+
+  const ended = engine.getRawState();
+  const last = ended.globalVars.lastHand as { endedBy: string; pots: { winners: string[] }[] };
+  assertEqual(last.endedBy, 'FOLD', 'the hand ended by folds');
+  const winner = last.pots[0].winners[0];
+
+  // 收牌时赢家底牌必须留在手牌区：否则 SHOW 无牌可翻。
+  const winnerZone = ended.zones[`zone_hand_${winner}`]?.orderedEntities ?? [];
+  assertEqual(winnerZone.length, 2, 'the fold winner keeps two cards in the hand zone');
+  const visibility = ended.entities[winnerZone[0]]?.visibility?.type;
+  assertEqual(visibility, 'HIDDEN', 'the kept cards stay face down until shown');
+
+  // 所有视角的投影都读不到牌面：未亮牌前结算账本只显示 hidden 张数。
+  const handView = projectedHandOf(engine.getProjectedStateFor(winner), winner);
+  assertEqual(handView.cards.length, 0, 'a projection cannot read the kept cards');
+  assertEqual(handView.hidden, 2, 'the kept cards count as hidden, not visible');
+
+  // SHOW 后两张底牌留在手牌区且翻 PUBLIC——结算画面看得见牌面。
+  const before = engine.getRawState().turn;
+  const step = engine.dispatch({ type: 'SHOW', playerId: winner });
+  assert(step.ok, `SHOW accepted: ${step.error ?? ''}`);
+  const shown = engine.getRawState();
+  assert(shown.turn > before, 'SHOW advanced the turn');
+  const shownZone = shown.zones[`zone_hand_${winner}`]?.orderedEntities ?? [];
+  assertEqual(shownZone.length, 2, 'the shown cards stay in the hand zone');
+  for (const id of shownZone) {
+    assertEqual(shown.entities[id]?.visibility?.type, 'PUBLIC', 'each shown card is face up');
+  }
+  const revealed = (shown.globalVars.hand as { revealed?: string[] }).revealed ?? [];
+  assert(revealed.includes(winner), 'the winner is recorded as revealed');
+});
+
+test('poker: an early fold winner MUCK collects the kept cards', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 75, { scenario: 'seats_4' });
+  startHand(engine);
+
+  act(engine, 'FOLD'); // p4
+  act(engine, 'FOLD'); // p1
+  act(engine, 'FOLD'); // p2
+
+  const last = engine.getRawState().globalVars.lastHand as { pots: { winners: string[] }[] };
+  const winner = last.pots[0].winners[0];
+  const step = engine.dispatch({ type: 'MUCK', playerId: winner });
+  assert(step.ok, `MUCK accepted: ${step.error ?? ''}`);
+
+  const mucked = engine.getRawState();
+  const winnerZone = mucked.zones[`zone_hand_${winner}`]?.orderedEntities ?? [];
+  assertEqual(winnerZone.length, 0, 'MUCK empties the winner hand zone');
+  const muckZone = mucked.zones.zone_muck?.orderedEntities ?? [];
+  assert(muckZone.length >= 2, 'the kept cards moved into the muck');
 });
 
 test('poker: an AI seat offers its concrete action through the normal pipeline', () => {
