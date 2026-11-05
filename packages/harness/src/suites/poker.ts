@@ -1258,14 +1258,38 @@ test('poker: the continue button resolves against the actions legal right now', 
   assert(left, 'leave reached the host handler');
 
   assert(session.performMomentAction('next-hand').ok, 'continue is accepted');
-  assertEqual(
-    (engine.getRawState().globalVars.hand as PokerHandState).street,
-    'PREFLOP',
-    'continue dealt the next hand'
+  // 按钮优先级是 READY → START_HAND → FORCE_START：点「继续下一局」先替自己准备，
+  // 等桌上其他人准备完才发下一手，而不是一按就 FORCE_START 把别人跳过（issue #177）。
+  const settled = engine.getRawState().globalVars.hand as PokerHandState & { readyForNext?: string[] };
+  assertEqual(settled.street, 'COMPLETE', 'continue only readies the viewer, the table still waits');
+  assert(
+    (settled.readyForNext ?? []).includes(engine.getRawState().playerOrder[2]),
+    'the viewer is marked ready for the next hand'
   );
   session.dispose();
 });
 
+test('poker: the settlement continue button follows its declared action priority', async () => {
+  const { takeMomentButton } = await import('@rds/app/session');
+  // 绑定表里 FORCE_START 排在 READY 前面（结算态的合法性顺序并不等于按钮优先级）。
+  // 之前按绑定顺序找，所以「继续下一局」永远命中 FORCE_START，绕过 READY 与冷却。
+  const bound = [
+    { ui: { id: 'force', actionType: 'FORCE_START' }, action: { type: 'FORCE_START' } },
+    { ui: { id: 'ready', actionType: 'READY' }, action: { type: 'READY' } }
+  ] as never;
+  const dispatched: string[] = [];
+  const result = takeMomentButton(
+    { id: 'next-hand', label: '继续下一局', actionTypes: ['READY', 'START_HAND', 'FORCE_START'], enabled: true },
+    bound,
+    undefined,
+    id => {
+      dispatched.push(id);
+      return { ok: true };
+    }
+  );
+  assert(result.ok, 'the button resolves to some action');
+  assertEqual(dispatched[0], 'ready', 'the declared priority wins over the bind order');
+});
 /* -------------------------------------------------------------------------- */
 /* 生涯统计的逐手事实                                                          */
 /* -------------------------------------------------------------------------- */
