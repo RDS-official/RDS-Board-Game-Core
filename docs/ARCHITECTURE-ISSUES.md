@@ -9,6 +9,8 @@
 > 来源：[ARCHITECTURE-REVIEW-2026-11.md](ARCHITECTURE-REVIEW-2026-11.md)（问题清单）+ [KERNEL-CHARTER.md](KERNEL-CHARTER.md)（形式化失效分析）。
 > 本节按严重度排列，**已实现**的条目在合并修复后应移入 §1 并把「状态」改为「已修复」。
 > 状态取值：`待修` / `进行中` / `已修复` / `已登记偏离`（在 [RULES-DEVIATIONS.md](RULES-DEVIATIONS.md) 中登记理由与到期日）。
+>
+> **2026-11-05 登记**：本节 40 条待修项已按台账顺序登记为 issue #199–#238，§3 的 AI-25 登记为 #239；同批核实并关闭 4 条：AR-11 / AR-24 / AR-34 已在 `main` 上实现（状态列改为已修复），AR-45 按「部分完成」关闭（状态列原本已标部分修复），分别见 issue #206 / #219 / #229 / #238。
 
 ### 0.1 S0 · 正确性 / 安全致命
 
@@ -34,7 +36,7 @@
 
 | ID | 问题 | 证据 | 建议 | 状态 |
 | --- | --- | --- | --- | --- |
-| AR-11 | 内核 invariant 对 `globalVars` / `custom` 全盲，61 条检查码全是结构一致性 | `packages/kernel/src/invariants.ts`（`grep -c chip` 为 0） | 新增 `GameModule.checkInvariants?`，strict 模式统一调用（宪章 C-6） | 待修 |
+| AR-11 | 内核 invariant 对 `globalVars` / `custom` 全盲，61 条检查码全是结构一致性 | `packages/kernel/src/invariants.ts`（`grep -c chip` 为 0） | 新增 `GameModule.checkInvariants?`，strict 模式统一调用（宪章 C-6） | ✅ **已修复（2026-11-05 核实）**：`GameModule.checkInvariants?` 已声明（`packages/kernel/src/module.ts`），poker `rules.ts` 已实现，`harness/suites/charter.ts` C-6 用例覆盖（issue #206 已关闭） |
 | AR-12 | `advanceClock` 有未文档化的 16 次级联上限，超限静默退出 | `packages/kernel/src/engine.ts` 的 `advanceClock()` | 改可配置预算 + 超限 `fail()` + 结构化事件 | 待修 |
 | AR-13 | `exportLog()` 每次全量重放只为取 head hash | `packages/kernel/src/engine.ts` 的 `exportLog()` | 直接 `hashState(this.state)`；每 50 步存检查点 | 待修 |
 | AR-14 | `replayTo` 无检查点，时间机器是 O(N) | `packages/kernel/src/engine.ts` 的 `replayState()` / `replayTo()` | 同上（检查点表） | 待修 |
@@ -47,7 +49,7 @@
 | AR-21 | 65 处 `innerHTML`，转义函数复制 4 份 | `apps/web/src/ui/hud.ts`、`lobby/lobby.ts`、`admin/admin.ts`、`main.ts` 各有 `esc*` | 抽 `html` tagged-template；CI grep 禁止裸 `innerHTML =` | 待修 |
 | AR-22 | `session.ts` God Object（`rebuild()` 一个函数做 7 件事） | `packages/app/src/session.ts` 的 `rebuild()`（约 1091 行起） | 拆为纯 builder 库 + 薄壳，`netSession` 复用 | 待修 |
 | AR-23 | `patch` 协议声明 `move/copy/test` 但未实现 | `packages/room-protocol/src/index.ts` 的 `PatchOp` vs `packages/net/src/patch.ts` | 协议收敛到实现子集，或补齐实现并加类型-实现一致性校验 | 待修 |
-| AR-24 | 客户端不校验 `baseRevision`，乱序 delta 会打错基线 | `packages/net/src/server-transport.ts` | 校验 `baseRevision === this.revision`，否则请求快照 | 待修 |
+| AR-24 | 客户端不校验 `baseRevision`，乱序 delta 会打错基线 | `packages/net/src/server-transport.ts` | 校验 `baseRevision === this.revision`，否则请求快照 | ✅ **已修复（2026-11-05 核实）**：`packages/app/src/netSession.ts` 已校验 `baseRevision`，不一致即 `requestSnapshot()`（issue #219 已关闭） |
 | AR-25 | 应用层重复实现"是否需要 tick" | `apps/server/src/match.ts` 的 `needsClock()` vs 内核 `stampDeadlines()` | 内核暴露 `needsClock()`，驱动方只读 | 待修 |
 | AR-26 | 每个对局两个 `setInterval`（tick + AI pump） | `apps/server/src/match.ts` 的 `startClock()` / `startAiPump()` | 全局时间轮 + 单一定时器 | 待修 |
 | AR-27 | 每帧每快照调用 `presentation.describeMoment` / `cardFacts` | `packages/app/src/session.ts` 的 `rebuild()` | 按 revision memo | 待修 |
@@ -62,7 +64,7 @@
 | AR-31 | 构建期执行 `git` 且失败回退硬编码贡献者列表 | `vite.config.ts` 的 `gitInfo` IIFE | 移到构建脚本产物；回退显式写 `unknown` | 待修 |
 | AR-32 | `HUB_SECRET` / `ADMIN_PASSWORD` 多处弱默认值，`.env.example` 写了真实口令 | `ecosystem.config.cjs`、`Dockerfile`、`apps/server/src/config.ts`、`.env.example` | 生产环境无默认值，配置缺失硬拒启；示例文件只写占位符 | 待修 |
 | AR-33 | 自检脚本断言默认口令可登录 | `apps/server/src/selftest.ts` | 用随机生成口令做自检 | 待修 |
-| AR-34 | `SignalHub` 顶掉旧连接时不清理 `MatchBroker` 订阅 | `apps/server/src/signal.ts` 的 `accept()` + `matchBroker.attach()` | 统一 `ConnectionRegistry` 管理连接生命周期 | 待修 |
+| AR-34 | `SignalHub` 顶掉旧连接时不清理 `MatchBroker` 订阅 | `apps/server/src/signal.ts` 的 `accept()` + `matchBroker.attach()` | 统一 `ConnectionRegistry` 管理连接生命周期 | ✅ **已修复（2026-11-05 核实）**：`signal.ts` 顶号即 `terminate`，`matchBroker.ts` close 时 `detach`，订阅随连接清理（issue #229 已关闭；旧 close 晚到误 detach 属另一竞态，未在本条内） |
 | AR-35 | 诊断指纹全局共享而非按 IP 分桶，`includes` O(128) | `apps/server/src/index.ts` 的 `DIAG_FINGERPRINTS` | Map + 按 IP 分桶 | 待修 |
 | AR-36 | 扑克排行未鉴权即可枚举账号昵称 | `apps/server/src/index.ts` 的 `/api/poker/leaderboard` | 加登录要求或分页脱敏 | 待修 |
 | AR-37 | 中心模式下仍生成 `hostSeed` / `aliasSecret`，并 bootstrap 固定 seed=42 占位引擎 | `packages/app/src/netSession.ts:193-245` | 分支收敛，删死代码 | 待修 |
