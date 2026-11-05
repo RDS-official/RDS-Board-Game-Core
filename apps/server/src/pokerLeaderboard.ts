@@ -12,7 +12,7 @@
 import type { PokerCareer } from '@rds/games/poker/stats';
 import { ratio } from '@rds/games/poker/stats';
 import type { MatchManager, ServerMatch } from './match.ts';
-import { accountOf, allAccounts, peekAccount, type PokerAccount } from './pokerLedger.ts';
+import { allAccounts, peekAccount, type PokerAccount } from './pokerLedger.ts';
 import { profileOf } from './auth.ts';
 import { POKER_AI_NAMES } from '@rds/games/poker/seating';
 
@@ -118,23 +118,27 @@ function rowOf(matches: MatchManager, account: PokerAccount, total: number): Glo
  * 全服排行：包括所有注册账号与内置 AI。
  *
  * `userIds` 是真人账号列表。内置名将 AI 也会统一纳入排行。
+ *
+ * **严格只读**（issue #186）：这里不调 `accountOf()`——那会给 20 个内置名将
+ * 创建账本并落盘，让公开 GET 变成写路径。账本里还没有的名将 AI 由内存中的
+ * 静态默认账本构造（默认余额，战绩为空），仅在 AI 真正上桌结算后才落盘。
  */
 export function rankAccounts(matches: MatchManager, userIds: readonly string[]): GlobalPokerRow[] {
-  // 1. 真人账号
+  // 1. 真人账号（peek：没有记录就返回默认账本，不写盘）
   const humanIds = new Set(userIds);
   const accounts: PokerAccount[] = userIds.map(userId => peekAccount(userId));
 
-  // 2. 内置 AI：确保三国杀名将均有 AI 账本记录，并读入
+  // 2. 内置名将 AI：只读 `peekAccount`，缺 name/isAi 时在**返回的副本**上补，
+  //    绝不碰账本存储（peekAccount 的默认账本是每次新建的对象，可直接改）。
   for (const hero of POKER_AI_NAMES) {
     const aiId = `ai:hero:${hero}`;
-    if (!humanIds.has(aiId)) {
-      const acct = accountOf(aiId);
-      if (!acct.name) {
-        acct.name = `${hero} (AI)`;
-        acct.isAi = true;
-      }
-      accounts.push(acct);
+    if (humanIds.has(aiId)) continue;
+    const acct = peekAccount(aiId);
+    if (!acct.name) {
+      acct.name = `${hero} (AI)`;
+      acct.isAi = true;
     }
+    accounts.push(acct);
   }
 
   // 3. 账本里可能已经存在其他历史 AI
@@ -157,9 +161,4 @@ export function rankAccounts(matches: MatchManager, userIds: readonly string[]):
 export function rankAccount(matches: MatchManager, userId: string): GlobalPokerRow | undefined {
   const acct = peekAccount(userId);
   return rowOf(matches, acct, 0);
-}
-
-/** 确保账号有账本记录（第一次看排行榜 / 第一次上桌时开档）。 */
-export function ensureAccount(userId: string): PokerAccount {
-  return accountOf(userId);
 }
