@@ -34,7 +34,7 @@ import {
 import { setupDuneMahjong } from './dune_mahjong/setup';
 import { PokerRules } from './poker/rules';
 import { pokerScenario, setupPoker } from './poker/setup';
-import { pokerSettlementMoment } from './poker/presentation';
+import { pokerDefaultViewer, pokerSettlementMoment } from './poker/presentation';
 import { isAiSeat, POKER_TABLE } from './poker/seating';
 import { SANGUOSHA_HOOKS } from './sanguosha/hooks';
 import { sanguoshaRoleLabel } from './sanguosha/presentation';
@@ -729,7 +729,10 @@ export const pokerModule: GameModule = defineGame({
     }),
   presentation: definePresentation({
     // 结算幕布：每手结束播一次（key 含手数与结束方式，天然去重）。
-    describeMoment: state => pokerSettlementMoment(state)
+    describeMoment: state => pokerSettlementMoment(state),
+    // 单机开局坐在第一个真人座位上：默认停在 GOD 视角会把全部底牌与牌堆顺序
+    // 直接画给玩家（issue #189）。中心模式的查看者由服务器绑定，不受影响。
+    defaultViewer: state => pokerDefaultViewer(state)
   }),
   /**
    * C-8：`𝒦_driver` —— 全部驱动方语义集中在这里。
