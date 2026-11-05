@@ -1287,7 +1287,7 @@ export class BoardGameHUD {
                   min="${field.min}" max="${field.max}" step="${field.step ?? 1}" value="${value}"
                   aria-label="${field.label}" />
                 <input class="pf-control pf-slider-num" data-field="${field.key}" type="number"
-                  value="${value}" min="${field.min}" max="${field.max}" step="${field.step ?? 1}"
+                  value="${value}" min="${field.min}" max="${field.max}" step="1"
                   aria-label="${field.label}" />
               </div>
               ${marks ? `<div class="pf-slider-quick" data-slider-quick="${field.key}">${marks}</div>` : ''}
@@ -1417,8 +1417,11 @@ export class BoardGameHUD {
         button.addEventListener('click', () => {
           const amount = Number(button.dataset.quick);
           if (!Number.isFinite(amount)) return;
-          slider.value = String(amount);
-          numberBox.value = slider.value;
+          // 快捷档（含「全押」）必须写**精确值**：range 的 value 会被 step 吸附到
+          // 最近的整盲注，1185 的全押会变成 1180，按钮就退化成了普通加注（issue #191）。
+          // 数字输入框是最终提交来源，滑块只负责视觉位置。
+          numberBox.value = String(amount);
+          slider.value = String(Math.min(Number(slider.max), Math.max(Number(slider.min), amount)));
           paintSlider();
         });
       });
