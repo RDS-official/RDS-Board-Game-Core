@@ -1,5 +1,5 @@
 {
-  "name": "borad_game",
+  "name": "rds-board-core",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",

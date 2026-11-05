@@ -59,7 +59,7 @@
 | ID | 问题 | 证据 | 建议 | 状态 |
 | --- | --- | --- | --- | --- |
 | AR-28 | 单 `package.json` 冒充 monorepo，无 workspace、无包级依赖声明 | `find -name package.json` 只有根 | `pnpm-workspace.yaml` + 每包 `package.json` | 待修 |
-| AR-29 | 包名拼写错误 | `package.json` 的 `"name": "borad_game"` | 改 `rds-board-core` | 待修 |
+| AR-29 | 包名拼写错误 | ~~`package.json` 的 `"name": "borad_game"`~~ | ✅ **已修复（2026-11-06）**：改为 `rds-board-core`（issue #224） | 已修复 |
 | AR-30 | `lucide` 依赖未被使用 | 全仓无 import | 删除依赖 | 待修 |
 | AR-31 | 构建期执行 `git` 且失败回退硬编码贡献者列表 | `vite.config.ts` 的 `gitInfo` IIFE | 移到构建脚本产物；回退显式写 `unknown` | 待修 |
 | AR-32 | `HUB_SECRET` / `ADMIN_PASSWORD` 多处弱默认值，`.env.example` 写了真实口令 | `ecosystem.config.cjs`、`Dockerfile`、`apps/server/src/config.ts`、`.env.example` | 生产环境无默认值，配置缺失硬拒启；示例文件只写占位符 | 待修 |
