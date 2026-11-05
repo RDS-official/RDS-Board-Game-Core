@@ -5,7 +5,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 process.env.HUB_DATA_DIR ||= fs.mkdtempSync(path.join(os.tmpdir(), 'rds-selftest-'));
+// 自检不能依赖「默认口令」：管理员口令在导入业务模块前换成一次性随机值，
+// 既跑通登录链路，又顺带证明默认口令即使存在也不再被信任（issue #228）。
+const ADMIN_PASSWORD = crypto.randomBytes(9).toString('base64url');
+process.env.ADMIN_PASSWORD = ADMIN_PASSWORD;
 const {
   register, login, verifyJwt, userFromAuthHeader, createUser, isAdminUser, changeOwnPassword,
   adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
@@ -22,11 +27,12 @@ const { getAiHeroName } = await import('@rds/games/poker/seating');
 let failed = 0;
 const ok = (cond: boolean, name: string) => { if (!cond) { failed++; console.error('FAIL', name); } else console.log('ok -', name); };
 
-// ---- 默认管理员 rds / kgnb666 自检 ----
-const adminLogin: any = login('rds', 'kgnb666');
+// ---- 管理员自检：口令来自 env 里的随机值，不是仓库里的默认值 ----
+const adminLogin: any = login('rds', ADMIN_PASSWORD);
 ok(adminLogin.token && adminLogin.user.name === 'rds' && adminLogin.user.role === 'admin', 'admin rds login works');
 ok(isAdminUser(verifyJwt(adminLogin.token)), 'admin rds has admin privileges');
 ok((login('rds', 'wrong_pass') as any).error, 'admin wrong password rejected');
+ok((login('rds', 'kgnb666') as any).error, 'the old default password is not accepted');
 
 // ---- 注册功能已关闭断言 ----
 const regClosed: any = register('new_user_' + Date.now(), 'secret123');
