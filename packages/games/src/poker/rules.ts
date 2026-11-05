@@ -794,6 +794,8 @@ export class PokerRules {
       if (winner !== playerId) return state;
       if (action.type === 'SHOW') {
         if (hand.revealed.includes(playerId)) return state;
+        // 弃牌结束时赢家的底牌还留在手牌区（afterHand 特意没收，issue #178），
+        // 这里翻 PUBLIC 即可；摊牌路径进来时同理。收牌由下一手 startHand 统一做。
         for (const card of holeCards(state, playerId)) {
           state = setVisibility(state, card.id, { type: 'PUBLIC' });
         }
@@ -802,9 +804,15 @@ export class PokerRules {
           turn: state.turn + 1
         };
       }
-      // MUCK：不亮牌，只记一笔，避免反复提示。
+      // MUCK：不亮牌，把留在手牌区的底牌收进暗弃区（issue #178：留在原地会一直
+      // 以 hidden 张数挂在结算画面上），只记一笔避免反复提示。
+      let mucked = state;
+      for (const card of holeCards(state, playerId)) {
+        mucked = ECSManager.moveEntity(mucked, card.id, 'zone_muck');
+        mucked = setVisibility(mucked, card.id, { type: 'HIDDEN' });
+      }
       return {
-        ...withHand(state, { ...hand, revealed: hand.revealed.filter(pid => pid !== playerId) }),
+        ...withHand(mucked, { ...hand, revealed: hand.revealed.filter(pid => pid !== playerId) }),
         turn: state.turn + 1
       };
     }
@@ -1427,10 +1435,27 @@ export class PokerRules {
     // 收牌（docs/POKER.md）：未亮出的手牌进 muck 且 HIDDEN；已亮出的（摊牌、或早
     // 结束时赢家选择明牌）留在手牌区并保持 PUBLIC，直到下一手开始——否则结算画面
     // 上牌面会瞬间消失，玩家看不清是什么牌赢了。
+    //
+    // 例外：弃牌结束时赢家还没选 SHOW / MUCK，他的两张底牌必须**留在手牌区**——
+    // 否则 SHOW 遍历的 `holeCards()` 是空的，按钮成了只烧 turn 的空操作（issue
+    // #178）。留在手牌区但设成 `HIDDEN`：所有视角（含赢家自己）在投影里都只看到
+    // `hidden` 张数，账本继续显示「未亮牌」，不构成泄漏通道；SHOW 翻 PUBLIC、
+    // MUCK 收进暗弃区，下一手 `startHand` 统一回收。
+    const pendingFoldWinner =
+      hand.street === 'COMPLETE'
+        ? (state.globalVars.lastHand as PokerHandResult | undefined)?.endedBy === 'FOLD'
+          ? (state.globalVars.lastHand as PokerHandResult).pots[0]?.winners[0]
+          : undefined
+        : undefined;
     for (const pid of next.playerOrder) {
-      if (hand.revealed.includes(pid)) continue;
+      if (hand.revealed.includes(pid) || pid === pendingFoldWinner) continue;
       for (const card of holeCards(next, pid)) {
         next = ECSManager.moveEntity(next, card.id, 'zone_muck');
+        next = setVisibility(next, card.id, { type: 'HIDDEN' });
+      }
+    }
+    if (pendingFoldWinner && !hand.revealed.includes(pendingFoldWinner)) {
+      for (const card of holeCards(next, pendingFoldWinner)) {
         next = setVisibility(next, card.id, { type: 'HIDDEN' });
       }
     }

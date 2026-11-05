@@ -251,7 +251,11 @@ levels = 去重(handBets 中 > 0 的值) 升序
 
 - 最高层只有 1 人贡献 → 该层即"未被跟注的注"，等价于自动退回，无需特判。
 - 每个池只在 `eligible` 内比牌；同分平分（`Math.floor`），余数筹码从**庄家左手顺时针**第一位符合条件的赢家开始各发 1。
-- `pot` 归零后写 `lastHand`、播报、清手牌到 `zone_muck`、公共牌回 `zone_deck`。
+- `pot` 归零后写 `lastHand`、播报、收未亮牌手牌到 `zone_muck`、公共牌回 `zone_deck`。
+  例外：**弃牌结束**时赢家的底牌留作「待亮牌」——留在 `zone_hand_<winner>` 且设成
+  `HIDDEN`（所有投影视角都只见 `hidden` 张数），直到赢家选 `SHOW`（翻 `PUBLIC`）
+  或 `MUCK`（进暗弃区），下一手 `startHand` 才统一回收。否则 `SHOW` 无牌可翻，
+  是只烧 turn 的空操作。
 
 ### 5.5 官方规则对照（TDA / WSOP 逐条自查）
 
@@ -665,8 +669,9 @@ node node_modules/typescript/bin/tsc --noEmit && pnpm run build
 只以 `hidden` 张数出现。于是：
 
 - **摊牌**：全员存活手牌已经被规则层设成 PUBLIC，账本显示两家（或 N 家）的底牌 + 牌型；
-- **弃牌结束**：底牌进暗弃区（`HIDDEN`），账本不显示任何手牌，只写「已弃牌 / 未亮牌」，
-  赢家按规则可以选择明牌（`SHOW`）后才亮出来；
+- **弃牌结束**：弃牌者的底牌进暗弃区（`HIDDEN`）；赢家的底牌**留在手牌区**（同样
+  `HIDDEN`）作为「待亮牌」，账本不显示任何手牌，只写「已弃牌 / 未亮牌」，赢家按规则
+  选择明牌（`SHOW`，翻 `PUBLIC`）或盖牌（`MUCK`，进暗弃区）后才动那两张牌；
 - 任何视角都拿不到别人的暗牌，结算画面因此不会成为泄漏通道（`poker: a settlement
   offers continue and leave, and never leaks a folded hand` 用例守着）。
 
