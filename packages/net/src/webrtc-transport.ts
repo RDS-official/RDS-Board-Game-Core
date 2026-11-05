@@ -155,7 +155,7 @@ export class WebRtcHostTransport {
         // seat already held by another peer. Combined with the actor check in
         // 'submit' this prevents cross-player impersonation.
         const seat = msg.viewer as PlayerId;
-        // 审查报告 S3：guest 自报座位，禁止 'GOD' 全知视角与非法座位标识
+        // guest 自报座位，禁止 'GOD' 全知视角与非法座位标识
         if (typeof seat !== 'string' || !seat || seat === 'GOD' || seat.startsWith('__')) {
           this.reply(peerId, { t: 'error', message: 'invalid viewer seat' });
           return;
@@ -192,7 +192,7 @@ export class WebRtcHostTransport {
         const viewer = this.viewers.get(peerId);
         if (!viewer) { this.reply(peerId, { t: 'error', message: 'join first' }); return; }
         const action = msg.action;
-        // 审查报告 S7/S10：__ 前缀是内核控制通道（如 __TICK__），guest 不可伪造；
+        // __ 前缀是内核控制通道（如 __TICK__），guest 不可伪造；
         // 同时校验基本形状，畸形 action 不进入引擎。
         if (!action || typeof action !== 'object' || typeof action.type !== 'string' || action.type.startsWith('__')) {
           this.reply(peerId, { t: 'error', message: 'invalid action' });
@@ -228,7 +228,7 @@ export class WebRtcHostTransport {
       default: break; // ignore unknown (forward compatibility)
     }
     } catch (err) {
-      // 审查报告 S10：畸形消息不允许打崩宿主——降级为一条 error 回执
+      // 畸形消息不允许打崩宿主——降级为一条 error 回执
       this.log('channel message error from', peerId, err);
       this.reply(peerId, { t: 'error', message: 'malformed message' });
     }

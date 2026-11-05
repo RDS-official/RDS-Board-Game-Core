@@ -40,7 +40,7 @@ tryLoadEnv();
 
 const env = process.env;
 function secret(): string {
-  // 运维用 HUB_SECRET 覆盖；生产缺失时拒绝启动（审查报告 S2）
+  // 运维用 HUB_SECRET 覆盖；生产缺失时拒绝启动
   if (env.HUB_SECRET) return env.HUB_SECRET;
   if (env.NODE_ENV === 'production') {
     throw new Error('[hub] 生产环境必须通过 HUB_SECRET 提供签名密钥，拒绝用默认密钥启动');

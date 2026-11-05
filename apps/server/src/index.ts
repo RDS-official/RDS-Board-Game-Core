@@ -464,7 +464,7 @@ const matchBroker = new MatchBroker();
 const hub = new SignalHub((ws, userId) => matchBroker.attach(ws, userId));
 hub.startHeartbeat();
 setRoomChangedHook(room => {
-  // 审查报告 S8：房间广播面向全部大厅订阅者，必须剥掉私密房加入码（房主经 REST 拿全量）
+  // 房间广播面向全部大厅订阅者，必须剥掉私密房加入码（房主经 REST 拿全量）
   const { code: _code, ...safe } = room;
   hub.broadcastRoomUpdate(safe as typeof room);
   // 中心模式：房间结束即释放服务端对局（引擎、投影缓存与时钟定时器）
@@ -479,7 +479,7 @@ server.on('upgrade', (req: http.IncomingMessage, socket, head) => {
   const url = new URL(req.url ?? '/', 'http://x');
   if (url.pathname !== '/ws') { socket.destroy(); return; }
   wss.handleUpgrade(req, socket, head, ws => {
-    // 审查报告 S1：信令层任何异常都不允许打崩 HTTP 进程
+    // 信令层任何异常都不允许打崩 HTTP 进程
     try {
       hub.accept(ws, url.searchParams.get('token'));
     } catch (err) {

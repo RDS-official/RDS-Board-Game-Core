@@ -41,7 +41,7 @@ function load(): DbShape {
     if (!parsed || !Array.isArray(parsed.users) || !Array.isArray(parsed.rooms)) throw new Error('bad shape');
     return parsed;
   } catch (err) {
-    // REVIEW.md 短期项 10：解析失败绝不能静默回空库（下一次 save 会覆盖全部数据）。
+    // 解析失败绝不能静默回空库（下一次 save 会覆盖全部数据）。
     // 先留备份，再拒绝启动，交给运维修复后重启。
     const bak = FILE + '.corrupt.' + Date.now();
     try { fs.copyFileSync(FILE, bak); } catch { /* 只读文件系统等极端情况：仍然退出 */ }

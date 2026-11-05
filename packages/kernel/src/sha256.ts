@@ -2,7 +2,7 @@
  * Minimal dependency-free SHA-256 + HMAC-SHA256.
  *
  * The kernel must stay platform-pure (no node:crypto / WebCrypto), but the
- * virtual-alias scheme (REVIEW.md S5) needs a keyed hash that cannot be
+ * virtual-alias scheme needs a keyed hash that cannot be
  * brute-forced through a 32-bit FNV bucket. This is a straightforward
  * implementation of FIPS 180-4 / RFC 2104 used only on the alias path;
  * state hashing keeps its fast FNV-1a.

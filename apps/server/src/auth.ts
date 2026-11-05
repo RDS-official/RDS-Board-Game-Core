@@ -30,7 +30,7 @@ export function verifyJwt(token: string): { sub: string; name: string; role?: 'a
   const parts = token.split('.');
   if (parts.length !== 3) return null;
   const expect = crypto.createHmac('sha256', JWT_SECRET).update(parts[0] + '.' + parts[1]).digest('base64url');
-  // 长度先比：timingSafeEqual 对不等长输入直接 throw（审查报告 S1，畸形签名可打崩进程）
+  // 长度先比：timingSafeEqual 对不等长输入直接 throw（不等长签名会打崩进程）
   const got = Buffer.from(parts[2]);
   const want = Buffer.from(expect);
   if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) return null;
@@ -166,7 +166,7 @@ export function profileOf(id: string): UserProfile | null {
 export function updateDisplayName(id: string, displayName: string): UserProfile | { error: string } {
   const name = displayName.trim().slice(0, 24);
   if (!name) return { error: '昵称不能为空' };
-  // 审查报告 S4：昵称是存储型 XSS 的源头，禁用 HTML/模板语法相关字符（中文/字母/数字/常规标点不受影响）
+  // 昵称是存储型 XSS 的源头，禁用 HTML/模板语法相关字符（中文/字母/数字/常规标点不受影响）
   const banned = new Set(['<', '>', String.fromCharCode(34), String.fromCharCode(39), String.fromCharCode(96), '&']);
   for (const ch of name) {
     const c = ch.charCodeAt(0);
