@@ -64,5 +64,28 @@ export const GAMES: HubGameInfo[] = [
       { id: 'short_stack', label: '短码演示（4 人）' },
     ],
   },
+  {
+    // 三国杀：夹具默认 4 座（packages/games/src/sanguosha/setup.ts 的 playerOrder）。
+    id: 'sanguosha',
+    name: '三国杀',
+    minPlayers: 4,
+    maxPlayers: 4,
+    clientUrl: '/games/rds-board-core/',
+    protocol: 'rds-room/1',
+    durationMin: 45,
+    accent: '#d9a441',
+  },
+  {
+    // 沙丘 & 麻将：夹具默认 3 座（packages/games/src/dune_mahjong/setup.ts 的 playerOrder）。
+    // 之前只在 registry 里、没进大厅，等于「能跑但没人能开房」（issue #236）。
+    id: 'dune_mahjong',
+    name: '沙丘 & 麻将',
+    minPlayers: 3,
+    maxPlayers: 3,
+    clientUrl: '/games/rds-board-core/',
+    protocol: 'rds-room/1',
+    durationMin: 60,
+    accent: '#c08457',
+  },
 ];
 export const gameById = (id: string) => GAMES.find(g => g.id === id);
