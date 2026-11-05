@@ -72,7 +72,7 @@
 | AR-39 | 显式 `any`：server 56 / web 49 / games 29 / app 21 | `rg '\bany\b'` 统计 | `noExplicitAny` 从 warn 升 error，逐包清零 | 待修 |
 | AR-40 | CSS 5427 行且关闭了 `noDescendingSpecificity` / `noImportantStyles` | `biome.json` | 至少 `apps/web/src/ui/tokens/*.css` 保留检查 | 待修 |
 | AR-41 | 大厅可达游戏 5 个，`GAME_REGISTRY` 有 6 个（`dune_mahjong` 未上架） | `packages/games/src/registry.ts` vs `apps/server/src/games.ts` | 由 registry 生成 `GAMES` 清单，消除两份真相 | 待修 |
-| AR-42 | 注释密度高且混入历史决策记录（"审查报告 Sx / AI-xx"），代码与注释双轨 | 全仓 | 历史决策迁到本文档，代码注释只留"为什么" | 待修 |
+| AR-42 | 注释密度高且混入历史决策记录 | ~~全仓 19 处「审查报告 Sx / REVIEW.md Sx / AI-xx」引用~~ | ✅ **已修复（2026-11-06）**：19 处历史编号引用全部摘除，注释只保留「为什么」；约定见 §4「注释约定」（issue #237） | 已修复 |
 
 ### 0.5 M · 多模组形式化失效（宪章落地项）
 
@@ -153,6 +153,12 @@
 | AI-20 | `placementRotation` 只在 session 内存 | 已实现：`session.ts` 用 `sessionStorage` 持久化（键含 game/seed/scenario/defId） |
 | AI-22 | 3D 卡面长描述截断 | 观点已定：DOM 卡牌详情为主，3D 只做摘要，不做长文渲染 |
 | AI-26 | 全量重建是 correctness-first | 按 BACKLOG §1 的实测判据未超预算（`lastSyncMs` 8.3ms、geometry/texture 恒定），暂不做 diff/对象池 |
+
+### 4.1 注释约定
+
+- 代码注释只写**为什么**（约束、踩过的坑、取舍），不写"当时是第几份审查报告的第几条"；
+- 历史决策、评审结论、编号（Sx / AR-x / AI-x）一律留在本文件与 [ARCHITECTURE-REVIEW-2026-11.md](ARCHITECTURE-REVIEW-2026-11.md)；
+- 新增注释若需要引用历史，写结论而不是编号（例：「长度先比，否则 timingSafeEqual 会 throw」）。
 
 ## 4. 验证入口
 

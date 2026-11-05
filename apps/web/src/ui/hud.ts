@@ -24,7 +24,7 @@ import {
 
 /**
  * HTML 转义：玩家可控文本（昵称/头像 URL/参与者名）进入 innerHTML 前必须经过这里。
- * 来源：审查报告 S4——昵称可携带 `<svg/onload=...>` 这类载荷（存储型 XSS）。
+ * 来源：昵称可携带 `<svg/onload=...>` 这类载荷（存储型 XSS）。
  */
 const escHtml = (v: unknown) =>
   String(v ?? '').replace(/[&<>"']/g, ch =>

@@ -328,7 +328,7 @@ export class UniversalGameEngine {
     return this.currentViewer;
   }
 
-  /** Per-room random secret for HMAC virtual aliases (REVIEW.md S5); never serialized. */
+  /** Per-room random secret for HMAC virtual aliases; never serialized. */
   public setAliasSecret(secret: string): void {
     this.aliasSecret = secret;
   }

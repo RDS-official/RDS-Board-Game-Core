@@ -52,7 +52,7 @@ export class SignalHub {
     try { msg = JSON.parse(text); } catch { return; }
     switch (msg.t) {
       case 'join-room': {
-        // 审查报告 S8：入组前校验成员资格——非房间成员不允许进入房间组
+        // 入组前校验成员资格——非房间成员不允许进入房间组
         // （否则可旁听 presence/sdp 转发、以任意 roomId 收发 lobby-chat）
         const rec = rooms.byId(msg.roomId ?? '');
         if (!rec || rec.status === 'closed' || !rec.players.includes(client.userId)) {

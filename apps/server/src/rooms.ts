@@ -81,7 +81,7 @@ export interface CreateRoomOpts { maxPlayers?: number; isPrivate?: boolean; scen
  * The kernel's `setup` only takes a seed, so a fixture's player count is fixed
  * per scenario. Reading it back from the fixture (one throwaway `setup(1)`)
  * keeps the room cap in sync with the seats that exist — the alternative is a
- * room that accepts players the engine has no seat for (REVIEW.md S9).
+ * room that accepts players the engine has no seat for.
  */
 function fixtureSeats(gameId: string, scenarioId?: string): number | undefined {
   const module = GAME_REGISTRY[gameId];
@@ -263,7 +263,7 @@ export function sweepRooms(onlineOf: (roomId: string) => string[]): string[] {
   for (const rec of rooms.all()) {
     const r = rec as RoomRec;
     if (r.status === 'closed') {
-      // REVIEW.md 短期项 10：closed 房间保留 24h（客户端还能看到状态），之后物理清理。
+      // closed 房间保留 24h（客户端还能看到状态），之后物理清理。
       if (now - (r.lastActivity ?? r.createdAt) > 24 * 3600 * 1000) rooms.remove(r.id);
       continue;
     }

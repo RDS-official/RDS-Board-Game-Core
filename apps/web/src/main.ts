@@ -1,6 +1,6 @@
 import { GAME_REGISTRY } from '@rds/games/registry';
 
-/** 玩家可控文本进入 innerHTML 前的转义（审查报告 S4）。 */
+/** 玩家可控文本进入 innerHTML 前的转义。 */
 const escText = (v: unknown) =>
   String(v ?? '').replace(/[&<>"']/g, ch =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
