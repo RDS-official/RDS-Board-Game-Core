@@ -262,7 +262,6 @@ UI 矩阵的三个提速点（都不是砍覆盖）：
 
 第 5 步不是多余的：GitHub 规定 **`GITHUB_TOKEN` 执行的操作不会触发新的 workflow**，
 所以机器人合并产生的 push 不会唤醒 `deploy.yml`（京东云 rsync 链路）。
-AWS 那条走仓库 webhook，不受影响。
 
 fork PR 一律不自动合并——任何人都能开 fork PR，自动合并等于把 main 的写权限交出去。
 

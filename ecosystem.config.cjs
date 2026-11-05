@@ -29,7 +29,6 @@ const envFiles = [
   process.env.ENV_FILE,
   path.join(__dirname, '.env'),
   path.join(__dirname, '..', '.env'),
-  path.join(__dirname, '..', 'deploy-webhook', '.env'),
 ].filter(Boolean);
 
 let envConfig = {};

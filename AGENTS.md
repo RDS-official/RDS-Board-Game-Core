@@ -12,8 +12,8 @@
   - pnpm（版本以 `package.json` 的 `devEngines` / `packageManager` 为准，勿手工指定路径）
   - TypeScript 7.x + Vite 8.x
 - **生产服务**：
-  - 公网站点：`https://rdsbg.zooter.eu.org/`
-  - 架构：AWS Lightsail (Ubuntu 24.04) + PM2 (`rds-board-core`) + Caddy 反向代理 + 本地静态文件加速托管。
+  - 公网站点：`http://117.72.60.103:8787/`
+  - 架构：GitHub Actions (`deploy.yml`) rsync 到京东云 + PM2 (`rds-board-core`) 守护。
 
 ---
 
@@ -131,9 +131,8 @@ gh pr create --base main --title "revert: 撤销 #<原PR号>（原因）" --body
 gh pr merge <新PR号> --squash --delete-branch
 ```
 
-- **线上还原不需要登录服务器**：两条部署链路都监听 `main` 的 push（见 `docs/DEPLOY.md`），
-  回滚 PR 合入后自动重新部署回退态；AWS 侧执行的是 `git reset --hard origin/main`，
-  服务器工作区会自己对齐。
+- **线上还原不需要登录服务器**：`deploy.yml` 监听 `main` 的 push（见 `docs/DEPLOY.md`），
+  回滚 PR 合入后自动重新部署回退态。
 - **禁止**用 `git reset --hard` + 强推 `main` 回滚：会重写公共历史，所有人的分支与 PR 全部失联。
 - **禁止**直接 `git revert -m 1 <merge-commit>`：这正是 §2.3 只允许 Squash 的原因之一。
 
@@ -142,7 +141,7 @@ gh pr merge <新PR号> --squash --delete-branch
 - 仅限**生产已经故障**且**CI 本身也在挂**：允许直接 push `main` 修复，但必须
   在 30 分钟内向团队说明「原因 / 影响面 / 后续补测动作」，并补一个说明性 PR 或 issue 留档。
 - 故障恢复后立即回到 §2.3 的正常流程，不得把直推当成常态。
-- 涉及凭据、鉴权的线上问题时，优先**降级而非硬修**（参照 §4 第 7 条）。
+- 涉及凭据、鉴权的线上问题时，优先**降级而非硬修**。
 
 ### 2.7 自动部署与上线机制 (CI/CD)
 - **PR 必过 CI**：`.github/workflows/ci.yml` 在 PR 上跑「类型 / lint / 结构 / 文档 +
@@ -152,12 +151,11 @@ gh pr merge <新PR号> --squash --delete-branch
 - **自动合并**：`auto-merge.yml` 在 `ci` 成功后 squash 合并**本仓库**的 PR（fork PR
   一律不自动合并），随后显式 `gh workflow run deploy.yml`（`GITHUB_TOKEN` 的 push
   不会触发新 workflow，这一步是补上京东云那条部署链路）。
-- 生产环境配置了 **GitHub Webhook 自动化流水线**：
-  - 目标端点：`https://rdsbg.zooter.eu.org/api/github-webhook`
+- **自动部署**：`deploy.yml` 在 `main` push 后跑 `pnpm test` / `test:server` / `docs:check` / `build`，
+  通过后 rsync 到京东云并 `pm2 startOrReload`。
 - **自动触发条件**：
-  - 只有当变更**经由 §2.3 的 Squash 合并进入 `main`** 时，AWS 服务器才会触发自动化拉取与部署。
+  - 只有变更**经由 §2.3 的 Squash 合并进入 `main`** 才会触发部署。
     直接 push `main` 已被分支保护阻断；§2.6 紧急流程需先临时摘掉保护。
-  - 服务器会自动执行：`git reset --hard origin/main` -> `pnpm install` -> `pnpm run build` -> `pm2 reload rds-board-core` -> `sudo systemctl reload caddy`。
   - 用户专属分支（`users/*`）的提交不会干扰生产环境运行。
 - 因此**合并即上线**：PR 里的「回滚方式」一栏不是形式主义，是线上事故时唯一能照抄的步骤。
 
@@ -259,4 +257,3 @@ pnpm verify:types
 4. **禁止重写公共历史**：`main` 与别人的 `users/*` 分支禁止 `git push --force` / `git reset --hard` 回滚；回滚必须走 §2.5 的 revert PR，禁止 `git revert -m 1 <merge-commit>`。
 5. **禁止将生成图提交至仓库**：`shots/` 目录属于临时验证生成物，已被 `.gitignore` 忽略，严禁强行 `git add -f shots/`。
 6. **禁止破坏状态纯粹性**：`GameState` 必须始终可进行 `JSON.stringify` 规范化序列化与 FNV-1a 哈希计算，严禁将类实例、回调函数存入状态中。
-7. **禁止修改 Webhook 鉴权核心配置**：除非有特定需求，严禁改动生产服务器上的自动部署脚本及 Caddy 中的 Webhook 路由转发规则（具体路径属服务器内部信息，不入库）。
