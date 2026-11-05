@@ -17,6 +17,7 @@ const {
 } = await import('./auth.ts');
 const { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo } = await import('./rooms.ts');
 const { GAMES } = await import('./games.ts');
+const { GAME_REGISTRY } = await import('@rds/games/registry');
 const { MatchManager } = await import('./match.ts');
 const { app } = await import('./index.ts');
 const { settleHand, takeSeat, leaveSeat } = await import('./pokerSettle.ts');
@@ -147,6 +148,16 @@ const pokerSix: any = createRoom(reg.user.id, '扑克六人房', 'poker', { scen
 ok(pokerSix.maxPlayers === 6, 'poker 6-seat variant widens the room cap');
 const pokerTwo: any = createRoom(reg.user.id, '扑克单挑房', 'poker', { scenarioId: 'seats_2', maxPlayers: 9 });
 ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
+
+// 大厅清单与模组注册表必须一一对应：少一个 = 能跑但开不了房，多一个 = 开房即崩（issue #236）。
+{
+  const listed = GAMES.map(game => game.id).sort();
+  const registered = Object.keys(GAME_REGISTRY).sort();
+  ok(
+    listed.join(',') === registered.join(','),
+    `lobby games match the registry (lobby: ${listed.join(',')} / registry: ${registered.join(',')})`
+  );
+}
 
 // ---- 中心模式（服务器权威对局） ----
 {
