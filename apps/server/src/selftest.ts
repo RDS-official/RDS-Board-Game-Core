@@ -15,7 +15,7 @@ const { GAMES } = await import('./games.ts');
 const { MatchManager } = await import('./match.ts');
 const { app } = await import('./index.ts');
 const { settleHand, takeSeat, leaveSeat } = await import('./pokerSettle.ts');
-const { accountOf, peekAccount, updateAccount } = await import('./pokerLedger.ts');
+const { accountOf, allAccounts, peekAccount, updateAccount } = await import('./pokerLedger.ts');
 const { rankAccounts } = await import('./pokerLeaderboard.ts');
 const { getAiHeroName } = await import('@rds/games/poker/seating');
 
@@ -357,7 +357,10 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
 
   // 全服排行：余额 + 桌上筹码，按筹码降序。包含真人与内置名将 AI。
   takeSeat(b, 250, 'r_selftest_seat');
+  // 排行榜是公开 GET：读一次不能替任何 AI 建档、更不能落盘（issue #186）。
+  const accountsBefore = allAccounts().length;
   const board = rankAccounts(matches, [a, b]);
+  ok(allAccounts().length === accountsBefore, 'ranking never creates accounts');
   ok(board.length >= 2, 'the leaderboard lists accounts and ai');
   ok(board[0].chips >= board[1].chips, 'the leaderboard is sorted by chips');
   ok(board.every(row => row.bankroll + row.onTable === row.chips), 'bankroll plus table stakes equals the ranked total');

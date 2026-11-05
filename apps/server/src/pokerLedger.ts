@@ -58,6 +58,9 @@ const FILE = path.join(DATA_DIR, 'poker-ledger.json');
 function emptyAccount(userId: string): PokerAccount {
   return {
     userId,
+    // 内置名将的账本从建立那一刻就该带 AI 标记：排行榜靠它区分真人与 AI，
+    // 以前只有 leaderboard 那段"顺手建档"的代码会写这个字段，读接口一改就丢。
+    ...(userId.startsWith('ai:hero:') ? { isAi: true } : {}),
     chips: STARTING_BANKROLL,
     peakChips: STARTING_BANKROLL,
     career: { ...EMPTY_POKER_CAREER },

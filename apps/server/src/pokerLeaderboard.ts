@@ -14,7 +14,6 @@ import { ratio } from '@rds/games/poker/stats';
 import type { MatchManager, ServerMatch } from './match.ts';
 import { accountOf, allAccounts, peekAccount, type PokerAccount } from './pokerLedger.ts';
 import { profileOf } from './auth.ts';
-import { POKER_AI_NAMES } from '@rds/games/poker/seating';
 
 /** 排行榜一行（全服）。 */
 export interface GlobalPokerRow {
@@ -124,23 +123,22 @@ export function rankAccounts(matches: MatchManager, userIds: readonly string[]):
   const humanIds = new Set(userIds);
   const accounts: PokerAccount[] = userIds.map(userId => peekAccount(userId));
 
-  // 2. 内置 AI：确保三国杀名将均有 AI 账本记录，并读入
-  for (const hero of POKER_AI_NAMES) {
-    const aiId = `ai:hero:${hero}`;
-    if (!humanIds.has(aiId)) {
-      const acct = accountOf(aiId);
-      if (!acct.name) {
-        acct.name = `${hero} (AI)`;
-        acct.isAi = true;
-      }
+  // 2. 内置 AI：**只读**，绝不在这里建档。
+  //
+  // 这是一个公开的 GET 接口：以前用 `accountOf` 会替每个名将开一个账本记录
+  // 并立刻落盘，等于「看一次排行榜就写一次数据库」，还会给不存在的 AI 发默认
+  // 5000 筹码（issue #186）。现在只读已有记录，没有账本的 AI 不出现在榜上。
+  for (const acct of allAccounts()) {
+    if (acct.isAi && !humanIds.has(acct.userId) && !accounts.some(a => a.userId === acct.userId)) {
       accounts.push(acct);
     }
   }
 
-  // 3. 账本里可能已经存在其他历史 AI
-  for (const acct of allAccounts()) {
-    if (acct.isAi && !accounts.some(a => a.userId === acct.userId)) {
-      accounts.push(acct);
+  // 3. 旧账本里 AI 的显示名可能没写：**在内存里**补，不落盘。
+  for (const account of accounts) {
+    if (account.isAi && !account.name) {
+      const hero = account.userId.replace('ai:hero:', '');
+      account.name = `${hero} (AI)`;
     }
   }
 
