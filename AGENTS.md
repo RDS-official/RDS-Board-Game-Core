@@ -224,7 +224,7 @@ pnpm verify:all       # 8 闸门全量：core + matrix(全种子) + overlap + li
 单条闸门（需要单独定位时）：
 
 ```bash
-# 1. 必跑：内核 268 项一致性测试与架构边界静态检查（分片并行：CORE_SHARDS，默认 3）
+# 1. 必跑：内核 329 项一致性测试与架构边界静态检查（分片并行：CORE_SHARDS，默认 3）
 pnpm test:core:parallel
 
 # 2. 动了 packages/kernel/src 或 packages/games/src/* 时必跑：黑盒随机对局与回放哈希（按模块并行）
@@ -242,11 +242,11 @@ pnpm test:ui
 # 6. 必跑：文档路径有效性（旧 src/ 布局引用 / 失效链接）
 pnpm docs:check
 
-# 7. 必跑：Biome lint（0 error；当前基线 232 warning / 139 info 不阻断）
+# 7. 必跑：Biome lint（0 error；当前基线 239 warning / 143 info 不阻断）
 pnpm lint
 
 # 8. 必跑：TypeScript 类型检查与生产编译构建
-node node_modules/typescript/bin/tsc --noEmit && pnpm run build
+pnpm verify:types
 ```
 
 ---

@@ -20,7 +20,7 @@
 pnpm install
 pnpm run dev       # http://127.0.0.1:5173/  （可视化调试器）
 # 场景直达：http://127.0.0.1:5173/?scenario=rich_action
-pnpm test          # 内核一致性 257 例 + 分层边界检查
+pnpm test          # 内核一致性 329 例 + 分层边界检查
 pnpm run build     # 生产构建
 pnpm shots         # 按需生成全部验证截图到 shots/（自动起停 dev server）
 ```
@@ -60,8 +60,8 @@ pnpm shots         # 按需生成全部验证截图到 shots/（自动起停 dev
 
 待办分成两份，**只记还没做的事**（已完成的按时间留在审计账本里，不重复）：
 
-- **[docs/BACKLOG.md](docs/BACKLOG.md)** — 可选开发：性能基线结论、楼层隔离与小地图、效果生命周期、检定窗口、i18n、网络，以及"已明确不做"清单。§10 附**复核手法**：动手前先确认该待办是否仍然成立。
-- **[docs/ARCHITECTURE-ISSUES.md](docs/ARCHITECTURE-ISSUES.md)** — 架构层：已修问题（AI-01~17）、重复特性合并建议、仍未完成的 AI-21/23/24/25/27。
+- **[docs/BACKLOG.md](docs/BACKLOG.md)** — 可选开发：性能基线结论、楼层隔离与小地图、效果生命周期、检定窗口、i18n、网络，以及"已明确不做"清单。§7 附**复核手法**：动手前先确认该待办是否仍然成立。
+- **[docs/ARCHITECTURE-ISSUES.md](docs/ARCHITECTURE-ISSUES.md)** — 架构层：已修问题（AI-01~17、AI-21/23/24/27）、重复特性合并建议、仍未完成的 AI-25（内核表达力 Wave 3）。
 - **[docs/UI-ARCHITECTURE.md](docs/UI-ARCHITECTURE.md)** — 表现层升级方案：现状实测（41 条绝对定位、167 处硬编码字号、移动端行动坞宽度归零）、业界方案调研（设计令牌 / 容器查询 / 流体排版 / Lit）、分层目标架构与 5 个阶段的可独立合并迁移路线。
 
 ---
@@ -178,7 +178,7 @@ Universal Board Game Kernel — conformance suite
 
   ✓ UI / application / kernel imports are separated
 
-  257 passed, 0 failed, 257 cases, 0 boundary violations
+  329 passed, 0 failed, 329 cases, 0 boundary violations
 ```
 
 （节选；完整清单见 `node scripts/test-core.mjs` 输出）
@@ -268,7 +268,7 @@ scripts/test-core.mjs                # Vite SSR 测试运行器
 - **连通性洪水填充**：落位后从门格出发泛洪，必须仍能到达其余所有门格，否则回滚该件；
 - **确定性**：种子来自 `roomId + 名称 + 门位`，同一房间每次重建布局完全一致。
 
-`node scripts/probe-layout.mjs` 会把 47 个房间全部跑一遍并报告落位数、拒绝数与**门位冲突数（应为 0）**。
+`node scripts/probe-layout.mjs` 会把所有带家具布局的房间板块（`ROOM_DEFS`）全部跑一遍并报告落位数、拒绝数与**门位冲突数（应为 0）**。
 
 ### 9.3 几何硬约束与回归
 
