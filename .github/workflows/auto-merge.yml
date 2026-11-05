@@ -16,8 +16,7 @@ name: auto-merge
 # 为什么手动触发 deploy：
 #   GitHub 规定「用仓库自带 `GITHUB_TOKEN` 执行的操作不会触发新的 workflow」。
 #   所以由机器人 squash 合并产生的 push **不会**唤醒 `deploy.yml`（京东云 rsync
-#   那条链路）。AWS 那条走的是仓库 webhook，不受影响。这里在合并成功后显式
-#   `gh workflow run deploy.yml`，两条生产链路都照常更新。
+#   那条链路）。这里在合并成功后显式 `gh workflow run deploy.yml`，生产链路照常更新。
 #
 # 合并方式遵循 AGENTS.md §2.3：只允许 squash，合并后删分支。
 
@@ -182,7 +181,7 @@ jobs:
           echo "rejected=$rejected" >> "$GITHUB_OUTPUT"
 
       # GITHUB_TOKEN 的 push 不会触发 deploy.yml（见文件头），这里补一次。
-      # AWS 走 webhook，不受影响；京东云靠这次 dispatch。
+      # 京东云靠这次 dispatch。
       #
       # 不需要等 main 前进：`gh pr merge` 是同步的，走到这里合并已经落地。
       - name: Trigger deploy for the merged commit
