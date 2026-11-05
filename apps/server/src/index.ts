@@ -242,8 +242,12 @@ const diagnosticsHits = new Map<string, { count: number; resetAt: number }>();
 const DIAG_WINDOW_MS = 60_000;
 const DIAG_MAX_PER_WINDOW = 12;
 const DIAG_MAX_BYTES = 256 * 1024;
-// 相同内容去重：只记最近 128 个指纹，重复上报不再落盘（防客户端死循环刷爆日志）
-const DIAG_FINGERPRINTS: string[] = [];
+// 相同内容去重：按 IP 分桶，每桶只记最近 32 个指纹，重复上报不再落盘。
+//
+// 以前是一个全局 string[]，用 includes() 线性扫，而且所有客户端共享同一桶：
+// 一个人刷满 128 个指纹就会把别人的去重记录挤掉（issue #230）。
+const DIAG_FINGERPRINTS = new Map<string, Set<string>>();
+const DIAG_FINGERPRINTS_PER_IP = 32;
 
 /**
  * 客户端真实 IP：仅当 TCP 直连来自本机（反代同机部署）时才信任 X-Forwarded-For，
@@ -266,7 +270,12 @@ app.post('/api/diagnostics', async c => {
   else hit.count += 1;
   // 上限保护：超过 1 万个键时清掉已过期项，防止伪造 IP 撑爆内存
   if (diagnosticsHits.size > 10_000) {
-    for (const [k, v] of diagnosticsHits) if (v.resetAt < now) diagnosticsHits.delete(k);
+    for (const [k, v] of diagnosticsHits) {
+      if (v.resetAt >= now) continue;
+      diagnosticsHits.delete(k);
+      // 限流窗口过期的 IP，其去重桶也一并丢掉，否则 Map 会随伪造 IP 无限长。
+      DIAG_FINGERPRINTS.delete(k);
+    }
   }
 
   const text = await c.req.text().catch(() => '');
@@ -275,9 +284,18 @@ app.post('/api/diagnostics', async c => {
 
   // 内容指纹去重：客户端同一异常反复上报时只落盘第一份
   const fingerprint = crypto.createHash('sha256').update(text).digest('hex').slice(0, 16);
-  if (!DIAG_FINGERPRINTS.includes(fingerprint)) {
-    DIAG_FINGERPRINTS.push(fingerprint);
-    if (DIAG_FINGERPRINTS.length > 128) DIAG_FINGERPRINTS.shift();
+  let seen = DIAG_FINGERPRINTS.get(ip);
+  if (!seen) {
+    seen = new Set<string>();
+    DIAG_FINGERPRINTS.set(ip, seen);
+  }
+  if (!seen.has(fingerprint)) {
+    seen.add(fingerprint);
+    // 老的先出队（Set 保持插入序），保证每 IP 的内存上限固定。
+    if (seen.size > DIAG_FINGERPRINTS_PER_IP) {
+      const oldest = seen.values().next().value;
+      if (oldest !== undefined) seen.delete(oldest);
+    }
     let payload: unknown;
     try {
       payload = JSON.parse(text);
