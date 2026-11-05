@@ -1531,18 +1531,20 @@ export class PokerRules {
        *   上限：破产补位最多让总额增长，但当前手牌 + 底池不该超过
        *         "初始总额 + 已补位人次 × 初始筹码"
        *
-       * 补位次数从 `observers.aiSerial` 与 `lastHand` 推出太间接，这里用
-       * 更朴素也更稳的口径：总额必须是 `startingStack` 的整数倍。
-       * 任何半份筹码的漂移（分池取整错误、记账重复）都会破坏整除性。
+       * 不能用「总额必须是 `startingStack` 的整数倍」当判据：房间的买入来自账号
+       * 余额（可能 700、可能短码 scenario），并不等于标准买入。那样只要有人
+       * 不是 1000 买入，合法牌局就会被误报 C-6（issue #180）。
+       *
+       * 真正与买入额无关的定律只剩两条：总额必须是**整数**（分池取整错误的
+       * 唯一症状就是半份筹码），且不能为负。
        */
-      const unit = POKER_DEFAULTS.startingStack;
-      if (seats.length > 0 && Math.abs(total % unit) > 1e-6) {
+      if (seats.length > 0 && Math.abs(total % 1) > 1e-6) {
         out.push(
-          `poker: chip total ${total} is not a multiple of the ${unit}-chip buy-in — seats ${inHands} + pot ${hand.pot} + street ${streetUnsettled}`
+          `poker: chip total ${total} is fractional — seats ${inHands} + pot ${hand.pot} + street ${streetUnsettled}`
         );
       }
-      if (seats.length > 0 && total < unit) {
-        out.push(`poker: chip total ${total} fell below one buy-in`);
+      if (seats.length > 0 && total < 0) {
+        out.push(`poker: chip total ${total} went negative`);
       }
     }
 
