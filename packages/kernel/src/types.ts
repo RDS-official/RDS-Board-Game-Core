@@ -583,6 +583,20 @@ export interface ActionFieldSpec {
   step?: number;
   default?: string | number | boolean;
   required?: boolean;
+  /**
+   * Optional declarative input widget hint. The default widget follows `kind`;
+   * `slider` renders a bounded drag control (needs numeric `min`/`max`) plus a
+   * synced number box for exact entry. Purely presentational: schema
+   * validation and `withDefaultPayload` ignore it.
+   */
+  widget?: 'slider';
+  /**
+   * Optional quick-jump stops for a `slider` widget, in ascending value order.
+   * The game supplies both the amounts and the labels (they are game words:
+   * the generic UI only renders buttons); values outside `[min, max]` are
+   * ignored by the UI. Serializable and replay-safe.
+   */
+  marks?: { value: number; label: string }[];
   /** Optional conditional visibility (cross-field form constraint). */
   dependsOn?: ActionFieldDependency;
 }

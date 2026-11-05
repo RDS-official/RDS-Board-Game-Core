@@ -53,6 +53,10 @@ export interface UiActionField {
   step?: number;
   default?: string | number | boolean;
   required?: boolean;
+  /** Declarative input widget hint (kernel `ActionFieldSpec.widget`). */
+  widget?: 'slider';
+  /** Quick-jump stops for the slider (kernel `ActionFieldSpec.marks`). */
+  marks?: { value: number; label: string }[];
   dependsOn?: {
     key: string;
     equals?: string | number | boolean;

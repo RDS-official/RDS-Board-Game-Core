@@ -3013,6 +3013,88 @@ select.pf-control {
   color: var(--text-secondary, #8b98ab);
 }
 
+/* Declarative slider widget (field.widget === 'slider'). */
+.pf-slider-row {
+  display: grid;
+  gap: 8px;
+}
+
+.pf-slider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pf-slider-bounds {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--type-xs);
+  color: var(--text-secondary, #8b98ab);
+  font-variant-numeric: tabular-nums;
+}
+
+.pf-slider-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pf-slider {
+  flex: 1;
+  appearance: none;
+  height: 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #d9b45b var(--pct, 0%), rgba(255, 255, 255, 0.12) var(--pct, 0%));
+  outline: none;
+  cursor: pointer;
+}
+
+.pf-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #f6dc9c;
+  border: 2px solid #1a1408;
+  box-shadow: 0 0 10px rgba(217, 180, 91, 0.7);
+  cursor: grab;
+}
+
+.pf-slider:focus-visible {
+  box-shadow: 0 0 0 2px rgba(201, 181, 122, 0.35);
+}
+
+.pf-slider-num {
+  width: 88px;
+  flex: none;
+  height: 30px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.pf-slider-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.pf-quick {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary, #e8edf5);
+  font-size: var(--type-xs);
+  cursor: pointer;
+}
+
+.pf-quick:hover {
+  border-color: rgba(201, 181, 122, 0.5);
+  background: rgba(217, 180, 91, 0.12);
+  color: #f6dc9c;
+}
+
 .pf-foot {
   margin-top: 16px;
   display: flex;

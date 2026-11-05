@@ -206,12 +206,12 @@ export function compareHands(a: HandValue, b: HandValue): number;
 | `toCall === 0` | `CHECK` |
 | `0 < toCall < stack` | `CALL`（`payload.amount = toCall`） |
 | `0 < toCall && toCall >= stack` | `ALL_IN`（跟到底） |
-| `stack > toCall` 且 `!actedSinceRaise.includes(me)` | `RAISE`（`fields.amount` = "加注到"，`min = minRaiseTo`，`max = streetBets[me] + stack`，`step = bigBlind`，`default = minRaiseTo`） |
+| `stack > toCall` 且 `!actedSinceRaise.includes(me)` | `RAISE`（`fields.amount` = "加注到"，`min = minRaiseTo`，`max = streetBets[me] + stack`，`step = bigBlind`，`default = minRaiseTo`，`widget = 'slider'`） |
 | `stack > toCall` | `ALL_IN`（推全部） |
 
 `minRaiseTo = currentBet + lastRaiseSize`；若 `minRaiseTo > 全押上限`，则只剩 `ALL_IN`（短全押）。
 
-`RAISE` 用**声明式 `fields`**（`kind: 'number'`），UI 已有数字输入控件，无需新增交互；`withDefaultPayload` 会给 bots 填 `default`，矩阵测试可自动推进。
+`RAISE` 用**声明式 `fields`**（`kind: 'number'` + `widget: 'slider'`）：UI 渲染「最小加注 → 全押」滑动条 + 同步数字框；`marks` 声明快捷档「最小加注 / ½池 / 满池 / 全押」（按 `[min, max]` 收口、去重升序，短码塌缩到上限）。`withDefaultPayload` 会给 bots 填 `default`，矩阵测试可自动推进。
 
 ### 5.2 加注规则
 

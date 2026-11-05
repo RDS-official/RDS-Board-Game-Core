@@ -520,10 +520,12 @@ export class PokerRules {
             key: 'amount',
             label: '加注到',
             kind: 'number',
+            widget: 'slider',
             min: minimum,
             max: maxRaiseTo,
             step: configOf(state).bigBlind,
-            default: minimum
+            default: minimum,
+            marks: this.raiseMarks(hand, playerId, minimum, maxRaiseTo)
           }
         ]
       });
@@ -585,6 +587,41 @@ export class PokerRules {
    */
   private static isReadyFor(hand: PokerHandState, state: GameState, playerId: PlayerId): boolean {
     return hand.readyForNext.includes(playerId) || isAiSeat(state, playerId);
+  }
+
+  /**
+   * Slider quick-jump stops for the raise form, all clamped into
+   * `[minRaiseTo, maxRaiseTo]`.
+   *
+   * Pot-size maths here is game knowledge (the kernel never knows what a pot
+   * is); the HUD renders whatever labels arrive, so the generic layer stays
+   * free of poker words. Deduplicated and sorted ascending: half-pot and pot
+   * collapse onto the nearest stop when a short stack cannot reach them.
+   */
+  private static raiseMarks(
+    hand: PokerHandState,
+    me: PlayerId,
+    minimum: number,
+    maxRaiseTo: number
+  ): { value: number; label: string }[] {
+    const others = Object.entries(hand.streetBets).filter(([pid]) => pid !== me);
+    // 池 = 已收注 + 本街所有其他座位的注；自己本次加注额不计入「底池」的分母口径。
+    const pot = hand.pot + others.reduce((sum, [, bet]) => sum + bet, 0);
+    const clamp = (value: number): number => Math.min(maxRaiseTo, Math.max(minimum, value));
+    const marks = [
+      { value: minimum, label: '最小加注' },
+      { value: clamp(minimum + Math.round(pot / 2)), label: '½池' },
+      { value: clamp(minimum + pot), label: '满池' },
+      { value: maxRaiseTo, label: '全押' }
+    ];
+    const seen = new Set<number>();
+    return marks
+      .filter(mark => {
+        if (seen.has(mark.value)) return false;
+        seen.add(mark.value);
+        return true;
+      })
+      .sort((left, right) => left.value - right.value);
   }
 
   private static everyoneReady(state: GameState, hand: PokerHandState): boolean {

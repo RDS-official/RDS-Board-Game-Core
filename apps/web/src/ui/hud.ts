@@ -1266,6 +1266,34 @@ export class BoardGameHUD {
         }
 
         const value = field.default ?? field.min ?? 0;
+        if (
+          field.kind === 'number' &&
+          field.widget === 'slider' &&
+          field.min !== undefined &&
+          field.max !== undefined
+        ) {
+          const marks = (field.marks ?? [])
+            .filter(mark => mark.value >= (field.min ?? -Infinity) && mark.value <= (field.max ?? Infinity))
+            .map(mark => `<button type="button" class="pf-quick" data-quick="${mark.value}">${mark.label}</button>`)
+            .join('');
+          return `
+            <div class="pf-row pf-slider-row" data-field-row="${field.key}">
+              <div class="pf-slider-head">
+                <span class="pf-label">${field.label}</span>
+                <span class="pf-slider-bounds">${field.min} – ${field.max}</span>
+              </div>
+              <div class="pf-slider-line">
+                <input class="pf-slider" data-slider="${field.key}" type="range"
+                  min="${field.min}" max="${field.max}" step="${field.step ?? 1}" value="${value}"
+                  aria-label="${field.label}" />
+                <input class="pf-control pf-slider-num" data-field="${field.key}" type="number"
+                  value="${value}" min="${field.min}" max="${field.max}" step="${field.step ?? 1}"
+                  aria-label="${field.label}" />
+              </div>
+              ${marks ? `<div class="pf-slider-quick" data-slider-quick="${field.key}">${marks}</div>` : ''}
+            </div>
+          `;
+        }
         return `
           <label class="pf-row" data-field-row="${field.key}">
             <span class="pf-label">${field.label}</span>
@@ -1361,6 +1389,41 @@ export class BoardGameHUD {
       control.addEventListener('input', applyFieldVisibility);
     });
     applyFieldVisibility();
+
+    // Slider widget: keep the drag control and the exact-entry number box in
+    // lockstep, and let the game-declared quick stops jump straight to a value.
+    for (const field of action.fields ?? []) {
+      if (field.kind !== 'number' || field.widget !== 'slider') continue;
+      const slider = form.querySelector<HTMLInputElement>(`[data-slider="${field.key}"]`);
+      const numberBox = form.querySelector<HTMLInputElement>(`[data-field="${field.key}"]`);
+      if (!slider || !numberBox) continue;
+      const paintSlider = (): void => {
+        const min = Number(slider.min);
+        const max = Number(slider.max);
+        const progress = max > min ? (Number(slider.value) - min) / (max - min) : 0;
+        slider.style.setProperty('--pct', `${(progress * 100).toFixed(2)}%`);
+      };
+      slider.addEventListener('input', () => {
+        numberBox.value = slider.value;
+        paintSlider();
+      });
+      numberBox.addEventListener('input', () => {
+        const amount = Number(numberBox.value);
+        if (!Number.isFinite(amount)) return;
+        slider.value = String(Math.min(Number(slider.max), Math.max(Number(slider.min), amount)));
+        paintSlider();
+      });
+      form.querySelectorAll<HTMLButtonElement>(`[data-slider-quick="${field.key}"] .pf-quick`).forEach(button => {
+        button.addEventListener('click', () => {
+          const amount = Number(button.dataset.quick);
+          if (!Number.isFinite(amount)) return;
+          slider.value = String(amount);
+          numberBox.value = slider.value;
+          paintSlider();
+        });
+      });
+      paintSlider();
+    }
 
     form.addEventListener('submit', event => {
       event.preventDefault();
