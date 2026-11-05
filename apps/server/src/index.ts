@@ -253,6 +253,15 @@ const DIAG_FINGERPRINTS_PER_IP = 32;
  * 客户端真实 IP：仅当 TCP 直连来自本机（反代同机部署）时才信任 X-Forwarded-For，
  * 否则外部客户端可伪造该头绕过限流 / 污染去重键。
  */
+/** 匿名访客看到的账号名：保留首字，其余打码（AI 账号本来就是展示名，不打码）。 */
+function maskAccountName(name: string): string {
+  const text = String(name ?? '').trim();
+  if (!text) return '匿名';
+  if (text.endsWith('(AI)')) return text;
+  const head = Array.from(text)[0] ?? '*';
+  return `${head}***`;
+}
+
 function clientIp(c: { env?: unknown; req: { header(name: string): string | undefined } }): string {
   const remote = (c.env as { info?: { remote?: { address?: string } } } | undefined)?.info?.remote?.address ?? '';
   const loopback = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
@@ -411,8 +420,15 @@ app.get('/api/match/stats', c => {
 // 但只暴露昵称与统计，登录名与账号 id 之外的敏感字段一律不出网关。
 app.get('/api/poker/leaderboard', c => {
   const board = matchBroker.pokerLeaderboard();
+  // 未登录也能看榜（大厅首页要展示），但不该把每个账号的昵称原样吐出去：
+  // 那等于给了一个免鉴权的账号枚举接口（issue #231）。匿名访客只看到打码名，
+  // 登录后才拿到完整行。
+  const signedIn = !!userFromAuthHeader(c.req.header('authorization'));
+  const rows = signedIn
+    ? board.rows
+    : board.rows.map(row => ({ ...row, name: maskAccountName(row.name), userId: '' }));
   return c.json({
-    rows: board.rows,
+    rows,
     rooms: board.rooms,
     updatedAt: board.updatedAt
   });
