@@ -6,7 +6,10 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!build"]
+    "includes": [
+      "**",
+      "!build"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -49,5 +52,22 @@
   },
   "assist": {
     "enabled": false
-  }
+  },
+  "overrides": [
+    {
+      "includes": [
+        "apps/web/src/ui/tokens/**/*.css"
+      ],
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noImportantStyles": "error"
+          },
+          "style": {
+            "noDescendingSpecificity": "error"
+          }
+        }
+      }
+    }
+  ]
 }
