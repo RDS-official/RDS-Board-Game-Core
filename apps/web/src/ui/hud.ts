@@ -2578,7 +2578,7 @@ export class BoardGameHUD {
     }
     panel.style.display = '';
     const signature = rows
-      .map(row => `${row.playerId}:${row.chips}:${row.pendingLabel ?? ''}:${row.canRejoin}`)
+      .map(row => `${row.playerId}:${row.chips}:${row.pendingLabel ?? ''}:${row.canRejoin}:${row.stipendInSeconds}:${row.stipendAmount}`)
       .join('|');
     if (panel.dataset.signature === signature) return;
     panel.dataset.signature = signature;
