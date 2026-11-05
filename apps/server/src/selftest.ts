@@ -15,8 +15,9 @@ const { GAMES } = await import('./games.ts');
 const { MatchManager } = await import('./match.ts');
 const { app } = await import('./index.ts');
 const { settleHand, takeSeat, leaveSeat } = await import('./pokerSettle.ts');
-const { accountOf, peekAccount } = await import('./pokerLedger.ts');
+const { accountOf, peekAccount, updateAccount } = await import('./pokerLedger.ts');
 const { rankAccounts } = await import('./pokerLeaderboard.ts');
+const { getAiHeroName } = await import('@rds/games/poker/seating');
 
 let failed = 0;
 const ok = (cond: boolean, name: string) => { if (!cond) { failed++; console.error('FAIL', name); } else console.log('ok -', name); };
@@ -169,6 +170,37 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
   ok(forged.ok === false, 'server rejects an action forging another seat');
   ok(match.revision === 0, 'forged action does not advance the server revision');
 
+  // issue #183：AI 补位的买入必须真的进到桌上，不能被 `stacks` 的 slice 丢掉。
+  // 之前只切到真人数，AI 账号被 `takeSeat` 扣过款、桌上却拿默认 1000 开局。
+  {
+    // 让两个 AI 的余额低于标准买入：这样「按扣款额开局」与「按夹具默认 1000
+    // 开局」才可区分（默认都是 1000 时这条断言恒真，等于没测）。
+    for (const ordinal of [1, 2]) {
+      const aiUserId = `ai:hero:${getAiHeroName(ordinal)}`;
+      accountOf(aiUserId);
+      updateAccount(aiUserId, account => ({ ...account, chips: 700 }));
+    }
+    const aiMatch = matches.ensure({
+      roomId: 'r_ai_buyin',
+      gameId: 'poker',
+      players: [{ userId: host, name: '测试员1' }],
+      seats: 1,
+      aiSeats: 2,
+      seed: 7
+    });
+    const raw: any = aiMatch.rawState();
+    const tableSeats = (raw.globalVars.seats as { playerId: string; isAi: boolean }[]) ?? [];
+    const aiSeats = tableSeats.filter(seat => seat.isAi);
+    ok(aiSeats.length === 2, 'two AI seats joined the table');
+    for (const [index, seat] of aiSeats.entries()) {
+      const chips = Number(raw.players?.[seat.playerId]?.customProps?.chips);
+      const hero = getAiHeroName(1 + index);
+      const charged = Number(peekAccount(`ai:hero:${hero}`).atTable?.['r_ai_buyin'] ?? 0);
+      ok(charged > 0, `AI ${seat.playerId} was charged a buy-in`);
+      ok(chips === charged, `AI ${seat.playerId} starts with the charged stack, not the fixture default`);
+    }
+    matches.close('r_ai_buyin');
+  }
   // 内核控制通道（__ 前缀）不可被客户端使用
   const control = match.submit(host, { type: '__TICK__', playerId: 'p1', payload: { ticks: 1 } });
   ok(control.ok === false, 'server rejects kernel control actions from clients');

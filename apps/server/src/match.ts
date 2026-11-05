@@ -343,13 +343,16 @@ export class ServerMatch {
     // 对局结束 = 下桌：把每个账号还留在桌上的筹码退回余额。放在清理定时器之前，
     // 这样即使后面的清理抛错，账本也已经结平（余额不会凭空蒸发）。
     this.refundTableStakes();
+    // 两个定时器各自独立清理：之前 aiTimer 的清理被误写进 tickTimer 的分支里，
+    // 一旦 tick 定时器没建起来（MATCH_TICK_MS 非法 / startClock 提前返回），
+    // AI 泵就永远停不下来，进程也退不出去（selftest 会挂住）。
     if (this.tickTimer) {
       clearInterval(this.tickTimer);
       this.tickTimer = null;
+    }
     if (this.aiTimer) {
       clearInterval(this.aiTimer);
       this.aiTimer = undefined;
-    }
     }
     this.listeners.clear();
     this.attached.clear();
@@ -476,6 +479,8 @@ export class ServerMatch {
       this.settleAt = 0;
       engine.dispatch({ type: 'FORCE_START', playerId: seat });
     }, step);
+    // 服务器进程退出时不该被 AI 泵吊住；对局生命周期仍由 dispose() 显式结束。
+    this.aiTimer.unref?.();
     this.aiTimer.unref?.();
   }
 
