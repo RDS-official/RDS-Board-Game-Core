@@ -464,6 +464,31 @@ ok(deleteRes.ok === true, 'adminDeleteUser works');
   );
 }
 
+/* -------------------------------------------------------------------------- */
+/* #231：匿名访客不能拿它当账号枚举接口                                          */
+/* -------------------------------------------------------------------------- */
+{
+  const anon = await app.fetch(new Request('http://127.0.0.1/api/poker/leaderboard', { headers: { host: '127.0.0.1' } }));
+  const anonBody: any = await anon.json();
+  const masked = (anonBody.rows ?? []).filter((row: any) => !String(row.name).endsWith('(AI)'));
+  ok(
+    masked.length > 0 && masked.every((row: any) => /^\S\*\*\*$/.test(row.name) && row.userId === ''),
+    'anonymous callers only get masked names and no user ids'
+  );
+
+  const signed = await app.fetch(
+    new Request('http://127.0.0.1/api/poker/leaderboard', {
+      headers: { host: '127.0.0.1', authorization: `Bearer ${adminLogin.token}` }
+    })
+  );
+  const signedBody: any = await signed.json();
+  const plain = (signedBody.rows ?? []).filter((row: any) => !String(row.name).endsWith('(AI)'));
+  ok(
+    plain.length > 0 && plain.every((row: any) => !String(row.name).includes('***')),
+    'signed-in callers still see real names'
+  );
+}
+
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');
 try { fs.rmSync(process.env.HUB_DATA_DIR!, { recursive: true, force: true }); } catch { /* 临时目录清理失败无所谓 */ }
 process.exit(failed ? 1 : 0);
