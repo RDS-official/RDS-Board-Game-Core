@@ -1533,7 +1533,8 @@ export class UniversalGameEngine {
   /* ------------------------------------------------------------------ */
 
   public exportLog(): ExportedLog {
-    const head = this.replayState(this.history).state;
+    // 当前 state 就是 history 全部应用后的结果：以前这里把整条 history 重放
+    // 一遍只为算一个哈希，日志一长就是 O(N) 的纯浪费（issue #208）。
     return {
       moduleId: this.module.meta.id,
       seed: this.state.seed,
@@ -1543,7 +1544,7 @@ export class UniversalGameEngine {
       ...(this.aiSeats === undefined ? {} : { aiSeats: this.aiSeats }),
       ...(this.stacks === undefined ? {} : { stacks: [...this.stacks] }),
       actions: [...this.history],
-      stateHash: hashState(head),
+      stateHash: hashState(this.state),
       schemaVersion: this.module.meta.schemaVersion ?? 1,
       engineVersion: this.module.meta.engineVersion ?? ENGINE_VERSION
     };

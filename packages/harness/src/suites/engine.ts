@@ -79,6 +79,16 @@ test('engine: named scenarios replay through export/load', () => {  const engine
   assert(engine.verifyReplay().ok, 'scenario replay is bit-exact');
 });
 
+test('engine: exportLog hashes the live state without replaying the log', () => {
+  const engine = new UniversalGameEngine(counterModule, 5);
+  for (let i = 0; i < 5; i++) engine.dispatch({ type: 'TICK', playerId: 'p1' });
+  const log = engine.exportLog();
+  // 导出日志里的 stateHash 必须就是当前状态的哈希：以前是重放整条 history 再算，
+  // 结果一样但要 O(N)，日志越长越慢（issue #208）。
+  assertEqual(log.stateHash, engine.getStateHash(), 'exported hash equals the live state hash');
+  assertEqual(log.actions.length, 5, 'every action is still exported');
+});
+
 test('engine: incompatible log versions are rejected, not migrated', () => {
   const engine = new UniversalGameEngine(counterModule, 5);
   engine.dispatch({ type: 'TICK', playerId: 'p1' });
