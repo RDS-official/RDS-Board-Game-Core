@@ -103,10 +103,13 @@ export class ServerMatch {
     this.gameId = options.gameId;
     this.scenario = options.scenario;
     this.seed = options.seed ?? randomSeed32();
-    // 真人座位按账号余额买入；AI 补位座位不在 stacks 数组里，由夹具补标准买入。
-    const buyIns = (options.stacks ?? []).slice(0, Math.max(1, options.seats ?? 0)).map(amount =>
-      Math.max(0, Math.round(Number(amount) || 0))
-    );
+    // `stacks` 的布局是「先真人、后 AI 补位」（见 `MatchManager.fundSeats`）。
+    // 之前只切到 `seats`（真人数），AI 补位那段被整段丢掉：AI 账号已经被
+    // `takeSeat` 扣过款，桌上却拿夹具的默认 1000 开局，关房再按剩余筹码退款，
+    // 账就对不上了（issue #183）。这里按「真人 + AI」的总座位数切。
+    const buyIns = (options.stacks ?? [])
+      .slice(0, Math.max(1, (options.seats ?? 0) + (options.aiSeats ?? 0)))
+      .map(amount => Math.max(0, Math.round(Number(amount) || 0)));
     this.room = new GameRoom(
       module,
       this.seed,
