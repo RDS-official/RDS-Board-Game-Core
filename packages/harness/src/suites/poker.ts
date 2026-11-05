@@ -1173,6 +1173,44 @@ test('poker: settlement lists every seat\'s cards, made hand and net chips', () 
   assertEqual(loser?.cards?.length, 2, 'a called hand stays face up at showdown');
 });
 
+test('poker: a split pot credits each winner only their own share', async () => {
+  const { pokerSettlementMoment } = await import('@rds/games/poker/presentation');
+  // 两人各投 50、共同赢下 100 的池：分账后每人净 0。
+  // 之前 netOf 把整池 100 算给每个赢家 → 每人显示 +50，合计凭空多出 100。
+  const state = {
+    globalVars: {
+      hand: {
+        handNo: 3,
+        street: 'COMPLETE',
+        handBets: { a: 50, b: 50 },
+        awarded: { a: 50, b: 50 },
+        folded: []
+      },
+      lastHand: {
+        handNo: 3,
+        endedBy: 'SHOWDOWN',
+        pots: [{ amount: 100, winners: ['a', 'b'], label: '同花' }],
+        showdown: []
+      }
+    },
+    players: { a: { name: 'A' }, b: { name: 'B' } },
+    seats: [
+      { playerId: 'a', name: 'A', cards: [] },
+      { playerId: 'b', name: 'B', cards: [] }
+    ]
+  } as unknown as Parameters<typeof pokerSettlementMoment>[0];
+
+  const moment = pokerSettlementMoment(state);
+  assert(!!moment, 'a completed hand declares a settlement moment');
+  const rows = moment!.ledger ?? [];
+  assertEqual(rows.length, 2, 'one row per seat');
+  const netSum = rows.reduce((sum, row) => sum + Number(row.value ?? 0), 0);
+  assertEqual(netSum, 0, 'net chips across a split pot add up to zero');
+  for (const row of rows) {
+    assertEqual(row.value, '0', `${row.name} nets zero in an even split`);
+    assertEqual(row.tone, 'neutral', `${row.name} is neither a win nor a loss`);
+  }
+});
 test('poker: a settlement offers continue and leave, and never leaks a folded hand', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 71, { scenario: 'seats_4' });
   startHand(engine);

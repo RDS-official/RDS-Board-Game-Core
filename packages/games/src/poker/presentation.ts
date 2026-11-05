@@ -21,6 +21,8 @@ interface SettlementHand {
   folded?: string[];
   /** 已亮牌的座位（摊牌全员，早结束只有主动明牌的赢家）。 */
   revealed?: string[];
+  /** 每个座位这一手实际到手多少（分池后按人记）。 */
+  awarded?: Record<string, number>;
 }
 
 interface SettlementResult {
@@ -33,7 +35,13 @@ interface SettlementResult {
 /** 一手结束时，一手进账相对于投入的净变化。 */
 function netOf(hand: SettlementHand, last: SettlementResult, playerId: string): number {
   const invested = Number(hand.handBets?.[playerId] ?? 0);
-  const won = last.pots.reduce((sum, pot) => sum + (pot.winners.includes(playerId) ? pot.amount : 0), 0);
+  // 平分底池时必须拿**分到自己名下的那一份**，不能把整个池算给每个赢家：
+  // 之前按 pot.amount 累加，两个赢家平分 100 的池会各自显示 +100（合计 +200，
+  // 但实际只派了 100）。`hand.awarded` 是 rules.ts 派发时逐人记的权威数字。
+  const awarded = Number(hand.awarded?.[playerId]);
+  const won = Number.isFinite(awarded)
+    ? awarded
+    : last.pots.reduce((sum, pot) => sum + (pot.winners.includes(playerId) ? pot.amount : 0), 0);
   return won - invested;
 }
 
