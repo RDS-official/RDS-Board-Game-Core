@@ -1,5 +1,6 @@
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { describeActionView } from './actionText';
+import { applyActionCooldowns } from './actionCooldown';
 import { buildEntityInspectNotice, buildMoment, buildNodeDiscoveryView, resolveDefaultViewer } from './inspect';
 import { buildObserverRoster } from './observers';
 import { GameModule } from '@rds/kernel/module';
@@ -1143,25 +1144,8 @@ export class UniversalSession implements GamePresenter {
     // 动作冷却（游戏声明 `actionCooldownMs`）：一手刚结束先留出阅读时间，再允许
     // 开下一手。时钟只存在于驱动层，内核保持无时钟、可回放。
     // 首帧（revision 0）不设冷却：开局那一次 START_HAND 本来就该立刻可用。
-    const cooldowns =
-      this.revision === 0
-        ? undefined
-        : module.driver?.actionCooldownMs;
-    if (cooldowns) {
-      const now = Date.now();
-      const live = new Set<string>();
-      for (const entry of this.bound) {
-        const type = entry.ui.actionType;
-        if (!type || cooldowns[type] === undefined) continue;
-        live.add(type);
-        if (!this.actionSeenAt.has(type)) this.actionSeenAt.set(type, now);
-        const remaining = (this.actionSeenAt.get(type) as number) + cooldowns[type] - now;
-        if (remaining > 0) entry.ui.cooldownMs = remaining;
-      }
-      for (const type of [...this.actionSeenAt.keys()]) {
-        if (!live.has(type)) this.actionSeenAt.delete(type);
-      }
-    }
+    const cooldowns = this.revision === 0 ? undefined : module.driver?.actionCooldownMs;
+    applyActionCooldowns(this.bound, cooldowns, this.actionSeenAt, Date.now());
 
     const actorName =
       turnActors.length > 1

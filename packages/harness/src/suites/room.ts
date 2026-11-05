@@ -170,3 +170,28 @@ test('net: centre-mode sessions never mint host-only secrets', async () => {
   guest.dispose();
 });
 
+
+test('net: action cooldowns are shared by solo and networked sessions', async () => {
+  const { applyActionCooldowns } = await import('@rds/app/actionCooldown');
+  const seen = new Map<string, number>();
+  type Probe = { ui: { actionType?: string; cooldownMs?: number } };
+  const view: Probe[] = [{ ui: { actionType: 'START_HAND' } }, { ui: { actionType: 'FOLD' } }];
+  const cooldowns = { START_HAND: 20_000 };
+
+  applyActionCooldowns(view, cooldowns, seen, 1_000);
+  assertEqual(view[0].ui.cooldownMs, 20_000, 'the declared cooldown lands on the action');
+  assertEqual(view[1].ui.cooldownMs, undefined, 'actions without a declaration stay free');
+
+  applyActionCooldowns(view, cooldowns, seen, 11_000);
+  assertEqual(view[0].ui.cooldownMs, 10_000, 'the cooldown counts down with the clock');
+
+  applyActionCooldowns(view, cooldowns, seen, 30_000);
+  assertEqual(view[0].ui.cooldownMs, undefined, 'an expired cooldown is removed, not left at 0');
+
+  // 动作从视图里消失后，下一次出现要重新计时，而不是沿用旧时间戳。
+  const onlyFold: Probe[] = [{ ui: { actionType: 'FOLD' } }];
+  applyActionCooldowns(onlyFold, cooldowns, seen, 40_000);
+  applyActionCooldowns(view, cooldowns, seen, 50_000);
+  assertEqual(view[0].ui.cooldownMs, 20_000, 'a returning action restarts its cooldown');
+});
+
