@@ -499,6 +499,36 @@ ok(deleteRes.ok === true, 'adminDeleteUser works');
   ok(body.pokerLedger === 'ok', 'a healthy ledger is reported as ok');
 }
 
+/* -------------------------------------------------------------------------- */
+/* #187 方案 A：账本降级 = 只读，且不允许开新的扑克桌                            */
+/* -------------------------------------------------------------------------- */
+{
+  const { __resetLedgerDegradedForTest, __setLedgerDegradedForTest, isLedgerDegraded, ledgerHealth } = await import('./pokerLedger.ts');
+  __setLedgerDegradedForTest();
+  ok(isLedgerDegraded(), 'the ledger reports a read-only degraded state');
+  ok(ledgerHealth().ok === false, 'ledgerHealth() surfaces the degraded flag');
+
+  const degradedMatches = new MatchManager();
+  let refused = false;
+  try {
+    degradedMatches.ensure({
+      roomId: 'r_degraded',
+      gameId: 'poker',
+      players: [{ userId: 'degraded_user', name: '测试员1' }],
+      seats: 1,
+      aiSeats: 0,
+      seed: 1
+    });
+  } catch (error) {
+    refused = String(error).includes('只读降级');
+  }
+  ok(refused, 'a poker table refuses to start while the ledger is read-only');
+  degradedMatches.closeAll();
+
+  __resetLedgerDegradedForTest();
+  ok(!isLedgerDegraded(), 'the ledger returns to normal for the rest of the suite');
+}
+
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');
 try { fs.rmSync(process.env.HUB_DATA_DIR!, { recursive: true, force: true }); } catch { /* 临时目录清理失败无所谓 */ }
 process.exit(failed ? 1 : 0);
