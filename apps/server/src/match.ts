@@ -316,12 +316,7 @@ export class ServerMatch {
     if (this.module.driver?.driverActions?.includes(action.type)) return this.reject('invalid action');
     const actor = String(action.actorId ?? action.playerId ?? '');
     if (actor !== seat) return this.reject(`actor does not match viewer: ${actor || '(missing)'}`);
-    this.room.setCurrentViewer(seat);
-    try {
-      return this.room.submit(action);
-    } finally {
-      this.room.setCurrentViewer(undefined);
-    }
+    return this.room.submit(action, seat);
   }
 
   public onChange(listener: () => void): () => void {

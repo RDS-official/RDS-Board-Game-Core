@@ -176,9 +176,14 @@ export class GameRoom implements RoomTransport {
     this.caches.delete(viewer);
   }
 
-  /** 房间层提交：校验 actor 归属后转发引擎（房客路径最终也走这里）。 */
-  public submit(action: Action): DispatchResult {
-    const viewer = this.currentViewer;
+  /**
+   * 房间层提交：校验 actor 归属后转发引擎（房客路径最终也走这里）。
+   *
+   * `viewer` 必须由调用方**显式传入**：以前靠 `setCurrentViewer()` 写可变字段，
+   * 两个并发请求会互相覆盖身份，等于用房间状态做参数传递（issue #212）。
+   * 不传时退回旧字段，仅为兼容仍在用的 P2P 传输路径。
+   */
+  public submit(action: Action, viewer: PlayerId | 'GOD' = this.currentViewer as PlayerId | 'GOD'): DispatchResult {
     if (viewer && viewer !== 'GOD' && !this.isActorAllowed(viewer, action)) {
       return {
         ok: false,
@@ -197,7 +202,9 @@ export class GameRoom implements RoomTransport {
     return this.engine.dispatch(action);
   }
 
-  /** 标记当前正在提交的 viewer（房客路径进入 submit 前设置）。 */
+  /**
+   * @deprecated 用 `submit(action, viewer)` 显式传身份；保留仅为兼容。
+   */
   public setCurrentViewer(viewer: PlayerId | 'GOD' | undefined): void {
     this.currentViewer = viewer;
   }
