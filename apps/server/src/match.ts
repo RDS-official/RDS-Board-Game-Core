@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { GameRoom, RoomUpdate } from '@rds/net/room';
 import { GAME_REGISTRY } from '@rds/games/registry';
+import { needsClock } from '@rds/kernel/engine';
 import { GameModule } from '@rds/kernel/module';
 import { seatsAccepted } from '@rds/kernel/seating';
 import { Action, DispatchResult, GameState, PlayerId } from '@rds/kernel/types';
@@ -499,24 +500,9 @@ export class ServerMatch {
     engine.dispatch({ type: 'FORCE_START', playerId: seat });
   }
 
+  /** 是否值得再推一拍时钟：判定完全交给内核（issue #220）。 */
   private needsClock(): boolean {
-    const state = this.room.engine.getRawState();
-    if (state.gameOver) return false;
-    const clock = state.clock;
-    const pending = state.pendingDecisions.some(
-      (window) =>
-        window.status === 'OPEN' &&
-        ((window.deadline !== undefined && window.deadline <= clock + 1) ||
-          window.participants.some(
-            (pid) =>
-              window.submissions[pid] === undefined &&
-              window.participantDeadlines?.[pid] !== undefined &&
-              window.participantDeadlines[pid] <= clock + 1,
-          )),
-    );
-    if (pending) return true;
-    const top = state.interruptStack[state.interruptStack.length - 1];
-    return !!top?.responseWindow?.deadline && top.responseWindow.deadline <= clock + 1;
+    return needsClock(this.room.engine.getRawState());
   }
 }
 

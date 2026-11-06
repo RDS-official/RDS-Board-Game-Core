@@ -135,6 +135,37 @@ export interface ExportedLog {
 /** 单次时钟推进内允许解算的最大级联层数（超限发 CLOCK_CASCADE_LIMIT 事件）。 */
 export const CLOCK_CASCADE_LIMIT = 16;
 
+/**
+ * 决策窗口在给定时刻是否到期（issue #220）。
+ *
+ * 这段判定以前有 3 份：内核级联循环、内核的 `hasDueWindow()`、以及服务端
+ * `ServerMatch.needsClock()`。三份只要有一份漏掉"参与者个人截止时间"就会
+ * 出现"时钟推了但窗口不结算"。现在统一走这里。
+ */
+export function isDecisionWindowDue(window: GameState['pendingDecisions'][number], clock: number): boolean {
+  if (window.status !== 'OPEN') return false;
+  if (window.deadline !== undefined && window.deadline <= clock) return true;
+  return window.participants.some(
+    pid =>
+      window.submissions[pid] === undefined &&
+      window.participantDeadlines?.[pid] !== undefined &&
+      (window.participantDeadlines[pid] as number) <= clock
+  );
+}
+
+/**
+ * 再推一拍时钟会不会有事情发生（到期窗口 / 到期响应窗口）。
+ *
+ * 驱动方（服务端 tick、单机定时器）只读这一个判定，不再自己复制条件。
+ */
+export function needsClock(state: GameState): boolean {
+  if (state.gameOver) return false;
+  const nextClock = state.clock + 1;
+  if (state.pendingDecisions.some(window => isDecisionWindowDue(window, nextClock))) return true;
+  const top = state.interruptStack[state.interruptStack.length - 1];
+  return top?.responseWindow?.deadline !== undefined && top.responseWindow.deadline <= nextClock;
+}
+
 export const ENGINE_VERSION = 3;
 
 function normalizeLimit(value: number | undefined, fallback: number, name: string): number {
@@ -765,17 +796,7 @@ export class UniversalGameEngine {
 
   /** 与级联循环同一判定：还有没有"已到期但没处理"的窗口。 */
   private hasDueWindow(state: GameState): boolean {
-    return state.pendingDecisions.some(
-      window =>
-        window.status === 'OPEN' &&
-        ((window.deadline !== undefined && window.deadline <= state.clock) ||
-          window.participants.some(
-            pid =>
-              window.submissions[pid] === undefined &&
-              window.participantDeadlines?.[pid] !== undefined &&
-              window.participantDeadlines[pid] <= state.clock
-          ))
-    );
+    return state.pendingDecisions.some(window => isDecisionWindowDue(window, state.clock));
   }
 
   private isLegal(action: Action): boolean {
@@ -1082,17 +1103,7 @@ export class UniversalGameEngine {
     // （issue #207）：现在超限会发一条 CLOCK_CASCADE_LIMIT 事件。
     let guard = 0;
     for (; guard < CLOCK_CASCADE_LIMIT; guard++) {
-      const dueWindow = next.pendingDecisions.find(
-        window =>
-          window.status === 'OPEN' &&
-          ((window.deadline !== undefined && window.deadline <= next.clock) ||
-            window.participants.some(
-              pid =>
-                window.submissions[pid] === undefined &&
-                window.participantDeadlines?.[pid] !== undefined &&
-                window.participantDeadlines[pid] <= next.clock
-            ))
-      );
+      const dueWindow = next.pendingDecisions.find(window => isDecisionWindowDue(window, next.clock));
 
       if (dueWindow) {
         const wholeWindow = dueWindow.deadline !== undefined && dueWindow.deadline <= next.clock;
