@@ -114,20 +114,24 @@ app.post('/api/auth/login', async c => {
   const body = await c.req.json().catch(() => ({}));
   const name = String(body.name ?? '');
   const key = clientIp(c) + '|' + name.toLowerCase();
+  // 限速必须**先占位再校验**（issue #203）：`login` 现在是异步的（scrypt 走线程池），
+  // 如果先 await 再计数，N 个并发请求会全部通过检查，等于限速失效。
+  // 这里在同一个同步块里完成「检查 + 预扣」，成功后再把这次预扣退还。
+  const now = Date.now();
   const fail = loginFails.get(key);
-  if (fail && fail.count >= 10 && fail.resetAt > Date.now()) {
+  if (fail && fail.resetAt > now && fail.count >= 10) {
     return c.json({ error: '尝试过于频繁，请 15 分钟后再试' }, 429);
   }
-  const r = login(name, String(body.password ?? ''));
-  if ('error' in r) {
-    const now = Date.now();
-    const cur = loginFails.get(key);
-    if (!cur || cur.resetAt < now) loginFails.set(key, { count: 1, resetAt: now + 15 * 60_000 });
-    else cur.count += 1;
-    // 顺手清理过期项，防止 Map 无限增长
-    if (loginFails.size > 10_000) for (const [k, v] of loginFails) if (v.resetAt < now) loginFails.delete(k);
-  } else {
-    loginFails.delete(key);
+  if (!fail || fail.resetAt < now) loginFails.set(key, { count: 1, resetAt: now + 15 * 60_000 });
+  else fail.count += 1;
+  // 顺手清理过期项，防止 Map 无限增长
+  if (loginFails.size > 10_000) for (const [k, v] of loginFails) if (v.resetAt < now) loginFails.delete(k);
+
+  const r = await login(name, String(body.password ?? ''));
+  if (!('error' in r)) {
+    // 成功登录退还预扣，正常用户不会把配额耗光。
+    const after = loginFails.get(key);
+    if (after && after.resetAt > now) after.count = Math.max(0, after.count - 1);
   }
   return 'error' in r ? c.json({ error: r.error }, 401) : c.json(r);
 });
