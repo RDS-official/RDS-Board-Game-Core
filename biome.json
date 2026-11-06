@@ -92,6 +92,18 @@
           }
         }
       }
+    },
+    {
+      "includes": [
+        "apps/web/src/**/*.ts"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "error"
+          }
+        }
+      }
     }
   ]
 }

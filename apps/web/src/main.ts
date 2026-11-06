@@ -150,7 +150,7 @@ class BoardGameSimulatorApp {
     this.scene.onInteractiveClick(data => {
       // Clicking a room entity is also the inspection camera gesture: the
       // dossier and the 2.5D close-up should come from the same click.
-      if (data.type === 'NODE' && data.metadata?.floor && this.currentGameId === 'betrayal') {
+      if (data.type === 'NODE' && (data.metadata as { floor?: unknown } | undefined)?.floor && this.currentGameId === 'betrayal') {
         this.scene.focusNode(data.id);
       }
       this.handleBoardPick(data);

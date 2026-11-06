@@ -1,3 +1,4 @@
+import { errorText } from '../errorText';
 import './admin.css';
 import {
   AdminUserItem,
@@ -91,8 +92,8 @@ export async function startAdmin(
       userList = res.users;
       stats = res.stats;
       render();
-    } catch (err: any) {
-      showToast(err.message || '加载用户列表失败', 'error');
+    } catch (err) {
+      showToast(errorText(err) || '加载用户列表失败', 'error');
     }
   }
 
@@ -182,8 +183,8 @@ export async function startAdmin(
         };
         showToast('管理员登录成功', 'success');
         await loadData();
-      } catch (err: any) {
-        errBox.textContent = err.message || '登录失败';
+      } catch (err) {
+        errBox.textContent = errorText(err) || '登录失败';
         errBox.style.display = 'block';
       } finally {
         loginBtn.disabled = false;
@@ -546,11 +547,11 @@ export async function startAdmin(
       if (restored && caret !== null) restored.setSelectionRange(caret, caret);
     });
     $('adm-filter-role')?.addEventListener('change', ev => {
-      roleFilter = (ev.target as HTMLSelectElement).value as any;
+      roleFilter = (ev.target as HTMLSelectElement).value as 'all' | 'user' | 'admin';
       renderDashboard();
     });
     $('adm-filter-status')?.addEventListener('change', ev => {
-      statusFilter = (ev.target as HTMLSelectElement).value as any;
+      statusFilter = (ev.target as HTMLSelectElement).value as 'all' | 'active' | 'disabled';
       renderDashboard();
     });
 
@@ -596,8 +597,8 @@ export async function startAdmin(
           await updateAdminUser(target.id, { disabled: !target.disabled });
           showToast(`账号 @${target.name} 已${target.disabled ? '启用' : '禁用'}`, 'success');
           await loadData();
-        } catch (err: any) {
-          showToast(err.message || '操作失败', 'error');
+        } catch (err) {
+          showToast(errorText(err) || '操作失败', 'error');
         }
       }
     });
@@ -642,8 +643,8 @@ export async function startAdmin(
         activeModal = 'none';
         modalError = '';
         await loadData();
-      } catch (err: any) {
-        modalError = err.message || '创建账号失败';
+      } catch (err) {
+        modalError = errorText(err) || '创建账号失败';
         renderDashboard();
       }
     });
@@ -661,8 +662,8 @@ export async function startAdmin(
         activeModal = 'none';
         modalError = '';
         await loadData();
-      } catch (err: any) {
-        modalError = err.message || '更新账号失败';
+      } catch (err) {
+        modalError = errorText(err) || '更新账号失败';
         renderDashboard();
       }
     });
@@ -690,8 +691,8 @@ export async function startAdmin(
         activeModal = 'none';
         modalError = '';
         renderDashboard();
-      } catch (err: any) {
-        modalError = err.message || '重置密码失败';
+      } catch (err) {
+        modalError = errorText(err) || '重置密码失败';
         renderDashboard();
       }
     });
@@ -739,8 +740,8 @@ export async function startAdmin(
         activeModal = 'none';
         modalError = '';
         renderDashboard();
-      } catch (err: any) {
-        modalError = err.message || '修改密码失败';
+      } catch (err) {
+        modalError = errorText(err) || '修改密码失败';
         renderDashboard();
       }
     });
@@ -754,8 +755,8 @@ export async function startAdmin(
         activeModal = 'none';
         modalError = '';
         await loadData();
-      } catch (err: any) {
-        modalError = err.message || '删除账号失败';
+      } catch (err) {
+        modalError = errorText(err) || '删除账号失败';
         renderDashboard();
       }
     });
