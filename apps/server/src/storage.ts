@@ -77,14 +77,77 @@ function load(): DbShape {
 
 let db: DbShape = load();
 
+/** 落盘次数（测试用：证明批量更新被合并成一次写）。 */
+let writeCount = 0;
+export function storageWriteCount(): number {
+  return writeCount;
+}
+
 export function save(): void {
   // 降级期间绝不落盘：内存里是空库，写回去等于把损坏文件覆盖成空数据。
+  if (degraded) return;
+  cancelRoomFlush();
+  writeNow();
+}
+
+function writeNow(): void {
   if (degraded) return;
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(db, null, 1));
   fs.renameSync(tmp, FILE);
+  writeCount += 1;
 }
+
+/* -------------------------------------------------------------------------- */
+/* 房间写入合并（issue #201）                                                   */
+/* -------------------------------------------------------------------------- */
+/**
+ * `hub.json` 是全量同步写：500 个用户 + 500 个房间约 145 KB，**每次 save 1.5–2.3 ms**。
+ * 房间的 `joinRoom` / `setReady` / 活动时间会高频触发它，等于每个大厅请求都重写整库。
+ *
+ * 这里把**房间**的写入合并成 25 ms 一次批量落盘：房间状态是可重建的临时数据，25 ms
+ * 的丢失窗口可以接受；而**用户**（注册、改密、角色）仍然立即落盘，因为那是不可重建的。
+ *
+ * 进程退出、崩溃前都会 flush，不会把最后 25 ms 的房间变更丢在内存里。
+ */
+const ROOM_FLUSH_MS = 25;
+let roomTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelRoomFlush(): void {
+  if (roomTimer) {
+    clearTimeout(roomTimer);
+    roomTimer = null;
+  }
+}
+
+function scheduleRoomFlush(): void {
+  if (degraded || roomTimer) return;
+  roomTimer = setTimeout(() => {
+    roomTimer = null;
+    writeNow();
+  }, ROOM_FLUSH_MS);
+  roomTimer.unref?.();
+}
+
+/** 立即把待写内容落盘（测试、退出钩子用）。 */
+export function flushStorage(): void {
+  if (!roomTimer) return;
+  cancelRoomFlush();
+  writeNow();
+}
+
+/** 是否有房间写入还在等待（测试用）。 */
+export function hasPendingStorageWrite(): boolean {
+  return roomTimer !== null;
+}
+
+process.once('exit', () => {
+  if (roomTimer) {
+    cancelRoomFlush();
+    writeNow();
+  }
+});
 
 export const users = {
   all: () => db.users,
@@ -111,12 +174,12 @@ export const users = {
 export const rooms = {
   all: () => db.rooms,
   byId: (id: string) => db.rooms.find(r => r.id === id),
-  add(r: RoomRecord) { db.rooms.push(r); save(); },
+  add(r: RoomRecord) { db.rooms.push(r); scheduleRoomFlush(); },
   update(id: string, patch: Partial<RoomRecord>) {
     const r = db.rooms.find(x => x.id === id);
     if (r) Object.assign(r, patch);
-    save();
+    scheduleRoomFlush();
     return r;
   },
-  remove(id: string) { db.rooms = db.rooms.filter(r => r.id !== id); save(); },
+  remove(id: string) { db.rooms = db.rooms.filter(r => r.id !== id); scheduleRoomFlush(); },
 };

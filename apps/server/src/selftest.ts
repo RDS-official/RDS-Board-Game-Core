@@ -655,6 +655,34 @@ ok(deleteRes.ok === true, 'adminDeleteUser works');
   ok(afterLimit.status === 429, 'the limiter rejects even a correct password once tripped');
 }
 
+/* -------------------------------------------------------------------------- */
+/* #201：房间写入合并成一次落盘，用户写入仍然立即生效                              */
+/* -------------------------------------------------------------------------- */
+{
+  const storage = await import('./storage.ts');
+  const baseCount = storage.storageWriteCount();
+  const burstRoom = {
+    id: 'r_write_burst',
+    name: '写入合并',
+    gameId: 'poker',
+    hostId: 'u_write_burst',
+    status: 'open' as const,
+    maxPlayers: 6,
+    players: [],
+    createdAt: Date.now()
+  };
+  storage.rooms.add(burstRoom);
+  for (let i = 0; i < 60; i++) storage.rooms.update(burstRoom.id, { lastActivity: Date.now() + i });
+  ok(storage.hasPendingStorageWrite(), 'room writes are queued');
+  ok(storage.storageWriteCount() === baseCount, 'a burst of room writes does not hit the disk');
+
+  storage.flushStorage();
+  ok(storage.storageWriteCount() === baseCount + 1, 'the whole burst is written once');
+  ok(!storage.hasPendingStorageWrite(), 'nothing is left pending after the flush');
+  storage.rooms.remove(burstRoom.id);
+  storage.flushStorage();
+}
+
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');
 try { fs.rmSync(process.env.HUB_DATA_DIR!, { recursive: true, force: true }); } catch { /* 临时目录清理失败无所谓 */ }
 process.exit(failed ? 1 : 0);
