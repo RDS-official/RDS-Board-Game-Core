@@ -68,6 +68,18 @@
           }
         }
       }
+    },
+    {
+      "includes": [
+        "packages/app/src/**/*.ts"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "error"
+          }
+        }
+      }
     }
   ]
 }
