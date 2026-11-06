@@ -277,8 +277,22 @@ async function runScreen(browser, game, scenario) {
         heapMb: Math.round((performance.memory?.usedJSHeapSize ?? 0) / 1048576)
       };
     });
+
+    // AR-20 / #215: board furniture is cached per (key, content signature). A
+    // screen that rebuilt the board three or more times must have reused
+    // something — without the cache every one of those rebuilds started from an
+    // empty pool and this counter stayed at zero.
+    if (
+      state?.stats &&
+      state.stats.boardRebuilds >= 3 &&
+      state.stats.cachedObjects === 0
+    ) {
+      failures.push(
+        `${label}: scene cache never reused furniture over ${state.stats.boardRebuilds} rebuilds`
+      );
+    }
     console.log(
-      `  ${label.padEnd(28)} initialActions=${String(initialActions).padStart(2)} log=${state?.log ?? '?'} labels=${labelInfo.count} sync=${state?.stats?.lastSyncMs ?? '?'}ms`
+      `  ${label.padEnd(28)} initialActions=${String(initialActions).padStart(2)} log=${state?.log ?? '?'} labels=${labelInfo.count} sync=${state?.stats?.lastSyncMs ?? '?'}ms rebuilds=${state?.stats?.boardRebuilds ?? '?'} cache=${state?.stats?.cachedObjects ?? '?'}`
     );
   } catch (error) {
     failures.push(`${label}: threw — ${error?.message ?? error}`);

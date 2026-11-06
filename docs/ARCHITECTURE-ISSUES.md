@@ -45,7 +45,7 @@
 | AR-17 | `GameRoom.setCurrentViewer` 用可变字段传参（隐式并发） | `packages/net/src/room.ts` 的 `submit()` + `apps/server/src/match.ts` 的 `submit()` | `submit(action, viewer)` 显式传参，删除 `setCurrentViewer` | 待修 |
 | AR-18 | 投影深拷贝 | ~~每次投影对 players / npcs / effects 做 JSON 深拷贝~~ | ✅ **已评估（2026-11-06）**：20 万次实测 291ms；浅拷贝 5.7ms 但会与权威状态共享嵌套引用；浅拷贝+深冻结 189ms（仅 1.5×）。**维持深拷贝**，把投影定义为只读 DTO 并在 `observer.ts` 写明（issue #213） | 维持现状 |
 | AR-19 | 座位数推导有 3 份实现 | `apps/server/src/rooms.ts` 的 `fixtureSeats()` / `seatsSupport()`、`apps/server/src/match.ts` 的 `ServerMatch`、`packages/app/src/netSession.ts` | `meta.seatRange` 声明式契约，三处统一读取 | 待修 |
-| AR-20 | 渲染层每次动作全量重建 3D 场景 | `apps/web/src/render/scene.ts` 的 `syncState()` 用 `actionLog.length` 作 boardKey | 按实体 id 增量 reconcile（`dom/keyed.ts` 的 3D 版） | 待修 |
+| AR-20 | 渲染层每次动作全量重建 3D 场景 | ~~`apps/web/src/render/scene.ts` 的 `syncState()` 用 `actionLog.length` 作 boardKey~~ | ✅ **已修复（#215）**：新增 `apps/web/src/render/objectCache.ts` —— `dom/keyed.ts` 的 3D 版，按「键 + 内容签名」缓存程序化家具；签名不变时克隆模板而不再重跑 builder，每次同步结束时驱逐未再请求的条目并只释放缓存自己创建的 GPU 资源。已接入桌面呢绒/边沿、筹码堆、牌堆与手牌、地图节点（HEX/ROOM/VERTEX）、座前装备牌、桌面牌与全部标签精灵。手牌行布局、settle 补间、门牌热区这类每次同步的派生物仍按同步重建。回归：`scripts/probe-scene-cache.mjs` 断言复用确实发生，且暖缓存板面与冷重建结构一致 | ✅ **已修复** |
 | AR-21 | 65 处 `innerHTML`，转义函数复制 4 份 | `apps/web/src/ui/hud.ts`、`lobby/lobby.ts`、`admin/admin.ts`、`main.ts` 各有 `esc*` | 抽 `html` tagged-template；CI grep 禁止裸 `innerHTML =` | 待修 |
 | AR-22 | `session.ts` God Object（`rebuild()` 一个函数做 7 件事） | `packages/app/src/session.ts` 的 `rebuild()`（约 1091 行起） | 拆为纯 builder 库 + 薄壳，`netSession` 复用 | 待修 |
 | AR-23 | `patch` 协议声明 `move/copy/test` 但未实现 | `packages/room-protocol/src/index.ts` 的 `PatchOp` vs `packages/net/src/patch.ts` | 协议收敛到实现子集，或补齐实现并加类型-实现一致性校验 | 待修 |
