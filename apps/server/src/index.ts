@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { PORT, DATA_DIR } from './config.ts';
-import { users } from './storage.ts';
+import { hubStorageHealth, users } from './storage.ts';
 import {
   login, userFromAuthHeader, profileOf, updateDisplayName, changeOwnPassword,
   createUser, isAdminUser, adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
@@ -31,6 +31,21 @@ interface AppEnv {
 }
 
 export const app = new Hono<AppEnv>();
+
+// hub.json 损坏时进入只读降级（issue #202）：读请求照常（大厅列表为空、登录仍可用），
+// 写请求一律 503，避免「内存里改成功、重启就消失」的假成功。
+app.use('*', async (c, next) => {
+  if (hubStorageHealth().ok) return next();
+  const method = c.req.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
+  return c.json(
+    {
+      error: '数据库文件损坏，服务处于只读降级状态（已备份）',
+      hint: '请联系管理员从 hub.json.corrupt.* 备份恢复后重启'
+    },
+    503
+  );
+});
 
 /* -------------------------------------------------------------------------- */
 /* AR-4：跨站请求防护                                                           */
@@ -395,11 +410,14 @@ app.post('/api/rooms/:id/ai', async c => {
 });
 app.get('/healthz', c => {
   const ledger = ledgerHealth();
+  const storage = hubStorageHealth();
   return c.json({
     ok: true,
     // 账本损坏时服务仍然可用（写空账本），但健康检查必须把这件事报出来。
     pokerLedger: ledger.ok ? 'ok' : 'degraded',
-    ...(ledger.ok ? {} : { pokerLedgerBackup: ledger.backup })
+    hubStorage: storage.ok ? 'ok' : 'degraded',
+    ...(ledger.ok ? {} : { pokerLedgerBackup: ledger.backup }),
+    ...(storage.ok ? {} : { hubStorageBackup: storage.backup })
   });
 });
 // ---- 中心模式（服务器权威）：对局观察端点 ----

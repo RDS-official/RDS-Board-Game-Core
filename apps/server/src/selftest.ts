@@ -604,6 +604,28 @@ ok(deleteRes.ok === true, 'adminDeleteUser works');
   ok(orderAfterKick[2] === seatC.user.id, 'a new player takes the freed seat');
 }
 
+/* -------------------------------------------------------------------------- */
+/* #202：hub.json 损坏 → 只读降级，而不是进程退出                                  */
+/* -------------------------------------------------------------------------- */
+{
+  const { parseDb, hubStorageHealth } = await import('./storage.ts');
+  const good = parseDb(JSON.stringify({ users: [], rooms: [] }));
+  ok(good.ok === true, 'a well-formed hub.json parses');
+
+  const broken = parseDb('{ oops');
+  ok(broken.ok === false, 'a truncated hub.json is reported as invalid');
+  ok(!broken.ok && broken.error.length > 0, 'the parse error explains why');
+
+  const wrongShape = parseDb(JSON.stringify({ users: {}, rooms: [] }));
+  ok(wrongShape.ok === false, 'a wrong-shaped hub.json is reported as invalid');
+
+  ok(hubStorageHealth().ok === true, 'the live store reports healthy');
+
+  const res = await app.fetch(new Request('http://127.0.0.1/healthz', { headers: { host: '127.0.0.1' } }));
+  const body: any = await res.json();
+  ok(body.hubStorage === 'ok', 'healthz exposes the hub storage state');
+}
+
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');
 try { fs.rmSync(process.env.HUB_DATA_DIR!, { recursive: true, force: true }); } catch { /* 临时目录清理失败无所谓 */ }
 process.exit(failed ? 1 : 0);
