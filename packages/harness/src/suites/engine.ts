@@ -397,3 +397,42 @@ test('hooks: a throwing handler fails the dispatch in strict mode, and is tolera
   );
 });
 
+
+test('crypto: sha256 and hmac-sha256 match the FIPS 180-4 / RFC 4231 vectors', async () => {
+  const { sha256Hex, hmacSha256Hex } = await import('@rds/kernel/sha256');
+
+  // FIPS 180-4 附录 B 与 NIST 公开样例：任何常量/轮函数笔误都会在这里暴露。
+  assertEqual(
+    sha256Hex(''),
+    'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    'sha256("") matches the standard'
+  );
+  assertEqual(
+    sha256Hex('abc'),
+    'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',
+    'sha256("abc") matches the standard'
+  );
+  assertEqual(
+    sha256Hex('abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq'),
+    '248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1',
+    'sha256(448-bit message) matches the standard'
+  );
+  assertEqual(
+    sha256Hex('a'.repeat(1000)),
+    '41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3',
+    'sha256(1000 x "a") matches the standard'
+  );
+
+  // RFC 4231 测试用例 1 / 2。
+  assertEqual(
+    hmacSha256Hex('\x0b'.repeat(20), 'Hi There'),
+    'b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7',
+    'hmac-sha256 RFC 4231 case 1'
+  );
+  assertEqual(
+    hmacSha256Hex('Jefe', 'what do ya want for nothing?'),
+    '5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843',
+    'hmac-sha256 RFC 4231 case 2'
+  );
+});
+
