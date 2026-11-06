@@ -170,6 +170,8 @@ export class NetSession implements GamePresenter {
   private state?: ProjectedGameState;
   private guestTransport?: WebRtcGuestTransport;
   private netRevision = 0;
+  /** 幕布缓存（issue #222）：同一 revision + viewer 只算一次。 */
+  private momentCache?: { key: string; value: UiMoment | null };
   /** 动作类型 -> 第一次出现在视图里的时刻（冷却用）。 */
   private readonly actionSeenAt = new Map<string, number>();
   private appliedRevision = -1;
@@ -538,13 +540,17 @@ export class NetSession implements GamePresenter {
   public moment(): UiMoment | null {
     if (this.isLocalAuthority) return this.session?.moment() ?? null;
     const state = this.state;
+    const cacheKey = this.netRevision + '|' + String(this.viewer);
+    if (this.momentCache && this.momentCache.key === cacheKey) return this.momentCache.value;
     if (!state) return null;
     const moment = buildMoment(state, missionLineOf(state), {
       module: this.module,
       viewer: this.viewer,
       handOf: playerId => projectedHandOf(state, playerId)
     });
-    return moment ? this.resolveMomentActions(moment) : null;
+    const value = moment ? this.resolveMomentActions(moment) : null;
+    this.momentCache = { key: cacheKey, value };
+    return value;
   }
 
   /** 宿主的「退出牌桌」：联机回大厅，单机回入口页，谁装配谁决定。 */
