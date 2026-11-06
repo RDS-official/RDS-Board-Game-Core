@@ -31,6 +31,32 @@ interface DbShape { users: UserRecord[]; rooms: RoomRecord[]; }
 
 const FILE = path.join(DATA_DIR, 'hub.json');
 
+/** 解析结果：损坏时带原因，不在这里做 IO（便于单测）。 */
+export function parseDb(text: string): { ok: true; data: DbShape } | { ok: false; error: string } {
+  try {
+    const parsed = JSON.parse(text) as DbShape;
+    if (!parsed || !Array.isArray(parsed.users) || !Array.isArray(parsed.rooms)) {
+      return { ok: false, error: 'bad shape: users/rooms must be arrays' };
+    }
+    return { ok: true, data: parsed };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * 存储降级状态（issue #202）。
+ *
+ * 损坏时不再 `process.exit(1)`：进程直接死掉 = 站点整体不可用，而且运维只能从
+ * 日志里翻原因。现在改成「备份 + 只读降级」：进程继续跑，`/healthz` 报 degraded，
+ * 所有写请求 503，等运维从备份恢复后重启。
+ */
+let degraded: { backup: string; error: string } | null = null;
+
+export function hubStorageHealth(): { ok: boolean; backup?: string } {
+  return degraded ? { ok: false, backup: degraded.backup } : { ok: true };
+}
+
 function load(): DbShape {
   let text: string;
   try {
@@ -38,23 +64,22 @@ function load(): DbShape {
   } catch {
     return { users: [], rooms: [] }; // 首次启动：文件还不存在
   }
-  try {
-    const parsed = JSON.parse(text) as DbShape;
-    if (!parsed || !Array.isArray(parsed.users) || !Array.isArray(parsed.rooms)) throw new Error('bad shape');
-    return parsed;
-  } catch (err) {
-    // 解析失败绝不能静默回空库（下一次 save 会覆盖全部数据）。
-    // 先留备份，再拒绝启动，交给运维修复后重启。
-    const bak = FILE + '.corrupt.' + Date.now();
-    try { fs.copyFileSync(FILE, bak); } catch { /* 只读文件系统等极端情况：仍然退出 */ }
-    console.error('[hub] hub.json 损坏，为避免覆盖已退出（备份 → ' + bak + '）：', String(err));
-    process.exit(1);
-  }
+  const parsed = parseDb(text);
+  if (parsed.ok) return parsed.data;
+
+  // 解析失败绝不能静默回空库（下一次 save 会覆盖全部数据）。
+  const bak = FILE + '.corrupt.' + Date.now();
+  try { fs.copyFileSync(FILE, bak); } catch { /* 只读文件系统等极端情况：仍然降级 */ }
+  console.error('[hub] hub.json 损坏，进入只读降级（备份 → ' + bak + '）：', parsed.error);
+  degraded = { backup: bak, error: parsed.error };
+  return { users: [], rooms: [] };
 }
 
 let db: DbShape = load();
 
 export function save(): void {
+  // 降级期间绝不落盘：内存里是空库，写回去等于把损坏文件覆盖成空数据。
+  if (degraded) return;
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(db, null, 1));
