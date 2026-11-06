@@ -223,6 +223,16 @@ export class UniversalGameEngine {
   /** Optional per-room secret; when set, hidden-entity aliases become HMAC-keyed (S5). */
   private aliasSecret?: string;
   private silent = false;
+  /**
+   * 回放检查点（issue #209）：每 CHECKPOINT_EVERY 步存一份状态快照。
+   *
+   * 以前 `replayTo(n)` 每次从第 0 步重放，时间轴拖动 N 次就是 O(N²)。
+   * 现在从「不晚于目标的最近检查点」续放，最多重放 CHECKPOINT_EVERY 步。
+   */
+  private checkpoints: { step: number; state: GameState }[] = [];
+  /** 回放期间实际 dispatch 的次数（测试用：证明检查点真的生效）。 */
+  private replayDispatches = 0;
+  private static readonly CHECKPOINT_EVERY = 64;
   /** 宪章判据（C-1 / C-2 / C-6 / C-9），构造时从模块声明解析一次。 */
   private readonly charter: ResolvedCharter;
   /** AR-48：模块的代码事实证据（当前只看是否用了中断栈）。 */
@@ -1617,7 +1627,8 @@ export class UniversalGameEngine {
     seats = this.seats,
     humans = this.humans,
     aiSeats = this.aiSeats,
-    stacks = this.stacks
+    stacks = this.stacks,
+    resume?: { state: GameState; step: number }
   ): { state: GameState; errors: string[] } {
     const shadow = new UniversalGameEngine(this.module, seed, {
       strict: false,
@@ -1634,23 +1645,64 @@ export class UniversalGameEngine {
      * 重生一遍自动步，状态与 live 对不上 —— 我第一版就在这里的 hash 不一致。
      */
     shadow.pumpDisabled = true;
+    if (resume) shadow.state = JSON.parse(JSON.stringify(resume.state)) as GameState;
     const errors: string[] = [];
 
     for (const action of actions) {
+      this.replayDispatches += 1;
       const result = shadow.dispatch(action);
       if (!result.ok && result.error) errors.push(result.error);
     }
 
-    shadow.state = { ...shadow.state, actionLog: [...actions] };
+    shadow.state = {
+      ...shadow.state,
+      actionLog: this.history.slice(0, resume?.step ?? 0).concat(actions)
+    };
     return { state: shadow.state, errors };
+  }
+
+  /** 取「不晚于 target 的最近检查点」，必要时把它推进到 target 之前。 */
+  private ensureCheckpoint(target: number): { step: number; state: GameState } {
+    if (this.checkpoints.length === 0) {
+      // 第 0 步 = 空 action 列表重放出来的初始状态（含 scenario / seats 等配置）。
+      const initial = this.replayState([], undefined, undefined, undefined, undefined, undefined, undefined).state;
+      this.checkpoints.push({ step: 0, state: JSON.parse(JSON.stringify(initial)) as GameState });
+    }
+    // 现有检查点不足：从最后一个继续向前建，直到覆盖 target 之前的最后一段。
+    while (this.checkpoints[this.checkpoints.length - 1].step + UniversalGameEngine.CHECKPOINT_EVERY <= target) {
+      const last = this.checkpoints[this.checkpoints.length - 1];
+      const nextStep = last.step + UniversalGameEngine.CHECKPOINT_EVERY;
+      const { state } = this.replayState(
+        this.history.slice(last.step, nextStep),
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        { state: last.state, step: last.step }
+      );
+      this.checkpoints.push({ step: nextStep, state: JSON.parse(JSON.stringify(state)) as GameState });
+    }
+    let base = this.checkpoints[0];
+    for (const cp of this.checkpoints) if (cp.step <= target) base = cp;
+    return base;
+  }
+
+  /** 检查点只对「当前这条 history」有效；日志被替换后必须清空。 */
+  private resetCheckpoints(): void {
+    this.checkpoints = [];
+  }
+
+  /** 回放期间累计 dispatch 次数（测试用：证明检查点避免了从头重放）。 */
+  public replayDispatchCount(): number {
+    return this.replayDispatches;
   }
 
   public replayTo(step: number): ReplayReport {
     const target = Math.max(0, Math.min(step, this.history.length));
-    const actions = this.history.slice(0, target);
     const before = this.getStateHash();
-
-    const { state, errors } = this.replayState(actions);
+    const base = this.ensureCheckpoint(target);
+    const { state, errors } = this.replayState(
+      this.history.slice(base.step, target),
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      { state: base.state, step: base.step }
+    );
     this.state = state;
     this.notifyStateChange();
 
@@ -1664,6 +1716,7 @@ export class UniversalGameEngine {
   }
 
   public rewindToStep(step: number): ReplayReport {
+    this.checkpoints = this.checkpoints.filter(cp => cp.step <= step);
     return this.replayTo(step);
   }
 
@@ -1733,6 +1786,7 @@ export class UniversalGameEngine {
     );
     this.state = state;
     this.history = [...payload.actions];
+    this.resetCheckpoints();
     this.notifyStateChange();
 
     const actual = hashState(state);
