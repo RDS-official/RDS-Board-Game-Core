@@ -168,6 +168,13 @@ export class MatchBroker {
             send({ t: 'error', message: '尚未加入对局' });
             return;
           }
+          // 纵深防御：座位可能因房间成员变化被撤销（issue #185），提交前先复核。
+          const seat = match.seatOf(userId);
+          if (!seat) {
+            send({ t: 'error', message: '你不在本局座位表中' });
+            detach();
+            return;
+          }
           const action = msg.action;
           if (!action || typeof action !== 'object' || typeof action.type !== 'string') {
             send({ t: 'error', message: 'invalid action' });
@@ -219,6 +226,34 @@ export class MatchBroker {
     this.roomSockets.delete(roomId);
     this.matches.close(roomId);
     this.forgetRoomLedger(roomId);
+  }
+
+  /**
+   * 房间成员变化（有人离开 / 被请离，房间仍在进行中）：立即撤销出局者的座位。
+   *
+   * 之前只有 `status === 'closed'` 才通知 broker，离开的玩家在 `ServerMatch.seats`
+   * 里还留着旧映射——旧 websocket 仍能拿到含自己底牌的投影，也能继续替座位提交
+   * 动作（issue #185）。这里按当前房间名单同步座位表：被移除的真人座位撤销、
+   * 连接 detach，并通知客户端本局已与它无关。
+   */
+  public onRoomMembersChanged(roomId: string): void {
+    const match = this.matches.get(roomId);
+    if (!match) return;
+    const room = rooms.byId(roomId);
+    const members = new Set(room?.players ?? []);
+    const peers = this.roomSockets.get(roomId);
+    // 遍历座位表而不是 attach 名单：断线重连前的玩家没 attach，但旧座位映射
+    // 同样必须撤销（issue #185）。
+    for (const userId of [...match.seatOwners()]) {
+      if (members.has(userId)) continue;
+      const revoked = match.revokeSeat(userId);
+      if (!revoked) continue;
+      const socket = peers?.get(userId);
+      if (socket?.readyState === 1) {
+        socket.send(JSON.stringify({ t: 'match-state', roomId, closed: true }));
+      }
+      if (peers?.get(userId) === socket) peers?.delete(userId);
+    }
   }
 
   public dispose(): void {
