@@ -127,7 +127,30 @@ export function ledgerHealth(): { ok: boolean; backup?: string } {
   return degraded ? { ok: false, backup: degraded.backup } : { ok: true };
 }
 
+/**
+ * 账本是否处于「损坏后只读降级」。
+ *
+ * 损坏时仍然开服（站点可用优先），但**不再接受任何写操作**：记账结果无法落盘，
+ * 继续收筹码等于让玩家赢一把空气。写接口统一返回 503，等运维从备份恢复
+ * （issue #187 方案 A）。
+ */
+export function isLedgerDegraded(): boolean {
+  return degraded !== null;
+}
+
+/** 仅测试用：把账本切到降级态，验证只读行为。 */
+export function __setLedgerDegradedForTest(backup = 'test-backup'): void {
+  degraded = { backup, error: 'test' };
+}
+
+/** 仅测试用：恢复健康态。 */
+export function __resetLedgerDegradedForTest(): void {
+  degraded = null;
+}
+
 function save(): void {
+  // 降级期间不落盘：内存里的改动只用于本次请求的展示，重启即丢。
+  if (degraded) return;
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const tmp = FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(ledger, null, 1));

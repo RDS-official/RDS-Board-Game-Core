@@ -5,7 +5,7 @@ import { GameModule } from '@rds/kernel/module';
 import { Action, DispatchResult, GameState, PlayerId } from '@rds/kernel/types';
 import type { PokerHandResult } from '@rds/games/poker/rules';
 import { leaveSeat, settleHand, takeSeat } from './pokerSettle.ts';
-import { peekAccount, tryGrantAiRelief } from './pokerLedger.ts';
+import { isLedgerDegraded, peekAccount, tryGrantAiRelief } from './pokerLedger.ts';
 import { POKER_AI_NAMES, getAiHeroName } from '@rds/games/poker/seating';
 
 /**
@@ -538,6 +538,11 @@ export class MatchManager {
    * 不会凭空造出「借钱入座」的牌局。
    */
   public ensure(options: MatchOptions): ServerMatch {
+    // 账本只读降级（启动时检测到损坏并备份）时，不允许开新的扑克桌：
+    // 买了筹码也存不下来，玩家赢的是一把空气（issue #187 方案 A）。
+    if (GAME_REGISTRY[options.gameId]?.meta.id === 'poker' && isLedgerDegraded()) {
+      throw new Error('扑克账本处于只读降级状态，暂不能开局；请管理员先从备份恢复账本');
+    }
     const existing = this.matches.get(options.roomId);
     if (existing) {
       // 开局前（尚无任何真实跃迁）玩家名单可能仍在变化：按最新座位表重建，
