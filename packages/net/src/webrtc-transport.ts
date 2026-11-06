@@ -204,13 +204,7 @@ export class WebRtcHostTransport {
         }
         // delta 由 GameRoom.onChange 订阅统一推送（构造时挂载），此处不再重复。
         // 房间层再校验一次 actor 归属（防御纵深：即使上面的检查被绕过，内核也拒绝）。
-        this.room.setCurrentViewer(viewer);
-        let result: ReturnType<GameRoom['submit']>;
-        try {
-          result = this.room.submit(action);
-        } finally {
-          this.room.setCurrentViewer(undefined);
-        }
+        const result = this.room.submit(action, viewer);
         if (!result.ok) this.reply(peerId, { t: 'error', message: result.error ?? 'rejected' });
         break;
       }

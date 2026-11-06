@@ -195,3 +195,18 @@ test('net: action cooldowns are shared by solo and networked sessions', async ()
   assertEqual(view[0].ui.cooldownMs, 20_000, 'a returning action restarts its cooldown');
 });
 
+
+test('net: submit takes the viewer explicitly so concurrent requests cannot swap identity', async () => {
+  const { GameRoom } = await import('@rds/net/room');
+  const { counterModule } = await import('../suiteHelpers.ts');
+  const room = new GameRoom(counterModule, 7);
+  // 房间上残留一个旧 viewer，不能影响显式传入的身份。
+  room.setCurrentViewer('p2');
+  const asP1 = room.submit({ type: 'TICK', playerId: 'p1' }, 'p1');
+  assertEqual(asP1.ok, true, 'the explicitly passed viewer is accepted');
+  const stolen = room.submit({ type: 'TICK', playerId: 'p1' }, 'p2');
+  assertEqual(stolen.ok, false, 'another viewer cannot act as p1');
+  room.setCurrentViewer(undefined);
+  room.dispose();
+});
+
