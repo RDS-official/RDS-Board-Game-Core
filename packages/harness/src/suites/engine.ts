@@ -323,3 +323,22 @@ test('seating: declared seat ranges match what every fixture actually deals', as
   assertEqual(seatRangeOf(legacy as never).default, 3, 'an undeclared module falls back to probing setup()');
 });
 
+
+test('clock: needsClock is decided by the kernel, not re-derived by the driver', async () => {
+  const { UniversalGameEngine, needsClock } = await import('@rds/kernel/engine');
+  const { deadlineModule } = await import('../suiteHelpers.ts');
+
+  const engine = new UniversalGameEngine(deadlineModule, 11);
+  assertEqual(needsClock(engine.getRawState()), false, 'nothing is due one tick away at clock 0');
+
+  assert(engine.dispatch({ type: '__TICK__', playerId: 'SYSTEM', payload: { ticks: 1 } }).ok, 'tick accepted');
+  assertEqual(engine.getRawState().clock, 1, 'clock advanced');
+  // 参与者 p1 的截止时间是 2：再推一拍就会到期，驱动方应当继续走时钟。
+  assertEqual(needsClock(engine.getRawState()), true, 'a participant deadline one tick away keeps the clock needed');
+
+  assert(engine.dispatch({ type: '__TICK__', playerId: 'SYSTEM', payload: { ticks: 1 } }).ok, 'second tick accepted');
+  const window = engine.getRawState().pendingDecisions[0];
+  assertEqual(window.submissions['p1'], 'PASS', 'the player whose deadline passed was auto-passed');
+  assertEqual(window.submissions['p2'], undefined, 'the other player is still on the clock');
+});
+
