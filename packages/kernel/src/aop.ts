@@ -26,7 +26,11 @@ export interface AfterTriggerResult {
  * `GameState.activeHooks` stays plain data.
  */
 export class RulePipeline {
-  constructor(private readonly rules: RuleRegistry) {}
+  constructor(
+    private readonly rules: RuleRegistry,
+    /** strict：钩子抛错不再降级为「记一条 message 继续跑」，而是让整次 dispatch 失败（issue #211）。 */
+    private readonly options: { strict?: boolean } = {}
+  ) {}
 
   /** Attach a hook instance to the state (hot-injection). */
   public activate(
@@ -162,6 +166,7 @@ export class RulePipeline {
       return predicate(action, state, ctx);
     } catch (err) {
       messages.push(`[${ctx.impl.id}] predicate threw: ${(err as Error).message}`);
+      if (this.options.strict) throw err;
       return false;
     }
   }
@@ -177,6 +182,7 @@ export class RulePipeline {
       return handler(action, state, ctx);
     } catch (err) {
       messages.push(`[${ctx.impl.id}] handler threw: ${(err as Error).message}`);
+      if (this.options.strict) throw err;
       return null;
     }
   }
