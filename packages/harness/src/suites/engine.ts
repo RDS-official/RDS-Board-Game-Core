@@ -287,3 +287,39 @@ test('engine: hitting the clock cascade limit is reported, not silent', async ()
   );
 });
 
+
+test('seating: declared seat ranges match what every fixture actually deals', async () => {
+  const { GAME_REGISTRY } = await import('@rds/games/registry');
+  const { seatRangeOf, seatsAccepted } = await import('@rds/kernel/seating');
+
+  for (const [id, module] of Object.entries(GAME_REGISTRY)) {
+    const range = seatRangeOf(module);
+    const dealt = module.setup(1).playerOrder.length;
+    assertEqual(range.default ?? range.min, dealt, `${id}: declared default seats match setup()`);
+    assert(range.min <= dealt && dealt <= range.max, `${id}: dealt seats stay inside [min,max]`);
+
+    for (const [scenarioId, scenario] of Object.entries(module.scenarios ?? {})) {
+      const scenarioRange = seatRangeOf(module, scenarioId);
+      const scenarioDealt = scenario.setup(1).playerOrder.length;
+      assertEqual(
+        scenarioRange.default ?? scenarioRange.min,
+        scenarioDealt,
+        `${id}/${scenarioId}: scenario seats match setup()`
+      );
+      assert(seatsAccepted(module, scenarioId, scenarioDealt).ok, `${id}/${scenarioId}: its own seat count is accepted`);
+    }
+  }
+
+  // 可变化人数的玩法：区间内接受、区间外拒绝；固定变体不受影响。
+  const poker = GAME_REGISTRY.poker;
+  for (const n of [2, 4, 6, 10]) assert(seatsAccepted(poker, undefined, n).ok, `poker accepts ${n}`);
+  assert(!seatsAccepted(poker, undefined, 1).ok && !seatsAccepted(poker, undefined, 11).ok, 'poker rejects outside 2..10');
+  assert(seatsAccepted(poker, 'short_stack', 4).ok, 'short_stack accepts its 4 seats');
+  assert(!seatsAccepted(poker, 'short_stack', 6).ok, 'short_stack rejects 6 seats');
+  assert(!seatsAccepted(GAME_REGISTRY.catan, undefined, 4).ok, 'catan is fixed at 3');
+
+  // 没声明 seatRange 的存量模组走遗留探测。
+  const legacy = { ...GAME_REGISTRY.catan, meta: { ...GAME_REGISTRY.catan.meta, seatRange: undefined } };
+  assertEqual(seatRangeOf(legacy as never).default, 3, 'an undeclared module falls back to probing setup()');
+});
+

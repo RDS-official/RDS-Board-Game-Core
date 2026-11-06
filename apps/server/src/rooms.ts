@@ -3,6 +3,7 @@ import { profileOf } from './auth.ts';
 import { randomId } from './config.ts';
 import { gameById } from './games.ts';
 import { GAME_REGISTRY } from '@rds/games/registry';
+import { seatRangeOf, seatsAccepted } from '@rds/kernel/seating';
 import type { HubRoomInfo } from '@rds/room-protocol';
 
 interface RoomRec {
@@ -75,36 +76,18 @@ export function listRooms(): HubRoomInfo[] {
 
 export interface CreateRoomOpts { maxPlayers?: number; isPrivate?: boolean; scenarioId?: string; }
 
-/**
- * Seats a room will actually be dealt.
- *
- * The kernel's `setup` only takes a seed, so a fixture's player count is fixed
- * per scenario. Reading it back from the fixture (one throwaway `setup(1)`)
- * keeps the room cap in sync with the seats that exist — the alternative is a
- * room that accepts players the engine has no seat for.
- */
-function fixtureSeats(gameId: string, scenarioId?: string): number | undefined {
-  const module = GAME_REGISTRY[gameId];
-  if (!module) return undefined;
-  const factory = scenarioId ? module.scenarios?.[scenarioId]?.setup : module.setup;
-  if (!factory) return undefined;
-  try {
-    return factory(1).playerOrder.length;
-  } catch {
-    return undefined;
-  }
-}
 
 export function createRoom(userId: string, name: string, gameId: string, opts: CreateRoomOpts = {}): HubRoomInfo | { error: string } {
   const game = gameById(gameId);
   if (!game) return { error: '未知游戏：' + gameId };
   const variantOk = !opts.scenarioId || game.variants?.some(v => v.id === opts.scenarioId);
   if (!variantOk) return { error: '未知开局变体' };
-  // 房间上限：夹具支持 game.maxPlayers 这种人数（可变人数玩法）就用它，
-  // 否则退回夹具固定座位数（卡坦岛 3、璀璨宝石 2、山屋 3）。
-  const ceiling = seatsSupport(gameId, opts.scenarioId, game.maxPlayers).ok
-    ? game.maxPlayers
-    : (fixtureSeats(gameId, opts.scenarioId) ?? game.maxPlayers);
+  // 房间上限来自座位契约：可变化人数取 max，固定阵容取实际座数（issue #214）。
+  const gameModule = GAME_REGISTRY[gameId];
+  const range = gameModule
+    ? seatRangeOf(gameModule, opts.scenarioId)
+    : { min: game.minPlayers, max: game.maxPlayers, default: game.maxPlayers, variable: false };
+  const ceiling = range.variable ? Math.min(game.maxPlayers, range.max) : (range.default ?? range.min);
   const maxPlayers = Math.min(Math.max(opts.maxPlayers ?? ceiling, game.minPlayers), ceiling);
   const id = randomId('r_');
   const rec: RoomRec = {
@@ -156,20 +139,15 @@ export function leaveRoom(userId: string, roomId: string) {
  * the request, fixed-roster ones return their own count and the mismatch is the
  * answer. This is what keeps a room from starting with seats nobody sits in.
  */
+/** 座位数契约的唯一读取口（issue #214）。 */
 function seatsSupport(
   gameId: string,
   scenarioId: string | undefined,
   wanted: number
 ): { ok: boolean; dealt: number } {
   const module = GAME_REGISTRY[gameId];
-  const factory = scenarioId ? module?.scenarios?.[scenarioId]?.setup : module?.setup;
-  if (!factory) return { ok: false, dealt: 0 };
-  try {
-    const dealt = factory(1, { seats: wanted }).playerOrder.length;
-    return { ok: dealt === wanted, dealt };
-  } catch {
-    return { ok: false, dealt: 0 };
-  }
+  if (!module) return { ok: false, dealt: 0 };
+  return seatsAccepted(module, scenarioId, wanted);
 }
 
 export function setRoomStatus(hostId: string, roomId: string, status: 'open' | 'playing' | 'closed') {
