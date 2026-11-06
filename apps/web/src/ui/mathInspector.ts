@@ -1,4 +1,5 @@
 import { GamePresenter, GameSnapshot, UiHook, UiLogEntry } from '@rds/app/contracts';
+import { html, raw, setHtml } from './dom/html';
 
 type InspectorTab = 'G' | 'STACK' | 'FACTIONS' | 'HOOKS' | 'TIME';
 
@@ -121,11 +122,11 @@ export class MathematicalInspectorUI {
     if (this.collapsed || !this.snapshot) return;
     const snapshot = this.snapshot;
 
-    this.panel.innerHTML = `
+    setHtml(this.panel, html`
       <header class="mip-head">
         <div class="mip-title">
           <span class="mip-kicker"><span class="mip-live"></span>LIVE KERNEL STATE</span>
-          <span class="mip-h1">${TAB_META.find(t => t.id === this.tab)!.title}</span>
+          <span class="mip-h1">${raw(TAB_META.find(t => t.id === this.tab)!.title)}</span>
         </div>
         <div class="mip-head-actions">
           <button class="icon-btn" id="mip-close" title="收起面板" style="width:30px;height:30px;font-size:var(--type-xs)">✕</button>
@@ -133,7 +134,7 @@ export class MathematicalInspectorUI {
       </header>
 
       <nav class="mip-tabs">
-        ${TAB_META.map(
+        ${raw(TAB_META.map(
           tab => `
           <button class="mip-tab ${tab.id === this.tab ? 'active' : ''} ${
             tab.id === 'STACK' && snapshot.stackDepth > 0 ? 'alerting' : ''
@@ -143,11 +144,11 @@ export class MathematicalInspectorUI {
             ${tab.id === 'HOOKS' ? `<span class="badge">${snapshot.hooks.length}</span>` : ''}
           </button>
         `
-        ).join('')}
+        ).join(''))}
       </nav>
 
-      <div class="mip-body">${this.renderTab(snapshot)}</div>
-    `;
+      <div class="mip-body">${raw(this.renderTab(snapshot))}</div>
+    `);
 
     this.panel.querySelectorAll<HTMLElement>('.mip-tab').forEach(button => {
       button.addEventListener('click', () => {

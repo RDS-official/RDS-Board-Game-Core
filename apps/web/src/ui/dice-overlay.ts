@@ -1,4 +1,5 @@
 import type { UiRoll } from '@rds/app/contracts';
+import { html, raw, setHtml } from './dom/html';
 
 /**
  * Dice roll overlay: a confirmation card, then a house silhouette in fog with
@@ -172,7 +173,7 @@ export class DiceRollOverlay {
             roll.success ? '成功' : '失败'
           } · ${roll.total} / ${roll.threshold}</span>`;
 
-    root.innerHTML = `
+    setHtml(root, html`
       <div class="dice-fog" aria-hidden="true"></div>
       <div class="dice-stage">
         <div class="house-wrap" aria-hidden="true">
@@ -202,13 +203,13 @@ export class DiceRollOverlay {
           <span class="house-lamp"></span>
         </div>
 
-        <div class="dice-caption">${view.label ?? '检定'}</div>
+        <div class="dice-caption">${raw(view.label ?? '检定')}</div>
 
         <div class="confirm-panel">
           <div class="confirm-text">
-            ${valueLine}
-            ${needLine}
-            ${effectLine}
+            ${raw(valueLine)}
+            ${raw(needLine)}
+            ${raw(effectLine)}
           </div>
           <div class="confirm-rail" aria-hidden="true">
             <span class="cr-line"></span>
@@ -219,12 +220,12 @@ export class DiceRollOverlay {
         <div class="dice-panel">
           <div class="dice-row" data-dice></div>
           <div class="dice-total"><b data-total>?</b><span>点数</span></div>
-          <div class="dice-verdict-slot">${verdict}<p class="dice-consequence">${consequence}</p></div>
+          <div class="dice-verdict-slot">${raw(verdict)}<p class="dice-consequence">${raw(consequence)}</p></div>
         </div>
 
       </div>
       <div class="dice-hint" data-hint>点击跳过</div>
-    `;
+    `);
 
     root.addEventListener('click', event => {
       event.preventDefault();
@@ -339,12 +340,13 @@ export class DiceRollOverlay {
   private renderDice(faces: number[]): void {
     const row = this.root?.querySelector('[data-dice]');
     if (!row) return;
-    row.innerHTML = faces
-      .map(
+    setHtml(
+      row,
+      html`${faces.map(
         (value, index) =>
-          `<div class="die" data-face="${value}" style="--i:${index}">${PIPS[value] ?? ''}</div>`
-      )
-      .join('');
+          html`<div class="die" data-face="${value}" style="--i:${index}">${raw(PIPS[value] ?? '')}</div>`
+      )}`
+    );
   }
 
   private randomFace(): number {

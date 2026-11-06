@@ -1,6 +1,7 @@
 import './lobby/lobby.css';
 import { showGameLoading } from './gameLoading';
 import { canEnterNetGame, netEntryOf, stripNetParamsFromUrl } from './entryRoute.ts';
+import { html, setHtml } from './ui/dom/html';
 
 /**
  * 统一外壳（unified shell）：单一 SPA 同时承载「联机大厅」、「后台管理」与「游戏本体」。
@@ -53,7 +54,7 @@ function showServerConnectingOverlay(onRetry: () => void): void {
   if (retryOverlayEl) return;
   const overlay = document.createElement('div');
   overlay.id = 'server-connecting-overlay';
-  overlay.innerHTML = `
+  setHtml(overlay, html`
     <div class="sco-card">
       <div class="sco-spinner"></div>
       <div class="sco-title">正在连接大厅服务器…</div>
@@ -62,7 +63,7 @@ function showServerConnectingOverlay(onRetry: () => void): void {
         <button id="sco-retry-btn" class="sco-btn">立即重试</button>
       </div>
     </div>
-  `;
+  `);
   const style = document.createElement('style');
   style.textContent = `
     #server-connecting-overlay {

@@ -152,6 +152,7 @@ if (selected.ui) {
 // 6. Lint, Structure, Types, Docs
 if (selected.lint) add('lint', 'biome lint', 'pnpm', ['lint']);
 if (selected.lint) add('structure', 'structure budget', process.execPath, ['scripts/check-structure.mjs']);
+if (selected.lint) add('hygiene', 'HTML hygiene', process.execPath, ['node_modules/tsx/dist/cli.mjs', 'scripts/check-html-hygiene.ts']);
 if (selected.types) add('types', 'tsc + build', process.execPath, ['scripts/verify-types.mjs']);
 if (selected.docs) add('docs', 'docs:check', process.execPath, ['scripts/check-doc-paths.mjs']);
 

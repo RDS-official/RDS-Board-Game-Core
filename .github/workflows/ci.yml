@@ -149,6 +149,9 @@ jobs:
       - name: Structure budget
         if: needs.changes.outputs.code == 'true'
         run: node scripts/check-structure.mjs
+      - name: HTML hygiene (no bare innerHTML, html template contract)
+        if: needs.changes.outputs.code == 'true'
+        run: node node_modules/tsx/dist/cli.mjs scripts/check-html-hygiene.ts
       - name: Typecheck + production build
         if: needs.changes.outputs.code == 'true'
         run: node scripts/verify-types.mjs

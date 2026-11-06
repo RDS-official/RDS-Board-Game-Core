@@ -1,6 +1,5 @@
 import { GAME_REGISTRY } from '@rds/games/registry';
 
-import { escapeHtml as escText } from './htmlEscape';
 import { BoardGameScene, CameraPreset } from './render/scene';
 import { BoardGameAudio } from './render/audio';
 import { ensureCanvasFontsReady } from './render/fonts';
@@ -23,6 +22,7 @@ import { layoutForGame } from '@rds/app/layout';
 import { NetSession, NetSessionOptions } from '@rds/app/netSession';
 import { UniversalSession } from '@rds/app/session';
 import type { InteractiveObjectData } from './render/raycaster';
+import { html, setHtml } from './ui/dom/html';
 
 /**
  * Composition root only.
@@ -422,10 +422,11 @@ class BoardGameSimulatorApp {
       s.display = 'flex'; s.flexDirection = 'column'; s.alignItems = 'center'; s.justifyContent = 'center';
       s.gap = '12px'; s.background = 'rgba(13,17,23,.94)'; s.color = '#d9b45b';
       s.fontFamily = '"Alibaba PuHuiTi", system-ui, sans-serif';
-      el.innerHTML = [
-        '<div class="nw-title" style="font-size:20px;letter-spacing:2px"></div>',
-        '<div class="nw-sub" style="font-size:13px;color:#8b949e"></div>'
-      ].join('');
+      setHtml(
+        el,
+        html`<div class="nw-title" style="font-size:20px;letter-spacing:2px"></div>
+        <div class="nw-sub" style="font-size:13px;color:#8b949e"></div>`
+      );
       document.body.appendChild(el);
       this.netWaitEl = el;
     }
@@ -687,11 +688,13 @@ class BoardGameSimulatorApp {
     const alive = snapshot.players.filter(player => player.alive);
     const roster = document.createElement('div');
     roster.style.cssText = 'margin:0 0 18px;text-align:left;font-size:12px;line-height:1.7';
-    roster.innerHTML =
-      `<div style="color:#57ffa8">存活：${alive.length ? alive.map(p => `${p.avatar} ${escText(p.name)}`).join('、') : '无'}</div>` +
-      `<div style="color:#8b94a3">已退场：${
-        snapshot.players.filter(p => !p.alive).map(p => `${p.avatar} ${escText(p.name)}`).join('、') || '无'
-      }</div>`;
+    setHtml(
+      roster,
+      html`<div style="color:#57ffa8">存活：${alive.length ? alive.map(p => `${p.avatar} ${p.name}`) : '无'}</div>
+      <div style="color:#8b94a3">已退场：${
+        snapshot.players.filter(p => !p.alive).map(p => `${p.avatar} ${p.name}`) || '无'
+      }</div>`
+    );
 
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:10px;justify-content:center';
