@@ -43,7 +43,7 @@
 | AR-15 | 动作合法性每次都全量 `canonicalize` 比较 | `packages/kernel/src/engine.ts` 的 `isLegal()` | 结构化比较先做 O(1) 索引，深比较仅兜底 | 待修 |
 | AR-16 | 钩子 handler 异常被静默吞掉，strict 下规则静默失效 | `packages/kernel/src/aop.ts` 的 `safeHandler()` | strict 模式升级为 dispatch 失败并上报 | 待修 |
 | AR-17 | `GameRoom.setCurrentViewer` 用可变字段传参（隐式并发） | `packages/net/src/room.ts` 的 `submit()` + `apps/server/src/match.ts` 的 `submit()` | `submit(action, viewer)` 显式传参，删除 `setCurrentViewer` | 待修 |
-| AR-18 | 投影对 players / npcs / effects 做深拷贝 | `packages/kernel/src/observer.ts` 的 `projectState()` | 结构化共享 + 只拷脱敏字段 | 待修 |
+| AR-18 | 投影深拷贝 | ~~每次投影对 players / npcs / effects 做 JSON 深拷贝~~ | ✅ **已评估（2026-11-06）**：20 万次实测 291ms；浅拷贝 5.7ms 但会与权威状态共享嵌套引用；浅拷贝+深冻结 189ms（仅 1.5×）。**维持深拷贝**，把投影定义为只读 DTO 并在 `observer.ts` 写明（issue #213） | 维持现状 |
 | AR-19 | 座位数推导有 3 份实现 | `apps/server/src/rooms.ts` 的 `fixtureSeats()` / `seatsSupport()`、`apps/server/src/match.ts` 的 `ServerMatch`、`packages/app/src/netSession.ts` | `meta.seatRange` 声明式契约，三处统一读取 | 待修 |
 | AR-20 | 渲染层每次动作全量重建 3D 场景 | `apps/web/src/render/scene.ts` 的 `syncState()` 用 `actionLog.length` 作 boardKey | 按实体 id 增量 reconcile（`dom/keyed.ts` 的 3D 版） | 待修 |
 | AR-21 | 65 处 `innerHTML`，转义函数复制 4 份 | `apps/web/src/ui/hud.ts`、`lobby/lobby.ts`、`admin/admin.ts`、`main.ts` 各有 `esc*` | 抽 `html` tagged-template；CI grep 禁止裸 `innerHTML =` | 待修 |

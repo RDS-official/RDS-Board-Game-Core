@@ -78,6 +78,13 @@ export class CognitiveObserver {
     }
   }
 
+  /**
+   * 投影出某个观看者能看到的只读快照。
+   *
+   * **返回值是只读 DTO**：players / npcs / effects 都是深拷贝，改它不会回写权威
+   * 状态；反过来也别依赖"改了能生效"。深拷贝成本与替代方案（浅拷贝，或浅拷贝 +
+   * 冻结只快 1.5×）的实测记录见 issue #213，结论是维持现状。
+   */
   public static projectState(
     state: GameState,
     viewerId: PlayerId | 'GOD',
