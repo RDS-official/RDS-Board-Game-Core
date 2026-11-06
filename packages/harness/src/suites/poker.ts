@@ -1498,3 +1498,15 @@ test('poker: the per-seat buy-in reaches setup and replays with the log', () => 
   const report = engine.verifyReplay();
   assert(report.ok, `replay matches with per-seat stacks: ${report.errors.join('; ')}`);
 });
+
+test('poker: a silent human is auto-checked or auto-folded, never auto-called', async () => {
+  const { GAME_REGISTRY } = await import('@rds/games/registry');
+  const driver = GAME_REGISTRY.poker.driver!;
+  assertEqual(driver.decisionDeadlineMs, 30_000, 'poker declares a 30s decision deadline');
+  const pick = driver.timeoutAction!;
+  const state = {} as never;
+  assertEqual(pick([{ type: 'CHECK' }, { type: 'FOLD' }] as never, state, 'p1' as never)?.type, 'CHECK', 'free to check → check');
+  assertEqual(pick([{ type: 'CALL' }, { type: 'FOLD' }] as never, state, 'p1' as never)?.type, 'FOLD', 'facing a bet → fold, never call');
+  assertEqual(pick([{ type: 'CALL' }] as never, state, 'p1' as never), null, 'no safe action → keep waiting');
+});
+

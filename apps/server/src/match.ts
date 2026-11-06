@@ -91,6 +91,9 @@ export class ServerMatch {
   private lastAiAt = 0;
   /** 结算开始的时刻：等满冷却就自动替全桌发下一手。 */
   private settleAt = 0;
+  /** 当前行动者与这一手开始的时刻：真人超时代打用（issue #190）。 */
+  private turnActor?: PlayerId;
+  private turnSince = 0;
   /** 上一次派发周期规则（观察者低保）的时刻。 */
   private lastHeartbeatAt = 0;
   private disposed = false;
@@ -451,6 +454,11 @@ export class ServerMatch {
       const state = engine.getRawState();
       if (state.gameOver) return;
       const actor = engine.getActiveActorId();
+      // 行动者换人就把计时归零：超时只针对"同一个人卡在这一手"。
+      if (actor !== this.turnActor) {
+        this.turnActor = actor ?? undefined;
+        this.turnSince = now;
+      }
       // AI 与真人同一条管线：`isAutomated` 说出谁由机器控制，具体动作直接来自
       // 它自己的合法动作表（结算阶段就是「开下一手」），因此全桌 AI 也能继续打。
       const automated = !!actor && !!this.module.driver?.isAutomated?.(state, actor);
@@ -460,6 +468,18 @@ export class ServerMatch {
         this.lastAiAt = now;
         this.room.submitUnchecked(action);
         return;
+      }
+
+      // 真人超时代打：只有声明了 decisionDeadlineMs 的游戏才启用。
+      const deadline = this.module.driver?.decisionDeadlineMs;
+      if (deadline && actor && !automated && this.turnSince && now - this.turnSince >= deadline) {
+        const legal = engine.getLegalActions(actor);
+        const timeout = this.module.driver?.timeoutAction?.(legal, state, actor) ?? null;
+        if (timeout) {
+          this.turnSince = 0;
+          this.room.submitUnchecked(timeout);
+          return;
+        }
       }
       // 没有 AI 要动：结算态且冷却已满就直接发下一手。
       const hand = state.globalVars.hand as { street?: string } | undefined;
