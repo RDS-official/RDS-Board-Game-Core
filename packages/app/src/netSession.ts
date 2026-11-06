@@ -314,11 +314,17 @@ export class NetSession implements GamePresenter {
    */
   private onServerSeat(seat: PlayerId): void {
     if (!seat || seat === this.viewer) return;
+    // 换座位 = 换投影。旧 state / appliedRevision 属于另一套座位视角，必须整个
+    // 作废，否则下一帧 delta 会把「新座位」的补丁打到「旧座位」的状态上 ——
+    // 表现就是重连后手牌变了、公共牌丢了（掉线重连事故）。
     this.viewer = seat;
-    if (this.state) {
-      this.rebuild();
-      this.publish();
-    }
+    this.state = undefined;
+    this.appliedRevision = -1;
+    this.netRevision = 0;
+    this.guestTransport?.requestSnapshot();
+    this.serverTransport?.requestSnapshot();
+    this.rebuild();
+    this.publish();
   }
 
   private async startHost(): Promise<void> {
@@ -487,6 +493,13 @@ export class NetSession implements GamePresenter {
         detail: updateError,
         durationMs: 4200
       });
+      return;
+    }
+    // 防御：服务端偶尔会先推一帧别的座位的投影（重连竞态）。把别人的局面
+    // 应用到自己身上比丢帧严重得多，直接丢弃并要整包。
+    if (update.viewer && update.viewer !== this.viewer) {
+      this.guestTransport?.requestSnapshot();
+      this.serverTransport?.requestSnapshot();
       return;
     }
     if (update.full) {

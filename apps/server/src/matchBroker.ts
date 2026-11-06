@@ -4,6 +4,7 @@ import { MatchManager } from './match.ts';
 import type { ServerMatch } from './match.ts';
 import { profileOf } from './auth.ts';
 import { rooms, users } from './storage.ts';
+import { seatedPlayers } from './rooms.ts';
 import { rankAccount, rankAccounts, type GlobalPokerRow } from './pokerLeaderboard.ts';
 import { forgetRoom } from './pokerSettle.ts';
 
@@ -82,8 +83,10 @@ export class MatchBroker {
         return;
       }
 
-      // 座位 = 大厅玩家顺序（p1..pN），由服务器决定，客户端无法自报。
-      const seats = room.players.map(pid => {
+      // 座位 = 房间记录里钉死的座位号（p1..pN），由服务器决定，客户端无法自报。
+      // 以前按 players 数组顺序推导：掉线重连的玩家被追加到末尾 → 座位漂移，
+      // 重连后手牌与公开牌全部错位。现在按 seatIndex 排序，重连回到原座。
+      const seats = seatedPlayers(room.id).map(pid => {
         const profile = profileOf(pid);
         return {
           userId: pid,
