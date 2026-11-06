@@ -229,22 +229,23 @@ export function nodeGrid(node: MapGraphNode | undefined): { col: number; row: nu
 /* Trait tracks                                                                */
 /* -------------------------------------------------------------------------- */
 
-export function tracksOf(player: { customProps: Record<string, any> }): Record<TraitKey, number[]> {
+export function tracksOf(player: { customProps: Record<string, unknown> }): Record<TraitKey, number[]> {
   return player.customProps.tracks as Record<TraitKey, number[]>;
 }
 
-export function traitIndex(player: { customProps: Record<string, any> }, trait: TraitKey): number {
-  const index = Number(player.customProps.traitIndex?.[trait]);
+export function traitIndex(player: { customProps: Record<string, unknown> }, trait: TraitKey): number {
+  const indices = player.customProps.traitIndex as Record<TraitKey, number> | undefined;
+  const index = Number(indices?.[trait]);
   return Number.isFinite(index) ? index : 0;
 }
 
-export function traitValue(player: { customProps: Record<string, any> }, trait: TraitKey): number {
+export function traitValue(player: { customProps: Record<string, unknown> }, trait: TraitKey): number {
   const track = tracksOf(player)?.[trait] ?? [0];
   const index = Math.max(0, Math.min(track.length - 1, traitIndex(player, trait)));
   return track[index] ?? 0;
 }
 
-export function traitValues(player: { customProps: Record<string, any> }): Record<TraitKey, number> {
+export function traitValues(player: { customProps: Record<string, unknown> }): Record<TraitKey, number> {
   return {
     speed: traitValue(player, 'speed'),
     might: traitValue(player, 'might'),
@@ -1407,7 +1408,7 @@ export function weaponOptions(state: GameState, playerId: PlayerId): { value: st
   return options;
 }
 
-export function attackDiceFor(player: { customProps: Record<string, any> }, weaponId: string): number {
+export function attackDiceFor(player: { customProps: Record<string, unknown> }, weaponId: string): number {
   const spec = WEAPON_SPECS[weaponId] ?? WEAPON_SPECS.fists;
   const trait = spec.trait;
   const base = traitValue(player, trait as TraitKey);

@@ -1615,7 +1615,7 @@ export class SplendorRules {
     const currentIdx = order.indexOf(currentPId);
     const nextIdx = (currentIdx + 1) % order.length;
 
-    const globalVars: Record<string, any> = { ...next.globalVars, evolvedThisTurn: false };
+    const globalVars: Record<string, unknown> = { ...next.globalVars, evolvedThisTurn: false };
     let round = next.round;
     if (nextIdx === 0) {
       round += 1;
