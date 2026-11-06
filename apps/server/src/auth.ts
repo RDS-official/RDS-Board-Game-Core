@@ -18,6 +18,26 @@ function verify(password: string, salt: string, expected: string) {
   return crypto.timingSafeEqual(Buffer.from(hashPassword(password, salt).passHash), Buffer.from(expected));
 }
 
+/**
+ * 异步版本的密码校验（issue #203）。
+ *
+ * `scryptSync` 会把事件循环卡住几十毫秒 —— 登录是**未鉴权**入口，任何人并发打
+ * 几十个请求就能让整个服务（含对局 tick）卡顿。异步 scrypt 跑在线程池里，参数与
+ * 同步版完全一致（N=16384, r=8, p=1, 32 字节），已有哈希不需要迁移。
+ */
+const scryptAsync = (password: string, salt: string): Promise<Buffer> =>
+  new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, 32, (error, derived) => (error ? reject(error) : resolve(derived as Buffer)));
+  });
+
+async function verifyAsync(password: string, salt: string, expected: string): Promise<boolean> {
+  const derived = await scryptAsync(password, salt);
+  // 与同步版保持同一比较口径：哈希以 hex 字符串存储，这里也按 hex 文本比较。
+  const actual = Buffer.from(derived.toString('hex'), 'utf8');
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  return actual.length === expectedBuf.length && crypto.timingSafeEqual(actual, expectedBuf);
+}
+
 // ---- JWT：HMAC-SHA256，手写避免依赖 ----
 const b64u = (buf: Buffer | string) => Buffer.from(buf).toString('base64url');
 export function signJwt(payload: Record<string, unknown>): string {
@@ -121,9 +141,9 @@ export function register(_name: string, _password: string): { token: string; use
   return { error: '注册功能已关闭，请联系管理员分配账号' };
 }
 
-export function login(name: string, password: string) {
+export async function login(name: string, password: string) {
   const u = users.byName(name);
-  if (!u || !verify(password, u.salt, u.passHash)) return { error: '用户名或密码错误' };
+  if (!u || !(await verifyAsync(password, u.salt, u.passHash))) return { error: '用户名或密码错误' };
   if (u.disabled) return { error: '账号已被禁用，请联系管理员' };
   const role: 'admin' | 'user' = u.role === 'admin' ? 'admin' : 'user';
   return issue(u.id, u.name, role);

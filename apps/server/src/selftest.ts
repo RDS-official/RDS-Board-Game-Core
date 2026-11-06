@@ -29,11 +29,11 @@ let failed = 0;
 const ok = (cond: boolean, name: string) => { if (!cond) { failed++; console.error('FAIL', name); } else console.log('ok -', name); };
 
 // ---- 管理员自检：口令来自 env 里的随机值，不是仓库里的默认值 ----
-const adminLogin: any = login('rds', ADMIN_PASSWORD);
+const adminLogin: any = await login('rds', ADMIN_PASSWORD);
 ok(adminLogin.token && adminLogin.user.name === 'rds' && adminLogin.user.role === 'admin', 'admin rds login works');
 ok(isAdminUser(verifyJwt(adminLogin.token)), 'admin rds has admin privileges');
-ok((login('rds', 'wrong_pass') as any).error, 'admin wrong password rejected');
-ok((login('rds', 'kgnb666') as any).error, 'the old default password is not accepted');
+ok((await login('rds', 'wrong_pass') as any).error, 'admin wrong password rejected');
+ok((await login('rds', 'kgnb666') as any).error, 'the old default password is not accepted');
 
 // ---- 注册功能已关闭断言 ----
 const regClosed: any = register('new_user_' + Date.now(), 'secret123');
@@ -54,9 +54,9 @@ const reg: any = createUser(name, 'secret123', { displayName: '测试员1' });
 ok(reg.token && reg.user.id && reg.user.name === name, 'createUser issues token and user');
 ok((createUser(name, 'secret123') as any).error, 'duplicate name rejected by createUser');
 ok(verifyJwt(reg.token)?.sub === reg.user.id, 'jwt roundtrip');
-const login_r: any = login(name, 'secret123');
+const login_r: any = await login(name, 'secret123');
 ok(login_r.token, 'login works');
-ok((login(name, 'wrong!!') as any).error, 'wrong password rejected');
+ok((await login(name, 'wrong!!') as any).error, 'wrong password rejected');
 
 // 列表查询
 const userList = adminListUsers();
@@ -66,11 +66,11 @@ ok(userList.some(u => u.name === name), 'created user listed');
 // 管理员直接重置他人密码（无需原密码）
 const resetRes: any = adminResetPassword(reg.user.id, 'new_secret_888');
 ok(resetRes.ok === true, 'adminResetPassword works');
-ok(!!(login(name, 'new_secret_888') as any).token, 'login with new password works');
+ok(!!(await login(name, 'new_secret_888') as any).token, 'login with new password works');
 
 // 令牌吊销：改密/重置后旧 token 必须立即失效（authUserFromToken 回查记录 + tokenEpoch）
 ok(userFromAuthHeader('Bearer ' + reg.token) === null, 'old token rejected after admin password reset');
-const reLogin: any = login(name, 'new_secret_888');
+const reLogin: any = await login(name, 'new_secret_888');
 ok(!!(userFromAuthHeader('Bearer ' + reLogin.token)?.sub), 'fresh token after reset is accepted');
 
 // 用户自主修改密码（需校验原密码）
@@ -78,23 +78,23 @@ ok(!!(changeOwnPassword(reg.user.id, 'wrong_old', 'user_new_pass_666') as any).e
 ok(!!(changeOwnPassword(reg.user.id, 'new_secret_888', '123') as any).error, 'changeOwnPassword rejects short password');
 const selfChangeRes: any = changeOwnPassword(reg.user.id, 'new_secret_888', 'user_new_pass_666');
 ok(selfChangeRes.ok === true, 'changeOwnPassword works with correct old password');
-ok(!!(login(name, 'user_new_pass_666') as any).token, 'login with user changed password works');
+ok(!!(await login(name, 'user_new_pass_666') as any).token, 'login with user changed password works');
 ok(userFromAuthHeader('Bearer ' + reLogin.token) === null, 'old token rejected after self password change');
 
 // 资料与禁用更新
 const updateRes: any = adminUpdateUser(reg.user.id, { displayName: '改名测试员', disabled: true }, adminLogin.user.id);
 ok(updateRes.user && updateRes.user.displayName === '改名测试员' && updateRes.user.disabled === true, 'adminUpdateUser works');
-ok(!!(login(name, 'user_new_pass_666') as any).error, 'disabled user login rejected');
+ok(!!(await login(name, 'user_new_pass_666') as any).error, 'disabled user login rejected');
 // 禁用账号的旧 token 同样被拒
 adminUpdateUser(reg.user.id, { disabled: false }, adminLogin.user.id);
-const enabledLogin: any = login(name, 'user_new_pass_666');
+const enabledLogin: any = await login(name, 'user_new_pass_666');
 adminUpdateUser(reg.user.id, { disabled: true }, adminLogin.user.id);
 ok(userFromAuthHeader('Bearer ' + enabledLogin.token) === null, 'token rejected while account is disabled');
 adminUpdateUser(reg.user.id, { disabled: false }, adminLogin.user.id);
 
 // 恢复启用
 adminUpdateUser(reg.user.id, { disabled: false }, adminLogin.user.id);
-ok(!!(login(name, 'user_new_pass_666') as any).token, 'enabled user login works again');
+ok(!!(await login(name, 'user_new_pass_666') as any).token, 'enabled user login works again');
 
 // 删除保护：不能删除系统管理员 rds
 ok(!!(adminDeleteUser('u_admin_rds', adminLogin.user.id) as any).error, 'rds admin cannot be deleted');
@@ -624,6 +624,35 @@ ok(deleteRes.ok === true, 'adminDeleteUser works');
   const res = await app.fetch(new Request('http://127.0.0.1/healthz', { headers: { host: '127.0.0.1' } }));
   const body: any = await res.json();
   ok(body.hubStorage === 'ok', 'healthz exposes the hub storage state');
+}
+
+/* -------------------------------------------------------------------------- */
+/* #203：并发登录必须被限速（预扣名额）                                            */
+/* -------------------------------------------------------------------------- */
+{
+  const raceName = 'race_' + Date.now();
+  createUser(raceName, 'secret123');
+  const attempt = () =>
+    app.fetch(
+      new Request('http://127.0.0.1/api/auth/login', {
+        method: 'POST',
+        headers: { host: '127.0.0.1', 'content-type': 'application/json' },
+        body: JSON.stringify({ name: raceName, password: 'definitely-wrong' })
+      })
+    );
+  const results = await Promise.all(Array.from({ length: 14 }, attempt));
+  const limited = results.filter(r => r.status === 429).length;
+  ok(limited >= 3, `concurrent wrong passwords are rate limited (429 x${limited})`);
+
+  // 正确的密码也不能在限速生效后再放行。
+  const afterLimit = await app.fetch(
+    new Request('http://127.0.0.1/api/auth/login', {
+      method: 'POST',
+      headers: { host: '127.0.0.1', 'content-type': 'application/json' },
+      body: JSON.stringify({ name: raceName, password: 'secret123' })
+    })
+  );
+  ok(afterLimit.status === 429, 'the limiter rejects even a correct password once tripped');
 }
 
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');
