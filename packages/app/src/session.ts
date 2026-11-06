@@ -289,8 +289,20 @@ export class UniversalSession implements GamePresenter {
     return buildNodeDiscoveryView(this.snapshot.board.mapGraph.nodes[nodeId], { module: this.module });
   }
 
+  /**
+   * 幕布按 (revision, viewer) 记忆（issue #222）。
+   *
+   * HUD 每帧都会问一次 `moment()`，而 `describeMoment` 是游戏自定义函数（可能遍历
+   * 整张牌桌）。同一帧里重复计算纯属浪费，这里缓存到下一次状态变化为止。
+   */
+  private momentCache?: { revision: number; viewer: string; value: UiMoment | null };
+
   /** Full-screen beat declared by the game (a haunt starting), or null. */
   public moment(): UiMoment | null {
+    const viewerKey = String(this.snapshot?.viewer ?? '');
+    if (this.momentCache && this.momentCache.revision === this.revision && this.momentCache.viewer === viewerKey) {
+      return this.momentCache.value;
+    }
     // The snapshot's board is already the viewer's projection, so the curtain
     // reads the same masked cards the table shows — no second projection pass.
     const state = this.snapshot.board;
@@ -299,7 +311,9 @@ export class UniversalSession implements GamePresenter {
       viewer: this.snapshot.viewer,
       handOf: playerId => projectedHandOf(state, playerId)
     });
-    return moment ? this.resolveMomentActions(moment) : null;
+    const value = moment ? this.resolveMomentActions(moment) : null;
+    this.momentCache = { revision: this.revision, viewer: viewerKey, value };
+    return value;
   }
 
   /** 宿主接管「退出牌桌」：单机是回到入口页，联机是回到大厅。 */

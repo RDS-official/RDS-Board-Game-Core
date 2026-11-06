@@ -928,3 +928,46 @@ test('presentation: an own hand row dodges the HUD, and only as far as it must',
     'overlap is the worst single panel, not the sum'
   );
 });
+
+test('presentation: describeMoment is memoized per revision, not recomputed every frame', async () => {
+  const { defineGame } = await import('@rds/kernel/module');
+  const { definePresentation } = await import('@rds/kernel/module');
+  const { UniversalSession } = await import('@rds/app/session');
+  const { emptyState } = await import('../suiteHelpers.ts');
+
+  let calls = 0;
+  const module = defineGame({
+    meta: {
+      id: 'moment_memo_fixture',
+      name: 'Moment memo',
+      description: 'counts describeMoment calls',
+      version: '1.0.0',
+      capabilities: {
+        simultaneousMoves: false,
+        hiddenInformation: false,
+        interruptStack: false,
+        dynamicRules: false,
+        topology: 'none'
+      }
+    },
+    hooks: [],
+    presentation: definePresentation({
+      describeMoment: () => {
+        calls += 1;
+        return { key: 'memo', title: '幕布', durationMs: 1000 };
+      }
+    }),
+    setup: seed => emptyState('moment_memo_fixture', seed),
+    legalActions: () => [],
+    reduce: state => state,
+    outcome: () => ({ gameOver: false, winner: null })
+  });
+
+  const session = new UniversalSession(module, 1);
+  const first = session.moment();
+  const second = session.moment();
+  const third = session.moment();
+  assert(first && second && third, 'the moment is available');
+  assertEqual(calls, 1, 'describeMoment ran once for three reads in the same revision');
+});
+
