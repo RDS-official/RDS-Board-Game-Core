@@ -436,3 +436,28 @@ test('crypto: sha256 and hmac-sha256 match the FIPS 180-4 / RFC 4231 vectors', a
   );
 });
 
+
+test('replay: scrubbing the timeline reuses checkpoints instead of replaying from zero', async () => {
+  const { UniversalGameEngine } = await import('@rds/kernel/engine');
+  const { counterModule } = await import('../suiteHelpers.ts');
+
+  const engine = new UniversalGameEngine(counterModule, 5);
+  for (let i = 0; i < 90; i++) {
+    const r = engine.dispatch({ type: 'TICK', playerId: 'p1' });
+    assert(r.ok, `tick ${i} accepted: ${r.error ?? ''}`);
+  }
+
+  engine.replayTo(90);
+  const afterFirst = engine.replayDispatchCount();
+
+  engine.replayTo(89);
+  const afterScrub = engine.replayDispatchCount();
+  const replayed = afterScrub - afterFirst;
+  assert(replayed <= 64, `a nearby scrub replays at most one checkpoint window (replayed ${replayed})`);
+
+  // 正确性：回放结果必须与「从零重放 89 步」完全一致。
+  const fresh = new UniversalGameEngine(counterModule, 5);
+  for (let i = 0; i < 89; i++) fresh.dispatch({ type: 'TICK', playerId: 'p1' });
+  assertEqual(engine.getStateHash(), fresh.getStateHash(), 'the checkpointed replay matches a full replay');
+});
+
