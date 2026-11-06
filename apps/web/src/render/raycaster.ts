@@ -3,7 +3,8 @@ import * as THREE from 'three';
 export interface InteractiveObjectData {
   type: 'ENTITY' | 'NODE' | 'EDGE' | 'DICE' | 'ZONE';
   id: string;
-  metadata?: any;
+  /** 节点自定义元数据，由场景构建方写入；消费处按需收窄（issue #234）。 */
+  metadata?: unknown;
 }
 
 export class BoardRaycaster {
@@ -158,7 +159,7 @@ export class BoardRaycaster {
   private isDraggable(data: InteractiveObjectData | null): data is InteractiveObjectData {
     // A surface can opt out of dragging while staying clickable (the viewer's
     // own hand is a read-only overlay: details on click, never a drag prop).
-    if (data?.metadata?.draggable === false) return false;
+    if ((data?.metadata as { draggable?: boolean } | undefined)?.draggable === false) return false;
     return data?.type === 'ENTITY' || data?.type === 'ZONE';
   }
 

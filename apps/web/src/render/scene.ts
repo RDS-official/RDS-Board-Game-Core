@@ -1999,7 +1999,7 @@ export class BoardGameScene {
       // detach from it as soon as the camera moves. Its cards are large and
       // face-on, so the generic cluster chip is unnecessary.
       if (this.handRows.get(zone.id)?.cameraAttached) continue;
-      const groups = buildCardGroups(zone, state.entities as Record<string, any>);
+      const groups = buildCardGroups(zone, state.entities as unknown as Record<string, Entity>);
       for (const group of groups) {
         if (group.count < 2) continue;
         const members = group.entityIds

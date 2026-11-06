@@ -1,3 +1,4 @@
+import { errorText } from '../errorText';
 import type { HubGameInfo, HubRoomInfo } from '@rds/room-protocol';
 import { getGames, getRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoom, me, setReady, kickPlayer, transferHost, setAiSeats, updateDisplayName, changeMyPassword, uploadAvatar, UserProfile, getPokerLeaderboard, PokerLeaderboardResponse } from './api.ts';
 import { showToast } from './toast.ts';
@@ -117,11 +118,20 @@ function openWs(): void {
     void refreshRooms();
   };
   ws.onmessage = ev => {
-    let msg: any;
-    try { msg = JSON.parse(ev.data); } catch { return; }
-    if (msg.t === 'room-updated') onRoomUpdated(msg.room as HubRoomInfo);
-    else if (msg.t === 'presence') onPresence(String(msg.roomId), Array.isArray(msg.online) ? msg.online.map(String) : []);
-    else if (msg.t === 'lobby-chat' && user) onChat(msg.roomId, { from: msg.from, name: msg.name, text: msg.text, at: msg.at, self: msg.from === user.sub });
+    let msg: Record<string, unknown>;
+    try { msg = JSON.parse(ev.data) as Record<string, unknown>; } catch { return; }
+    const type = String(msg.t ?? '');
+    if (type === 'room-updated') onRoomUpdated(msg.room as HubRoomInfo);
+    else if (type === 'presence') onPresence(String(msg.roomId), Array.isArray(msg.online) ? msg.online.map(String) : []);
+    else if (type === 'lobby-chat' && user) {
+      onChat(String(msg.roomId), {
+        from: String(msg.from ?? ''),
+        name: String(msg.name ?? ''),
+        text: String(msg.text ?? ''),
+        at: Number(msg.at ?? 0),
+        self: msg.from === user.sub
+      });
+    }
     // hello/peer-join/peer-leave：游戏信令消息，大厅忽略
   };
   ws.onclose = () => { ws = null; wsHealthy = false; scheduleWsRetry(); };
@@ -253,7 +263,7 @@ function render(): void {
 /** 房间页渲染签名：签名字段变化才值得重建 DOM */
 function roomSig(r: HubRoomInfo): string {
   return [r.id, r.status, r.name, r.gameId, r.hostId, r.maxPlayers, r.isPrivate ? 1 : 0, r.code ?? '', r.scenarioId ?? '',
-    r.players.map(p => p.id + ':' + ((p as any).displayName || p.name) + ':' + ((p as any).avatarUrl ?? '')).join(','),
+    r.players.map(p => p.id + ':' + (p.displayName || p.name) + ':' + (p.avatarUrl ?? '')).join(','),
     (r.readyPlayers ?? []).join(','), onlineIds.join(',')].join('|');
 }
 
@@ -555,7 +565,7 @@ async function refreshRooms() {
     if (hint) hint.textContent = roomsHintText(rooms);
     const shelf = document.getElementById('shelf');
     if (shelf) shelf.innerHTML = games.map(shelfCard).join('');
-  } catch (e: any) { el.innerHTML = '<span class="lob-error">' + esc(e.message) + '</span>'; }
+  } catch (e) { el.innerHTML = '<span class="lob-error">' + esc(errorText(e)) + '</span>'; }
 }
 
 async function refreshLeaderboard() {
@@ -776,8 +786,8 @@ async function refreshRoom() {
     if (roomSig(fresh) === lastRoomSig) { currentRoom = fresh; return; }
     currentRoom = fresh;
     render();
-  } catch (e: any) {
-    currentRoom = null; render(); showToast(e.message, 'error');
+  } catch (e) {
+    currentRoom = null; render(); showToast(errorText(e), 'error');
   }
 }
 
@@ -803,7 +813,7 @@ function bind() {
         lastRoomSig = '';
         stripNetParamsFromUrl();
         await boot();
-      } catch (e: any) { err(e.message); }
+      } catch (e) { err(errorText(e)); }
     };
     $('login')?.addEventListener('click', doLogin);
     $('name')?.addEventListener('keydown', ev => { if (ev.key === 'Enter') doLogin(); });
@@ -840,7 +850,7 @@ function bind() {
       pendingAvatar = await compressImage(file);
       $('pf-avatar-wrap').innerHTML = '<img class="lob-avatar" src="' + pendingAvatar.dataUrl + '" alt="" />';
       showToast('头像已就绪，点保存生效', 'success');
-    } catch (e: any) { showToast(e.message || '图片处理失败', 'error'); }
+    } catch (e) { showToast(errorText(e) || '图片处理失败', 'error'); }
     input.value = '';
   });
   $('pf-save')?.addEventListener('click', async () => {
@@ -861,7 +871,7 @@ function bind() {
       roomsCacheSig = '';
       render();
       showToast('资料已更新', 'success');
-    } catch (e: any) { showToast(e.message, 'error'); }
+    } catch (e) { showToast(errorText(e), 'error'); }
   });
 
   $('pf-pass-submit')?.addEventListener('click', async () => {
@@ -895,9 +905,9 @@ function bind() {
       if (errEl) errEl.style.display = 'none';
       showToast('密码修改成功，请牢记新密码', 'success');
       ($('profile-modal') as HTMLElement).hidden = true;
-    } catch (e: any) {
-      if (errEl) { errEl.textContent = e.message || '修改密码失败'; errEl.style.display = 'block'; }
-      showToast(e.message || '修改密码失败', 'error');
+    } catch (e) {
+      if (errEl) { errEl.textContent = errorText(e) || '修改密码失败'; errEl.style.display = 'block'; }
+      showToast(errorText(e) || '修改密码失败', 'error');
     }
   });
 
@@ -938,7 +948,7 @@ function bind() {
       $('create-modal').hidden = true;
       currentRoom = room; render();
       wsSend({ t: 'join-room', roomId: room.id });
-    } catch (e: any) { showToast(e.message, 'error'); }
+    } catch (e) { showToast(errorText(e), 'error'); }
   });
 
   // 快速加入 / 私密码模态
@@ -950,7 +960,7 @@ function bind() {
       $('code-modal').hidden = true;
       render();
       wsSend({ t: 'join-room', roomId: currentRoom.id });
-    } catch (e: any) { showToast(e.message, 'error'); }
+    } catch (e) { showToast(errorText(e), 'error'); }
   });
   $('rooms')?.addEventListener('click', async (ev) => {
     const btn = (ev.target as HTMLElement).closest<HTMLElement>('[data-join]');
@@ -966,7 +976,7 @@ function bind() {
       return;
     }
     try { currentRoom = await joinRoom(id); render(); wsSend({ t: 'join-room', roomId: id }); }
-    catch (e: any) { showToast(e.message, 'error'); }
+    catch (e) { showToast(errorText(e), 'error'); }
   });
 
   // 排行榜点击单项查看战绩详情
@@ -1045,7 +1055,7 @@ function bindRoom() {
   const isHost = r0.hostId === user!.sub;
 
   $('exit-room')?.addEventListener('click', async () => {
-    try { await leaveRoom(r0.id); } catch (e: any) { showToast(e.message, 'error'); return; }
+    try { await leaveRoom(r0.id); } catch (e) { showToast(errorText(e), 'error'); return; }
     wsSend({ t: 'leave-room' });
     currentRoom = null; onlineIds = []; render();
   });
@@ -1060,7 +1070,7 @@ function bindRoom() {
     try {
       currentRoom = await setRoomStatus(r0.id, 'playing');
       onEnterGame?.({ query: gameQuery(currentRoom, 'host') });
-    } catch (e: any) { showToast(e.message, 'error'); }
+    } catch (e) { showToast(errorText(e), 'error'); }
   });
 
   // 房主增删内置 AI 补位（目前仅德州扑克）。
@@ -1072,7 +1082,7 @@ function bindRoom() {
       lastRoomSig = roomSig(currentRoom);
       render();
       showToast(next > 0 ? `已添加 ${next} 个 AI` : '已移除全部 AI', 'success');
-    } catch (e: any) { showToast(e.message, 'error'); }
+    } catch (e) { showToast(errorText(e), 'error'); }
   };
   $('ai-add')?.addEventListener('click', () => void adjustAi(1));
   $('ai-remove')?.addEventListener('click', () => void adjustAi(-1));
@@ -1081,7 +1091,7 @@ function bindRoom() {
   $('ready-toggle')?.addEventListener('click', async () => {
     const myReady = (currentRoom?.readyPlayers ?? []).includes(user!.sub);
     try { currentRoom = await setReady(r0.id, !myReady); render(); }
-    catch (e: any) { showToast(e.message, 'error'); }
+    catch (e) { showToast(errorText(e), 'error'); }
   });
 
   // 房主座位操作（事件委托：seat 卡片随刷新重建）
@@ -1091,7 +1101,7 @@ function bindRoom() {
     try {
       if (kick) { currentRoom = await kickPlayer(r0.id, kick.dataset.kick!); render(); }
       else if (host) { currentRoom = await transferHost(r0.id, host.dataset.host!); render(); showToast('已转移房主', 'success'); }
-    } catch (e: any) { showToast(e.message, 'error'); }
+    } catch (e) { showToast(errorText(e), 'error'); }
   });
 
   // 聊天
@@ -1135,8 +1145,8 @@ function gameQuery(r: HubRoomInfo, role: 'host' | 'guest'): string {
   // 阶段一：座位 → 昵称/头像，房主开局时写进内核 Player 同步全员。
   const roster: Record<string, { name: string; avatarUrl?: string }> = {};
   r.players.forEach((p, i) => {
-    const name = (p as any).displayName || p.name;
-    const avatarUrl = (p as any).avatarUrl;
+    const name = p.displayName || p.name;
+    const avatarUrl = p.avatarUrl;
     roster['p' + (i + 1)] = avatarUrl ? { name, avatarUrl } : { name };
   });
   q.set('roster', JSON.stringify(roster));
