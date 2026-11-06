@@ -650,7 +650,8 @@ export type VisualEventType =
   | 'DECISION_OPEN'
   | 'DECISION_COMMIT'
   | 'DECISION_REVEAL'
-  | 'ANNOUNCEMENT';
+  | 'ANNOUNCEMENT'
+  | 'CLOCK_CASCADE_LIMIT';
 
 export interface VisualTraceEvent {
   id: string;

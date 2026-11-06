@@ -132,6 +132,9 @@ export interface ExportedLog {
 }
 
 /** Bump when scheduling/legality semantics change; logs are rejected, not migrated. */
+/** 单次时钟推进内允许解算的最大级联层数（超限发 CLOCK_CASCADE_LIMIT 事件）。 */
+export const CLOCK_CASCADE_LIMIT = 16;
+
 export const ENGINE_VERSION = 3;
 
 function normalizeLimit(value: number | undefined, fallback: number, name: string): number {
@@ -760,6 +763,21 @@ export class UniversalGameEngine {
     }
   }
 
+  /** 与级联循环同一判定：还有没有"已到期但没处理"的窗口。 */
+  private hasDueWindow(state: GameState): boolean {
+    return state.pendingDecisions.some(
+      window =>
+        window.status === 'OPEN' &&
+        ((window.deadline !== undefined && window.deadline <= state.clock) ||
+          window.participants.some(
+            pid =>
+              window.submissions[pid] === undefined &&
+              window.participantDeadlines?.[pid] !== undefined &&
+              window.participantDeadlines[pid] <= state.clock
+          ))
+    );
+  }
+
   private isLegal(action: Action): boolean {
     const actorId = this.actorIdOf(action);
     // 驱动方动作（心跳、补给等）只由 app / server 的定时器派发，永远不出现在
@@ -1059,7 +1077,11 @@ export class UniversalGameEngine {
 
     let next = this.stampDeadlines({ ...this.state, clock: this.state.clock + ticks, seq });
 
-    for (let guard = 0; guard < 16; guard++) {
+    // 单次时钟推进里最多解算这么多层「到期 → 解算 → 又到期」的级联。
+    // 之前这个 16 是裸数字且超限后静默退出，调用方无法知道还有窗口没处理
+    // （issue #207）：现在超限会发一条 CLOCK_CASCADE_LIMIT 事件。
+    let guard = 0;
+    for (; guard < CLOCK_CASCADE_LIMIT; guard++) {
       const dueWindow = next.pendingDecisions.find(
         window =>
           window.status === 'OPEN' &&
@@ -1148,6 +1170,18 @@ export class UniversalGameEngine {
       if (resumed.error) return this.fail(resumed.error, events);
       next = resumed.state;
       next = this.stampDeadlines(next);
+    }
+
+    if (guard >= CLOCK_CASCADE_LIMIT && this.hasDueWindow(next)) {
+      const pending = next.pendingDecisions.filter(window => window.status === 'OPEN').length;
+      events.push(
+        this.event(
+          ctx,
+          'CLOCK_CASCADE_LIMIT',
+          `时钟级联达到 ${CLOCK_CASCADE_LIMIT} 层上限，仍有 ${pending} 个决策窗口到期未处理`,
+          900
+        )
+      );
     }
 
     const tickAction: Action = {
