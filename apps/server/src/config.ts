@@ -60,13 +60,59 @@ export const DATA_DIR = env.HUB_DATA_DIR || path.join(path.dirname(fileURLToPath
 export const DEFAULT_ADMIN_USER = env.ADMIN_USER || 'rds';
 export const DEFAULT_ADMIN_PASSWORD = adminPassword();
 
+/** 仓库里出现过的弱口令 / NPM 示例值，生产一律拒绝。 */
+const WEAK_PASSWORDS = new Set(['kgnb666', 'admin', 'password', '123456', 'changeme', 'your-secure-jwt-secret-here']);
+const DEV_HUB_SECRET = 'dev-secret-do-not-use-in-prod';
+
+export interface SecretProblem {
+  variable: 'ADMIN_PASSWORD' | 'HUB_SECRET';
+  reason: string;
+}
+
+/**
+ * 生产环境凭据校验（issue #227）。
+ *
+ * 纯函数：只看传入的 env，便于单测；开发/CI 环境（NODE_ENV !== 'production'）永远返回空数组。
+ */
+export function validateProductionSecrets(input: {
+  NODE_ENV?: string;
+  ADMIN_PASSWORD?: string;
+  HUB_SECRET?: string;
+}): SecretProblem[] {
+  if (input.NODE_ENV !== 'production') return [];
+  const problems: SecretProblem[] = [];
+  const password = input.ADMIN_PASSWORD ?? '';
+  if (!password) problems.push({ variable: 'ADMIN_PASSWORD', reason: '未配置' });
+  else if (WEAK_PASSWORDS.has(password.toLowerCase())) problems.push({ variable: 'ADMIN_PASSWORD', reason: '是仓库示例/弱口令' });
+  else if (password.length < 8) problems.push({ variable: 'ADMIN_PASSWORD', reason: '少于 8 位' });
+
+  const secret = input.HUB_SECRET ?? '';
+  if (!secret) problems.push({ variable: 'HUB_SECRET', reason: '未配置' });
+  else if (secret === DEV_HUB_SECRET) problems.push({ variable: 'HUB_SECRET', reason: '仍是开发默认值' });
+  else if (secret.length < 16) problems.push({ variable: 'HUB_SECRET', reason: '少于 16 位' });
+  return problems;
+}
+
 function adminPassword(): string {
   if (env.ADMIN_PASSWORD) return env.ADMIN_PASSWORD;
   if (env.NODE_ENV === 'production') {
-    console.error('[hub] 高危：未配置 ADMIN_PASSWORD，正在使用默认口令。请在部署环境（.env 文件或环境变量）中配置 ADMIN_PASSWORD 并重启。');
+    // 生产缺失会在下面的 assertProductionSecrets() 里直接拒绝启动，
+    // 这里只保证开发环境有个可用的默认口令。
+    return 'kgnb666';
   }
   return 'kgnb666';
 }
+
+/** 生产环境缺凭据 / 用弱口令时**拒绝启动**（issue #227）。 */
+export function assertProductionSecrets(): void {
+  const problems = validateProductionSecrets(env);
+  if (problems.length === 0) return;
+  const detail = problems.map(p => `${p.variable} ${p.reason}`).join('；');
+  throw new Error(
+    `[hub] 生产环境凭据不合格：${detail}。请通过 .env 或 PM2 环境变量注入强随机值后重启（参考 .env.example）。`
+  );
+}
+assertProductionSecrets();
 
 export function randomId(prefix = ''): string {
   return prefix + crypto.randomBytes(8).toString('hex');

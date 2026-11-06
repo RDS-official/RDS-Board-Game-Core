@@ -529,6 +529,26 @@ ok(deleteRes.ok === true, 'adminDeleteUser works');
   ok(!isLedgerDegraded(), 'the ledger returns to normal for the rest of the suite');
 }
 
+/* -------------------------------------------------------------------------- */
+/* #227：生产环境弱口令必须被拒绝                                                 */
+/* -------------------------------------------------------------------------- */
+{
+  const { validateProductionSecrets } = await import('./config.ts');
+  const good = { NODE_ENV: 'production', ADMIN_PASSWORD: 's3cure-Random-Value', HUB_SECRET: 'a'.repeat(32) };
+  ok(validateProductionSecrets(good).length === 0, 'strong production secrets pass');
+
+  const weak = validateProductionSecrets({ ...good, ADMIN_PASSWORD: 'kgnb666' });
+  ok(weak.some(p => p.variable === 'ADMIN_PASSWORD' && p.reason.includes('弱口令')), 'the repo default password is rejected');
+
+  const missing = validateProductionSecrets({ NODE_ENV: 'production', HUB_SECRET: good.HUB_SECRET });
+  ok(missing.some(p => p.variable === 'ADMIN_PASSWORD' && p.reason === '未配置'), 'a missing admin password is rejected');
+
+  const devSecret = validateProductionSecrets({ ...good, HUB_SECRET: 'dev-secret-do-not-use-in-prod' });
+  ok(devSecret.some(p => p.variable === 'HUB_SECRET'), 'the dev hub secret is rejected in production');
+
+  ok(validateProductionSecrets({ NODE_ENV: 'development' }).length === 0, 'development stays permissive');
+}
+
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');
 try { fs.rmSync(process.env.HUB_DATA_DIR!, { recursive: true, force: true }); } catch { /* 临时目录清理失败无所谓 */ }
 process.exit(failed ? 1 : 0);
