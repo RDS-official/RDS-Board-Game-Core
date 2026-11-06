@@ -228,3 +228,62 @@ test('engine: non-participants cannot act through an open decision', () => {
 });
 
 /* -------------------------------------------------------------------------- */
+
+test('engine: hitting the clock cascade limit is reported, not silent', async () => {
+  const { defineGame } = await import('@rds/kernel/module');
+  const { emptyState } = await import('../suiteHelpers.ts');
+  const { openDecision } = await import('@rds/kernel/decisions');
+  const { CLOCK_CASCADE_LIMIT, UniversalGameEngine } = await import('@rds/kernel/engine');
+
+  // 20 个同时到期的窗口：每次循环只解算一个，必然撞上 16 层上限。
+  const manyWindows = defineGame({
+    meta: {
+      id: 'cascade_fixture',
+      name: 'Cascade fixture',
+      description: '20 due decision windows',
+      version: '1.0.0',
+      capabilities: {
+        simultaneousMoves: true,
+        hiddenInformation: false,
+        interruptStack: false,
+        dynamicRules: false,
+        topology: 'none'
+      }
+    },
+    hooks: [],
+    setup: seed => {
+      let state = emptyState('cascade_fixture', seed);
+      for (let i = 0; i < 20; i++) {
+        const opened = openDecision(
+          state,
+          {
+            kind: 'VOTE',
+            title: `window ${i}`,
+            participants: ['p1'],
+            secret: false,
+            policy: { type: 'ALL_COMMITTED' },
+            participantDeadlines: { p1: 1 }
+          },
+          `w${i}`
+        );
+        state = opened.state;
+      }
+      return { ...state, phase: 'WAIT' };
+    },
+    legalActions: () => [],
+    reduce: state => state,
+    outcome: () => ({ gameOver: false, winner: null })
+  });
+
+  const engine = new UniversalGameEngine(manyWindows, 1);
+  const result = engine.dispatch({ type: '__TICK__', playerId: 'SYSTEM', payload: { ticks: 1 } });
+  assert(result.ok, `tick accepted: ${result.error ?? ''}`);
+  const limitEvent = result.events.find(event => event.type === 'CLOCK_CASCADE_LIMIT');
+  assert(!!limitEvent, 'the cascade limit emits a visible event');
+  assert(String(limitEvent?.title).includes(String(CLOCK_CASCADE_LIMIT)), 'the message names the limit');
+  assert(
+    engine.getRawState().pendingDecisions.some(window => window.status === 'OPEN'),
+    'windows beyond the limit stay open for the next tick'
+  );
+});
+
