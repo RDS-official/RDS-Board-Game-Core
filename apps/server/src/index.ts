@@ -497,8 +497,11 @@ setRoomChangedHook(room => {
   // 房间广播面向全部大厅订阅者，必须剥掉私密房加入码（房主经 REST 拿全量）
   const { code: _code, ...safe } = room;
   hub.broadcastRoomUpdate(safe as typeof room);
-  // 中心模式：房间结束即释放服务端对局（引擎、投影缓存与时钟定时器）
+  // 中心模式：房间结束即释放服务端对局（引擎、投影缓存与时钟定时器）；
+  // 成员变化（离开 / 被请离）也必须同步撤销对局座位，否则出局者的旧连接
+  // 仍持有底牌投影与提交权限（issue #185）。
   if (room.status === 'closed') matchBroker.onRoomClosed(room.id);
+  else matchBroker.onRoomMembersChanged(room.id);
 });
 // 阶段三：房间回收——60s 清扫一次（全员离线 >10min 或 6h 无动作 → 关房）。
 setInterval(() => {

@@ -559,6 +559,63 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
 
   // 排名数据不含隐藏信息：字段只有余额与统计。
   ok(!('entities' in board[0]) && !('hand' in board[0]), 'the leaderboard carries no hidden game state');
+
+  // ---- issue #185：离开/被踢后座位撤销 ----
+  {
+    const { MatchBroker } = await import('./matchBroker.ts');
+    const { leaveRoom, kickPlayer: kick, createRoom: create, setRoomStatus: setStatus, joinRoom: join, setRoomChangedHook } =
+      await import('./rooms.ts');
+    const { rooms } = await import('./storage.ts');
+    const broker = new MatchBroker();
+    // 与 index.ts 相同的钩子接线：成员变化也通知 broker（自检模块默认钩子是空函数）。
+    setRoomChangedHook(room => {
+      if (room.status === 'closed') broker.onRoomClosed(room.id);
+      else broker.onRoomMembersChanged(room.id);
+    });
+    const host = a;
+    const mkGuest = (tag: string): string => {
+      const created: any = createUser('seatrev_' + tag + '_' + Date.now(), 'secret123');
+      return created.user.id;
+    };
+    const guest = mkGuest('k');
+    const guest2 = mkGuest('l');
+    // 默认扑克桌：3 真人 + 3 AI 补位（joinRoom 只在 open 状态收人，两个客人先入房）。
+    const pokerRoom: any = create(host, '撤销测试房', 'poker');
+    join(guest, pokerRoom.id);
+    join(guest2, pokerRoom.id);
+    const { setAiSeats } = await import('./rooms.ts');
+    setAiSeats(host, pokerRoom.id, 3);
+    setStatus(host, pokerRoom.id, 'playing');
+    // 建局并 attach 三个真人
+    const seats = ((rooms.byId(pokerRoom.id) as any).players as string[]).map(pid => ({ userId: pid, name: pid }));
+    const match = broker.matches.ensure({
+      roomId: pokerRoom.id,
+      gameId: 'poker',
+      players: seats,
+      seats: seats.length,
+      aiSeats: 3
+    });
+    ok(!!match.attach(host), 'host attach works');
+    ok(!!match.attach(guest), 'guest attach works');
+    ok(!('error' in match.snapshotFor(guest)), 'guest gets a snapshot before removal');
+
+    // 房主把 guest 请离（房间仍在 playing）：座位必须立即撤销。
+    const kickedNow: any = kick(host, pokerRoom.id, guest);
+    ok(!kickedNow.error, 'host kicks the guest mid-hand');
+    ok(!match.seatOf(guest), 'the removed player no longer owns a seat');
+    ok('error' in match.snapshotFor(guest), 'snapshot is refused after removal');
+    ok('error' in match.deltaFor(guest), 'delta push is refused after removal');
+    const rejected = match.submit(guest, { type: 'FOLD', playerId: 'p2' });
+    ok(!rejected.ok, 'submit is refused after removal');
+
+    // 主动离开同样撤销座位。
+    const left: any = leaveRoom(guest2, pokerRoom.id);
+    ok(!left.error, 'a player can leave mid-hand');
+    ok(!match.seatOf(guest2), 'the leaver no longer owns a seat');
+    ok('error' in match.snapshotFor(guest2), 'snapshot is refused after leaving');
+    ok(match.seatOf(host) === 'p1', 'the staying player keeps their seat');
+    broker.dispose();
+  }
 }
 
 // 测试用户删除
