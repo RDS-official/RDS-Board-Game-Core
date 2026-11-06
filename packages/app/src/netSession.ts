@@ -18,6 +18,7 @@
  * clock forcing) are no-ops with a notice for non-authoritative clients.
  */
 import { UniversalGameEngine } from '@rds/kernel/engine';
+import { seatRangeOf } from '@rds/kernel/seating';
 import { GameModule } from '@rds/kernel/module';
 import {
   Action,
@@ -214,7 +215,11 @@ export class NetSession implements GamePresenter {
       // 权威房间（GameRoom）共用它，因此本地 dispatch 直接就是权威跃迁，
       // 不需要「本地引擎 → 重放 action 到镜像房间」的双引擎同步。
       // 座位数按房间人数发牌：2 人房间不该摆出 4 个无人控制的座位。
-      const seats = options.seats ?? (options.roster ? Object.keys(options.roster).length : undefined);
+      // 座位数：显式传入 > roster 人数 > 座位契约的默认值（issue #214）。
+      // 以前没有第三档，未传 roster 时夹具只能用自己的默认值，和房间容量可能不一致。
+      const seats =
+        options.seats ??
+        (options.roster ? Object.keys(options.roster).length : seatRangeOf(module, options.scenario).default);
       const engineOptions = {
         ...(options.scenario ? { scenario: options.scenario } : {}),
         ...(seats === undefined ? {} : { seats })

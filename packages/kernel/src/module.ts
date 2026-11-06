@@ -55,6 +55,14 @@ export interface GameMeta {
   engineVersion?: number;
   capabilities: GameCapabilities;
   /**
+   * 座位数契约（issue #214）。
+   *
+   * 在这之前，"这座游戏能坐几个人"只能靠跑一遍 `setup(1)` 数 `playerOrder`，
+   * 于是房间上限、联机默认座位、服务端开局核对各自猜了一遍。声明之后，三处
+   * 统一读这一份；未声明的存量模组仍走遗留探测（见 `seatRangeOf`）。
+   */
+  seatRange?: SeatRange;
+  /**
    * C-9 扩展字段收口：声明本模块会往自由形状字段里写哪些 key。
    *
    * 内核据此做"未登记 key 出现即违规"的检查 —— 这条是防止规则悄悄长出
@@ -68,9 +76,23 @@ export interface GameMeta {
   };
 }
 
+/** 座位数契约：最少/最多/默认，以及是否支持任意人数（issue #214）。 */
+export interface SeatRange {
+  /** 最少开局人数（含 AI 补位）。 */
+  min: number;
+  /** 最多座位数。 */
+  max: number;
+  /** 不传 `seats` 时夹具实际发几座；缺省 = `min`。 */
+  default?: number;
+  /** true = 支持 `[min,max]` 任意人数；否则只支持 `default`。 */
+  variable?: boolean;
+}
+
 /** A named, deterministic initial position used by tests, demos and replays. */
 export interface GameScenario {
   description?: string;
+  /** 该变体固定发几座；缺省沿用 `meta.seatRange`（issue #214）。 */
+  seats?: number;
   setup: (seed: number, options?: GameSetupOptions) => GameState;
 }
 

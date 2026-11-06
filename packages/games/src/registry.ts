@@ -67,6 +67,8 @@ export const catanModule: GameModule = defineGame({
     name: '卡坦岛 (Catan)',
     description: '六边形对偶平面图、港口经济、发展卡与 10 分胜利',
     version: '1.0.0',
+    // 座位数契约（issue #214）：与 setup 的 playerOrder 保持一致，由回归用例守着。
+    seatRange: { min: 3, max: 3 },
     capabilities: {
       simultaneousMoves: true,
       hiddenInformation: true,
@@ -168,6 +170,8 @@ export const sanguoshaModule: GameModule = defineGame({
     name: '三国杀 (Sanguosha)',
     description: '递归中断栈、身份暗置、装备/技能规则切面',
     version: '1.0.0',
+    // 座位数契约（issue #214）：与 setup 的 playerOrder 保持一致，由回归用例守着。
+    seatRange: { min: 4, max: 4 },
     capabilities: {
       simultaneousMoves: false,
       hiddenInformation: true,
@@ -231,6 +235,8 @@ export const splendorModule: GameModule = defineGame({
     name: '宝可梦璀璨宝石 (Pokémon Splendor)',
     description: '六色精灵球 · 三阶宝可梦市场 · 大师球稀有捕捉 · 免费进化 · 18 分终局（可选超级进化 / 宝可梦商店扩展）',
     version: '2.1.0',
+    // 座位数契约（issue #214）：与 setup 的 playerOrder 保持一致，由回归用例守着。
+    seatRange: { min: 2, max: 2 },
     schemaVersion: 2,
     capabilities: {
       simultaneousMoves: false,
@@ -343,6 +349,8 @@ export const betrayalModule: GameModule = defineGame({
     name: '山屋惊魂 (Betrayal)',
     description: '44 块可生长房间 · 四维属性轨道 · 13 预兆 / 25 物品 / 45 事件 · 三套完整作祟剧本',
     version: '2.2.0',
+    // 座位数契约（issue #214）：与 setup 的 playerOrder 保持一致，由回归用例守着。
+    seatRange: { min: 3, max: 3 },
     schemaVersion: 3,
     engineVersion: 3,
     capabilities: {
@@ -555,6 +563,8 @@ export const duneMahjongModule: GameModule = defineGame({
     name: '沙丘 & 麻将 (Dune / Mahjong)',
     description: '秘密同步决策 |P(s)|>1、优先级仲裁与短路',
     version: '1.0.0',
+    // 座位数契约（issue #214）：与 setup 的 playerOrder 保持一致，由回归用例守着。
+    seatRange: { min: 3, max: 3 },
     capabilities: {
       simultaneousMoves: true,
       hiddenInformation: true,
@@ -634,6 +644,8 @@ export const pokerModule: GameModule = defineGame({
     name: "德州扑克 (Texas Hold'em)",
     description: '无限注德州扑克 · 52 张牌 · 2–10 人 · 边池 / 平分 · 输光转观察者',
     version: '1.0.0',
+    // 座位数契约（issue #214）：与 setup 的 playerOrder 保持一致，由回归用例守着。
+    seatRange: { min: 2, max: 10, default: 6, variable: true },
     capabilities: {
       simultaneousMoves: false,
       hiddenInformation: true,
@@ -677,21 +689,32 @@ export const pokerModule: GameModule = defineGame({
     OBSERVER_TICK: { type: 'OBSERVER_TICK', payload: { seconds: { kind: 'integer', min: 0 } } }
   },
   scenarios: {
-    seats_2: { description: '单挑（2 人）', setup: pokerScenario(2) },
-    seats_3: { description: '3 人桌', setup: pokerScenario(3) },
-    seats_4: { description: '4 人桌', setup: pokerScenario(4) },
-    seats_5: { description: '5 人桌', setup: pokerScenario(5) },
-    seats_6: { description: '6 人桌', setup: pokerScenario(6) },
-    seats_7: { description: '7 人桌', setup: pokerScenario(7) },
-    seats_8: { description: '8 人桌', setup: pokerScenario(8) },
-    seats_9: { description: '9 人桌', setup: pokerScenario(9) },
-    seats_10: { description: '10 人满桌', setup: pokerScenario(10) },
+    seats_2: { seats: 2,
+ description: '单挑（2 人）', setup: pokerScenario(2) },
+    seats_3: { seats: 3,
+ description: '3 人桌', setup: pokerScenario(3) },
+    seats_4: { seats: 4,
+ description: '4 人桌', setup: pokerScenario(4) },
+    seats_5: { seats: 5,
+ description: '5 人桌', setup: pokerScenario(5) },
+    seats_6: { seats: 6,
+ description: '6 人桌', setup: pokerScenario(6) },
+    seats_7: { seats: 7,
+ description: '7 人桌', setup: pokerScenario(7) },
+    seats_8: { seats: 8,
+ description: '8 人桌', setup: pokerScenario(8) },
+    seats_9: { seats: 9,
+ description: '9 人桌', setup: pokerScenario(9) },
+    seats_10: { seats: 10,
+ description: '10 人满桌', setup: pokerScenario(10) },
     short_stack: {
+      seats: 4,
       description: '短码演示（玩家 4 只有 60 筹码，输光后转观察者）',
       setup: pokerScenario(4, { stacks: [1000, 1000, 1000, 60] })
     },
     /** 默认桌：1 名真人 + 5 个内置 AI（入门桌）/ 1 真人 + 9 AI（满桌）。 */
     ai_table_6: {
+      seats: 6,
       description: '1 真人 + 5 AI（入门桌）',
       setup: (seed: number, options?: { autoAi?: boolean }) =>
         setupPoker(seed, {
@@ -701,6 +724,7 @@ export const pokerModule: GameModule = defineGame({
         })
     },
     ai_table_10: {
+      seats: 10,
       description: '1 真人 + 9 AI（满桌）',
       setup: (seed: number, options?: { autoAi?: boolean }) =>
         setupPoker(seed, {

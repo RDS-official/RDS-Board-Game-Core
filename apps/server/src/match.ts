@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { GameRoom, RoomUpdate } from '@rds/net/room';
 import { GAME_REGISTRY } from '@rds/games/registry';
 import { GameModule } from '@rds/kernel/module';
+import { seatsAccepted } from '@rds/kernel/seating';
 import { Action, DispatchResult, GameState, PlayerId } from '@rds/kernel/types';
 import type { PokerHandResult } from '@rds/games/poker/rules';
 import { leaveSeat, settleHand, takeSeat } from './pokerSettle.ts';
@@ -146,14 +147,15 @@ export class ServerMatch {
     // 变成可关联的指纹。也必须在任何投影之前设置，否则弱别名会先进缓存。
     this.room.engine.setAliasSecret(crypto.randomBytes(32).toString('hex'));
 
-    // 座位数必须覆盖房间里的真人：夹具可能不支持该人数（固定阵容的夹具会
-    // 忽略 seats 请求），这时宁可开局失败，也不要摆出无人控制的空座位。
+    // 座位数必须覆盖房间里的真人：先用座位契约判断请求是否合法，再核对
+    // 引擎实际发出几座（契约说支持、夹具没做到，同样要当场失败）。issue #214。
     if (options.seats !== undefined) {
       const wanted = Math.min(options.seats + (options.aiSeats ?? 0), MAX_SEATS);
+      const accepts = seatsAccepted(module, options.scenario, wanted);
       const dealt = this.room.engine.getRawState().playerOrder.length;
-      if (dealt !== wanted) {
+      if (!accepts.ok || dealt !== wanted) {
         this.room.dispose();
-        throw new Error(`${module.meta.name} 不支持 ${wanted} 人：该玩法固定 ${dealt} 个座位`);
+        throw new Error(`${module.meta.name} 不支持 ${wanted} 人：该玩法固定 ${accepts.dealt} 个座位`);
       }
     }
 
