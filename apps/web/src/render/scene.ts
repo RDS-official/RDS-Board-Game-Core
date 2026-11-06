@@ -12,6 +12,7 @@ import { HexTileBuilder } from './procedural/hexTile';
 import { RoomTileBuilder } from './procedural/roomTile';
 import { TokenMeshBuilder } from './procedural/tokenMesh';
 import { GameTableBuilder, TABLE_SIZE } from './table';
+import { ObjectTemplateCache, signatureOf } from './objectCache';
 import { createDefaultProjectionRegistry, ProjectionRegistry } from './projectionPort';
 import { LabelOverlay, WorldLabel } from './labels/labelOverlay';
 import { ScreenRect } from './labels/labelLayout';
@@ -189,6 +190,14 @@ const ZONE_LABEL_SCALE = 0.6;
 const ZONE_LABEL_SUPERSAMPLE = 2;
 const ZONE_LABEL_BASE_Y = 0.55;
 /**
+ * Bumped whenever the label painter changes.
+ *
+ * Cached label sprites are keyed by their text and styling; without this the
+ * first paint after a painter edit would keep serving the old artwork until the
+ * label text happened to change.
+ */
+const LABEL_PAINTER_VERSION = 1;
+/**
  * Fixed per-role offsets (parent-local X/Y/Z) keep the three piles legible
  * instead of stacking their labels over the same centre point.
  */
@@ -342,6 +351,14 @@ export interface RenderStats {
   geometries: number;
   textures: number;
   lastSyncMs: number;
+  /** Full board rebuilds since the scene was created. */
+  boardRebuilds: number;
+  /** Furniture templates reused instead of rebuilt (since the last reset). */
+  cachedObjects: number;
+  /** Furniture templates that had to be re-run because content changed. */
+  rebuiltObjects: number;
+  /** Templates evicted because the board stopped asking for them. */
+  evictedObjects: number;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -694,6 +711,16 @@ export class BoardGameScene {
   /** Fold meshes detached before the board rebuild, consumed by the next FX pass. */
   private pendingPokerFoldVisuals: THREE.Object3D[] = [];
   private isDestroyed = false;
+  /**
+   * Cached board furniture (labels, table dressing, tiles, cards, tokens).
+   *
+   * A sync still rebuilds the objects it draws, but pure builders are only
+   * re-run when their arguments changed; unchanged furniture is cloned from
+   * this cache. See `render/objectCache.ts` for the rationale.
+   */
+  private furniture = new ObjectTemplateCache();
+  /** Full board rebuilds since construction (the cache's blast radius). */
+  private boardRebuildCount = 0;
   private lastRawState: ProjectedGameState | null = null;
   private lastState: ProjectedGameState | null = null;
   private lastPlacement?: PlacementPreview;
@@ -1505,6 +1532,9 @@ export class BoardGameScene {
     this.actionAnimationSlots = 0;
     this.disposePendingPokerFoldVisuals();
     this.cancelCameraTween();
+    // A different fixture shares no furniture: drop the templates rather than
+    // carrying the previous table's geometry into the new game.
+    this.furniture.clear();
   }
 
   /**
@@ -1824,11 +1854,15 @@ export class BoardGameScene {
     }
 
     this.lastBoardKey = boardKey;
+    this.boardRebuildCount += 1;
     this.raycaster.clearInteractive();
     // Folded hole cards must leave the table through an animation, but the new
     // projection has already moved them to the muck. Capture their old meshes
     // before the rebuild disposes them; this is a render-only copy.
     this.capturePokerFoldVisuals(previousState, state);
+
+    // Any furniture this sync does not ask for is evicted when the rebuild ends.
+    this.furniture.begin();
 
     // Clear previous board objects (dispose GPU resources; keep cached textures).
     this.clearBoardObjects();
@@ -1887,6 +1921,7 @@ export class BoardGameScene {
     }
     this.refreshLabels(state);
     this.applyFloorFilter();
+    this.furniture.end();
     this.lastSyncMs = performance.now() - syncStarted;
   }
 
@@ -2101,12 +2136,17 @@ export class BoardGameScene {
   /** Lightweight profiling seam for deciding whether scene diffing is needed. */
   public getRenderStats(): RenderStats {
     const info = this.renderer.info;
+    const cache = this.furniture.stats();
     return {
       calls: info.render.calls,
       triangles: info.render.triangles,
       geometries: info.memory.geometries,
       textures: info.memory.textures,
-      lastSyncMs: Math.round(this.lastSyncMs * 100) / 100
+      lastSyncMs: Math.round(this.lastSyncMs * 100) / 100,
+      boardRebuilds: this.boardRebuildCount,
+      cachedObjects: cache.hits,
+      rebuiltObjects: cache.misses,
+      evictedObjects: cache.evictions
     };
   }
 
@@ -2602,11 +2642,17 @@ export class BoardGameScene {
     // Render Nodes
     Object.values(graph.nodes).forEach(node => {
       if (node.type === 'HEX') {
-        const hexMesh = HexTileBuilder.createHexTileMesh(
-          2.15,
-          node.props.resource || 'wood',
-          node.props.diceNumber,
-          node.props.hasRobber
+        const resource = node.props.resource || 'wood';
+        const hexMesh = this.furniture.obtain(
+          `node:${node.id}`,
+          signatureOf('hex', 2.15, resource, node.props.diceNumber, node.props.hasRobber),
+          () =>
+            HexTileBuilder.createHexTileMesh(
+              2.15,
+              resource,
+              node.props.diceNumber,
+              node.props.hasRobber
+            )
         );
         hexMesh.position.set(node.position[0], node.position[1], node.position[2]);
         this.boardObjectsGroup.add(hexMesh);
@@ -2621,13 +2667,15 @@ export class BoardGameScene {
         // Vertex spot for settlements
         // Render subtle clickable marker if unoccupied
         if (!node.occupantEntityId) {
-          const vGeom = new THREE.CylinderGeometry(0.17, 0.17, 0.04, 12);
-          const vMat = new THREE.MeshBasicMaterial({
-            color: 0xd9b45b,
-            transparent: true,
-            opacity: 0.22
+          const vMesh = this.furniture.obtain('vertex-marker', 'vertex', () => {
+            const vGeom = new THREE.CylinderGeometry(0.17, 0.17, 0.04, 12);
+            const vMat = new THREE.MeshBasicMaterial({
+              color: 0xd9b45b,
+              transparent: true,
+              opacity: 0.22
+            });
+            return new THREE.Mesh(vGeom, vMat);
           });
-          const vMesh = new THREE.Mesh(vGeom, vMat);
           vMesh.position.set(node.position[0], 0.205, node.position[2]);
           this.boardObjectsGroup.add(vMesh);
           this.nodeMeshes.set(node.id, vMesh);
@@ -2641,24 +2689,42 @@ export class BoardGameScene {
       } else if (node.type === 'ROOM') {
         // Betrayal room tile: 2.5D diorama with a door-aware furniture layout.
         const roomId = node.id.startsWith('room_') ? node.id.slice(5) : node.id;
-        const roomMesh = RoomTileBuilder.createRoomMesh(
-          node.props.name || 'Room',
-          2.84,
-          node.props.color,
-          node.props.doors,
-          {
-            roomId,
-            floor: node.props.floor,
-            special: node.props.special,
-            tags: node.props.tags,
-            symbol: node.props.symbol,
-            frontDoor: node.props.frontDoor
-          }
+        const roomFloor = String(node.props.floor ?? '');
+        // The room shell is pure furniture: same props → same diorama. Door
+        // hotspots and navigation arrows are built below and stay per-sync,
+        // because they depend on where the active explorer stands.
+        const roomMesh = this.furniture.obtain(
+          `node:${node.id}`,
+          signatureOf(
+            'room',
+            node.props.name,
+            node.props.color,
+            node.props.doors,
+            roomFloor,
+            node.props.special,
+            node.props.tags,
+            node.props.symbol,
+            node.props.frontDoor
+          ),
+          () =>
+            RoomTileBuilder.createRoomMesh(
+              node.props.name || 'Room',
+              2.84,
+              node.props.color,
+              node.props.doors,
+              {
+                roomId,
+                floor: node.props.floor,
+                special: node.props.special,
+                tags: node.props.tags,
+                symbol: node.props.symbol,
+                frontDoor: node.props.frontDoor
+              }
+            )
         );
         roomMesh.position.set(node.position[0], node.position[1], node.position[2]);
         // Tagged so the floor filter can hide/show whole rooms without a rebuild.
-        const nodeFloor = String(node.props.floor ?? '');
-        roomMesh.userData.floor = nodeFloor;
+        roomMesh.userData.floor = roomFloor;
         this.boardObjectsGroup.add(roomMesh);
         this.nodeMeshes.set(node.id, roomMesh);
 
@@ -2838,7 +2904,7 @@ export class BoardGameScene {
           const badge = this.createLabelSprite(icon, color, 46);
           badge.position.set(node.position[0] + 0.95, 0.34, node.position[2] - 0.95);
           badge.scale.set(0.42, 0.42, 1);
-          badge.userData.floor = nodeFloor;
+          badge.userData.floor = roomFloor;
           this.boardObjectsGroup.add(badge);
         }
 
@@ -3780,7 +3846,13 @@ export class BoardGameScene {
       const isTop = i === visible - 1;
       const faceUp = isDiscard && isTop;
       const face = faceUp ? items[i].components?.cardFace || { title: 'Discard' } : { title: 'Card' };
-      const mesh = CardMeshBuilder.createCardMesh(face, DECK_CARD_W, DECK_CARD_H, !faceUp);
+      // A draw pile is the same few card backs on every sync; only the top of a
+      // discard pile changes, so the mesh is cached per face + orientation.
+      const mesh = this.furniture.obtain(
+        `pile:${zone.id}:${i}`,
+        signatureOf(face, faceUp, DECK_CARD_W, DECK_CARD_H),
+        () => CardMeshBuilder.createCardMesh(face, DECK_CARD_W, DECK_CARD_H, !faceUp)
+      );
       // Local coordinates: the pile's world XZ lives on the group so a drag can
       // move every layer (and the count label) as one object.
       mesh.position.set(0, anchor[1] + i * 0.02, 0);
@@ -4536,14 +4608,28 @@ export class BoardGameScene {
     const ids: string[] = [];
     for (const entity of items) {
       const face = entity.components?.cardFace || { title: 'Card' };
-      const mesh = CardMeshBuilder.createCardMesh(
-        face,
-        HAND_CARD_MESH_WIDTH,
-        1.68 * CARD_SIZE_MULTIPLIER,
-        !!entity.isMasked,
-        null,
-        null,
-        this.lastState?.gameId === 'poker' ? 'playing' : 'plate'
+      const handStyle = this.lastState?.gameId === 'poker' ? 'playing' : 'plate';
+      // A hand card is a pure function of its face and mask state, so a card
+      // that stays in hand across two syncs is cloned, not repainted.
+      const mesh = this.furniture.obtain(
+        `hand:${entity.id}`,
+        signatureOf(
+          face,
+          HAND_CARD_MESH_WIDTH,
+          1.68 * CARD_SIZE_MULTIPLIER,
+          !!entity.isMasked,
+          handStyle
+        ),
+        () =>
+          CardMeshBuilder.createCardMesh(
+            face,
+            HAND_CARD_MESH_WIDTH,
+            1.68 * CARD_SIZE_MULTIPLIER,
+            !!entity.isMasked,
+            null,
+            null,
+            handStyle
+          )
       );
       if (cameraAttached) {
         // A screen-space card starts as a vertical quad: +Y (face) → +Z
@@ -4971,7 +5057,11 @@ export class BoardGameScene {
     for (let i = 0; i < limit; i++) {
       const entity = items[i];
       const face = entity.components?.cardFace || { title: 'Card' };
-      const mesh = CardMeshBuilder.createCardMesh(face, 0.78, 1.16, !!entity.isMasked);
+      const mesh = this.furniture.obtain(
+        `seat-card:${entity.id}`,
+        signatureOf(face, 0.78, 1.16, !!entity.isMasked),
+        () => CardMeshBuilder.createCardMesh(face, 0.78, 1.16, !!entity.isMasked)
+      );
       const offset = 1.9 + i * 0.55;
 
       mesh.position.set(
@@ -5284,44 +5374,59 @@ export class BoardGameScene {
 
     // Padded rail under the cloth: a darker, slightly larger oval so the felt
     // reads as inset rather than painted on the floor.
-    const rail = new THREE.Mesh(
-      new THREE.CircleGeometry(1, 96),
-      new THREE.MeshStandardMaterial({ color: 0x241a14, roughness: 0.92, metalness: 0.04 })
-    );
+    //
+    // Rail, cloth and rim only depend on the table's radius, which moves when a
+    // seat is added or removed — not when a card is dealt. They are the most
+    // expensive static furniture on the table (two 96-segment discs and a
+    // 72-segment torus), so they come from the template cache.
+    const tableSignature = `${rx.toFixed(2)}|${rz.toFixed(2)}`;
+    const rail = this.furniture.obtain('poker:rail', tableSignature, () => {
+      const mesh = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 96),
+        new THREE.MeshStandardMaterial({ color: 0x241a14, roughness: 0.92, metalness: 0.04 })
+      );
+      mesh.receiveShadow = true;
+      return mesh;
+    }) as THREE.Mesh;
     rail.rotation.x = -Math.PI / 2;
     rail.scale.set(rx + 0.32, rz + 0.32, 1);
     rail.position.set(0, 0.008, 0);
-    rail.receiveShadow = true;
     this.boardObjectsGroup.add(rail);
 
     // Matte green cloth with a woven fibre texture (built once, reused).
     // One texture per table: the light pool and the rim shading are baked into
     // it, so it must not tile.
     const clothTexture = BoardGameScene.pokerClothTexture();
-    const felt = new THREE.Mesh(
-      new THREE.CircleGeometry(1, 96),
-      new THREE.MeshStandardMaterial({
-        map: clothTexture,
-        color: 0xffffff,
-        roughness: 1,
-        metalness: 0
-      })
-    );
+    const felt = this.furniture.obtain('poker:felt', tableSignature, () => {
+      const mesh = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 96),
+        new THREE.MeshStandardMaterial({
+          map: clothTexture,
+          color: 0xffffff,
+          roughness: 1,
+          metalness: 0
+        })
+      );
+      mesh.receiveShadow = true;
+      return mesh;
+    }) as THREE.Mesh;
     felt.rotation.x = -Math.PI / 2;
     felt.scale.set(rx, rz, 1);
     felt.position.set(0, 0.02, 0);
-    felt.receiveShadow = true;
     this.boardObjectsGroup.add(felt);
 
-    const rim = new THREE.Mesh(
-      new THREE.TorusGeometry(1, 0.02, 8, 72),
-      new THREE.MeshStandardMaterial({
-        color: 0xc9a24a,
-        emissive: 0x6b4d12,
-        emissiveIntensity: 0.35,
-        roughness: 0.5
-      })
-    );
+    const rim = this.furniture.obtain('poker:rim', tableSignature, () => {
+      const mesh = new THREE.Mesh(
+        new THREE.TorusGeometry(1, 0.02, 8, 72),
+        new THREE.MeshStandardMaterial({
+          color: 0xc9a24a,
+          emissive: 0x6b4d12,
+          emissiveIntensity: 0.35,
+          roughness: 0.5
+        })
+      );
+      return mesh;
+    }) as THREE.Mesh;
     rim.rotation.x = -Math.PI / 2;
     rim.scale.set(rx, rz, 1);
     rim.position.set(0, 0.05, 0);
@@ -5352,7 +5457,9 @@ export class BoardGameScene {
 
     // The pot itself: a real pile of chips directly under the readout.
     if (pot > 0) {
-      const potChips = ChipMeshBuilder.createStack(pot);
+      const potChips = this.furniture.obtain('poker:pot-chips', String(pot), () =>
+        ChipMeshBuilder.createStack(pot)
+      );
       potChips.position.set(POKER_POT_X, 0.03, potZ);
       this.boardObjectsGroup.add(potChips);
     }
@@ -5368,7 +5475,9 @@ export class BoardGameScene {
       const tangentX = -inwardZ;
       const tangentZ = inwardX;
       if (chips > 0) {
-        const stack = ChipMeshBuilder.createStack(chips);
+        const stack = this.furniture.obtain(`poker:stack:${pid}`, String(chips), () =>
+          ChipMeshBuilder.createStack(chips)
+        );
         stack.position.set(
           x - inwardX * 1.9 + tangentX * 1.25,
           0.03,
@@ -5380,7 +5489,9 @@ export class BoardGameScene {
       // Chips already committed on this street sit between the seat and the pot.
       const bet = Number(hand?.streetBets?.[pid] ?? 0);
       if (bet > 0) {
-        const betStack = ChipMeshBuilder.createStack(bet);
+        const betStack = this.furniture.obtain(`poker:bet:${pid}`, String(bet), () =>
+          ChipMeshBuilder.createStack(bet)
+        );
         betStack.position.set(x - inwardX * 3.1, 0.03, z - inwardZ * 3.1);
         this.boardObjectsGroup.add(betStack);
       }
@@ -6051,14 +6162,35 @@ export class BoardGameScene {
     return tex;
   }
 
+  /**
+   * Painted board label.
+   *
+   * Painting is expensive — a 1024×256 canvas, text measurement, a mipmapped
+   * canvas texture — and the text of a furniture label (`底池 120`, `牌堆 · 39`)
+   * changes on a handful of syncs at most. So the paint is cached per
+   * (text, colour, font size, supersample): an unchanged label is a clone of the
+   * cached sprite instead of another canvas.
+   */
   private createLabelSprite(
     text: string,
     color = '#ffffff',
     fontSize = TABLE_LABEL_FONT_SIZE,
     canvasSupersample = 1
   ): THREE.Sprite {
-    const canvas = document.createElement('canvas');
     const supersample = Math.max(1, Math.floor(canvasSupersample));
+    const signature = `${LABEL_PAINTER_VERSION}|${text}|${color}|${fontSize}|${supersample}`;
+    return this.furniture.obtain(`label:${signature}`, signature, () =>
+      this.paintLabelSprite(text, color, fontSize, supersample)
+    ) as THREE.Sprite;
+  }
+
+  private paintLabelSprite(
+    text: string,
+    color: string,
+    fontSize: number,
+    supersample: number
+  ): THREE.Sprite {
+    const canvas = document.createElement('canvas');
     canvas.width = 1024 * supersample;
     canvas.height = 256 * supersample;
     const ctx = canvas.getContext('2d')!;
@@ -6136,23 +6268,31 @@ export class BoardGameScene {
     // Poker draws real playing cards (ivory stock, pips, court figures) instead
     // of the house occult plate.
     const cardStyle = this.lastState?.gameId === 'poker' ? 'playing' : 'plate';
-    const mesh = CardMeshBuilder.createCardMesh(
-      face,
-      isPkmn ? PKMN_CARD_W : CARD_W,
-      isPkmn ? PKMN_CARD_H : CARD_H,
-      isMasked,
-      isPkmn ? pokemonCardTexture(custom) : null,
-      isPkmn ? pokemonCardBackTexture(custom) : null,
-      cardStyle
-    );
     // Cards in the floating board row are posed at `rotation.x = −70°`. The
     // house card mesh paints its face on +Y, so a −70° X rotation alone would
     // show the back; a compensating +140° turn baked into the row cards'
     // geometry makes −70° the readable, camera-facing pose.
     const grouped = parent === this.dealerAreaGroup;
-    if (grouped) {
-      mesh.geometry.rotateX(BOARD_ROW_GEOMETRY_TILT);
-    }
+    // The tilt is baked into the geometry, so it has to happen inside the build:
+    // a cached card shares its geometry with the template and must not be
+    // rotated again on every reuse.
+    const mesh = this.furniture.obtain(
+      `card:${entity.id}:${grouped ? 'row' : 'board'}`,
+      signatureOf(face, isPkmn, isMasked, cardStyle, grouped, custom ?? null),
+      () => {
+        const built = CardMeshBuilder.createCardMesh(
+          face,
+          isPkmn ? PKMN_CARD_W : CARD_W,
+          isPkmn ? PKMN_CARD_H : CARD_H,
+          isMasked,
+          isPkmn ? pokemonCardTexture(custom) : null,
+          isPkmn ? pokemonCardBackTexture(custom) : null,
+          cardStyle
+        );
+        if (grouped) built.geometry.rotateX(BOARD_ROW_GEOMETRY_TILT);
+        return built;
+      }
+    );
 
     if (isPkmn && (zone.id === 'zone_market_t1' || zone.id === 'zone_market_t2' || zone.id === 'zone_market_t3')) {
       // One row per tier, laid out from the card size: `PKMN_MARKET_PITCH_X`
@@ -6781,6 +6921,7 @@ export class BoardGameScene {
     this.renderer.domElement.removeEventListener('pointerleave', this.onHandPointerLeave);
     this.handRows.clear();
     this.clearBoardObjects();
+    this.furniture.clear();
     this.labels.destroy();
     this.physics.dispose();
     this.renderer.dispose();
