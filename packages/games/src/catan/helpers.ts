@@ -14,8 +14,8 @@ export function emptyBag(): ResourceBag {
   return { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 };
 }
 
-export function resourcesOf(player: { customProps: Record<string, any> } | undefined): ResourceBag {
-  const raw = player?.customProps?.resources ?? {};
+export function resourcesOf(player: { customProps: Record<string, unknown> } | undefined): ResourceBag {
+  const raw = (player?.customProps?.resources ?? {}) as Partial<Record<CatanResource, number>>;
   return {
     wood: Number(raw.wood ?? 0),
     brick: Number(raw.brick ?? 0),
@@ -25,8 +25,9 @@ export function resourcesOf(player: { customProps: Record<string, any> } | undef
   };
 }
 
-export function totalResources(player: { customProps: Record<string, any> }): number {
-  return CATAN_RESOURCES.reduce((sum, res) => sum + Number(player.customProps.resources?.[res] ?? 0), 0);
+export function totalResources(player: { customProps: Record<string, unknown> }): number {
+  const raw = (player.customProps.resources ?? {}) as Partial<Record<CatanResource, number>>;
+  return CATAN_RESOURCES.reduce((sum, res) => sum + Number(raw[res] ?? 0), 0);
 }
 
 export function bankOf(state: GameState): ResourceBag {
