@@ -342,3 +342,58 @@ test('clock: needsClock is decided by the kernel, not re-derived by the driver',
   assertEqual(window.submissions['p2'], undefined, 'the other player is still on the clock');
 });
 
+
+test('hooks: a throwing handler fails the dispatch in strict mode, and is tolerated otherwise', async () => {
+  const { defineGame } = await import('@rds/kernel/module');
+  const { UniversalGameEngine } = await import('@rds/kernel/engine');
+  const { emptyState } = await import('../suiteHelpers.ts');
+
+  const throwingHook = {
+    id: 'boom',
+    name: 'Boom',
+    stage: 'FILTER_MODIFY' as const,
+    priority: 1,
+    description: 'always throws',
+    predicate: () => true,
+    handler: () => {
+      throw new Error('hook exploded');
+    }
+  };
+  const boomModule = defineGame({
+    meta: {
+      id: 'boom_fixture',
+      name: 'Boom fixture',
+      description: 'hook throws on every action',
+      version: '1.0.0',
+      capabilities: {
+        simultaneousMoves: false,
+        hiddenInformation: false,
+        interruptStack: false,
+        dynamicRules: true,
+        topology: 'none'
+      }
+    },
+    hooks: [throwingHook],
+    setup: seed => ({
+      ...emptyState('boom_fixture', seed),
+      activeHooks: [{ instanceId: 'boom', hookId: 'boom', visibility: { type: 'PUBLIC' as const } }]
+    }),
+    legalActions: () => [{ type: 'PING', playerId: 'p1' }],
+    reduce: state => state,
+    outcome: () => ({ gameOver: false, winner: null })
+  });
+
+  const strictEngine = new UniversalGameEngine(boomModule, 1);
+  const strictResult = strictEngine.dispatch({ type: 'PING', playerId: 'p1' });
+  assertEqual(strictResult.ok, false, 'strict mode rejects the action');
+  assert(String(strictResult.error ?? '').includes('hook exploded'), 'the error names the hook failure');
+
+  const lenientEngine = new UniversalGameEngine(boomModule, 1, { strict: false });
+  const lenientResult = lenientEngine.dispatch({ type: 'PING', playerId: 'p1' });
+  assertEqual(lenientResult.ok, true, 'lenient mode keeps going');
+  assert(
+    lenientResult.events.some(event => String(event.title).includes('handler threw')),
+    'lenient mode still records the failure as a rule event'
+  );
+});
+

@@ -259,8 +259,8 @@ export class UniversalGameEngine {
   constructor(module: GameModule, seed = 42, options: EngineOptions = {}) {
     this.module = module;
     this.rules = new RuleRegistry(module.hooks);
-    this.pipeline = new RulePipeline(this.rules);
     this.strict = options.strict ?? true;
+    this.pipeline = new RulePipeline(this.rules, { strict: this.strict });
     this.projectRedactor = module.project ?? {};
     this.charter = resolveCharter(module);
     this.maxFollowUpActions = normalizeLimit(
@@ -915,7 +915,15 @@ export class UniversalGameEngine {
         }
       }
 
-      const result = this.pipeline.processAction(frame.action, next);
+      let result: ReturnType<RulePipeline['processAction']>;
+      try {
+        result = this.pipeline.processAction(frame.action, next);
+      } catch (error) {
+        // strict 模式下钩子异常必须让整次 dispatch 失败并说明是谁抛的（issue #211）。
+        const error_ = `rule hook failed during ${frame.action.type}: ${error instanceof Error ? error.message : String(error)}`;
+        events.push(this.event(ctx, 'STACK_CANCEL', error_, 200));
+        return { state, cancelled: false, error: error_ };
+      }
       for (const message of result.messages) {
         events.push(this.event(ctx, 'RULE_MUTATE', message, 300));
       }
@@ -930,7 +938,14 @@ export class UniversalGameEngine {
 
       next = this.module.reduce(next, result.finalAction, ctx);
 
-      const after = this.pipeline.triggerAfter(result.finalAction, next);
+      let after: ReturnType<RulePipeline['triggerAfter']>;
+      try {
+        after = this.pipeline.triggerAfter(result.finalAction, next);
+      } catch (error) {
+        const error_ = `rule hook failed after ${result.finalAction.type}: ${error instanceof Error ? error.message : String(error)}`;
+        events.push(this.event(ctx, 'STACK_CANCEL', error_, 200));
+        return { state, cancelled: false, error: error_ };
+      }
       for (const message of after.messages) {
         events.push(this.event(ctx, 'RULE_MUTATE', message, 300));
       }
