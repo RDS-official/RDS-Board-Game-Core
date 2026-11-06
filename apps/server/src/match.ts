@@ -85,9 +85,11 @@ export class ServerMatch {
   private readonly seats = new Map<string, PlayerId>();
   private readonly attached = new Set<string>();
   private readonly listeners = new Set<() => void>();
-  private tickTimer: NodeJS.Timeout | null = null;
   /** AI 节奏泵的定时器与上一次出手时刻。 */
-  private aiTimer?: ReturnType<typeof setInterval>;
+  /** 唯一的定时泵：tick 与 AI 泵共用一条时间轴（issue #221）。 */
+  private pumpTimer?: ReturnType<typeof setInterval>;
+  private tickAccumMs = 0;
+  private aiAccumMs = 0;
   private lastAiAt = 0;
   /** 结算开始的时刻：等满冷却就自动替全桌发下一手。 */
   private settleAt = 0;
@@ -112,33 +114,26 @@ export class ServerMatch {
     // 账就对不上了（issue #183）。这里按「真人 + AI」的总座位数切。
     const buyIns = (options.stacks ?? [])
       .slice(0, Math.max(1, (options.seats ?? 0) + (options.aiSeats ?? 0)))
-      .map(amount => Math.max(0, Math.round(Number(amount) || 0)));
-    this.room = new GameRoom(
-      module,
-      this.seed,
-      undefined,
-      options.scenario,
-      undefined,
-      {
-        hostActors: [], // 服务端没有任何「本地房主」，全部走 viewer 校验
-        // 桌面座位 = 真人 + AI 补位；`humans` 让夹具知道哪几个座位是真人，
-        // 其余按等级编制填入内置 AI。
-        ...(options.seats === undefined
-          ? {}
-          : {
-              // 总座位 = 真人 + AI 补位；夹具按 humans 决定哪几座是真人，
-              // 其余按等级编制填入内置 AI（见 poker/seating.ts）。
-              seats: Math.min(options.seats + (options.aiSeats ?? 0), MAX_SEATS),
-              humans: options.seats,
-              aiSeats: options.aiSeats ?? 0,
-              // 真人座位的买入来自账号余额（见 MatchManager）；AI 补位不传，
-              // 由夹具按标准买入填。
-              ...(buyIns.length > 0 ? { stacks: buyIns } : {})
-            }),
-        // AI 交给房间按游戏声明的节奏驱动，真人才能看清每一步。
-        ...(module.driver?.aiActionDelayMs ? { autoAi: false } : {})
-      }
-    );
+      .map((amount) => Math.max(0, Math.round(Number(amount) || 0)));
+    this.room = new GameRoom(module, this.seed, undefined, options.scenario, undefined, {
+      hostActors: [], // 服务端没有任何「本地房主」，全部走 viewer 校验
+      // 桌面座位 = 真人 + AI 补位；`humans` 让夹具知道哪几个座位是真人，
+      // 其余按等级编制填入内置 AI。
+      ...(options.seats === undefined
+        ? {}
+        : {
+            // 总座位 = 真人 + AI 补位；夹具按 humans 决定哪几座是真人，
+            // 其余按等级编制填入内置 AI（见 poker/seating.ts）。
+            seats: Math.min(options.seats + (options.aiSeats ?? 0), MAX_SEATS),
+            humans: options.seats,
+            aiSeats: options.aiSeats ?? 0,
+            // 真人座位的买入来自账号余额（见 MatchManager）；AI 补位不传，
+            // 由夹具按标准买入填。
+            ...(buyIns.length > 0 ? { stacks: buyIns } : {}),
+          }),
+      // AI 交给房间按游戏声明的节奏驱动，真人才能看清每一步。
+      ...(module.driver?.aiActionDelayMs ? { autoAi: false } : {}),
+    });
 
     // ---- AR-1：中心模式的虚拟别名必须有密钥 --------------------------------
     //
@@ -201,7 +196,7 @@ export class ServerMatch {
     const raw = this.room.engine.getRawState();
     const lastHand = raw.globalVars.lastHand as PokerHandResult | undefined;
     if (!lastHand?.players?.length) return;
-    settleHand(this.roomId, lastHand.handNo, lastHand.players, seat => this.userOf(seat));
+    settleHand(this.roomId, lastHand.handNo, lastHand.players, (seat) => this.userOf(seat));
   }
 
   /** 座位 → 账号 id（内置 AI 座位映射到其专属 AI 账号，如 ai:hero:...）。 */
@@ -213,11 +208,11 @@ export class ServerMatch {
     if (this.module.meta.id === 'poker') {
       const raw = this.room.engine.getRawState();
       const aiSeats = (raw.globalVars.seats as { playerId: string; isAi: boolean }[] | undefined) ?? [];
-      const matchAi = aiSeats.find(s => s.playerId === seat && s.isAi);
+      const matchAi = aiSeats.find((s) => s.playerId === seat && s.isAi);
       if (matchAi) {
         const actorName = this.room.engine.getActorName(seat);
         // 从名称中提取武将名字，例如 "初级 AI · 诸葛亮" -> "诸葛亮"
-        const hero = POKER_AI_NAMES.find(h => actorName.includes(h));
+        const hero = POKER_AI_NAMES.find((h) => actorName.includes(h));
         if (hero) return `ai:hero:${hero}`;
         const ordinal = Number((seat.match(/\d+/) ?? ['1'])[0]) || 1;
         return `ai:hero:${getAiHeroName(ordinal - 1)}`;
@@ -254,19 +249,19 @@ export class ServerMatch {
     const raw = this.room.engine.getRawState();
     const aiSeats = new Set(
       ((raw.globalVars.seats as { playerId: string; isAi: boolean }[] | undefined) ?? [])
-        .filter(seat => seat.isAi)
-        .map(seat => seat.playerId)
+        .filter((seat) => seat.isAi)
+        .map((seat) => seat.playerId),
     );
     const bySeat = new Map<string, string>();
     for (const [userId, seat] of this.seats) bySeat.set(String(seat), userId);
 
-    return raw.playerOrder.map(seat => {
+    return raw.playerOrder.map((seat) => {
       const isAi = aiSeats.has(seat);
       return {
-        userId: isAi ? `ai:${seat}` : bySeat.get(seat) ?? `unknown:${seat}`,
+        userId: isAi ? `ai:${seat}` : (bySeat.get(seat) ?? `unknown:${seat}`),
         seat,
         name: this.room.engine.getActorName(seat),
-        isAi
+        isAi,
       };
     });
   }
@@ -344,13 +339,9 @@ export class ServerMatch {
     // 两个定时器各自独立清理：之前 aiTimer 的清理被误写进 tickTimer 的分支里，
     // 一旦 tick 定时器没建起来（MATCH_TICK_MS 非法 / startClock 提前返回），
     // AI 泵就永远停不下来，进程也退不出去（selftest 会挂住）。
-    if (this.tickTimer) {
-      clearInterval(this.tickTimer);
-      this.tickTimer = null;
-    }
-    if (this.aiTimer) {
-      clearInterval(this.aiTimer);
-      this.aiTimer = undefined;
+    if (this.pumpTimer) {
+      clearInterval(this.pumpTimer);
+      this.pumpTimer = undefined;
     }
     this.listeners.clear();
     this.attached.clear();
@@ -404,14 +395,30 @@ export class ServerMatch {
   private startClock(): void {
     const intervalMs = Number(process.env.MATCH_TICK_MS ?? 1000);
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
-    this.tickTimer = setInterval(() => {
+    const aiDelay = this.module.driver?.aiActionDelayMs;
+    const aiStep = aiDelay ? Math.max(100, Math.min(aiDelay, 500)) : 0;
+    // 基础节拍取两条时间轴里更细的那条，避免 AI 动作被 tick 周期拖慢。
+    const beat = aiStep ? Math.min(intervalMs, aiStep) : intervalMs;
+    this.pumpTimer = setInterval(() => {
       if (this.disposed) return;
-      this.pulseHeartbeat(Date.now());
-      if (!this.needsClock()) return;
-      this.room.submitUnchecked({ type: '__TICK__', playerId: 'SYSTEM', payload: { ticks: 1 } });
-    }, intervalMs);
-    this.tickTimer.unref?.();
-    this.startAiPump();
+      const now = Date.now();
+      this.tickAccumMs += beat;
+      if (this.tickAccumMs >= intervalMs) {
+        this.tickAccumMs = 0;
+        this.pulseHeartbeat(now);
+        if (this.needsClock()) {
+          this.room.submitUnchecked({ type: '__TICK__', playerId: 'SYSTEM', payload: { ticks: 1 } });
+        }
+      }
+      if (aiStep) {
+        this.aiAccumMs += beat;
+        if (this.aiAccumMs >= aiStep) {
+          this.aiAccumMs = 0;
+          this.pumpAi(now);
+        }
+      }
+    }, beat);
+    this.pumpTimer.unref?.();
   }
 
   /**
@@ -435,68 +442,59 @@ export class ServerMatch {
    * 自己的合法动作表，由这里按 `driver.aiActionDelayMs`（德州 = 5s）逐个
    * 派发：真人能看清 AI 的每一次跟注/加注，而不是一瞬间跳过整轮。
    */
-  private startAiPump(): void {
+  private pumpAi(now: number): void {
     const delay = this.module.driver?.aiActionDelayMs;
     if (!delay) return;
-    const step = Math.max(100, Math.min(delay, 500));
     // 结算兜底：一手结束后等满冷却仍有人没点「准备」，服务器就替全桌开下一手。
     // 真人点准备仍照常提前开局；掉线/走开的玩家不再能把整张桌子卡死。
     const settleGateMs = this.module.driver?.actionCooldownMs?.START_HAND ?? 20000;
-    this.aiTimer = setInterval(() => {
-      if (this.disposed) return;
-      const now = Date.now();
-      const engine = this.room.engine;
-      const state = engine.getRawState();
-      if (state.gameOver) return;
-      const actor = engine.getActiveActorId();
-      // 行动者换人就把计时归零：超时只针对"同一个人卡在这一手"。
-      if (actor !== this.turnActor) {
-        this.turnActor = actor ?? undefined;
-        this.turnSince = now;
-      }
-      // AI 与真人同一条管线：`isAutomated` 说出谁由机器控制，具体动作直接来自
-      // 它自己的合法动作表（结算阶段就是「开下一手」），因此全桌 AI 也能继续打。
-      const automated = !!actor && !!this.module.driver?.isAutomated?.(state, actor);
-      const action = automated && actor ? engine.getLegalActions(actor)[0] : undefined;
-      if (action) {
-        if (now - this.lastAiAt < delay) return;
-        this.lastAiAt = now;
-        this.room.submitUnchecked(action);
-        return;
-      }
+    if (this.disposed) return;
+    const engine = this.room.engine;
+    const state = engine.getRawState();
+    if (state.gameOver) return;
+    const actor = engine.getActiveActorId();
+    // 行动者换人就把计时归零：超时只针对"同一个人卡在这一手"。
+    if (actor !== this.turnActor) {
+      this.turnActor = actor ?? undefined;
+      this.turnSince = now;
+    }
+    // AI 与真人同一条管线：`isAutomated` 说出谁由机器控制，具体动作直接来自
+    // 它自己的合法动作表（结算阶段就是「开下一手」），因此全桌 AI 也能继续打。
+    const automated = !!actor && !!this.module.driver?.isAutomated?.(state, actor);
+    const action = automated && actor ? engine.getLegalActions(actor)[0] : undefined;
+    if (action) {
+      if (now - this.lastAiAt < delay) return;
+      this.lastAiAt = now;
+      this.room.submitUnchecked(action);
+      return;
+    }
 
-      // 真人超时代打：只有声明了 decisionDeadlineMs 的游戏才启用。
-      const deadline = this.module.driver?.decisionDeadlineMs;
-      if (deadline && actor && !automated && this.turnSince && now - this.turnSince >= deadline) {
-        const legal = engine.getLegalActions(actor);
-        const timeout = this.module.driver?.timeoutAction?.(legal, state, actor) ?? null;
-        if (timeout) {
-          this.turnSince = 0;
-          this.room.submitUnchecked(timeout);
-          return;
-        }
-      }
-      // 没有 AI 要动：结算态且冷却已满就直接发下一手。
-      const hand = state.globalVars.hand as { street?: string } | undefined;
-      if (hand?.street !== 'COMPLETE') {
-        this.settleAt = 0;
+    // 真人超时代打：只有声明了 decisionDeadlineMs 的游戏才启用。
+    const deadline = this.module.driver?.decisionDeadlineMs;
+    if (deadline && actor && !automated && this.turnSince && now - this.turnSince >= deadline) {
+      const legal = engine.getLegalActions(actor);
+      const timeout = this.module.driver?.timeoutAction?.(legal, state, actor) ?? null;
+      if (timeout) {
+        this.turnSince = 0;
+        this.room.submitUnchecked(timeout);
         return;
       }
-      if (!this.settleAt) {
-        this.settleAt = now;
-        return;
-      }
-      if (now - this.settleAt < settleGateMs) return;
-      const seat = state.playerOrder.find(
-        pid => Number(state.players[pid]?.customProps?.chips ?? 0) > 0
-      );
-      if (!seat) return;
+    }
+    // 没有 AI 要动：结算态且冷却已满就直接发下一手。
+    const hand = state.globalVars.hand as { street?: string } | undefined;
+    if (hand?.street !== 'COMPLETE') {
       this.settleAt = 0;
-      engine.dispatch({ type: 'FORCE_START', playerId: seat });
-    }, step);
-    // 服务器进程退出时不该被 AI 泵吊住；对局生命周期仍由 dispose() 显式结束。
-    this.aiTimer.unref?.();
-    this.aiTimer.unref?.();
+      return;
+    }
+    if (!this.settleAt) {
+      this.settleAt = now;
+      return;
+    }
+    if (now - this.settleAt < settleGateMs) return;
+    const seat = state.playerOrder.find((pid) => Number(state.players[pid]?.customProps?.chips ?? 0) > 0);
+    if (!seat) return;
+    this.settleAt = 0;
+    engine.dispatch({ type: 'FORCE_START', playerId: seat });
   }
 
   private needsClock(): boolean {
@@ -504,15 +502,15 @@ export class ServerMatch {
     if (state.gameOver) return false;
     const clock = state.clock;
     const pending = state.pendingDecisions.some(
-      window =>
+      (window) =>
         window.status === 'OPEN' &&
         ((window.deadline !== undefined && window.deadline <= clock + 1) ||
           window.participants.some(
-            pid =>
+            (pid) =>
               window.submissions[pid] === undefined &&
               window.participantDeadlines?.[pid] !== undefined &&
-              window.participantDeadlines[pid] <= clock + 1
-          ))
+              window.participantDeadlines[pid] <= clock + 1,
+          )),
     );
     if (pending) return true;
     const top = state.interruptStack[state.interruptStack.length - 1];
@@ -531,9 +529,7 @@ function sameSeats(match: ServerMatch, options: MatchOptions): boolean {
   const humans = Math.min(options.players.length, MAX_SEATS);
   const wanted = Math.min(humans + (options.aiSeats ?? 0), MAX_SEATS);
   if (seats.length !== wanted) return false;
-  return options.players
-    .slice(0, humans)
-    .every((player, index) => seats[index]?.userId === player.userId);
+  return options.players.slice(0, humans).every((player, index) => seats[index]?.userId === player.userId);
 }
 
 /** 房间 → 对局映射。房间关闭或重开时销毁对局。 */
@@ -619,11 +615,12 @@ export class MatchManager {
       allowedAi++;
       const wanted = Math.min(acct.chips, POKER_BUY_IN);
       const funded = Math.max(0, Math.round(Number(acct.atTable?.[options.roomId] ?? 0)));
-      const charged = funded > 0 ? takeSeat(aiUserId, funded, options.roomId) : takeSeat(aiUserId, wanted, options.roomId);
+      const charged =
+        funded > 0 ? takeSeat(aiUserId, funded, options.roomId) : takeSeat(aiUserId, wanted, options.roomId);
       aiStacks.push(charged);
     }
 
-    const humanStacks = options.players.slice(0, MAX_SEATS).map(player => {
+    const humanStacks = options.players.slice(0, MAX_SEATS).map((player) => {
       const account = peekAccount(player.userId);
       const funded = Math.max(0, Math.round(Number(account.atTable?.[options.roomId] ?? 0)));
       if (funded > 0) return takeSeat(player.userId, funded, options.roomId);
@@ -635,7 +632,7 @@ export class MatchManager {
     return {
       ...options,
       aiSeats: allowedAi,
-      stacks
+      stacks,
     };
   }
 

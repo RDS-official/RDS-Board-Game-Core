@@ -549,6 +549,33 @@ ok(deleteRes.ok === true, 'adminDeleteUser works');
   ok(validateProductionSecrets({ NODE_ENV: 'development' }).length === 0, 'development stays permissive');
 }
 
+/* -------------------------------------------------------------------------- */
+/* #221：每个对局只能有一个定时泵                                                 */
+/* -------------------------------------------------------------------------- */
+{
+  const originalSetInterval = globalThis.setInterval;
+  let timerCount = 0;
+  (globalThis as unknown as { setInterval: typeof setInterval }).setInterval = ((fn: never, ms?: number) => {
+    timerCount++;
+    return originalSetInterval(fn, ms);
+  }) as unknown as typeof setInterval;
+  try {
+    const timerMatches = new MatchManager();
+    timerMatches.ensure({
+      roomId: 'r_timer_count',
+      gameId: 'poker',
+      players: [{ userId: 'timer_host', name: '计时' }],
+      seats: 2,
+      aiSeats: 1,
+      seed: 3
+    });
+    ok(timerCount <= 1, `a match uses a single interval timer (saw ${timerCount})`);
+    timerMatches.closeAll();
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+  }
+}
+
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');
 try { fs.rmSync(process.env.HUB_DATA_DIR!, { recursive: true, force: true }); } catch { /* 临时目录清理失败无所谓 */ }
 process.exit(failed ? 1 : 0);
