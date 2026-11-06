@@ -1,8 +1,18 @@
 /** rds-room/1 — Hub ↔ 桌游客户端共享协议类型。与 RDS-Board-Core src/net 对齐。 */
 export const PROTOCOL_VERSION = 'rds-room/1';
 
-/** RFC6902 子集，与内核 net/patch.ts 的 PatchOp 同形。 */
-export interface PatchOp { op: 'add' | 'remove' | 'replace' | 'move' | 'copy' | 'test'; path: string; value?: unknown; from?: string; }
+/**
+ * RFC6902 子集 —— **只声明真正实现的那三个操作**（issue #218）。
+ *
+ * 之前这里多声明了 `move` / `copy` / `test`，但 `packages/net/src/patch.ts` 只实现
+ * add/remove/replace：协议上说支持、实际收到就崩。现在两边收敛到同一子集，并用
+ * `packages/harness/src/suites/patchParity.ts` 做类型级一致性校验。
+ */
+export interface PatchOp {
+  op: 'add' | 'remove' | 'replace';
+  path: string;
+  value?: unknown;
+}
 
 /** Host→Guest，与内核 GameRoom.RoomUpdate 同形。 */
 export interface RoomUpdateMessage {
