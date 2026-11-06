@@ -88,11 +88,31 @@ export interface BoundAction {
   idKey?: 'targetEdgeId' | 'targetNodeId' | 'entityId';
 }
 
+/**
+ * 面板动作携带的自由元数据（由各游戏的呈现层写入）。
+ *
+ * 这里以前是 15 处 `(pick.metadata as any)`，等于放弃类型检查；现在集中成一个
+ * 结构化类型，读不到的键统一走索引签名（issue #234）。
+ */
+interface PickMetadata {
+  intent?: string;
+  type?: string;
+  feature?: string;
+  action?: string;
+  targetRoomId?: string;
+  targetName?: string;
+  direction?: string;
+  [key: string]: unknown;
+}
+
 interface ActiveBoardGroup {
   type: string;
   idKey: 'targetEdgeId' | 'targetNodeId' | 'entityId';
   targets: string[];
 }
+
+/** 读面板动作的元数据；缺失时给空对象，避免到处判空。 */
+const metaOf = (pick: { metadata?: unknown }): PickMetadata => (pick.metadata ?? {}) as PickMetadata;
 
 const RESOURCES: Record<string, { icon: string; label: string; color: string }> = {
   wood: { icon: '🌲', label: '木材', color: '#3f9d5a' },
@@ -452,19 +472,19 @@ export class UniversalSession implements GamePresenter {
 
     // In-world placement rotation / confirmation gizmos
     if (this.snapshot.placement) {
-      if (pick.id === 'placement_rotate' || (pick.metadata as any)?.intent === 'rotate') {
+      if (pick.id === 'placement_rotate' || metaOf(pick).intent === 'rotate') {
         this.rotatePlacement(1);
         return { handled: true };
       }
-      if (pick.id === 'placement_confirm' || (pick.metadata as any)?.intent === 'confirm') {
+      if (pick.id === 'placement_confirm' || metaOf(pick).intent === 'confirm') {
         const res = this.confirmPlacement();
         return { handled: res.ok, message: res.error };
       }
     }
 
     // In-world actionable room feature (currently the vault)
-    if ((pick.metadata as any)?.type === 'ROOM_FEATURE') {
-      const feature = String((pick.metadata as any)?.feature ?? '');
+    if (metaOf(pick).type === 'ROOM_FEATURE') {
+      const feature = String(metaOf(pick).feature ?? '');
       const action = legal.find(
         a => a.type === 'ROOM_FEATURE' && String(a.payload?.feature ?? '') === feature
       );
@@ -474,10 +494,10 @@ export class UniversalSession implements GamePresenter {
     }
 
     // In-world special traversal badge (stairs / drop / rappel / lift)
-    if ((pick.metadata as any)?.type === 'SPECIAL_MOVE') {
-      const action = String((pick.metadata as any)?.action ?? '');
-      const targetRoomId = (pick.metadata as any)?.targetRoomId;
-      const targetName = (pick.metadata as any)?.targetName ?? '目标房间';
+    if (metaOf(pick).type === 'SPECIAL_MOVE') {
+      const action = String(metaOf(pick).action ?? '');
+      const targetRoomId = String(metaOf(pick).targetRoomId ?? '');
+      const targetName = metaOf(pick).targetName ?? '目标房间';
 
       if (action === 'USE_ELEVATOR') {
         // The ride rolls first. Arming a board group here used to highlight every
@@ -520,9 +540,9 @@ export class UniversalSession implements GamePresenter {
     }
 
     // In-world room navigation arrow hotspot (moving to adjacent room)
-    if ((pick.metadata as any)?.type === 'ROOM_NAV') {
-      const targetRoomId = (pick.metadata as any)?.targetRoomId;
-      const targetName = (pick.metadata as any)?.targetName ?? '相邻房间';
+    if (metaOf(pick).type === 'ROOM_NAV') {
+      const targetRoomId = String(metaOf(pick).targetRoomId ?? '');
+      const targetName = metaOf(pick).targetName ?? '相邻房间';
       const moveAction = legal.find(
         a =>
           a.type === 'MOVE_TO_ROOM' &&
@@ -553,9 +573,9 @@ export class UniversalSession implements GamePresenter {
     }
 
     // In-world door exploration hotspot
-    if ((pick.metadata as any)?.type === 'DOOR') {
-      const dir = (pick.metadata as any)?.direction;
-      const meta = pick.metadata as any;
+    if (metaOf(pick).type === 'DOOR') {
+      const dir = metaOf(pick).direction;
+      const meta = metaOf(pick);
       if (meta?.elevator) {
         // The elevator pick names a doorway, so match on room + direction.
         const rideAction = legal.find(
@@ -576,7 +596,7 @@ export class UniversalSession implements GamePresenter {
     }
 
     // Direct entity/board interaction from 3D viewport clicks
-    const isDirectInteract = (pick.metadata as any)?.intent === 'interact';
+    const isDirectInteract = metaOf(pick).intent === 'interact';
     if (isDirectInteract && !this.activeBoardGroup) {
       if (pick.kind === 'node') {
         const directMoveAction = legal.find(
