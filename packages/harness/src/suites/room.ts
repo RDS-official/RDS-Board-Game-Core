@@ -210,3 +210,30 @@ test('net: submit takes the viewer explicitly so concurrent requests cannot swap
   room.dispose();
 });
 
+
+test('net: a reconnect that changes seat drops the stale projection', async () => {
+  const { NetSession } = await import('@rds/app/netSession');
+  const { GAME_REGISTRY } = await import('@rds/games/registry');
+  const net = new NetSession(GAME_REGISTRY.poker, {
+    hub: 'http://127.0.0.1:9',
+    roomId: 'r_reconnect',
+    token: 't',
+    role: 'guest',
+    authority: 'server',
+    playerId: 'p1'
+  } as never);
+  const inner = net as unknown as { state?: unknown; appliedRevision: number; viewer: string; onServerSeat(seat: string): void; dispose(): void };
+
+  // 模拟掉线重连：本地还挂着上一局的 p1 投影与 revision。
+  inner.state = { gameId: 'poker', players: {}, zones: {} };
+  inner.appliedRevision = 7;
+
+  // 服务端这次把玩家放到了 p3（旧实现会直接把 p3 的补丁打到 p1 的状态上）。
+  inner.onServerSeat('p3');
+  assertEqual(inner.viewer, 'p3', 'the server seat wins');
+  assertEqual(inner.state, undefined, 'the stale projection is dropped');
+  assertEqual(inner.appliedRevision, -1, 'the stale revision is dropped, forcing a full snapshot');
+
+  net.dispose();
+});
+

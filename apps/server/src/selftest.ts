@@ -15,7 +15,7 @@ const {
   register, login, verifyJwt, userFromAuthHeader, createUser, isAdminUser, changeOwnPassword,
   adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
 } = await import('./auth.ts');
-const { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo } = await import('./rooms.ts');
+const { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo, leaveRoom, seatedPlayers } = await import('./rooms.ts');
 const { GAMES } = await import('./games.ts');
 const { GAME_REGISTRY } = await import('@rds/games/registry');
 const { MatchManager } = await import('./match.ts');
@@ -574,6 +574,34 @@ ok(deleteRes.ok === true, 'adminDeleteUser works');
   } finally {
     globalThis.setInterval = originalSetInterval;
   }
+}
+
+/* -------------------------------------------------------------------------- */
+/* 掉线重连不能换座位（线上事故）                                                */
+/* -------------------------------------------------------------------------- */
+{
+  const seatHost = createUser('seat_host', 'secret123', { displayName: '座位房主' }) as unknown as { user: { id: string } };
+  const seatA = createUser('seat_a', 'secret123', { displayName: '座位A' }) as unknown as { user: { id: string } };
+  const seatB = createUser('seat_b', 'secret123', { displayName: '座位B' }) as unknown as { user: { id: string } };
+  const seatRoom = createRoom(seatHost.user.id, '座位稳定性', 'poker') as any;
+  ok(!seatRoom.error, 'seat room created');
+  joinRoom(seatA.user.id, seatRoom.id);
+  joinRoom(seatB.user.id, seatRoom.id);
+  const orderBefore = seatedPlayers(seatRoom.id);
+  ok(orderBefore.join(',') === [seatHost.user.id, seatA.user.id, seatB.user.id].join(','), 'seats follow join order');
+
+  // 掉线 → 离开房间 → 重连：必须回到原座位，而不是被追加到末尾。
+  leaveRoom(seatA.user.id, seatRoom.id);
+  joinRoom(seatA.user.id, seatRoom.id);
+  ok(seatedPlayers(seatRoom.id).join(',') === orderBefore.join(','), 'reconnecting player keeps the same seat');
+
+  // 被请离则释放座位，新玩家可以补进来。
+  kickPlayer(seatHost.user.id, seatRoom.id, seatB.user.id);
+  const seatC = createUser('seat_c', 'secret123', { displayName: '座位C' }) as unknown as { user: { id: string } };
+  joinRoom(seatC.user.id, seatRoom.id);
+  const orderAfterKick = seatedPlayers(seatRoom.id);
+  ok(orderAfterKick.length === 3, 'the kicked seat is reusable');
+  ok(orderAfterKick[2] === seatC.user.id, 'a new player takes the freed seat');
 }
 
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');

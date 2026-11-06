@@ -23,6 +23,8 @@ export interface RoomRecord {
   lastActivity?: number; firstEmptyAt?: number;
   /** 房主添加的内置 AI 座位数（旧数据缺省 = 0）。 */
   aiSeats?: number;
+  /** 账号 → 固定座位序号（旧数据缺省：按 players 顺序推导）。 */
+  seatIndex?: Record<string, number>;
 }
 
 interface DbShape { users: UserRecord[]; rooms: RoomRecord[]; }

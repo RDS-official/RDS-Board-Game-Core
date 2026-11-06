@@ -12,6 +12,14 @@ interface RoomRec {
   players: string[]; createdAt: number;
   /** 房主添加的内置 AI 座位数（目前只有德州扑克支持；开局时由夹具补齐）。 */
   aiSeats?: number;
+  /**
+   * 账号 → 固定座位序号（issue: 掉线重连被换座位）。
+   *
+   * 座位以前按 `players` 数组顺序推导：谁掉线被移出数组、重连时就被追加到末尾，
+   * 于是同一张桌子上的座位会漂移 —— 重连后拿到别的座位（可能正是 AI 补位占着的
+   * 那一座），手牌和公开牌全部错位。这里把座位号钉在账号上，离开房间也不释放。
+   */
+  seatIndex?: Record<string, number>;
   /** Phase B */
   readyPlayers: string[];      // 已就绪玩家 id（开局时清空）
   isPrivate: boolean;
@@ -95,6 +103,7 @@ export function createRoom(userId: string, name: string, gameId: string, opts: C
     status: 'open', maxPlayers,
     players: [userId], createdAt: Date.now(), lastActivity: Date.now(),
     readyPlayers: [userId],          // 房主默认就绪
+    seatIndex: { [userId]: 0 },
     isPrivate: !!opts.isPrivate,
     code: genCode(),
     scenarioId: opts.scenarioId,
@@ -111,6 +120,16 @@ export function joinRoom(userId: string, roomId: string, code?: string): HubRoom
     if (r.players.length >= r.maxPlayers) return { error: '房间已满' };
     if (r.isPrivate && (!code || code.toUpperCase() !== r.code)) return { error: '房间码不正确' };
     r.players.push(userId);
+    // 座位号：之前坐过就复用，否则取最小空位。掉线重连因此回到原座，不会漂移。
+    const taken = new Set(Object.entries(r.seatIndex ?? {})
+      .filter(([uid]) => uid !== userId && r.players.includes(uid))
+      .map(([, index]) => index));
+    const remembered = r.seatIndex?.[userId];
+    let seat = remembered !== undefined && !taken.has(remembered) ? remembered : 0;
+    if (remembered === undefined || taken.has(remembered)) {
+      while (taken.has(seat)) seat += 1;
+    }
+    r.seatIndex = { ...(r.seatIndex ?? {}), [userId]: seat };
     rooms.update(roomId, { players: r.players, readyPlayers: r.readyPlayers ?? [] });
   }
   return changed(r, { includeCode: userId === r.hostId });
@@ -127,7 +146,8 @@ export function leaveRoom(userId: string, roomId: string) {
     return { id: roomId, closed: true } as unknown as HubRoomInfo;
   }
   const hostId = r.hostId === userId ? players[0] : r.hostId;
-  rooms.update(roomId, { players, readyPlayers, hostId });
+  // 座位号保留：掉线重连要回到原位。房间被清空时整条记录会被删掉，不会泄漏。
+  rooms.update(roomId, { players, readyPlayers, hostId, seatIndex: r.seatIndex });
   const after = rooms.byId(roomId)! as RoomRec;
   return changed(after);
 }
@@ -198,6 +218,10 @@ export function kickPlayer(hostId: string, roomId: string, targetId: string) {
   if (r.hostId !== hostId) return { error: '只有房主可以操作' };
   if (targetId === hostId) return { error: '不能请离自己' };
   if (!r.players.includes(targetId)) return { error: '该玩家不在房间内' };
+  // 被请离 ≠ 掉线：座位不应为它保留，否则新玩家会看到「空着但占位」的座位。
+  const seatIndex = { ...(r.seatIndex ?? {}) };
+  delete seatIndex[targetId];
+  rooms.update(roomId, { seatIndex });
   return leaveRoom(targetId, roomId);
 }
 
@@ -222,6 +246,19 @@ export function transferHost(hostId: string, roomId: string, targetId: string) {
  * AI 不占真人名额：`players` 仍只记真人，`aiSeats` 是额外补位的数量，
  * 开局时由夹具按等级编制填入（见 packages/games/src/poker/seating.ts）。
  */
+/**
+ * 房间里的玩家，按**固定座位号**排序（issue: 掉线重连换座位）。
+ *
+ * `players` 是"当前在房间里的人"，顺序会因离开/重连变化；座位号才是身份。
+ * 大厅与服务端建局都必须用这个顺序，不能再直接读 `players`。
+ */
+export function seatedPlayers(roomId: string): string[] {
+  const r = rooms.byId(roomId) as RoomRec | undefined;
+  if (!r) return [];
+  const indexOf = (uid: string) => r.seatIndex?.[uid] ?? Number.MAX_SAFE_INTEGER;
+  return [...r.players].sort((a, b) => indexOf(a) - indexOf(b));
+}
+
 export function setAiSeats(hostId: string, roomId: string, aiSeats: number) {
   const r = rooms.byId(roomId) as RoomRec | undefined;
   if (!r) return { error: '房间不存在' };
