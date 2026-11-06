@@ -54,14 +54,14 @@ const gitInfo = (() => {
       if (list.length > 0) return list;
     } catch {}
 
-    return [
-      { login: 'Xhopo-hk', commits: 72 },
-      { login: 'QSanSi', commits: 30 },
-      { login: '1368129224', commits: 24 }
-    ];
+    // 没有 git 历史时**不要编造数字**：以前这里写死了一份贡献者与提交次数，
+    // 每次构建都会把过期数据打进包里，且没人知道它是假的（issue #226）。
+    // 返回空数组，HUD 会自动退化成"只显示当前提交作者"。
+    return [];
   })();
 
-  const totalCommits = run('git rev-list --count HEAD') || '140+';
+  // 数不出来就留空，不猜一个"140+"糊弄过去。
+  const totalCommits = run('git rev-list --count HEAD') || '';
 
   return { hash, fullHash, author, commitDate, repo, contributors, totalCommits };
 })();
