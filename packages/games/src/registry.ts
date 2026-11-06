@@ -769,7 +769,16 @@ export const pokerModule: GameModule = defineGame({
     // 内置 AI 每步至少 5 秒，真人跟得上牌桌；驱动方据此逐步派发它的具体动作。
     aiActionDelayMs: 5000,
     // 一手刚结束，先让牌桌读完结算，20 秒后才允许开下一手。
-    actionCooldownMs: { START_HAND: 20000 }
+    actionCooldownMs: { START_HAND: 20000 },
+    // 真人 30 秒不出手就由服务端代打：能过牌就过牌，否则弃牌。
+    // 掉线、锁屏、走开都不再能把整张桌子卡死（issue #190）。
+    decisionDeadlineMs: 30_000,
+    timeoutAction: legal => {
+      // 能免费过牌就过牌，否则弃牌 —— 绝不替玩家跟注花钱。
+      const check = legal.find(action => action.type === 'CHECK');
+      if (check) return check;
+      return legal.find(action => action.type === 'FOLD') ?? null;
+    }
   }),
   legalActions: (state, playerId) => PokerRules.getLegalActions(state, playerId),
   validatePayload: (state, action, payload) => PokerRules.validatePayload(state, action, payload),

@@ -352,6 +352,16 @@ export interface GameDriverHints {
    * `action(state)` 返回 null 表示这一拍不需要派发（例如桌上没有观察者），
    * 驱动方跳过即可。动作本身仍走正常的 reduce 路径，因此回放完全确定。
    */
+  /**
+   * 真人决策超时（issue #190）。声明后，驱动方在「当前行动者是真人」且超过该
+   * 毫秒数仍未出手时，用 `timeoutAction` 代打一次；不声明则永不代打。
+   */
+  decisionDeadlineMs?: number;
+  /**
+   * 超时代打策略：由游戏自己从合法动作里挑一个（例如优先 CHECK，其次 FOLD）。
+   * 返回 null 表示"这一拍无法代打"，驱动方保持等待。
+   */
+  timeoutAction?: (legal: Action[], state: GameState, playerId: PlayerId) => Action | null;
   heartbeat?: {
     intervalMs: number;
     action: (state: GameState) => Action | null;
@@ -639,6 +649,18 @@ export function defineDriver(hints: GameDriverHints): GameDriverHints {
       }
       if (typeof beat.action !== 'function') {
         throw new TypeError('driver.heartbeat.action must be a function');
+      }
+      continue;
+    }
+    if (key === 'decisionDeadlineMs') {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        throw new TypeError('driver.decisionDeadlineMs must be a positive number');
+      }
+      continue;
+    }
+    if (key === 'timeoutAction') {
+      if (typeof value !== 'function') {
+        throw new TypeError('driver.timeoutAction must be a function');
       }
       continue;
     }
