@@ -10,6 +10,7 @@ import {
   deleteAdminUser,
 } from './adminApi.ts';
 import { showToast } from '../lobby/toast.ts';
+import { html, raw, setHtml } from '../ui/dom/html';
 
 export interface AdminHandle {
   destroy(): void;
@@ -115,7 +116,7 @@ export async function startAdmin(
 
   function renderLogin() {
     if (!root) return;
-    root.innerHTML = `
+    setHtml(root, html`
       <div class="adm-login-wrap">
         <div class="adm-login-card">
           <div class="adm-brand">
@@ -143,7 +144,7 @@ export async function startAdmin(
           </div>
         </div>
       </div>
-    `;
+    `);
 
     const nameInput = document.getElementById('adm-login-name') as HTMLInputElement;
     const passInput = document.getElementById('adm-login-pass') as HTMLInputElement;
@@ -202,7 +203,7 @@ export async function startAdmin(
 
     const filtered = getFilteredUsers();
 
-    root.innerHTML = `
+    setHtml(root, html`
       <header class="adm-header">
         <div class="adm-brand">
           <span class="adm-brand-dot"></span>
@@ -211,8 +212,8 @@ export async function startAdmin(
         </div>
         <div class="adm-nav">
           <div class="adm-userchip">
-            <span class="adm-avatar">${esc((adminUser.displayName || adminUser.name).slice(0, 1).toUpperCase())}</span>
-            <span class="adm-userchip-name">${esc(adminUser.displayName || adminUser.name)}</span>
+            <span class="adm-avatar">${(adminUser.displayName || adminUser.name).slice(0, 1).toUpperCase()}</span>
+            <span class="adm-userchip-name">${adminUser.displayName || adminUser.name}</span>
           </div>
           <button id="adm-nav-my-pass" class="adm-btn adm-btn-secondary">修改密码</button>
           <button id="adm-nav-lobby" class="adm-btn adm-btn-secondary">返回大厅</button>
@@ -226,21 +227,21 @@ export async function startAdmin(
           <div class="adm-stat-card">
             <div class="adm-stat-meta">
               <span class="adm-stat-label">总账号</span>
-              <span class="adm-stat-val">${stats.totalUsers}</span>
+              <span class="adm-stat-val">${raw(stats.totalUsers)}</span>
             </div>
             <div class="adm-stat-icon">👥</div>
           </div>
           <div class="adm-stat-card">
             <div class="adm-stat-meta">
               <span class="adm-stat-label">管理员</span>
-              <span class="adm-stat-val" style="color: var(--gold);">${stats.adminUsers}</span>
+              <span class="adm-stat-val" style="color: var(--gold);">${raw(stats.adminUsers)}</span>
             </div>
             <div class="adm-stat-icon">🛡️</div>
           </div>
           <div class="adm-stat-card">
             <div class="adm-stat-meta">
               <span class="adm-stat-label">已禁用</span>
-              <span class="adm-stat-val" style="color: ${stats.disabledUsers > 0 ? 'var(--err)' : 'var(--muted)'};">${stats.disabledUsers}</span>
+              <span class="adm-stat-val" style="color: ${raw(stats.disabledUsers > 0 ? 'var(--err)' : 'var(--muted)')};">${raw(stats.disabledUsers)}</span>
             </div>
             <div class="adm-stat-icon">🚫</div>
           </div>
@@ -249,16 +250,16 @@ export async function startAdmin(
         <!-- 工具栏 -->
         <section class="adm-toolbar">
           <div class="adm-filters">
-            <input id="adm-filter-search" class="adm-input" placeholder="搜索用户名 / 昵称…" value="${esc(searchQuery)}" />
+            <input id="adm-filter-search" class="adm-input" placeholder="搜索用户名 / 昵称…" value="${searchQuery}" />
             <select id="adm-filter-role" class="adm-select">
-              <option value="all" ${roleFilter === 'all' ? 'selected' : ''}>全部角色</option>
-              <option value="user" ${roleFilter === 'user' ? 'selected' : ''}>普通玩家 (user)</option>
-              <option value="admin" ${roleFilter === 'admin' ? 'selected' : ''}>管理员 (admin)</option>
+              <option value="all" ${raw(roleFilter === 'all' ? 'selected' : '')}>全部角色</option>
+              <option value="user" ${raw(roleFilter === 'user' ? 'selected' : '')}>普通玩家 (user)</option>
+              <option value="admin" ${raw(roleFilter === 'admin' ? 'selected' : '')}>管理员 (admin)</option>
             </select>
             <select id="adm-filter-status" class="adm-select">
-              <option value="all" ${statusFilter === 'all' ? 'selected' : ''}>全部状态</option>
-              <option value="active" ${statusFilter === 'active' ? 'selected' : ''}>正常可用</option>
-              <option value="disabled" ${statusFilter === 'disabled' ? 'selected' : ''}>已禁用</option>
+              <option value="all" ${raw(statusFilter === 'all' ? 'selected' : '')}>全部状态</option>
+              <option value="active" ${raw(statusFilter === 'active' ? 'selected' : '')}>正常可用</option>
+              <option value="disabled" ${raw(statusFilter === 'disabled' ? 'selected' : '')}>已禁用</option>
             </select>
           </div>
           <div>
@@ -279,19 +280,17 @@ export async function startAdmin(
               </tr>
             </thead>
             <tbody>
-              ${
-                filtered.length === 0
+              ${raw(filtered.length === 0
                   ? `<tr><td colspan="5" class="adm-empty">没有匹配的账号数据</td></tr>`
-                  : filtered.map(u => renderUserRow(u, adminUser!)).join('')
-              }
+                  : filtered.map(u => renderUserRow(u, adminUser!)).join(''))}
             </tbody>
           </table>
         </section>
       </main>
 
       <!-- 弹窗容器 -->
-      ${renderModal()}
-    `;
+      ${raw(renderModal())}
+    `);
 
     bindDashboardEvents();
   }
@@ -780,7 +779,7 @@ export async function startAdmin(
 
   return {
     destroy() {
-      if (root) root.innerHTML = '';
+      if (root) root.replaceChildren();
       root = null;
       adminUser = null;
       userList = [];

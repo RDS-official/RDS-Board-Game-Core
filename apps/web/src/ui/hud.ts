@@ -22,6 +22,7 @@ import {
   UiTraitChange,
   UiPlayer
 } from '@rds/app/contracts';
+import { html, raw, setHtml } from './dom/html';
 
 /**
  * HTML 转义：玩家可控文本（昵称/头像 URL/参与者名）进入 innerHTML 前必须经过这里。
@@ -375,7 +376,7 @@ export class BoardGameHUD {
     const layer = this.container.querySelector('#payload-layer') as HTMLElement | null;
     if (!layer) return;
     layer.style.display = 'none';
-    layer.innerHTML = '';
+    layer.replaceChildren();
   }
 
   /** 「关于」弹窗：展示当前构建的版本信息（git hash、作者、仓库地址等）。 */
@@ -421,7 +422,7 @@ export class BoardGameHUD {
       .map(c => `${esc(c.login)}: ${c.commits}`)
       .join(' · ');
 
-    layer.innerHTML = `
+    setHtml(layer, html`
       <div class="about-backdrop" data-about-close></div>
       <div class="about-card" role="dialog" aria-modal="true" aria-label="关于 · 版本信息">
         <div class="pf-head">
@@ -434,12 +435,11 @@ export class BoardGameHUD {
         <dl class="about-rows">
           <div class="about-row">
             <dt>Git Hash</dt>
-            <dd><code title="${esc(fullHash)}">${esc(commitHash)}</code></dd>
+            <dd><code title="${fullHash}">${commitHash}</code></dd>
           </div>
           <div class="about-row">
             <dt>Contributors</dt>
-            <dd class="about-contributors">${
-              contributors.length > 0
+            <dd class="about-contributors">${raw(contributors.length > 0
                 ? contributors
                     .map(c => {
                       const safeId = esc(c.login);
@@ -452,32 +452,29 @@ export class BoardGameHUD {
                         : `<span class="contributor-tag">${safeId}${countBadge}</span>`;
                     })
                     .join('')
-                : 'unknown'
-            }</dd>
+                : 'unknown')}</dd>
           </div>
           <div class="about-row">
             <dt>Repository</dt>
-            <dd class="about-repo">${
-              repoHref
+            <dd class="about-repo">${raw(repoHref
                 ? `<a href="${esc(repoHref)}" target="_blank" rel="noopener noreferrer">${esc(repoUrl)}</a>`
-                : esc(repoUrl) || 'unknown'
-            }</dd>
+                : esc(repoUrl) || 'unknown')}</dd>
           </div>
           <div class="about-row">
             <dt>Commits</dt>
             <dd class="about-commits">
-              <span class="commit-total"><strong>${esc(totalCommits || '140+')}</strong> 次提交</span>
-              ${commitBreakdown ? `<span class="commit-breakdown">（${commitBreakdown}）</span>` : ''}
+              <span class="commit-total"><strong>${totalCommits || '140+'}</strong> 次提交</span>
+              ${raw(commitBreakdown ? `<span class="commit-breakdown">（${commitBreakdown}）</span>` : '')}
             </dd>
           </div>
-          ${commitDate ? `<div class="about-row"><dt>Commit Date</dt><dd>${esc(commitDate)}</dd></div>` : ''}
-          ${buildTime ? `<div class="about-row"><dt>Build Time</dt><dd>${esc(buildTime)}</dd></div>` : ''}
+          ${raw(commitDate ? `<div class="about-row"><dt>Commit Date</dt><dd>${esc(commitDate)}</dd></div>` : '')}
+          ${raw(buildTime ? `<div class="about-row"><dt>Build Time</dt><dd>${esc(buildTime)}</dd></div>` : '')}
         </dl>
         <div class="pf-foot">
           <button class="pf-btn primary about-close" data-about-close>关闭</button>
         </div>
       </div>
-    `;
+    `);
     this.container.appendChild(layer);
 
     const close = () => this.closeAbout();
@@ -523,37 +520,35 @@ export class BoardGameHUD {
     const layer = document.createElement('div');
     layer.className = 'about-layer account-detail-layer';
     layer.id = 'account-detail-layer';
-    layer.innerHTML = `
+    setHtml(layer, html`
       <div class="about-backdrop" data-account-close></div>
       <div class="about-card account-detail" role="dialog" aria-modal="true" aria-label="账号生涯战绩">
         <div class="pf-head">
-          <div class="pf-ico">${
-            row.avatarUrl
+          <div class="pf-ico">${raw(row.avatarUrl
               ? `<img class="ad-avatar" src="${escapeAttr(row.avatarUrl)}" alt="" />`
-              : escHtml(row.name.slice(0, 1).toUpperCase())
-          }</div>
+              : escHtml(row.name.slice(0, 1).toUpperCase()))}</div>
           <div>
-            <div class="pf-title">${escHtml(row.name)}</div>
-            <div class="pf-hint">${row.roomId
+            <div class="pf-title">${row.name}</div>
+            <div class="pf-hint">${raw(row.roomId
               ? `正在对局 · ${escHtml(row.roomId)} · ${escHtml(row.seat ?? '')} 座位`
-              : '当前不在牌桌'}</div>
+              : '当前不在牌桌')}</div>
           </div>
         </div>
         <div class="ad-hero">
-          <span class="ad-hero-v">${row.chips}</span>
+          <span class="ad-hero-v">${raw(row.chips)}</span>
           <span class="ad-hero-k">总筹码</span>
-          <span class="ad-hero-split">余额 ${row.bankroll} · 在桌 ${row.onTable}</span>
+          <span class="ad-hero-split">余额 ${raw(row.bankroll)} · 在桌 ${raw(row.onTable)}</span>
         </div>
         <div class="ad-stats">
-          ${stat('手数', String(row.stats.hands), '参与过的手牌总数（不含旁观）')}
-          ${stat('胜率', percent(row.stats.winRate), '赢下至少一个底池的手数 / 参与手数')}
-          ${stat('入池率', percent(row.stats.vpipRate), '翻前自愿投钱（跟注 / 加注 / 全押）的手数占比，盲注不算')}
-          ${stat('看翻牌', percent(row.stats.sawFlopRate), '翻牌发出时仍在牌局里的手数占比')}
-          ${stat('摊牌率', percent(row.stats.showdownRate), '走到摊牌的手数占比')}
-          ${stat('摊牌胜率', percent(row.stats.showdownWinRate), '摊牌中赢下底池的手数 / 摊牌手数')}
-          ${stat('净输赢', `${row.stats.netChips >= 0 ? '+' : ''}${row.stats.netChips}`, '赢回 - 投入的累计筹码')}
-          ${stat('最大底池', String(row.stats.bestPot), '单手提走的最大底池')}
-          ${stat('峰值筹码', String(row.peakChips), '生涯最高总筹码')}
+          ${raw(stat('手数', String(row.stats.hands), '参与过的手牌总数（不含旁观）'))}
+          ${raw(stat('胜率', percent(row.stats.winRate), '赢下至少一个底池的手数 / 参与手数'))}
+          ${raw(stat('入池率', percent(row.stats.vpipRate), '翻前自愿投钱（跟注 / 加注 / 全押）的手数占比，盲注不算'))}
+          ${raw(stat('看翻牌', percent(row.stats.sawFlopRate), '翻牌发出时仍在牌局里的手数占比'))}
+          ${raw(stat('摊牌率', percent(row.stats.showdownRate), '走到摊牌的手数占比'))}
+          ${raw(stat('摊牌胜率', percent(row.stats.showdownWinRate), '摊牌中赢下底池的手数 / 摊牌手数'))}
+          ${raw(stat('净输赢', `${row.stats.netChips >= 0 ? '+' : ''}${row.stats.netChips}`, '赢回 - 投入的累计筹码'))}
+          ${raw(stat('最大底池', String(row.stats.bestPot), '单手提走的最大底池'))}
+          ${raw(stat('峰值筹码', String(row.peakChips), '生涯最高总筹码'))}
         </div>
         <div class="ad-foot">
           入池率 = 翻前自愿投钱手数 / 参与手数 · 胜率 = 赢下底池手数 / 参与手数
@@ -562,7 +557,7 @@ export class BoardGameHUD {
           <button class="pf-btn primary account-close" data-account-close>关闭</button>
         </div>
       </div>
-    `;
+    `);
     this.container.appendChild(layer);
 
     const close = (): void => this.closeAccountDetail();
@@ -696,9 +691,8 @@ export class BoardGameHUD {
     // A card face gets a full preview above the caption: a one-line tooltip
     // cannot convey a card's art at board scale.
     el.classList.toggle('with-art', !!hint.art);
-    el.innerHTML =
-      (hint.art ? `<img class="hh-art" src="${escapeAttr(hint.art)}" alt="${escapeAttr(hint.title)}" />` : '') +
-      `<span class="hh-body"><b>${escHtml(hint.title)}</b>${hint.desc ? `<span>${escHtml(hint.desc)}</span>` : ''}</span>`;
+    setHtml(el, raw((hint.art ? `<img class="hh-art" src="${escapeAttr(hint.art)}" alt="${escapeAttr(hint.title)}" />` : '') +
+      `<span class="hh-body"><b>${escHtml(hint.title)}</b>${hint.desc ? `<span>${escHtml(hint.desc)}</span>` : ''}</span>`));
     el.classList.add('on');
   }
 
@@ -730,13 +724,13 @@ export class BoardGameHUD {
       const rows = view.sections
         .map(row => `<div class="sp-row"><span class="sp-k">${escHtml(row.label)}</span><span class="sp-v">${escHtml(row.value)}</span></div>`)
         .join('');
-      el.innerHTML = `
-        <div class="sp-coin">${escHtml(view.seal ?? '👤')}</div>
-        <div class="sp-name">${escHtml(view.title)}</div>
-        ${view.badge ? `<div class="sp-badge">${escHtml(view.badge)}</div>` : ''}
-        ${view.subtitle ? `<div class="sp-sub">${escHtml(view.subtitle)}</div>` : ''}
-        <div class="sp-rows">${rows}</div>
-      `;
+      setHtml(el, html`
+        <div class="sp-coin">${view.seal ?? '👤'}</div>
+        <div class="sp-name">${view.title}</div>
+        ${raw(view.badge ? `<div class="sp-badge">${escHtml(view.badge)}</div>` : '')}
+        ${raw(view.subtitle ? `<div class="sp-sub">${escHtml(view.subtitle)}</div>` : '')}
+        <div class="sp-rows">${raw(rows)}</div>
+      `);
     }
 
     const rect = el.getBoundingClientRect();
@@ -759,9 +753,7 @@ export class BoardGameHUD {
 
     const el = document.createElement('div');
     el.className = 'toast';
-    el.innerHTML = `<span class="t-ico">${icon}</span><span class="t-txt">${text}${
-      detail ? `<span class="t-detail">${detail}</span>` : ''
-    }</span>`;
+    setHtml(el, html`<span class="t-ico">${raw(icon)}</span><span class="t-txt">${raw(text)}${raw(detail ? `<span class="t-detail">${detail}</span>` : '')}</span>`);
     stack.appendChild(el);
 
     while (stack.children.length > 4) stack.removeChild(stack.firstElementChild!);
@@ -778,7 +770,7 @@ export class BoardGameHUD {
 
     if (this.announceTimer) window.clearTimeout(this.announceTimer);
 
-    banner.innerHTML = `<span class="a-mark">❖</span><span>${title}</span>`;
+    setHtml(banner, html`<span class="a-mark">❖</span><span>${raw(title)}</span>`);
     banner.style.display = 'flex';
     banner.classList.remove('out');
 
@@ -892,7 +884,7 @@ export class BoardGameHUD {
     this.closeAccountDetail();
     this.closePayload();
 
-    layer.innerHTML = `
+    setHtml(layer, html`
       <div class="payload-backdrop" data-menu-backdrop></div>
       <div class="menu-card" id="menu-dialog" role="dialog" aria-modal="true" aria-labelledby="menu-dialog-title" tabindex="-1">
         <header class="menu-head">
@@ -913,12 +905,12 @@ export class BoardGameHUD {
           </section>
         </div>
       </div>
-    `;
+    `);
     const root = layer.querySelector('.menu-card') as HTMLElement | null;
     const gamesSlot = layer.querySelector('[data-menu-slot="games"]') as HTMLElement | null;
     const controlsSlot = layer.querySelector('[data-menu-slot="controls"]') as HTMLElement | null;
     if (!root || !gamesSlot || !controlsSlot) {
-      layer.innerHTML = '';
+      layer.replaceChildren();
       return;
     }
 
@@ -970,7 +962,7 @@ export class BoardGameHUD {
     if (topbar && moved.length > 0) topbar.append(...moved);
     if (layer) {
       layer.style.display = 'none';
-      layer.innerHTML = '';
+      layer.replaceChildren();
       layer.onclick = null;
       layer.onchange = null;
     }
@@ -1326,28 +1318,28 @@ export class BoardGameHUD {
         </div>`
       : '';
 
-    layer.innerHTML = `
+    setHtml(layer, html`
       <div class="payload-backdrop"></div>
       <form class="payload-card" autocomplete="off">
         <header class="pf-head">
-          <span class="pf-ico">${action.icon}</span>
+          <span class="pf-ico">${raw(action.icon)}</span>
           <div>
-            <div class="pf-title">${action.label}</div>
-            <div class="pf-hint">${action.hint}</div>
+            <div class="pf-title">${raw(action.label)}</div>
+            <div class="pf-hint">${raw(action.hint)}</div>
           </div>
         </header>
-        <div class="pf-body">${selection}${fields}</div>
+        <div class="pf-body">${raw(selection)}${raw(fields)}</div>
         <footer class="pf-foot">
           <button type="button" class="pf-btn" id="pf-cancel">取消</button>
           <button type="submit" class="pf-btn primary">确认</button>
         </footer>
       </form>
-    `;
+    `);
     layer.style.display = 'flex';
 
     const close = () => {
       layer.style.display = 'none';
-      layer.innerHTML = '';
+      layer.replaceChildren();
     };
 
     layer.querySelector('.payload-backdrop')?.addEventListener('click', close);
@@ -1586,7 +1578,7 @@ export class BoardGameHUD {
     if (!entry) {
       this.paintedSheetStamp = 0;
       layer.classList.remove('open', 'is-reveal');
-      layer.innerHTML = '';
+      layer.replaceChildren();
       return;
     }
     this.paintedSheetStamp = entry.stamp;
@@ -1598,34 +1590,32 @@ export class BoardGameHUD {
       .join('');
 
     layer.classList.toggle('is-reveal', !!entry.reveal);
-    layer.innerHTML = `
-      <article class="card-sheet" data-tone="${escapeAttr(view.tone ?? 'neutral')}" style="--ink:${theme.ink};--ribbon:${theme.ribbon}">
+    setHtml(layer, html`
+      <article class="card-sheet" data-tone="${view.tone ?? 'neutral'}" style="--ink:${raw(theme.ink)};--ribbon:${raw(theme.ribbon)}">
         <button class="cs-close" type="button" aria-label="关闭">×</button>
-        ${view.badge ? `<div class="cs-ribbon"><span>${escHtml(view.badge)}</span></div>` : ''}
+        ${raw(view.badge ? `<div class="cs-ribbon"><span>${escHtml(view.badge)}</span></div>` : '')}
         <div class="cs-body">
-          <div class="cs-art">${
-            view.art
+          <div class="cs-art">${raw(view.art
               ? `<img class="cs-art-img" src="${escapeAttr(view.art)}" alt="${escapeAttr(view.title)}" />`
-              : cardArtSvg(view)
-          }</div>
-          ${view.actions?.length ? `<div class="cs-actions">${view.actions
+              : cardArtSvg(view))}</div>
+          ${raw(view.actions?.length ? `<div class="cs-actions">${view.actions
             .map(
               action =>
                 `<button type="button" class="cs-action" data-card-action="${escapeAttr(action.id)}"><span>${escHtml(
                   action.icon
                 )}</span>${escHtml(action.label)}</button>`
             )
-            .join('')}</div>` : ''}
-          ${view.seal ? `<div class="cs-seal">${escHtml(view.seal)}</div>` : ''}
-          <h2 class="cs-title">${escHtml(view.title)}</h2>
-          ${view.subtitle ? `<div class="cs-en">${escHtml(view.subtitle)}</div>` : ''}
+            .join('')}</div>` : '')}
+          ${raw(view.seal ? `<div class="cs-seal">${escHtml(view.seal)}</div>` : '')}
+          <h2 class="cs-title">${view.title}</h2>
+          ${raw(view.subtitle ? `<div class="cs-en">${escHtml(view.subtitle)}</div>` : '')}
           <div class="cs-rule"></div>
-          <p class="cs-desc">${escHtml(view.desc ?? '')}</p>
-          ${facts ? `<ul class="cs-facts">${facts}</ul>` : ''}
+          <p class="cs-desc">${view.desc ?? ''}</p>
+          ${raw(facts ? `<ul class="cs-facts">${facts}</ul>` : '')}
         </div>
-        <div class="cs-foot">${escHtml(entry.footer ?? '点击牌堆或场景实体继续')}</div>
+        <div class="cs-foot">${entry.footer ?? '点击牌堆或场景实体继续'}</div>
       </article>
-    `;
+    `);
     layer.classList.add('open');
 
     const close = () => this.overlays.close(entry.mode);
@@ -1799,21 +1789,21 @@ export class BoardGameHUD {
     layer.setAttribute('role', 'dialog');
     layer.setAttribute('aria-modal', 'true');
     layer.setAttribute('aria-labelledby', 'mc-title');
-    layer.innerHTML = `
+    setHtml(layer, html`
       <div class="mc-vignette"></div>
       <div class="mc-inner" tabindex="-1">
-        <div class="mc-live" aria-live="assertive" aria-atomic="true">${escHtml(moment.title)}</div>
-        ${moment.kicker ? `<div class="mc-kicker">${escHtml(moment.kicker)}</div>` : ''}
-        ${moment.caption ? `<div class="mc-caption">${escHtml(moment.caption)}</div>` : ''}
-        <h1 class="mc-title" id="mc-title">${escHtml(moment.title)}</h1>
+        <div class="mc-live" aria-live="assertive" aria-atomic="true">${moment.title}</div>
+        ${raw(moment.kicker ? `<div class="mc-kicker">${escHtml(moment.kicker)}</div>` : '')}
+        ${raw(moment.caption ? `<div class="mc-caption">${escHtml(moment.caption)}</div>` : '')}
+        <h1 class="mc-title" id="mc-title">${moment.title}</h1>
         <div class="mc-rule"></div>
-        ${moment.story ? `<p class="mc-story">${escHtml(moment.story)}</p>` : ''}
-        ${cast}
-        ${ledger}
-        ${moment.objective ? `<p class="mc-objective">${escHtml(moment.objective)}</p>` : ''}
-        ${buttons || '<div class="mc-hint">点击任意处继续</div>'}
+        ${raw(moment.story ? `<p class="mc-story">${escHtml(moment.story)}</p>` : '')}
+        ${raw(cast)}
+        ${raw(ledger)}
+        ${raw(moment.objective ? `<p class="mc-objective">${escHtml(moment.objective)}</p>` : '')}
+        ${raw(buttons || '<div class="mc-hint">点击任意处继续</div>')}
       </div>
-    `;
+    `);
     layer.classList.add('open');
     layer.classList.toggle('locked', locked);
     // a11y：把焦点移进幕布，并在幕布内循环 Tab；关闭时还原（issue #194）。
@@ -1886,7 +1876,7 @@ export class BoardGameHUD {
       if (this.momentClickHandler) layer.removeEventListener('click', this.momentClickHandler);
       if (this.momentKeyHandler) layer.removeEventListener('keydown', this.momentKeyHandler);
       layer.classList.remove('open', 'locked');
-      layer.innerHTML = '';
+      layer.replaceChildren();
       layer.removeAttribute('aria-modal');
       layer.removeAttribute('aria-labelledby');
     }
@@ -1972,18 +1962,18 @@ export class BoardGameHUD {
 
   private renderSkeleton(): void {
     this.container.classList.add('app-shell');
-    this.container.innerHTML = `
+    setHtml(this.container, html`
       <header class="topbar">
         <button class="shell-toggle menu-btn" data-toggle="menu" aria-label="主菜单" aria-haspopup="dialog" aria-controls="menu-dialog" aria-expanded="false"><span class="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span></button>
 
         <nav class="game-switch" id="game-switch">
-          ${GAME_TABS.map(
+          ${raw(GAME_TABS.map(
             tab => `
             <button class="game-pill" data-game="${tab.id}">
               <span class="gp-ico">${tab.icon}</span><span>${tab.name}</span>
             </button>
           `
-          ).join('')}
+          ).join(''))}
         </nav>
 
         <div class="topbar-actions">
@@ -2057,7 +2047,7 @@ export class BoardGameHUD {
       <div class="announcement-banner" id="announce" style="display:none"></div>
       <div class="payload-layer" id="payload-layer" style="display:none"></div>
       <div class="shell-scrim" data-shell-scrim aria-hidden="true"></div>
-    `;
+    `);
 
     // Tablet/phone slide-overs. Only one panel is open at a time so the board
     // is never covered by two overlays.
@@ -2410,7 +2400,7 @@ export class BoardGameHUD {
 
     const minimapSig = hash(minimapHtml);
     if (el.dataset.sig !== minimapSig) {
-      el.innerHTML = minimapHtml;
+      setHtml(el, raw(minimapHtml));
       el.dataset.sig = minimapSig;
     }
 
@@ -2481,13 +2471,13 @@ export class BoardGameHUD {
       panel.style.display = '';
       if (panel.dataset.signature !== 'empty') {
         panel.dataset.signature = 'empty';
-        panel.innerHTML = `
+        setHtml(panel, html`
           <div class="cr-head">
             <span class="cr-title">排行榜</span>
             <span class="cr-total">—</span>
           </div>
           <div class="cr-empty">本局暂无排行榜数据</div>
-        `;
+        `);
       }
       if (!this.sideTabTouched && this.sideTab === 'ranking') {
         this.sideTab = 'feed';
@@ -2557,26 +2547,20 @@ export class BoardGameHUD {
            </div>`
         : '';
 
-    panel.innerHTML = `
+    setHtml(panel, html`
       <div class="cr-head">
         <span class="cr-title">筹码排行</span>
-        <span class="cr-total">${tab === 'table' ? total : this.accountRanking?.rooms ?? 0} ${
-          tab === 'table' ? '' : '桌'
-        }</span>
+        <span class="cr-total">${raw(tab === 'table' ? total : this.accountRanking?.rooms ?? 0)} ${raw(tab === 'table' ? '' : '桌')}</span>
       </div>
-      ${tabs}
-      <div class="cr-body">${
-        tab === 'table'
+      ${raw(tabs)}
+      <div class="cr-body">${raw(tab === 'table'
           ? tableBody
           : accountBody ||
-            `<div class="cr-empty">${this.accountRanking ? '还没有账号战绩' : '读取全服排行失败 · 点「全服」重试'}</div>`
-      }</div>
-      <div class="cr-foot">${
-        tab === 'table'
+            `<div class="cr-empty">${this.accountRanking ? '还没有账号战绩' : '读取全服排行失败 · 点「全服」重试'}</div>`)}</div>
+      <div class="cr-foot">${raw(tab === 'table'
           ? '占比 = 该玩家筹码 / 全桌总筹码'
-          : '占比 = 该账号筹码 / 全服总筹码 · 点击查看生涯战绩'
-      }</div>
-    `;
+          : '占比 = 该账号筹码 / 全服总筹码 · 点击查看生涯战绩')}</div>
+    `);
   }
 
   /** 打开全服页签时拉一次数据；失败就沉默保留本桌视图。 */
@@ -2642,14 +2626,14 @@ export class BoardGameHUD {
       })
       .join('');
 
-    panel.innerHTML = `
+    setHtml(panel, html`
       <div class="ob-head">
         <span class="ob-title">观察席</span>
-        <span class="ob-count">${rows.length}</span>
+        <span class="ob-count">${raw(rows.length)}</span>
       </div>
-      <div class="ob-body">${body}</div>
+      <div class="ob-body">${raw(body)}</div>
       <div class="ob-foot">输光不散场：座位由 AI 接手，攒够买入即可申请回桌（轮末生效）</div>
-    `;
+    `);
     this.startObserverTicker(rows);
   }
 
@@ -2692,14 +2676,14 @@ export class BoardGameHUD {
     let head = feed.querySelector('#af-toggle') as HTMLButtonElement | null;
     let body = feed.querySelector('.af-body') as HTMLElement | null;
     if (!head || !body) {
-      feed.innerHTML = `
+      setHtml(feed, html`
         <button class="af-head" id="af-toggle" type="button" title="展开 / 收起近期记录">
           <span class="af-title">近期动态</span>
           <span class="af-count"></span>
           <span class="af-caret"></span>
         </button>
         <div class="af-body"></div>
-      `;
+      `);
       head = feed.querySelector('#af-toggle') as HTMLButtonElement;
       body = feed.querySelector('.af-body') as HTMLElement;
       head.addEventListener('click', () => {
@@ -2717,7 +2701,7 @@ export class BoardGameHUD {
     // leaves the rest — and therefore the reader's scroll position — alone.
     const visible = entries.slice(0, this.historyCollapsed ? 3 : 18);
     if (visible.length === 0) {
-      body.innerHTML = '<div class="af-empty">尚无记录，行动后会在这里留下痕迹</div>';
+      setHtml(body, raw('<div class="af-empty">尚无记录，行动后会在这里留下痕迹</div>'));
     } else {
       body.querySelector('.af-empty')?.remove();
       reconcileKeyedPreservingScroll(
@@ -2799,20 +2783,20 @@ export class BoardGameHUD {
       card.dataset.signature = signature;
 
       card.style.display = '';
-      card.innerHTML = `
+      setHtml(card, html`
         <div class="rc-head">
-          <span class="rc-floor">[待定放置] ${floorLabel}</span>
-          <span class="rc-angle">${placement.rotation * 90}°</span>
+          <span class="rc-floor">[待定放置] ${raw(floorLabel)}</span>
+          <span class="rc-angle">${raw(placement.rotation * 90)}°</span>
         </div>
-        <div class="rc-title">${placement.name}</div>
-        ${placement.en ? `<div class="rc-en">${placement.en}</div>` : ''}
+        <div class="rc-title">${raw(placement.name)}</div>
+        ${raw(placement.en ? `<div class="rc-en">${placement.en}</div>` : '')}
         <div class="rc-meta">
-          <div class="rc-compass">${compass}</div>
-          <div class="rc-symbol">${symbolBadge}</div>
+          <div class="rc-compass">${raw(compass)}</div>
+          <div class="rc-symbol">${raw(symbolBadge)}</div>
         </div>
-        <p class="rc-text">${placement.text ?? '探索发现的新房间，请选择朝向确认放置。'}</p>
-        <div class="rc-occupants">${connChips}</div>
-      `;
+        <p class="rc-text">${raw(placement.text ?? '探索发现的新房间，请选择朝向确认放置。')}</p>
+        <div class="rc-occupants">${raw(connChips)}</div>
+      `);
       return;
     }
 
@@ -2887,7 +2871,7 @@ export class BoardGameHUD {
     // every row inside it.
     const dossierSig = hash(dossierHtml);
     if (card.dataset.dossierSig !== dossierSig) {
-      card.innerHTML = dossierHtml;
+      setHtml(card, raw(dossierHtml));
       card.dataset.dossierSig = dossierSig;
     }
 
@@ -2928,28 +2912,28 @@ export class BoardGameHUD {
         .join('') +
       (loot ? `<span class="rc-chip loot"><i></i>${escHtml(loot.label)} ×${loot.count}</span>` : '');
 
-    layer.innerHTML = `
+    setHtml(layer, html`
       <div class="payload-backdrop"></div>
       <div class="payload-card room-card-window">
         <header class="rc-head">
-          <span class="rc-floor">${floorLabel}</span>
+          <span class="rc-floor">${raw(floorLabel)}</span>
           <button type="button" class="pf-btn" id="rcw-close">关闭</button>
         </header>
-        <div class="rc-title">${String(props.name ?? '房间')}</div>
-        <div class="rc-en">${String(props.en ?? '')}</div>
+        <div class="rc-title">${raw(String(props.name ?? '房间'))}</div>
+        <div class="rc-en">${raw(String(props.en ?? ''))}</div>
         <div class="rc-meta">
-          <div class="rc-compass">${compass}</div>
-          <div class="rc-symbol">${escHtml(this.tokenBadgeOf(props.symbol) || '· 无符号')}</div>
+          <div class="rc-compass">${raw(compass)}</div>
+          <div class="rc-symbol">${this.tokenBadgeOf(props.symbol) || '· 无符号'}</div>
         </div>
-        <p class="rc-text">${String(props.text ?? '')}</p>
-        <div class="rc-occupants">${chips || '<span class="rc-empty">空无一人</span>'}</div>
+        <p class="rc-text">${raw(String(props.text ?? ''))}</p>
+        <div class="rc-occupants">${raw(chips || '<span class="rc-empty">空无一人</span>')}</div>
       </div>
-    `;
+    `);
     layer.style.display = 'flex';
 
     const close = () => {
       layer.style.display = 'none';
-      layer.innerHTML = '';
+      layer.replaceChildren();
     };
     layer.querySelector('.payload-backdrop')?.addEventListener('click', close);
     layer.querySelector('#rcw-close')?.addEventListener('click', close);
@@ -2961,9 +2945,9 @@ export class BoardGameHUD {
 
     const signature = snapshot.viewers.map(v => `${v.id}:${v.name}`).join('|');
     if (select.dataset.signature !== signature) {
-      select.innerHTML = snapshot.viewers
+      setHtml(select, raw(snapshot.viewers
         .map(viewer => `<option value="${viewer.id}">${viewer.name}</option>`)
-        .join('');
+        .join('')));
       select.dataset.signature = signature;
     }
     select.value = snapshot.viewer;
@@ -2987,9 +2971,9 @@ export class BoardGameHUD {
 
     const signature = options.map(option => `${option.id}:${option.description}`).join('|');
     if (select.dataset.signature !== signature) {
-      select.innerHTML = options
+      setHtml(select, raw(options
         .map(option => `<option value="${option.id}">${option.description}</option>`)
-        .join('');
+        .join('')));
       select.dataset.signature = signature;
       // The description doubles as the option label, so keep the control compact.
       select.title = options.find(option => option.selected)?.description ?? '';
@@ -3314,7 +3298,7 @@ export class BoardGameHUD {
     this.handWheelDelta = 0;
     this.handSuppressClick = false;
     this.container.querySelectorAll<HTMLElement>('.hs-stage').forEach(stage => {
-      stage.innerHTML = '';
+      stage.replaceChildren();
       delete stage.dataset.handKey;
     });
     slot?.classList.remove('pressing');
@@ -3387,7 +3371,7 @@ export class BoardGameHUD {
     const current = stage.querySelector<HTMLElement>('.hs-card:not(.hs-leaving)');
     if (current && key === stage.dataset.handKey) {
       current.dataset.tone = target.dataset.tone;
-      current.innerHTML = content;
+      setHtml(current, raw(content));
       return;
     }
 
@@ -3397,7 +3381,7 @@ export class BoardGameHUD {
     const next = document.createElement('div');
     next.className = 'hs-card';
     next.dataset.tone = target.dataset.tone;
-    next.innerHTML = content;
+    setHtml(next, raw(content));
 
     if (current && direction !== 0 && action) {
       const suffix = direction > 0 ? 'next' : 'prev';
@@ -3791,7 +3775,7 @@ export class BoardGameHUD {
     // the fan cards mid-gesture and dropped their hover state. The skeleton and
     // its delegated listeners now survive; each render only patches what moved.
     if (!dock.querySelector('.dock-shell')) {
-      dock.innerHTML = `
+      setHtml(dock, html`
         <button class="dock-handle" data-dock-toggle aria-expanded="false">
           <span class="dh-grip"></span>
           <span class="dh-label"></span>
@@ -3824,7 +3808,7 @@ export class BoardGameHUD {
           <div class="dock-actions" data-slot="actions"></div>
         </div>
         <span class="sr-only" data-held-live aria-live="polite"></span>
-      `;
+      `);
       this.bindDockEvents(dock);
       this.bindPlayerRail();
       // The seat peek window is placed beside the pointer, so its position has to
@@ -3845,11 +3829,11 @@ export class BoardGameHUD {
     };
     // Signature-guarded paint: these slots have no persistent state, so a full
     // innerHTML is fine as long as it only happens when the content changed.
-    const setHtml = (el: HTMLElement | null, html: string) => {
+    const paintSlot = (el: HTMLElement | null, html: string) => {
       if (!el) return;
       const sig = hash(html);
       if (el.dataset.sig === sig) return;
-      el.innerHTML = html;
+      setHtml(el, raw(html));
       el.dataset.sig = sig;
     };
 
@@ -3865,8 +3849,8 @@ export class BoardGameHUD {
       if (count && count.textContent !== countText) count.textContent = countText;
     }
 
-    setHtml(slot('alert'), alert);
-    setHtml(
+    paintSlot(slot('alert'), alert);
+    paintSlot(
       slot('mission'),
       snapshot.mission
         ? `<div class="alert-strip mission">
@@ -3878,7 +3862,7 @@ export class BoardGameHUD {
            </div>`
         : ''
     );
-    setHtml(slot('floors'), floorTabs);
+    paintSlot(slot('floors'), floorTabs);
 
     setText('[data-bar="phase"]', snapshot.phaseLabel);
     setText('[data-bar="actor"]', snapshot.actorName);
@@ -3913,25 +3897,24 @@ export class BoardGameHUD {
         actionsSlot.dataset.shape = dockShape;
         actionsSlot.dataset.mode = mode;
         actionsSlot.removeAttribute('data-sig');
-        actionsSlot.innerHTML =
-          mode === 'fan'
+        setHtml(actionsSlot, raw(mode === 'fan'
             ? onlyEndTurn
               ? `<div class="fan-hint" data-fan-hint><span class="fh-label">${blockedReason || '本回合已无可用动作'}</span><span class="fh-detail">点「结束回合」交给下一位</span></div><div class="dock-fan" data-fan></div>`
               : `<div class="fan-hint" data-fan-hint><span class="fh-label">悬停查看动作</span><span class="fh-detail">点击牌面执行该动作 · 数字键直接执行</span></div><div class="dock-fan" data-fan></div>`
-            : '';
+            : ''));
       }
 
       if (mode === 'placement') {
-        setHtml(actionsSlot, placementPanel);
+        paintSlot(actionsSlot, placementPanel);
       } else if (mode === 'over') {
-        setHtml(
+        paintSlot(
           actionsSlot,
           `<div class="empty-hint"><span class="e-ico">🏁</span><span>对局已结束${
             snapshot.winnerLabel ? ` — 胜者：${snapshot.winnerLabel}` : ''
           }${snapshot.winnerReason ? ` · ${snapshot.winnerReason}` : ''}</span></div>`
         );
       } else if (mode === 'idle') {
-        setHtml(
+        paintSlot(
           actionsSlot,
           '<div class="empty-hint"><span class="e-ico">◌</span><span>暂无可执行的合法动作 — 等待其他玩家，或正在结算响应栈。</span></div>'
         );
@@ -4212,32 +4195,30 @@ export class BoardGameHUD {
       )
       .join('');
 
-    layer.innerHTML = `
+    setHtml(layer, html`
       <div class="payload-backdrop"></div>
-      <div class="payload-card player-sheet" style="--pc-color:${player.color}">
+      <div class="payload-card player-sheet" style="--pc-color:${raw(player.color)}">
         <header class="ps-head">
-          ${avatar}
+          ${raw(avatar)}
           <div class="ps-id">
-            <div class="ps-name">${escHtml(player.name)}</div>
+            <div class="ps-name">${player.name}</div>
             <div class="ps-sub">
-              ${player.roleLabel ? `${escHtml(player.roleLabel)} · ` : ''}${escHtml(player.scoreLabel)} ${player.score}${
-                player.alive ? '' : ' · 已出局'
-              }
+              ${raw(player.roleLabel ? `${escHtml(player.roleLabel)} · ` : '')}${player.scoreLabel} ${raw(player.score)}${raw(player.alive ? '' : ' · 已出局')}
             </div>
           </div>
           <button type="button" class="pf-btn" id="ps-close">关闭</button>
         </header>
         <div class="ps-body">
-          ${stats}${pips}
-          ${effects ? `<ul class="ps-fx">${effects}</ul>` : ''}
+          ${raw(stats)}${raw(pips)}
+          ${raw(effects ? `<ul class="ps-fx">${effects}</ul>` : '')}
         </div>
       </div>
-    `;
+    `);
     layer.style.display = 'flex';
 
     const close = (): void => {
       layer.style.display = 'none';
-      layer.innerHTML = '';
+      layer.replaceChildren();
     };
     layer.querySelector('.payload-backdrop')?.addEventListener('click', close);
     layer.querySelector('#ps-close')?.addEventListener('click', close);
@@ -4256,22 +4237,22 @@ export class BoardGameHUD {
       )
       .join('');
 
-    layer.innerHTML = `
+    setHtml(layer, html`
       <div class="payload-backdrop"></div>
       <div class="payload-card effects-window">
         <header class="rc-head">
           <span class="rc-floor">当前状态</span>
           <button type="button" class="pf-btn" id="fx-close">关闭</button>
         </header>
-        <div class="rc-title">${escHtml(player.name)}</div>
-        <ul class="fx-list">${rows || '<li class="fx-row neutral"><span class="fx-name">无</span></li>'}</ul>
+        <div class="rc-title">${player.name}</div>
+        <ul class="fx-list">${raw(rows || '<li class="fx-row neutral"><span class="fx-name">无</span></li>')}</ul>
       </div>
-    `;
+    `);
     layer.style.display = 'flex';
 
     const close = () => {
       layer.style.display = 'none';
-      layer.innerHTML = '';
+      layer.replaceChildren();
     };
     layer.querySelector('.payload-backdrop')?.addEventListener('click', close);
     layer.querySelector('#fx-close')?.addEventListener('click', close);
@@ -4385,15 +4366,16 @@ export class BoardGameHUD {
     const showHint = (card: HTMLElement) => {
       const el = bar();
       if (!el) return;
-      el.innerHTML =
-        `<span class="fh-label">${card.dataset.fanLabel ?? ''}</span>` +
-        `<span class="fh-detail">${card.dataset.fanHint ?? ''}</span>`;
+      setHtml(
+        el,
+        html`<span class="fh-label">${card.dataset.fanLabel ?? ''}</span><span class="fh-detail">${card.dataset.fanHint ?? ''}</span>`
+      );
       el.classList.add('active');
     };
     const hideHint = () => {
       const el = bar();
       if (!el) return;
-      el.innerHTML = REST_HINT;
+      setHtml(el, raw(REST_HINT));
       el.classList.remove('active');
     };
     // relatedTarget checks keep the hint from flickering as the pointer crosses
@@ -4428,40 +4410,36 @@ export class BoardGameHUD {
     const needsInput = !!(action.fields?.length || action.selection);
     const toneClass = action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : '';
 
-    layer.innerHTML = `
+    setHtml(layer, html`
       <div class="payload-backdrop"></div>
-      <div class="payload-card action-detail ${toneClass}">
+      <div class="payload-card action-detail ${raw(toneClass)}">
         <header class="pf-head">
-          <span class="pf-ico">${action.icon}</span>
+          <span class="pf-ico">${raw(action.icon)}</span>
           <div>
-            <div class="pf-title">${action.label}</div>
-            <div class="pf-hint">${action.hint}</div>
+            <div class="pf-title">${raw(action.label)}</div>
+            <div class="pf-hint">${raw(action.hint)}</div>
           </div>
         </header>
         <div class="pf-body">
-          <div class="ad-row"><span class="ad-k">动作</span><span class="ad-v">${action.actionType ?? action.id}</span></div>
-          ${
-            action.highlightIds?.length
+          <div class="ad-row"><span class="ad-k">动作</span><span class="ad-v">${raw(action.actionType ?? action.id)}</span></div>
+          ${raw(action.highlightIds?.length
               ? `<div class="ad-row"><span class="ad-k">可选目标</span><span class="ad-v">${action.highlightIds.length} 处</span></div>`
-              : ''
-          }
-          ${
-            needsInput
+              : '')}
+          ${raw(needsInput
               ? `<div class="ad-note">该动作需要补充参数，执行时会打开选择面板。</div>`
-              : `<div class="ad-note">该动作无需额外参数，点击执行立即生效。</div>`
-          }
+              : `<div class="ad-note">该动作无需额外参数，点击执行立即生效。</div>`)}
         </div>
         <footer class="pf-foot">
           <button type="button" class="pf-btn" id="ad-close">关闭</button>
           <button type="button" class="pf-btn primary" id="ad-run">执行</button>
         </footer>
       </div>
-    `;
+    `);
     layer.style.display = 'flex';
 
     const close = () => {
       layer.style.display = 'none';
-      layer.innerHTML = '';
+      layer.replaceChildren();
     };
 
     layer.querySelector('.payload-backdrop')?.addEventListener('click', close);

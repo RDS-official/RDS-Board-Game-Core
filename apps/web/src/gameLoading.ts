@@ -1,3 +1,4 @@
+import { html, setHtml } from './ui/dom/html';
 /**
  * 联机开局过渡遮罩：从「房主开局」到牌局首帧渲染之间，用全屏加载动效
  * 掩盖 大厅 → 游戏外壳(main chunk 加载/WebFont 解码/场景首绘) 的中间态。
@@ -11,11 +12,12 @@ export function showGameLoading(): void {
   shownAt = Date.now();
   const ov = document.createElement('div');
   ov.id = 'game-loading';
-  ov.innerHTML = [
-    '<div class="gl-spinner"></div>',
-    '<div class="gl-title">游戏加载中</div>',
-    '<div class="gl-sub">正在同步牌局与渲染桌面…</div>'
-  ].join('');
+  setHtml(
+    ov,
+    html`<div class="gl-spinner"></div>
+    <div class="gl-title">游戏加载中</div>
+    <div class="gl-sub">正在同步牌局与渲染桌面…</div>`
+  );
   const s = ov.style;
   s.position = 'fixed'; s.inset = '0'; s.zIndex = '9999';
   s.display = 'flex'; s.flexDirection = 'column'; s.alignItems = 'center'; s.justifyContent = 'center';

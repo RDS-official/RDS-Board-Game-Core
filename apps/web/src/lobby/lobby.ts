@@ -3,6 +3,7 @@ import type { HubGameInfo, HubRoomInfo } from '@rds/room-protocol';
 import { getGames, getRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, getRoom, me, setReady, kickPlayer, transferHost, setAiSeats, updateDisplayName, changeMyPassword, uploadAvatar, UserProfile, getPokerLeaderboard, PokerLeaderboardResponse } from './api.ts';
 import { showToast } from './toast.ts';
 import { localToken, stripNetParamsFromUrl } from '../entryRoute.ts';
+import { html, raw, setHtml } from '../ui/dom/html';
 
 /**
  * 大厅 2.0（Phase B）：游戏货架 + 快速加入 + 创建模态 + 座位/就绪/聊天 + ws 实时。
@@ -202,7 +203,7 @@ function appendChatDom(m: ChatMsg): void {
   log.querySelector('.lob-chat-empty')?.remove();
   const div = document.createElement('div');
   div.className = 'lob-chat-msg' + (m.self ? ' self' : '');
-  div.innerHTML = '<span class="lob-chat-name">' + esc(m.self ? '你' : m.name) + '</span>' + esc(m.text);
+  setHtml(div, raw('<span class="lob-chat-name">' + esc(m.self ? '你' : m.name) + '</span>' + esc(m.text)));
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
 }
@@ -236,7 +237,7 @@ export async function startLobby(
       stopTimer('room'); stopTimer('list');
       closeWs();
       if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler);
-      if (rootEl) rootEl.innerHTML = '';
+      if (rootEl) rootEl.replaceChildren();
       rootEl = null; onEnterGame = null; onAdmin = null; currentRoom = null; lastRoomSig = '';
       roomsCacheSig = ''; roomsLoaded = false; onlineIds = [];
     }
@@ -255,7 +256,7 @@ function stopTimer(which: 'room' | 'list'): void {
 
 function render(): void {
   if (!rootEl) return;
-  rootEl.innerHTML = !user ? authHtml() : (currentRoom ? roomHtml() : lobbyHtml()) + profileModalHtml();
+  setHtml(rootEl, raw(!user ? authHtml() : (currentRoom ? roomHtml() : lobbyHtml()) + profileModalHtml()));
   lastRoomSig = currentRoom ? roomSig(currentRoom) : '';
   bind();
 }
@@ -560,12 +561,12 @@ async function refreshRooms() {
     roomsLoaded = true;
     if (sig === roomsCacheSig && !firstLoad) return;
     roomsCacheSig = sig;
-    el.innerHTML = roomsHtml(rooms);
+    setHtml(el, raw(roomsHtml(rooms)));
     const hint = document.getElementById('rooms-hint');
     if (hint) hint.textContent = roomsHintText(rooms);
     const shelf = document.getElementById('shelf');
-    if (shelf) shelf.innerHTML = games.map(shelfCard).join('');
-  } catch (e) { el.innerHTML = '<span class="lob-error">' + esc(errorText(e)) + '</span>'; }
+    if (shelf) setHtml(shelf, raw(games.map(shelfCard).join('')));
+  } catch (e) { setHtml(el, raw('<span class="lob-error">' + esc(errorText(e)) + '</span>')); }
 }
 
 async function refreshLeaderboard() {
@@ -576,9 +577,9 @@ async function refreshLeaderboard() {
     // 轮询只换列表与页脚，不重建整张卡片：重建会把用户的滚动位置和
     // 悬停状态一起冲掉，「隐藏 AI」按钮也就跟着闪。
     const listEl = document.getElementById('poker-leaderboard-list');
-    if (listEl) listEl.innerHTML = leaderboardRowsHtml();
+    if (listEl) setHtml(listEl, raw(leaderboardRowsHtml()));
     const footEl = document.getElementById('poker-leaderboard-foot');
-    if (footEl) footEl.innerHTML = leaderboardFootHtml();
+    if (footEl) setHtml(footEl, raw(leaderboardFootHtml()));
   } catch {}
 }
 
@@ -834,7 +835,7 @@ function bind() {
   $('profile-open')?.addEventListener('click', () => {
     const nameInput = $('pf-name') as HTMLInputElement;
     nameInput.value = displayNameOf(user);
-    $('pf-avatar-wrap').innerHTML = avatarChipHtml(user);
+    setHtml($('pf-avatar-wrap'), raw(avatarChipHtml(user)));
     pendingAvatar = null;
     ($('profile-modal') as HTMLElement).hidden = false;
     nameInput.focus();
@@ -848,7 +849,7 @@ function bind() {
     if (!file) return;
     try {
       pendingAvatar = await compressImage(file);
-      $('pf-avatar-wrap').innerHTML = '<img class="lob-avatar" src="' + pendingAvatar.dataUrl + '" alt="" />';
+      setHtml($('pf-avatar-wrap'), html`<img class="lob-avatar" src="${pendingAvatar.dataUrl}" alt="" />`);
       showToast('头像已就绪，点保存生效', 'success');
     } catch (e) { showToast(errorText(e) || '图片处理失败', 'error'); }
     input.value = '';
@@ -998,9 +999,9 @@ function bind() {
       button.title = hideAiInLeaderboard ? '显示 AI 名将' : '隐藏 AI 名将，只比较真人筹码';
     }
     const listEl = document.getElementById('poker-leaderboard-list');
-    if (listEl) listEl.innerHTML = leaderboardRowsHtml();
+    if (listEl) setHtml(listEl, raw(leaderboardRowsHtml()));
     const footEl = document.getElementById('poker-leaderboard-foot');
-    if (footEl) footEl.innerHTML = leaderboardFootHtml();
+    if (footEl) setHtml(footEl, raw(leaderboardFootHtml()));
   });
 
   // 战绩详情弹窗关闭
@@ -1045,8 +1046,8 @@ function syncCreateModal(gameId: string) {
   const sel = document.getElementById('cm-variant') as HTMLSelectElement;
   if (g.variants?.length) {
     wrap.hidden = false;
-    sel.innerHTML = '<option value="">标准</option>' + g.variants.map(v => '<option value="' + esc(v.id) + '">' + esc(v.label) + '</option>').join('');
-  } else { wrap.hidden = true; sel.innerHTML = ''; }
+    setHtml(sel, raw('<option value="">标准</option>' + g.variants.map(v => '<option value="' + esc(v.id) + '">' + esc(v.label) + '</option>').join('')));
+  } else { wrap.hidden = true; sel.replaceChildren(); }
 }
 
 function bindRoom() {

@@ -1,4 +1,5 @@
 import { escapeHtml } from '../htmlEscape';
+import { html, raw, setHtml } from '../ui/dom/html';
 
 export interface WebGLSupportResult {
   supported: boolean;
@@ -68,7 +69,7 @@ export function renderWebGLErrorModal(detail?: string): void {
   overlay.id = 'webgl-error-overlay';
   overlay.className = 'webgl-error-overlay';
 
-  overlay.innerHTML = `
+  setHtml(overlay, html`
     <div class="webgl-error-card">
       <div class="webgl-error-icon">⚠️</div>
       <h2 class="webgl-error-title">无法启动 3D 渲染引擎 (WebGL)</h2>
@@ -100,21 +101,19 @@ export function renderWebGLErrorModal(detail?: string): void {
         </div>
       </div>
 
-      ${
-        detail
+      ${raw(detail
           ? `<details class="webgl-error-technical">
               <summary>查看详细错误信息</summary>
               <pre>${escapeHtml(detail)}</pre>
             </details>`
-          : ''
-      }
+          : '')}
 
       <div class="webgl-error-actions">
         <button class="webgl-retry-btn" onclick="window.location.reload()">重新检查并刷新</button>
         <a class="webgl-link-btn" href="https://get.webgl.org/" target="_blank" rel="noopener noreferrer">访问 WebGL 官方测试页</a>
       </div>
     </div>
-  `;
+  `);
 
   document.body.appendChild(overlay);
 }
