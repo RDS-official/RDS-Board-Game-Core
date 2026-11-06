@@ -1,9 +1,6 @@
 import { GAME_REGISTRY } from '@rds/games/registry';
 
-/** 玩家可控文本进入 innerHTML 前的转义。 */
-const escText = (v: unknown) =>
-  String(v ?? '').replace(/[&<>"']/g, ch =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
+import { escapeHtml as escText } from './htmlEscape';
 import { BoardGameScene, CameraPreset } from './render/scene';
 import { BoardGameAudio } from './render/audio';
 import { ensureCanvasFontsReady } from './render/fonts';

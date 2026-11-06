@@ -1,3 +1,5 @@
+import { escapeHtml } from '../htmlEscape';
+
 export interface WebGLSupportResult {
   supported: boolean;
   version?: 'webgl2' | 'webgl';
@@ -117,11 +119,4 @@ export function renderWebGLErrorModal(detail?: string): void {
   document.body.appendChild(overlay);
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+

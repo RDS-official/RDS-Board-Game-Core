@@ -1,3 +1,4 @@
+import { escapeHtml } from '../htmlEscape';
 import confetti from 'canvas-confetti';
 import { cardArtSvg } from './cardArt';
 import { detailTone } from './detailView';
@@ -26,9 +27,7 @@ import {
  * HTML 转义：玩家可控文本（昵称/头像 URL/参与者名）进入 innerHTML 前必须经过这里。
  * 来源：昵称可携带 `<svg/onload=...>` 这类载荷（存储型 XSS）。
  */
-const escHtml = (v: unknown) =>
-  String(v ?? '').replace(/[&<>"']/g, ch =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string));
+const escHtml = (v: unknown) => escapeHtml(v);
 
 /**
  * 操作栏抖动排查的一行记录。
@@ -104,9 +103,7 @@ export interface HUDOptions {
  * It must not import the engine, game modules, audio or Three.js.
  */
 function escapeAttr(value: string): string {
-  return value.replace(/[&<>"']/g, ch =>
-    ch === '&' ? '&amp;' : ch === '<' ? '&lt;' : ch === '>' ? '&gt;' : ch === '"' ? '&quot;' : '&#39;'
-  );
+  return escapeHtml(value);
 }
 
 export class BoardGameHUD {
