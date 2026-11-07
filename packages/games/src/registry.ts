@@ -9,7 +9,10 @@ import {
   betrayalDescribeMoment,
   betrayalDescribeNode,
   betrayalDescribeTrait,
+  betrayalMissionLine,
+  betrayalPhaseLabel,
   betrayalPlayerNode,
+  betrayalPlayerView,
   betrayalRoleLabel,
   betrayalRoomLoot,
   betrayalTokenBadge,
@@ -23,7 +26,9 @@ import { traitModifiers } from './betrayal/helpers';
 import { CatanRules } from './catan/rules';
 import { setupCatan } from './catan/setup';
 import { CATAN_SCENARIOS } from './catan/scenarios';
+import { catanPhaseLabel, catanPlayerView } from './catan/presentation';
 import { DuneMahjongRules } from './dune_mahjong/rules';
+import { dunePhaseLabel, dunePlayerView } from './dune_mahjong/presentation';
 import {
   checkBetrayalInvariants,
   checkCatanInvariants,
@@ -34,7 +39,14 @@ import {
 import { setupDuneMahjong } from './dune_mahjong/setup';
 import { PokerRules } from './poker/rules';
 import { pokerScenario, setupPoker } from './poker/setup';
-import { pokerDefaultViewer, pokerSettlementMoment } from './poker/presentation';
+import {
+  pokerDefaultViewer,
+  pokerMissionLine,
+  pokerPhaseLabel,
+  pokerPlayerView,
+  pokerRankedPlayers,
+  pokerSettlementMoment
+} from './poker/presentation';
 import { isAiSeat as isPokerAiSeat, POKER_TABLE } from './poker/seating';
 import { SANGUOSHA_HOOKS } from './sanguosha/hooks';
 import {
@@ -42,6 +54,9 @@ import {
   sanguoshaCardStyle,
   sanguoshaDefaultViewer,
   sanguoshaDescribeMoment,
+  sanguoshaMissionLine,
+  sanguoshaPhaseLabel,
+  sanguoshaPlayerView,
   sanguoshaRoleLabel
 } from './sanguosha/presentation';
 import { isAiSeat } from './sanguosha/ai';
@@ -51,6 +66,7 @@ import type { SgsPendingChoice } from './sanguosha/types';
 import { sanguoshaScenario, setupSanguosha } from './sanguosha/setup';
 import { SplendorRules } from './splendor/rules';
 import { setupSplendor } from './splendor/setup';
+import { splendorPhaseLabel, splendorPlayerView } from './splendor/presentation';
 
 /**
  * Game fixtures for kernel conformance testing.
@@ -102,6 +118,10 @@ export const catanModule: GameModule = defineGame({
   },
   // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
   checkInvariants: state => checkCatanInvariants(state),
+  presentation: definePresentation({
+    phaseLabel: catanPhaseLabel,
+    playerView: catanPlayerView
+  }),
   // C-7：资源获取经 ctx.reward() 记账（掷骰产出 / 港口兑换 / 强盗抢夺）。
   charter: { requiresRewardLedger: true },
   hooks: [],
@@ -218,6 +238,9 @@ export const sanguoshaModule: GameModule = defineGame({
     cardFacts: sanguoshaCardFacts,
     cardStyle: sanguoshaCardStyle,
     describeMoment: sanguoshaDescribeMoment,
+    phaseLabel: sanguoshaPhaseLabel,
+    missionLine: sanguoshaMissionLine,
+    playerView: sanguoshaPlayerView,
     // 单机开局坐在第一个真人座位上；否则 GOD 视角会把 AI 手牌全画出来。
     defaultViewer: sanguoshaDefaultViewer
   }),
@@ -396,7 +419,11 @@ export const splendorModule: GameModule = defineGame({
   checkInvariants: state => checkSplendorInvariants(state),
   // The market row already previews faces on hover; a click must not open a
   // second card view for the same card.
-  presentation: definePresentation({ cardPreviewOnHover: true }),
+  presentation: definePresentation({
+    cardPreviewOnHover: true,
+    phaseLabel: splendorPhaseLabel,
+    playerView: splendorPlayerView
+  }),
   hooks: [],
   actionSchemas: {
     TAKE_3_DIFF_GEMS: {
@@ -529,6 +556,9 @@ export const betrayalModule: GameModule = defineGame({
     describeTrait: betrayalDescribeTrait,
     traits: betrayalTraits,
     describeMoment: betrayalDescribeMoment,
+    phaseLabel: betrayalPhaseLabel,
+    missionLine: betrayalMissionLine,
+    playerView: betrayalPlayerView,
     roleLabel: betrayalRoleLabel,
     mapTitle: BETRAYAL_MAP_TITLE,
     playerNode: betrayalPlayerNode,
@@ -720,6 +750,10 @@ export const duneMahjongModule: GameModule = defineGame({
   },
   // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
   checkInvariants: state => checkDuneInvariants(state),
+  presentation: definePresentation({
+    phaseLabel: dunePhaseLabel,
+    playerView: dunePlayerView
+  }),
   hooks: [],
   timing: { decision: 8, response: 8 },
   project: {
@@ -892,7 +926,11 @@ export const pokerModule: GameModule = defineGame({
     describeMoment: state => pokerSettlementMoment(state),
     // 单机开局坐在第一个真人座位上：默认停在 GOD 视角会把全部底牌与牌堆顺序
     // 直接画给玩家（issue #189）。中心模式的查看者由服务器绑定，不受影响。
-    defaultViewer: state => pokerDefaultViewer(state)
+    defaultViewer: state => pokerDefaultViewer(state),
+    phaseLabel: pokerPhaseLabel,
+    missionLine: pokerMissionLine,
+    playerView: pokerPlayerView,
+    rankedPlayers: pokerRankedPlayers
   }),
   /**
    * C-8：`𝒦_driver` —— 全部驱动方语义集中在这里。

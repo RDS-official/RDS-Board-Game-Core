@@ -506,6 +506,11 @@ test('presentation: both sessions inspect through the shared module, never by mo
     const source = readFileSync(new URL(file, appDir), 'utf8');
     assert(source.includes("from './inspect'"), `${file} reuses the shared inspector`);
     assert(source.includes('buildEntityInspectNotice('), `${file} calls the shared inspector`);
+    // Phase labels, missions, player cards and rankings all come from the
+    // module's presentation hints now; no presentation branch may read the id.
+    assert(!source.includes('state.gameId'), `${file} branches presentation on state.gameId`);
+    assert(!source.includes("gameId === '"), `${file} compares gameId to decide presentation`);
+    assert(!source.includes('gameId !=='), `${file} excludes a game by id in presentation`);
   }
   // Capability checks replaced identity checks: the application layer must not
   // ask "which game is this?" to decide how to present something.
@@ -772,8 +777,8 @@ test('presentation: a table can declare its protagonist without the shell knowin
     readFileSync(new URL(relative, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const session = read('../../../app/src/session.ts');
   // 通用层不认识「德州扑克」：主角座位只能由游戏的能力声明给出。
-  // 只看绑定这一段——`session.ts` 里的 `gameId` 分支是既有的阶段文案债（AR-49 遗留），
-  // 这条绑定不能跟着一起长歪。
+  // 阶段/任务/玩家卡/排行已由各游戏的 GamePresentationHints 返回；这条绑定
+  // 仍保持单一入口，不能重新长出按游戏身份判断的分支。
   const bind = session.slice(
     session.indexOf('private bindDefaultViewer'),
     session.indexOf('/* GamePresenter')

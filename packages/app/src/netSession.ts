@@ -543,7 +543,7 @@ export class NetSession implements GamePresenter {
     const cacheKey = this.netRevision + '|' + String(this.viewer);
     if (this.momentCache && this.momentCache.key === cacheKey) return this.momentCache.value;
     if (!state) return null;
-    const moment = buildMoment(state, missionLineOf(state), {
+    const moment = buildMoment(state, missionLineOf(state, this.module.presentation), {
       module: this.module,
       viewer: this.viewer,
       handOf: playerId => projectedHandOf(state, playerId)
@@ -1220,8 +1220,8 @@ export class NetSession implements GamePresenter {
       schemaCount: Object.keys(module.actionSchemas ?? {}).length,
       dependencyErrors: this.bootstrapDependencyErrors,
 
-      phaseLabel: phaseLabelOf(state),
-      mission: missionLineOf(state),
+      phaseLabel: phaseLabelOf(state, module.presentation),
+      mission: missionLineOf(state, module.presentation),
       round: state.round,
       turn: state.turn,
       clock: state.clock,
@@ -1279,32 +1279,18 @@ export class NetSession implements GamePresenter {
     };
   }
 
-  /** 筹码排行（德州扑克）——联机模式同样只读公开的筹码字段。 */
+  /** 筹码排行——数据由游戏模块声明，联机与单机读同一份 DTO。 */
   private buildChipRanking(state: ProjectedGameState): UiChipRank[] | undefined {
-    if (state.gameId !== 'poker') return undefined;
-    const seats = (state as unknown as GameState).globalVars?.seats as
-      | { playerId: string; isAi: boolean; aiTier?: string }[]
-      | undefined;
-    const seatOf = new Map((seats ?? []).map(seat => [seat.playerId, seat]));
-    const TIER_LABEL: Record<string, string> = { beginner: '初级', intermediate: '中级', advanced: '高级' };
-    const rows = state.playerOrder.map(playerId => {
-      const player = state.players[playerId];
-      const chips = Number(player?.customProps?.chips ?? 0);
-      const seat = seatOf.get(playerId);
-      const tier = seat?.aiTier;
-      return {
-        playerId,
-        name: player?.name ?? playerId,
-        chips,
-        share: 0,
-        isAi: !!seat?.isAi,
-        tierLabel: tier ? TIER_LABEL[tier] ?? tier : undefined
-      };
-    });
-    const total = rows.reduce((sum, row) => sum + row.chips, 0);
-    for (const row of rows) row.share = total > 0 ? row.chips / total : 0;
-    rows.sort((a, b) => b.chips - a.chips);
-    return rows;
+    const rows = this.module.presentation?.rankedPlayers?.(state);
+    if (!rows) return undefined;
+    return rows.map(row => ({
+      playerId: row.playerId,
+      name: row.name,
+      chips: row.value,
+      share: row.share,
+      isAi: row.isAi ?? false,
+      tierLabel: row.tierLabel
+    }));
   }
 
   private buildSpatial(state: ProjectedGameState, actor?: string): UiSpatialInfo | undefined {

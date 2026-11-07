@@ -1,6 +1,6 @@
 import { RuleHookImpl } from './rules';
 import { ProjectionRedactor } from './observer';
-import { Action, ActorId, DecisionWindow, DiceSpec, GameOutcome, GameState, MapGraphNode, NodeId, PlayerId, RollResult, SelectionCandidate, SelectionSpec, TopologySpec, VisualTraceEvent } from './types';
+import { Action, ActorId, DecisionWindow, DiceSpec, GameOutcome, GameState, MapGraphNode, NodeId, Player, PlayerId, ProjectedGameState, RollResult, SelectionCandidate, SelectionSpec, TopologySpec, VisualTraceEvent } from './types';
 import { ActionSchemaMap } from './validation';
 import type { CharterDeviation } from './charter';
 
@@ -403,12 +403,69 @@ export interface GameDriverHints {
   isAutomated?: (state: GameState, actorId: ActorId) => boolean;
 }
 
+/** Context the app hands to a game's per-player presentation declaration. */
+export interface PlayerViewContext {
+  viewer: PlayerId | 'GOD';
+  handCount: number;
+  equipCount: number;
+  isFocus: boolean;
+  /** Derived standing bonuses already computed by `GameModule.statModifiers`. */
+  modifiers: Record<string, number>;
+}
+
+/**
+ * Neutral player-card facts supplied by a game.
+ *
+ * These names deliberately describe presentation, not a game's rules: the app
+ * maps them onto `UiPlayer` and never learns a resource / HP / chip field name.
+ */
+export interface PlayerViewHints {
+  score?: number;
+  scoreLabel?: string;
+  hp?: { current: number; max: number };
+  stats?: { label: string; value: string }[];
+  pips?: {
+    color: string;
+    label: string;
+    value: string;
+    short?: string;
+    icon?: string;
+    max?: number;
+    start?: number;
+    modifier?: number;
+    key?: string;
+  }[];
+  effects?: { id: string; label: string; detail?: string; tone?: 'good' | 'bad' | 'neutral' }[];
+}
+
+/** One row of a game-declared leaderboard / chip ranking. */
+export interface RankedPlayerViewHint {
+  playerId: PlayerId;
+  name: string;
+  value: number;
+  share: number;
+  isAi?: boolean;
+  tierLabel?: string;
+}
+
 export interface GamePresentationHints {
   /**
    * The board already previews card faces on hover, so a click on a card must
    * not open a second, differently-styled detail sheet for the same card.
    */
   cardPreviewOnHover?: boolean;
+  /** Localised phase line, or null to let the app fall back to `state.phase`. */
+  phaseLabel?: (state: ProjectedGameState) => string | null;
+  /** Persistent mission / objective line under the table header. */
+  missionLine?: (state: ProjectedGameState) => string | undefined;
+  /** Game-owned player-card facts; null means “use the neutral defaults”. */
+  playerView?: (
+    player: Player,
+    state: ProjectedGameState,
+    context: PlayerViewContext
+  ) => PlayerViewHints | null;
+  /** Optional game-owned ranking rows (poker chips, future score tables). */
+  rankedPlayers?: (state: ProjectedGameState) => RankedPlayerViewHint[] | null;
   /**
    * Player-facing fact rows for a card's `components.custom` bag
    * ("类别: 武器", "剩余次数: 2", ...). Games supply their own vocabulary; the

@@ -1,4 +1,10 @@
-import type { MomentPresentationHints, MomentPresentationState } from '@rds/kernel/module';
+import type {
+  MomentPresentationHints,
+  MomentPresentationState,
+  PlayerViewContext,
+  PlayerViewHints
+} from '@rds/kernel/module';
+import type { Player, ProjectedGameState } from '@rds/kernel/types';
 import type { SgsCardCustom } from './types';
 
 const ROLE_LABELS: Record<string, string> = {
@@ -61,6 +67,65 @@ const EQUIP_SLOT_LABELS: Record<string, string> = {
 
 export function sanguoshaRoleLabel(role: string): string | null {
   return ROLE_LABELS[role] ?? null;
+}
+
+const PHASES: Record<string, string> = {
+  TURN_START: 'TURN START · 回合开始',
+  JUDGE: 'JUDGE PHASE · 判定阶段',
+  DRAW: 'DRAW PHASE · 摸牌阶段',
+  PLAY: 'PLAY PHASE · 出牌阶段',
+  DISCARD: 'DISCARD PHASE · 弃牌阶段',
+  END: 'END PHASE · 结束阶段'
+};
+
+export function sanguoshaPhaseLabel(state: ProjectedGameState): string {
+  const owner = state.players[state.activePlayerId]?.name ?? state.activePlayerId;
+  return `${PHASES[state.phase] ?? state.phase} · ${owner}`;
+}
+
+export function sanguoshaMissionLine(state: ProjectedGameState): string {
+  const hero = String(state.players[state.viewerId]?.customProps?.heroName ?? '');
+  const deck = Number(state.globalVars.drawDeckCount ?? 0);
+  const mode = String(state.globalVars.mode ?? 'identity');
+  const modeLabel = MODE_LABELS[mode] ?? '身份局';
+  return [hero || null, modeLabel, `牌堆 ${deck}`, sanguoshaPhaseLabel(state)].filter(Boolean).join(' · ');
+}
+
+export function sanguoshaPlayerView(
+  player: Player,
+  _state: ProjectedGameState,
+  context: PlayerViewContext
+): PlayerViewHints {
+  const hp = Number(player.customProps.hp ?? 0);
+  const maxHp = Number(player.customProps.maxHp ?? 4);
+  const kingdom = String(player.customProps.kingdomLabel ?? player.customProps.kingdom ?? '');
+  const gender = String(player.customProps.genderLabel ?? player.customProps.gender ?? '');
+  const skillNames = Array.isArray(player.customProps.skillNames)
+    ? (player.customProps.skillNames as string[])
+    : [];
+  return {
+    scoreLabel: 'HP',
+    hp: { current: hp, max: maxHp },
+    stats: [
+      { label: String(player.customProps.heroName ?? '武将'), value: `${kingdom} · ${gender}` },
+      { label: '体力', value: `${hp} / ${maxHp}` },
+      { label: '手牌 / 装备', value: `${context.handCount} / ${context.equipCount}` },
+      { label: '积分', value: String(Number(player.customProps.points ?? 0)) },
+      ...(skillNames.length > 0 ? [{ label: '技能', value: skillNames.join(' · ') }] : []),
+      ...(player.role ? [{ label: '身份', value: ROLE_LABELS[player.role] ?? player.role }] : [])
+    ],
+    effects: [
+      ...(player.customProps.chained
+        ? [{ id: 'chained', label: '横置', detail: '铁索连环状态：受到属性伤害时会传导', tone: 'bad' as const }]
+        : []),
+      ...(player.customProps.skipPlay
+        ? [{ id: 'skip-play', label: '跳过出牌阶段', detail: '乐不思蜀或技能效果', tone: 'bad' as const }]
+        : []),
+      ...(player.customProps.skipDraw
+        ? [{ id: 'skip-draw', label: '跳过摸牌阶段', detail: '兵粮寸断或技能效果', tone: 'bad' as const }]
+        : [])
+    ]
+  };
 }
 
 /** Local first-person seat: the first human in the table assignment. */

@@ -1123,7 +1123,8 @@ SETUP_SETTLEMENT → SETUP_ROAD → ... → ROLL → ACTION
 - 伤害支持普通/火焰/雷电、藤甲/白银狮子/青釭剑、铁索传导、濒死救援、身份奖惩与角色胜负；
 - 17 名可玩武将，全部印刷技能落地（仁德/激将、武圣、咆哮、龙胆、铁骑、集智/奇才、奸雄/护驾、刚烈、倾国/洛神、制衡/救援、奇袭、苦肉、谦逊/连营、结姻/枭姬、急救/青囊、无双、离间/闭月）；
 - `bagua_armor` 仍是 `BEFORE_REPLACE` 钩子：`JUDGE_BAGUA` 的参数由 hook payload 提供，reducer 只执行通用判定；
-- Presenter 通过 `cardFacts` / `cardStyle` / `roleLabel` / `describeMoment` 取得牌面、身份与终局幕布；应用层不解释牌局规则。
+- Presenter 通过 `GamePresentationHints` 取得牌面、身份、阶段/任务文案、玩家卡事实、排行榜与终局幕布；
+  `packages/app/src/session.ts` 不再按 `gameId` 分支决定表现。
 
 ### 10.4 Splendor 实现
 
