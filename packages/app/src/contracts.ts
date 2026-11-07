@@ -699,6 +699,14 @@ export interface PresentationPorts {
   clearRoomFocus?(): void;
   /** 3D burst + match SFX for a trait movement (damage flash, heal sparkle). */
   showTraitChange?(change: UiTraitChange): void;
+  /** Show/hide the viewer's camera-attached hand without touching board cards. */
+  setOwnHandVisible?(visible: boolean): void;
+  /**
+   * The exact face image used by the board for this entity, as a URL or data
+   * URL. Undefined when the projected entity has no visible card face. Masked
+   * entities must return the card back, never their hidden artwork.
+   */
+  entityCardArt?(entityId: string): string | undefined;
   /** Focus and isolate a specific floor ('ALL' frames the whole house). */
   setFloor?(floorId: string): void;
 }

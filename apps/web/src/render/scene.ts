@@ -632,6 +632,10 @@ export class BoardGameScene {
    * the screen centre and follows every pan/tilt without a world-space race.
    */
   private ownHandGroup = new THREE.Group();
+  /** Unified DOM hand replaces the camera-attached overlay, board cards stay. */
+  private ownHandHidden = false;
+  /** PNG data URLs of the exact procedural textures used by the board cards. */
+  private readonly entityCardArtCache = new Map<string, string>();
   /** Last smoothed camera forward used by the attached hand. */
   private ownHandForward = new THREE.Vector3(0, 0, -1);
   private ownHandQuaternion = new THREE.Quaternion();
@@ -2153,6 +2157,46 @@ export class BoardGameScene {
       rebuiltObjects: cache.misses,
       evictedObjects: cache.evictions
     };
+  }
+
+  /**
+   * Show/hide only the viewer's camera-attached hand. Physical cards on the
+   * board, other seats' hands and the raycast metadata are left untouched.
+   */
+  public setOwnHandVisible(visible: boolean): void {
+    this.ownHandHidden = !visible;
+    this.ownHandGroup.visible = visible;
+    if (!visible) this.ownHandReady = false;
+  }
+
+  /**
+   * Return the exact artwork the board uses for an entity. Procedural faces
+   * reuse the cached canvas texture rather than drawing a second, lookalike
+   * plate in the HUD; imported cards keep their source image. A masked entity
+   * always returns the appropriate card back, so a hand preview cannot leak
+   * hidden information through `imageUrl`.
+   */
+  public entityCardArt(entityId: string, fallbackState?: ProjectedGameState): string | undefined {
+    const state = this.lastState ?? this.lastRawState ?? fallbackState;
+    const entity = state?.entities[entityId];
+    const face = entity?.components?.cardFace;
+    if (!state || !entity || !face) return undefined;
+    if (face.imageUrl && !entity.isMasked) return face.imageUrl;
+
+    const style = state.gameId === 'poker' ? 'playing' : 'plate';
+    const cacheKey = `${style}|${entity.isMasked ? 'masked' : 'open'}|${JSON.stringify(face)}`;
+    const cached = this.entityCardArtCache.get(cacheKey);
+    if (cached) return cached;
+
+    const texture =
+      style === 'playing'
+        ? CardMeshBuilder.createPlayingCardFaceTexture(face, !!entity.isMasked)
+        : CardMeshBuilder.createCardFaceTexture(face, !!entity.isMasked);
+    const canvas = texture.image as HTMLCanvasElement;
+    const dataUrl = canvas.toDataURL('image/png');
+    if (this.entityCardArtCache.size >= 256) this.entityCardArtCache.clear();
+    this.entityCardArtCache.set(cacheKey, dataUrl);
+    return dataUrl;
   }
 
   private clearPreviewObjects(): void {
@@ -4439,7 +4483,7 @@ export class BoardGameScene {
    * permanently centred on the frustum apex.
    */
   private updateCameraAttachedHand(dt: number): void {
-    if (this.ownHandGroup.children.length === 0) {
+    if (this.ownHandHidden || this.ownHandGroup.children.length === 0) {
       this.ownHandReady = false;
       return;
     }

@@ -1,0 +1,670 @@
+import { FLY_EASE, HOVER_EASE } from './easing';
+import { ArcLayoutOptions, ArcSlot, arcLayout } from './layout';
+import { Point, pointInPolygonWithPadding, polygonCentroid } from './polygon';
+import { SpringConfig, SpringState, spring, springStep } from './spring';
+
+/**
+ * 统一动作手牌的物理层（docs/INTERACTION-AUDIT.md G3/G5/G6 的落地）：
+ * 弧形排布 + hover 上浮/回正 + 邻居让位 + 跟手拖拽 + 弹簧回弹 + 出牌区高亮。
+ *
+ * 四条不变量（缺一条就会"跳"或"卡"）：
+ *  1. **单写者**：transform / opacity / z-index 只由本文件的 `frame()` 写，CSS 不参与
+ *     transform 过渡——否则 CSS transition 与 rAF 抢同一属性，肉眼看到的就是跳变。
+ *  2. **帧内零布局读取**：容器矩形只在 measure()（ResizeObserver / sync）里测，
+ *     指针坐标直接用事件的 clientX/Y。
+ *  3. **可中断**：任何状态下新的 pointerdown 都能立即接管，接管基线取"当前渲染位"。
+ *  4. **可静止**：弹簧与缓动都收敛，收敛后 rAF 自动停机，空闲 0 开销。
+ *
+ * 语义（谁负责执行动作）不在这里：单击/回车走 `onActivate`，松手在出牌区走 `onDrop`，
+ * 是否合法一律由调用方（HUD → session）决定，本类只负责"手感"。
+ */
+
+export type CardHandState = 'idle' | 'hover' | 'armed' | 'dragging' | 'returning' | 'committing' | 'flying';
+
+/** 一张牌的稳定身份 + 外观签名（签名变了才重建节点，否则只换文字）。 */
+export interface HandCardItem {
+  id: string;
+  signature: string;
+}
+
+export interface CardHandConfig {
+  /** 结构变化时构建一张卡的 DOM；返回 null 表示这张牌这次不该出现。 */
+  createCard: (id: string) => HTMLElement | null;
+  /** 出牌区多边形（视口坐标）。返回 null = 当前没有出牌区。 */
+  playZone?: () => readonly Point[] | null;
+  /** 出牌区元素：命中时挂 data-drop="valid|invalid"。 */
+  playZoneElement?: () => HTMLElement | null;
+  /** 单击 / 回车：查看或执行（由 HUD 决定）。 */
+  onActivate?: (id: string) => void;
+  /** 拖到出牌区松手：true = 已出牌（飞场并移除），false = 回弹。 */
+  onDrop?: (id: string, at: Point) => boolean | Promise<boolean>;
+  layout?: Partial<ArcLayoutOptions>;
+  spring?: Partial<SpringConfig>;
+  /** 回弹专用弹簧：比跟随稍软 + 松手速度灌入速度，才有"甩回去"的手感。 */
+  returnSpring?: Partial<SpringConfig>;
+  /** hover 过渡时长（ms）。150–200。 */
+  hoverMs?: number;
+  /** hover 上浮（px）。12–20。 */
+  hoverLift?: number;
+  /** hover 放大倍数。1.08–1.15。 */
+  hoverScale?: number;
+  /** 邻居让位位移（px）。 */
+  neighbourPush?: number;
+  /** 起拖阈值（px）。鼠标 4–6，触屏建议 8–10。 */
+  slopPx?: number;
+  /** 每 px/ms 速度对应的倾斜角（deg）。 */
+  tiltPerPx?: number;
+  /** 倾斜角上限（deg）。 */
+  tiltMaxDeg?: number;
+  /** 拖拽时整体放大倍数。 */
+  dragScale?: number;
+  /** 飞场时长（ms）。 */
+  flyMs?: number;
+  /** 飞场终点缩放。 */
+  flyScale?: number;
+  /** 区内判定外扩（px）。 */
+  zonePadding?: number;
+  /** 区外判定外扩（px，须小于 zonePadding → 滞回，边界不闪）。 */
+  zoneExitPadding?: number;
+  /** 单帧 dt 上限（s）。 */
+  maxDt?: number;
+}
+
+interface CardView {
+  id: string;
+  signature: string;
+  el: HTMLElement;
+  slot: ArcSlot;
+  x: SpringState;
+  y: SpringState;
+  rot: SpringState;
+  scale: SpringState;
+  /** 邻居让位目标（加在 slot.x 上）。 */
+  pushTarget: number;
+  /** hover 进度 0..1（按 HOVER_EASE 求值）。 */
+  hover: number;
+  hoverTarget: number;
+  /** 出场 / 退场透明度。 */
+  appear: number;
+  appearTarget: number;
+  tilt: number;
+  lastZ: number;
+  gone: boolean;
+  fly?: { start: number; fromX: number; fromY: number; fromScale: number; toX: number; toY: number };
+}
+
+const DEFAULTS = {
+  spring: { stiffness: 240, damping: 26, mass: 1 } as SpringConfig,
+  returnSpring: { stiffness: 210, damping: 23, mass: 1 } as SpringConfig,
+  hoverMs: 170,
+  hoverLift: 16,
+  hoverScale: 1.1,
+  neighbourPush: 12,
+  slopPx: 6,
+  tiltPerPx: 0.35,
+  tiltMaxDeg: 9,
+  dragScale: 1.06,
+  flyMs: 260,
+  flyScale: 0.8,
+  zonePadding: 14,
+  zoneExitPadding: 4,
+  maxDt: 0.032
+};
+
+export class CardHand {
+  private readonly root: HTMLElement;
+  private readonly config: CardHandConfig;
+  private readonly springs: { follow: SpringConfig; back: SpringConfig };
+  private readonly views = new Map<string, CardView>();
+  private readonly order: string[] = [];
+  private readonly rootRect = { left: 0, top: 0, width: 0, height: 0 };
+  private readonly resizeObserver?: ResizeObserver;
+
+  private state: CardHandState = 'idle';
+  private drag: {
+    view: CardView;
+    pointerId: number;
+    startX: number;
+    startY: number;
+    dx: number;
+    dy: number;
+    lastX: number;
+    lastTime: number;
+    velX: number;
+    moved: boolean;
+  } | null = null;
+  private hovered: CardView | null = null;
+  private inZone = false;
+  private suppressClick = false;
+  private rafId = 0;
+  private lastNow = 0;
+  private reduced = false;
+  private destroyed = false;
+
+  public constructor(root: HTMLElement, config: CardHandConfig) {
+    this.root = root;
+    this.config = config;
+    this.springs = {
+      follow: { ...DEFAULTS.spring, ...(config.spring ?? {}) },
+      back: { ...DEFAULTS.returnSpring, ...(config.returnSpring ?? {}) }
+    };
+    this.root.dataset.physics = '1';
+    this.reduced =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    this.root.addEventListener('pointerdown', this.onPointerDown);
+    this.root.addEventListener('pointermove', this.onPointerMove);
+    this.root.addEventListener('pointerup', this.onPointerUp);
+    this.root.addEventListener('pointercancel', this.onPointerCancel);
+    this.root.addEventListener('pointerleave', this.onPointerLeave);
+    this.root.addEventListener('click', this.onClick);
+    window.addEventListener('blur', this.onWindowBlur);
+    document.addEventListener('visibilitychange', this.onVisibilityChange);
+
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.measure());
+      this.resizeObserver.observe(this.root);
+    }
+    this.measure();
+  }
+
+  /* -------------------------------------------------------------- 同步 DOM */
+
+  /**
+   * 把 HUD 的卡片清单同步进来：按 id 复用节点，签名变化才重建。
+   * 正在飞场的卡不会被同步打断（否则"打出"会被下一帧快照吞掉）。
+   */
+  public sync(items: readonly HandCardItem[]): void {
+    if (this.destroyed) return;
+    const alive = new Set<string>();
+    this.order.length = 0;
+
+    for (const item of items) {
+      alive.add(item.id);
+      this.order.push(item.id);
+      const existing = this.views.get(item.id);
+      if (!existing) {
+        const el = this.config.createCard(item.id);
+        if (!el) {
+          this.order.pop();
+          continue;
+        }
+        const view: CardView = {
+          id: item.id,
+          signature: item.signature,
+          el,
+          slot: { x: 0, y: 0, rotationDeg: 0, scale: 1, z: 1 },
+          x: spring(0),
+          y: spring(0),
+          rot: spring(0),
+          scale: spring(1),
+          pushTarget: 0,
+          hover: 0,
+          hoverTarget: 0,
+          appear: 0,
+          appearTarget: 1,
+          tilt: 0,
+          lastZ: 0,
+          gone: false
+        };
+        this.root.appendChild(el);
+        this.views.set(item.id, view);
+        continue;
+      }
+      existing.gone = false;
+      existing.appearTarget = 1;
+      if (existing.signature !== item.signature) {
+        const el = this.config.createCard(item.id);
+        if (el) {
+          existing.el.replaceWith(el);
+          existing.el = el;
+          existing.signature = item.signature;
+        }
+      }
+    }
+
+    for (const [id, view] of this.views) {
+      if (alive.has(id) || view.fly) continue;
+      view.appearTarget = 0;
+      view.gone = true;
+    }
+
+    this.relayout();
+    this.applyStyle();
+    this.start();
+  }
+
+  public getState(): CardHandState {
+    return this.state;
+  }
+
+  public destroy(): void {
+    this.destroyed = true;
+    this.stopRaf();
+    this.resizeObserver?.disconnect();
+    this.root.removeEventListener('pointerdown', this.onPointerDown);
+    this.root.removeEventListener('pointermove', this.onPointerMove);
+    this.root.removeEventListener('pointerup', this.onPointerUp);
+    this.root.removeEventListener('pointercancel', this.onPointerCancel);
+    this.root.removeEventListener('pointerleave', this.onPointerLeave);
+    this.root.removeEventListener('click', this.onClick);
+    window.removeEventListener('blur', this.onWindowBlur);
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.root.removeAttribute('data-physics');
+    this.views.clear();
+    this.order.length = 0;
+  }
+
+  /* ---------------------------------------------------------------- 布局 */
+
+  private measure(): void {
+    const rect = this.root.getBoundingClientRect();
+    this.rootRect.left = rect.left;
+    this.rootRect.top = rect.top;
+    this.rootRect.width = rect.width;
+    this.rootRect.height = rect.height;
+    this.relayout();
+    this.start();
+  }
+
+  private relayout(): void {
+    const active = this.order
+      .map(id => this.views.get(id))
+      .filter((view): view is CardView => Boolean(view) && !view!.gone && !view!.fly);
+    const slots = arcLayout(active.length, {
+      ...(this.config.layout ?? {}),
+      handWidth: this.rootRect.width || this.config.layout?.handWidth || 900
+    });
+    active.forEach((view, index) => {
+      view.slot = slots[index] ?? { x: 0, y: 0, rotationDeg: 0, scale: 1, z: 1 };
+    });
+  }
+
+  /* -------------------------------------------------------------- 帧循环 */
+
+  private start(): void {
+    if (this.rafId !== 0 || this.destroyed) return;
+    this.lastNow = 0;
+    this.rafId = requestAnimationFrame(this.frame);
+  }
+
+  private stopRaf(): void {
+    if (this.rafId === 0) return;
+    cancelAnimationFrame(this.rafId);
+    this.rafId = 0;
+  }
+
+  private frame = (now: number): void => {
+    this.rafId = 0;
+    if (this.destroyed) return;
+    const raw = this.lastNow === 0 ? 1 / 60 : (now - this.lastNow) / 1000;
+    this.lastNow = now;
+    const dt = Math.min(this.config.maxDt ?? DEFAULTS.maxDt, Math.max(1 / 240, raw));
+    const hoverMs = this.reduced ? 0 : (this.config.hoverMs ?? DEFAULTS.hoverMs);
+    let busy = false;
+
+    for (const view of this.views.values()) {
+      if (view.appear !== view.appearTarget) {
+        const step = this.reduced ? 1 : (dt * 1000) / 180;
+        view.appear += Math.sign(view.appearTarget - view.appear) *
+          Math.min(step, Math.abs(view.appearTarget - view.appear));
+        busy = true;
+      }
+      if (view.hover !== view.hoverTarget) {
+        const step = hoverMs <= 0 ? 1 : (dt * 1000) / hoverMs;
+        view.hover += Math.sign(view.hoverTarget - view.hover) *
+          Math.min(step, Math.abs(view.hoverTarget - view.hover));
+        busy = true;
+      }
+
+      const dragged = this.drag?.view === view;
+      if (!view.fly) {
+        const config = dragged || this.state !== 'returning' ? this.springs.follow : this.springs.back;
+        const settled =
+          springStep(view.x, view.slot.x + view.pushTarget, config, dt) &&
+          springStep(view.y, view.slot.y, config, dt) &&
+          springStep(view.rot, view.slot.rotationDeg, config, dt) &&
+          springStep(view.scale, view.slot.scale, config, dt);
+        if (!settled) busy = true;
+      }
+
+      if (view.fly) {
+        const progress = this.reduced
+          ? 1
+          : Math.min(1, (now - view.fly.start) / (this.config.flyMs ?? DEFAULTS.flyMs));
+        if (progress >= 1) {
+          view.el.remove();
+          this.views.delete(view.id);
+        } else {
+          busy = true;
+        }
+      }
+
+      this.writeCard(view, now);
+    }
+
+    if (busy) this.rafId = requestAnimationFrame(this.frame);
+    else if (!this.drag && this.state !== 'committing' && this.state !== 'flying') this.setState('idle');
+  };
+
+  /** 唯一的样式写入点：只写 transform / opacity / z-index。 */
+  private writeCard(view: CardView, now: number): void {
+    const hover = HOVER_EASE(view.hover);
+    const dragged = this.drag?.view === view && (this.state === 'dragging' || this.state === 'armed');
+    const lift = dragged ? 0 : -(this.config.hoverLift ?? DEFAULTS.hoverLift) * hover;
+    const hoverScale = 1 + ((this.config.hoverScale ?? DEFAULTS.hoverScale) - 1) * hover;
+    const tilt = dragged ? view.tilt : 0;
+    const rotation = view.rot.value * (1 - hover) + tilt;
+    const baseScale = view.scale.value * hoverScale * (dragged ? (this.config.dragScale ?? DEFAULTS.dragScale) : 1);
+
+    let x = view.x.value + (dragged ? (this.drag?.dx ?? 0) : 0);
+    let y = view.y.value + lift + (dragged ? (this.drag?.dy ?? 0) : 0);
+    let scale = baseScale;
+    let opacity = Math.max(0, Math.min(1, view.appear));
+
+    if (view.fly) {
+      const progress = this.reduced
+        ? 1
+        : Math.min(1, (now - view.fly.start) / (this.config.flyMs ?? DEFAULTS.flyMs));
+      const eased = FLY_EASE(progress);
+      x = view.fly.fromX + (view.fly.toX - view.fly.fromX) * eased;
+      y = view.fly.fromY + (view.fly.toY - view.fly.fromY) * eased;
+      scale = view.fly.fromScale + ((this.config.flyScale ?? DEFAULTS.flyScale) - view.fly.fromScale) * eased;
+      opacity *= 1 - eased;
+    }
+
+    view.el.style.transform =
+      `translate3d(calc(-50% + ${x.toFixed(2)}px), ${y.toFixed(2)}px, 0) ` +
+      `rotate(${rotation.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
+    view.el.style.opacity = opacity >= 1 ? '' : opacity.toFixed(3);
+    const z = view.fly || dragged ? 900 : view.slot.z;
+    if (view.lastZ !== z) {
+      view.lastZ = z;
+      view.el.style.zIndex = String(z);
+    }
+  }
+
+  private setState(next: CardHandState): void {
+    if (this.state === next) return;
+    this.state = next;
+    this.root.dataset.state = next;
+  }
+
+  /** 让静态样式（阴影/hover 描边）与物理状态对齐，只在状态切换时调一次。 */
+  private applyStyle(): void {
+    for (const view of this.views.values()) view.el.dataset.hover = view.hoverTarget > 0 ? '1' : '0';
+  }
+
+  /* --------------------------------------------------------------- 手势 */
+
+  private viewFromEvent(event: Event): CardView | null {
+    const el = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-action-id]');
+    if (!el) return null;
+    const id = el.dataset.actionId ?? '';
+    return this.views.get(id) ?? null;
+  }
+
+  private onPointerDown = (event: PointerEvent): void => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const view = this.viewFromEvent(event);
+    if (!view || view.fly) return;
+    this.suppressClick = false;
+    // 接管：无论它正在回弹还是让位，都从"当前渲染位"起算 → 零跳变。
+    view.x.velocity = 0;
+    view.y.velocity = 0;
+    view.el.dataset.active = '1';
+    try {
+      this.root.setPointerCapture(event.pointerId);
+    } catch {
+      // 某些浏览器在 pointerdown 之外调用会抛错，忽略即可。
+    }
+    this.drag = {
+      view,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dx: 0,
+      dy: 0,
+      lastX: event.clientX,
+      lastTime: event.timeStamp,
+      velX: 0,
+      moved: false
+    };
+    this.setState('armed');
+    this.setHover(null);
+    this.start();
+  };
+
+  private onPointerMove = (event: PointerEvent): void => {
+    if (!this.drag || event.pointerId !== this.drag.pointerId) {
+      this.setHover(this.viewFromEvent(event));
+      return;
+    }
+    const drag = this.drag;
+    drag.dx = event.clientX - drag.startX;
+    drag.dy = event.clientY - drag.startY;
+    const elapsed = Math.max(1, event.timeStamp - drag.lastTime);
+    const instant = (event.clientX - drag.lastX) / elapsed;
+    drag.velX = drag.velX * 0.65 + instant * 0.35;
+    drag.lastX = event.clientX;
+    drag.lastTime = event.timeStamp;
+
+    if (!drag.moved && Math.hypot(drag.dx, drag.dy) > (this.config.slopPx ?? DEFAULTS.slopPx)) {
+      drag.moved = true;
+      this.setState('dragging');
+      drag.view.el.dataset.drag = '1';
+    }
+    if (drag.moved) {
+      const maxTilt = this.config.tiltMaxDeg ?? DEFAULTS.tiltMaxDeg;
+      drag.view.tilt = Math.max(-maxTilt, Math.min(maxTilt, drag.velX * (this.config.tiltPerPx ?? DEFAULTS.tiltPerPx)));
+      this.applyNeighbourYield(drag.view, event.clientX);
+      this.updateZone(event.clientX, event.clientY);
+    }
+    this.start();
+  };
+
+  private onPointerUp = (event: PointerEvent): void => {
+    const drag = this.drag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    this.releaseCapture(event.pointerId);
+    this.drag = null;
+    drag.view.el.dataset.active = '0';
+    drag.view.el.dataset.drag = '0';
+    drag.view.tilt = 0;
+    this.releaseNeighbours();
+    this.clearZone();
+
+    if (!drag.moved) {
+      // 轻点即激活。不能依赖随后的 click：pointer capture 会把 click 的目标重定向到
+      // 捕获元素（手牌条本身），事件里面已经找不到是哪张卡了，所以这里直接发。
+      // 随后的 click 由 suppressClick 吞掉，避免同一次点击触发两次。
+      this.suppressClick = true;
+      this.setState('idle');
+      this.config.onActivate?.(drag.view.id);
+      return;
+    }
+    this.suppressClick = true;
+
+    const at: Point = { x: event.clientX, y: event.clientY };
+    const inside = this.hitZone(at.x, at.y, this.config.zonePadding ?? DEFAULTS.zonePadding);
+    if (!inside) {
+      this.releaseBack(drag.view, drag.velX);
+      return;
+    }
+    void this.commit(drag.view, at);
+  };
+
+  private onPointerCancel = (): void => {
+    const drag = this.drag;
+    if (!drag) return;
+    this.releaseCapture(drag.pointerId);
+    this.drag = null;
+    drag.view.el.dataset.active = '0';
+    drag.view.el.dataset.drag = '0';
+    drag.view.tilt = 0;
+    this.releaseNeighbours();
+    this.clearZone();
+    this.releaseBack(drag.view, 0);
+  };
+
+  private onPointerLeave = (): void => {
+    if (this.drag) return; // 拖拽中由 pointer capture 兜底
+    this.setHover(null);
+  };
+
+  /**
+   * 键盘路径（Enter / Space 在聚焦卡片上会派发 click）。
+   * 指针路径已经在 pointerup 里发过，靠 suppressClick 挡住这次重复。
+   */
+  private onClick = (event: MouseEvent): void => {
+    if (this.suppressClick) {
+      this.suppressClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    // 鼠标/触摸来源的 click 已经在上面的 pointerup 处理过（detail >= 1）；
+    // detail === 0 才是键盘激活，需要走这里。
+    if (event.detail > 0) return;
+    const view = this.viewFromEvent(event);
+    if (!view) return;
+    this.config.onActivate?.(view.id);
+  };
+
+  private onWindowBlur = (): void => {
+    if (this.drag) this.onPointerCancel();
+    this.setHover(null);
+  };
+
+  private onVisibilityChange = (): void => {
+    if (document.visibilityState === 'hidden' && this.drag) this.onPointerCancel();
+  };
+
+  /* ---------------------------------------------------------------- hover */
+
+  private setHover(view: CardView | null): void {
+    if (this.hovered === view) return;
+    if (this.hovered) {
+      this.hovered.hoverTarget = 0;
+      this.hovered.el.dataset.hover = '0';
+    }
+    this.hovered = view;
+    if (view && !this.drag) {
+      view.hoverTarget = 1;
+      view.el.dataset.hover = '1';
+      this.setState('hover');
+      this.applyNeighbourYield(view, null);
+    } else if (!this.drag) {
+      this.setState('idle');
+      this.releaseNeighbours();
+    }
+    this.start();
+  }
+
+  /** 邻居让位：改的是弹簧**目标**而不是位置，所以是"让"而不是"瞬移"。 */
+  private applyNeighbourYield(view: CardView, pointerX: number | null): void {
+    const push = this.config.neighbourPush ?? DEFAULTS.neighbourPush;
+    const center = this.rootRect.left + this.rootRect.width / 2;
+    const anchor = pointerX ?? center + view.slot.x;
+    for (const other of this.views.values()) {
+      if (other === view || other.gone || other.fly) continue;
+      const distance = Math.abs(center + other.slot.x - anchor);
+      const influence = push / (1 + distance / 90);
+      other.pushTarget = other.slot.x < view.slot.x ? -influence : influence;
+    }
+    this.start();
+  }
+
+  private releaseNeighbours(): void {
+    for (const other of this.views.values()) other.pushTarget = 0;
+    this.start();
+  }
+
+  /* ------------------------------------------------------------- 出牌区 */
+
+  private zonePoints(): readonly Point[] | null {
+    const zone = this.config.playZone?.() ?? null;
+    return zone && zone.length >= 3 ? zone : null;
+  }
+
+  private hitZone(x: number, y: number, padding: number): boolean {
+    const zone = this.zonePoints();
+    if (!zone) return false;
+    return pointInPolygonWithPadding({ x, y }, zone, padding);
+  }
+
+  private updateZone(x: number, y: number): void {
+    // 滞回：进区用大容差、出区用小容差，指针在边界上来回时不会闪。
+    const enter = this.config.zonePadding ?? DEFAULTS.zonePadding;
+    const exit = this.config.zoneExitPadding ?? DEFAULTS.zoneExitPadding;
+    const inside = this.inZone ? this.hitZone(x, y, exit) : this.hitZone(x, y, enter);
+    if (inside === this.inZone) return;
+    this.inZone = inside;
+    const value = inside ? 'valid' : 'invalid';
+    this.root.dataset.drop = value;
+    const zoneEl = this.config.playZoneElement?.() ?? null;
+    if (zoneEl) zoneEl.dataset.drop = value;
+    if (this.drag) this.drag.view.el.dataset.drop = value;
+  }
+
+  private clearZone(): void {
+    this.inZone = false;
+    this.root.dataset.drop = '';
+    const zoneEl = this.config.playZoneElement?.() ?? null;
+    if (zoneEl) zoneEl.dataset.drop = '';
+    for (const view of this.views.values()) view.el.dataset.drop = '';
+  }
+
+  /* ---------------------------------------------------------- 提交 / 回弹 */
+
+  private async commit(view: CardView, at: Point): Promise<void> {
+    this.setState('committing');
+    let accepted = true;
+    try {
+      accepted = (await Promise.resolve(this.config.onDrop?.(view.id, at))) ?? true;
+    } catch {
+      accepted = false;
+    }
+    if (!accepted) {
+      this.releaseBack(view, 0);
+      return;
+    }
+    this.flyOut(view, at);
+  }
+
+  private flyOut(view: CardView, at: Point): void {
+    const zone = this.zonePoints();
+    const target = zone ? polygonCentroid(zone) : at;
+    this.setState('flying');
+    view.fly = {
+      start: performance.now(),
+      fromX: view.x.value,
+      fromY: view.y.value,
+      fromScale: view.scale.value,
+      toX: target.x - (this.rootRect.left + this.rootRect.width / 2),
+      toY: target.y - (this.rootRect.top + this.rootRect.height)
+    };
+    this.start();
+  }
+
+  /** 回弹：把拖拽速度灌进弹簧，松手那一下才有惯性，而不是被"拉"回去。 */
+  private releaseBack(view: CardView, velocity: number): void {
+    this.setState('returning');
+    view.x.velocity = velocity * 60;
+    this.start();
+    // 弹簧收敛后 frame() 会把 state 收回 idle；这里兜底一次，避免状态卡在 returning。
+    window.setTimeout(() => {
+      if (!this.destroyed && !this.drag && this.state === 'returning') this.setState('idle');
+    }, 420);
+  }
+
+  private releaseCapture(pointerId: number): void {
+    try {
+      if (this.root.hasPointerCapture(pointerId)) this.root.releasePointerCapture(pointerId);
+    } catch {
+      // 已经由浏览器释放。
+    }
+  }
+}
