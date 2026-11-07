@@ -34,6 +34,7 @@
     "probe:action-cards": "node scripts/probe-action-cards.mjs",
     "probe:action-hand": "node scripts/probe-action-hand.mjs",
     "probe:action-hand-html": "node scripts/probe-action-hand-html.mjs",
+    "probe:radial": "node scripts/probe-radial.mjs",
     "probe:board": "node scripts/probe-board-facing.mjs",
     "probe:hand:view": "node scripts/probe-hand-visibility.mjs",
     "probe:tokens": "node scripts/probe-design-tokens.mjs",
