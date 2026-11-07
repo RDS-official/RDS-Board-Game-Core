@@ -2104,8 +2104,17 @@
   overflow: hidden;
 }
 .action-hand .ah-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 34px;
   font-size: 30px;
   line-height: 1;
+}
+.action-hand .ah-ico svg {
+  width: 34px;
+  height: 34px;
+  display: block;
 }
 .action-hand .ah-label {
   text-align: center;

@@ -74,6 +74,21 @@ contains(evilOut, 'a&quot;b', 'hint attribute escaped');
 /* 5. empty hand */
 eq(actionHandHtml({ cards: [], count: 0, focusIndex: null }), '', 'empty hand emits nothing');
 
+/* 6. inline SVG icons stay markup; other markup-looking strings are escaped */
+const svgIcon = '<svg viewBox="0 0 32 32" width="30" height="30"><path d="M0 0"/></svg>';
+const iconView = actionHandHtml(
+  layoutActionHand([base({ id: 'svg-icon', icon: svgIcon })], { containerWidth: 400, cardWidth: 96 }),
+);
+contains(iconView, '<svg viewBox="0 0 32 32"', 'svg icon rendered as markup');
+check(!iconView.includes('&lt;svg'), 'svg icon is not escaped');
+
+const badIcon = '<img src=x onerror=alert(1)>';
+const badView = actionHandHtml(
+  layoutActionHand([base({ id: 'bad-icon', icon: badIcon })], { containerWidth: 400, cardWidth: 96 }),
+);
+check(!badView.includes('<img'), 'non-svg markup is escaped');
+contains(badView, '&lt;img', 'non-svg markup escaped form');
+
 /* aria-label present on every button */
 eq((out.match(/aria-label="/g) || []).length, ACTIONS.length, 'aria-label per card');
 
