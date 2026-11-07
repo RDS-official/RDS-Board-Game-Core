@@ -283,6 +283,9 @@ test('layout: deterministic across repeated runs', () => {
 
 test('presenter: snapshot exposes actions and performs by id', () => {
   const session = new UniversalSession(GAME_REGISTRY.sanguosha, 5);
+  // This case drives the whole table (p1..p4), so use the debug/inspector view.
+  // The protagonist-seat default is covered by the viewer-switching case below.
+  session.setViewer('GOD');
   const before = session.getSnapshot();
 
   assert(before.actions.length > 0, 'snapshot exposes actions');
@@ -337,8 +340,14 @@ test('presenter: board picks are resolved to legal actions', () => {
 
 test('presenter: viewer switching reprojects without exposing the raw engine', () => {
   const session = new UniversalSession(GAME_REGISTRY.sanguosha, 9);
+  const seated = session.getSnapshot();
+  assertEqual(seated.viewer, 'p1', 'Sanguosha starts at the protagonist seat, not god mode');
+  assert(seated.board.maskedEntityCount > 0, 'the seated view masks other hands');
+
+  session.setViewer('GOD');
   const god = session.getSnapshot();
-  assertEqual(god.viewer, 'GOD', 'starts in god mode');
+  assertEqual(god.viewer, 'GOD', 'the inspector can switch to god mode');
+  assert(god.board.maskedEntityCount <= seated.board.maskedEntityCount, 'god mode reveals more');
 
   session.setViewer('p2');
   const view = session.getSnapshot();

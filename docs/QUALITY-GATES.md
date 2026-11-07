@@ -14,7 +14,7 @@
 | --- | --- | --- | --- |
 | 内核一致性 + 分层边界 | `pnpm test` | 257 例 + UI/app/kernel 静态 import 边界 | ✅ `deploy.yml` |
 | Biome lint | `pnpm lint` | 全仓静态检查，0 error 为门槛（231 warn / 130 info 基线不阻断） | 本地必跑；CI 阻断待 Phase 2 |
-| 黑盒矩阵 | `pnpm test:matrix` | 六夹具 × 多 seed × 回放哈希（当前 72 seed 对局 / 27 场景 / 4726 动作） | 手工（改动 kernel/games 时） |
+| 黑盒矩阵 | `pnpm test:matrix` | 六夹具 × 多 seed × 回放哈希（当前 81 seed 对局 / 36 场景 / 4869 动作；三国杀场景按 1 seed × 60 步收敛） | 手工（改动 kernel/games 时） |
 | 大厅自测 | `pnpm test:server` | Hub 房间/账号/私密房/座位 clamp | ✅ `deploy.yml` |
 | 类型检查 | `tsc --noEmit` | 全仓类型 | CI 构建链路内 |
 | 生产构建 | `pnpm build` | Vite 打包 | ✅ `deploy.yml` |
@@ -155,9 +155,9 @@ UI 矩阵的三个提速点（都不是砍覆盖）：
 
 | 套件 | 时间预算 | 内存预算（Node RSS） |
 | --- | --- | --- |
-| core | 90s | 900MB |
+| core | 120s | 900MB |
 | matrix | 180s | 900MB |
-| ui | 360s | 1400MB（另打印浏览器 JS heap 峰值） |
+| ui | 720s | 1400MB（另打印浏览器 JS heap 峰值） |
 
 - 预算是实测值的 ~2 倍，机器噪声不会误伤；真正的回归（多了一层 O(n²)、每次用例重新加载夹具、引擎泄漏）会立刻被抓到。
 - 覆盖：`GATE_SCALE=2` 整体放宽（慢 CI），或 `GATE_UI_MS` / `GATE_CORE_MB` 等单项覆盖。

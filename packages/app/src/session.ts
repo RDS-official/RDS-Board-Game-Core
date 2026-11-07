@@ -930,7 +930,7 @@ export class UniversalSession implements GamePresenter {
    *
    * AI 与真人同一条管线：`legalActions` 直接给出它这一步要做的具体动作，这里
    * 只按 `aiActionDelayMs` 的节奏派发。每次状态变化后重排定时器，于是 AI 与 AI
-   * 之间的间隔正好是 5 秒，真人看得清每一步。
+   * 之间保持可读的间隔，真人看得清每一步。
    */
   private scheduleAiTurn(): void {
     if (this.aiTimer !== null) {
@@ -940,15 +940,15 @@ export class UniversalSession implements GamePresenter {
     const delay = this.module.driver?.aiActionDelayMs;
     if (!delay) return;
     const state = this.engine.getRawState();
-    const actor = this.engine.getActiveActorId();
-    if (!actor || !this.module.driver?.isAutomated?.(state, actor)) return;
+    const actor = this.automatedFocusActor(state);
+    if (!actor) return;
     if (this.engine.getLegalActions(actor).length === 0) return;
     this.aiTimer = setTimeout(() => {
       this.aiTimer = null;
-      // 这 5 秒里状态可能已经变了（真人先手、换座、牌局结束），到点重新问一次。
+      // 这 1.2 秒里状态可能已经变了（真人先手、换座、牌局结束），到点重新问一次。
       const live = this.engine.getRawState();
-      const liveActor = this.engine.getActiveActorId();
-      if (!liveActor || !this.module.driver?.isAutomated?.(live, liveActor)) {
+      const liveActor = this.automatedFocusActor(live);
+      if (!liveActor) {
         this.scheduleAiTurn();
         return;
       }
@@ -957,6 +957,23 @@ export class UniversalSession implements GamePresenter {
       this.engine.dispatch(action);
       this.scheduleAiTurn();
     }, delay);
+  }
+
+  /**
+   * The automated actor that currently owns the input.
+   *
+   * A response window can focus the strike target while the active player is
+   * still the attacker, so looking only at `activePlayerId` would let an AI
+   * target sit on a Dodge/Peach prompt forever.
+   */
+  private automatedFocusActor(state: ReturnType<UniversalGameEngine['getRawState']>): string | undefined {
+    const isAutomated = this.module.driver?.isAutomated;
+    if (!isAutomated) return undefined;
+    const focus = this.engine.getFocusActors() as string[];
+    const focused = focus.find(actorId => isAutomated(state, actorId));
+    if (focused) return focused;
+    const active = this.engine.getActiveActorId();
+    return active && isAutomated(state, active) ? active : undefined;
   }
 
   /**
@@ -1491,8 +1508,18 @@ export function phaseLabelOf(state: ProjectedGameState): string {
         };
         return labels[state.phase] ?? state.phase;
       }
-      case 'sanguosha':
-        return 'PLAY PHASE · 出牌阶段';
+      case 'sanguosha': {
+        const labels: Record<string, string> = {
+          TURN_START: 'TURN START · 回合开始',
+          JUDGE: 'JUDGE PHASE · 判定阶段',
+          DRAW: 'DRAW PHASE · 摸牌阶段',
+          PLAY: 'PLAY PHASE · 出牌阶段',
+          DISCARD: 'DISCARD PHASE · 弃牌阶段',
+          END: 'END PHASE · 结束阶段'
+        };
+        const owner = state.players[state.activePlayerId]?.name ?? state.activePlayerId;
+        return `${labels[state.phase] ?? state.phase} · ${owner}`;
+      }
       case 'splendor': {
         // 行动阶段：收服精灵球 / 捕捉宝可梦 / 保留 / 进化（进化免费且不结束回合）。
         const evolved = state.globalVars.evolvedThisTurn === true;
@@ -1580,6 +1607,13 @@ export function missionLineOf(state: ProjectedGameState): string | undefined {
         bits.push(`上一手：${winners.join(' / ')} 赢得 ${total}`);
       }
       return bits.join(' · ');
+    }
+    if (state.gameId === 'sanguosha') {
+      const hero = String(state.players[state.viewerId]?.customProps?.heroName ?? '');
+      const deck = Number(state.globalVars.drawDeckCount ?? 0);
+      const mode = String(state.globalVars.mode ?? 'identity');
+      const modeLabel = mode === 'team' ? '4人对抗' : mode === 'kill_next' ? '杀下家' : '身份局';
+      return [hero || null, modeLabel, `牌堆 ${deck}`, phaseLabelOf(state)].filter(Boolean).join(' · ');
     }
     if (state.gameId !== 'betrayal') return undefined;
     const objectives = state.globalVars.hauntObjectives as { hero?: string; traitor?: string } | undefined;
@@ -1679,13 +1713,26 @@ export function buildPlayersView(
             : [])
         ];
       } else if (state.gameId === 'sanguosha') {
-        const hp = player.customProps.hp ?? 0;
-        const maxHp = player.customProps.maxHp ?? 4;
+        const hp = Number(player.customProps.hp ?? 0);
+        const maxHp = Number(player.customProps.maxHp ?? 4);
+        const kingdom = String(player.customProps.kingdomLabel ?? player.customProps.kingdom ?? '');
+        const gender = String(player.customProps.genderLabel ?? player.customProps.gender ?? '');
+        const skillNames = Array.isArray(player.customProps.skillNames)
+          ? (player.customProps.skillNames as string[])
+          : [];
+        const chained = Boolean(player.customProps.chained);
         base.hp = { current: hp, max: maxHp };
         base.stats = [
-          { label: player.customProps.hero ?? '武将', value: `${hp} / ${maxHp} HP` },
-          { label: '手牌 / 装备', value: `${handCount} / ${equipCount}` }
+          { label: String(player.customProps.heroName ?? '武将'), value: `${kingdom} · ${gender}` },
+          { label: '体力', value: `${hp} / ${maxHp}` },
+          { label: '手牌 / 装备', value: `${handCount} / ${equipCount}` },
+          { label: '积分', value: String(Number(player.customProps.points ?? 0)) },
+          ...(skillNames.length > 0 ? [{ label: '技能', value: skillNames.join(' · ') }] : []),
+          ...(player.role ? [{ label: '身份', value: presentation?.roleLabel?.(player.role) ?? player.role }] : [])
         ];
+        if (chained) base.effects = [...(base.effects ?? []), { id: 'chained', label: '横置', detail: '铁索连环状态：受到属性伤害时会传导', tone: 'bad' }];
+        if (player.customProps.skipPlay) base.effects = [...(base.effects ?? []), { id: 'skip-play', label: '跳过出牌阶段', detail: '乐不思蜀或技能效果', tone: 'bad' }];
+        if (player.customProps.skipDraw) base.effects = [...(base.effects ?? []), { id: 'skip-draw', label: '跳过摸牌阶段', detail: '兵粮寸断或技能效果', tone: 'bad' }];
       } else if (state.gameId === 'splendor') {
         // 宝可梦语义词条：彩虹徽章是该色加成数，紫色徽章是手上的大师球。
         const bonuses = player.customProps.bonuses ?? {};
@@ -1939,7 +1986,7 @@ export function buildActionsView(
       const reserveKey = `${action.entityId ?? ''}|${String(action.payload?.fromTier ?? '')}`;
       const dedupeKey = `${action.actorId ?? action.playerId}:${
         action.type === 'PLAY_STRIKE'
-          ? `${action.type}:${action.targetPlayerId}`
+          ? `${action.type}:${action.targetPlayerId}:${JSON.stringify(action.payload ?? {})}`
           : action.type === 'RESERVE_CARD'
           ? `${action.type}:${reserveKey}`
           : `${action.type}:${action.entityId ?? ''}:${action.targetPlayerId ?? ''}:${action.targetNodeId ?? ''}:${action.targetEdgeId ?? ''}:${JSON.stringify(action.payload ?? {})}`

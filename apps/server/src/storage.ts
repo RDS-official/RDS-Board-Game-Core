@@ -13,6 +13,12 @@ export interface UserRecord {
   disabled?: boolean;
   /** 令牌世代：改密/重置密码时 +1，使该用户所有已签发 JWT 立即失效（缺省视为 0） */
   tokenEpoch?: number;
+  /** 三国杀积分：由服务端权威对局结算，零和增减。 */
+  sanguoshaPoints?: number;
+  /** 三国杀生涯：场次 / 胜场（排行榜与个人资料展示）。 */
+  sanguoshaCareer?: { games: number; wins: number };
+  /** 已结算的房间（防止重连 / 重建对局重复加减分）。 */
+  sanguoshaSettled?: Record<string, number>;
 }
 export interface RoomRecord {
   id: string; name: string; gameId: string; hostId: string; status: 'open' | 'playing' | 'closed';

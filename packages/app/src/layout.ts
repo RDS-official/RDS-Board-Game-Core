@@ -28,7 +28,9 @@ export interface LayoutHints {
 
 const PRESENTATION: Record<string, LayoutHints> = {
   catan: { padding: 5, cameraDirection: [0.06, 0.72, 0.92], minDistance: 22 },
-  sanguosha: { padding: 4, cameraDirection: [0.06, 0.7, 0.9], minDistance: 17 },
+  // 2–8 seats share the same ring; the extra distance keeps the 8-seat ring and
+  // its seat plates in frame without changing the 4-seat composition much.
+  sanguosha: { padding: 6, cameraDirection: [0.06, 0.7, 0.9], minDistance: 20 },
   splendor: { padding: 4, cameraDirection: [0.05, 0.7, 0.9], minDistance: 15 },
   betrayal: { padding: 4, cameraDirection: [0.03, 0.68, 0.9], minDistance: 18 },
   dune_mahjong: { padding: 4, cameraDirection: [0.05, 0.7, 0.9], minDistance: 15 },

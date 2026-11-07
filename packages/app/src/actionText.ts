@@ -137,7 +137,11 @@ function describeActionZh(
     const card = (id?: string) => {
       if (!id) return '未知卡牌';
       const entity = state.entities[id];
+      // `actionLabel` is an optional, pre-localised button label supplied by
+      // the game (Sanguosha uses it to add a serial to physical duplicates).
+      // Never infer a game from unrelated fields: poker cards also have a suit.
       return (
+        (entity?.components?.custom?.actionLabel as string | undefined) ??
         (entity?.components?.custom?.zh as string | undefined) ??
         (entity?.components?.custom?.name as string | undefined) ??
         entity?.components?.cardFace?.title ??
@@ -188,19 +192,62 @@ function describeActionZh(
       case 'END_TURN':
         return { icon: '⌛', label: '结束回合', hint: '移交行动权', tone: 'normal' };
       case 'PLAY_STRIKE':
-        return { icon: '⚔️', label: `出【杀】→ ${name(action.targetPlayerId)}`, hint: '开启【闪】响应窗口', tone: 'primary' };
+        return {
+          icon: '⚔️',
+          label: `出【杀】${action.targetPlayerId ? `→ ${name(action.targetPlayerId)}` : ''}`,
+          hint: action.targetPlayerId ? '开启【闪】响应窗口' : '响应【决斗】/【南蛮入侵】',
+          tone: 'primary'
+        };
       case 'PLAY_DODGE':
         return { icon: '🛡️', label: '出【闪】', hint: '抵消此【杀】', tone: 'primary' };
       case 'JUDGE_BAGUA':
         return { icon: '☯️', label: '发动【八卦阵】', hint: '判定红牌即视为闪', tone: 'primary' };
       case 'PLAY_PEACH':
-        return { icon: '🍑', label: '出【桃】', hint: '回复 1 点体力', tone: 'primary' };
+        return { icon: '🍑', label: '出【桃】', hint: '回复 1 点体力 / 救助濒死角色', tone: 'primary' };
       case 'PLAY_WUXIE':
         return { icon: '📜', label: '打出【无懈可击】', hint: '压栈反制 · 可被再反制', tone: 'primary' };
       case 'PASS':
         return { icon: '⊘', label: '放弃响应', hint: 'Pass · 让栈顶结算', tone: 'danger' };
       case 'DRAW_CARDS':
         return { icon: '🎴', label: '摸 2 张牌', hint: '从牌堆抽取', tone: 'normal' };
+      case 'EQUIP_CARD':
+        return {
+          icon: '🧰',
+          label: `装备【${card(action.entityId)}】`,
+          hint: '置入装备区，同槽位旧装备进入弃牌堆',
+          tone: 'normal'
+        };
+      case 'PLAY_CARD': {
+        const label = card(action.entityId);
+        const target = action.targetPlayerId ? ` → ${name(action.targetPlayerId)}` : '';
+        const recast = action.payload?.recast === true;
+        return {
+          icon: recast ? '♻️' : '📜',
+          label: recast ? `重铸【${label}】` : `使用【${label}】${target}`,
+          hint: recast ? '置入弃牌堆并摸一张牌' : '点击后按牌面规则结算',
+          tone: 'normal'
+        };
+      }
+      case 'USE_SKILL': {
+        const cardName = action.entityId ? card(action.entityId) : '';
+        return {
+          icon: '✨',
+          label: `发动【${String(action.payload?.skillName ?? action.payload?.skill ?? '技能')}】${
+            cardName ? `（${cardName}）` : ''
+          }${action.targetPlayerId ? ` → ${name(action.targetPlayerId)}` : ''}`,
+          hint: String(action.payload?.hint ?? '按技能描述结算'),
+          tone: 'primary'
+        };
+      }
+      case 'DISCARD_CARD':
+        return { icon: '🗑️', label: `弃置【${card(action.entityId)}】`, hint: '手牌上限等于当前体力值', tone: 'normal' };
+      case 'RESOLVE_CHOICE':
+        return {
+          icon: '☑️',
+          label: String(action.payload?.choiceLabel ?? '选择一项'),
+          hint: '选择后立即结算',
+          tone: 'primary'
+        };
       /* ---- 宝可梦璀璨宝石 (Pokémon Splendor) ---------------------------- */
       case 'TAKE_3_DIFF_GEMS': {
         // 1–3 colours: the bank may not cover three, and the 10-ball cap bites.

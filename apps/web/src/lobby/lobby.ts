@@ -18,7 +18,7 @@ export interface LobbyHandle { destroy(): void; }
 
 export interface EnterGameParams { query: string; }
 
-let user: { sub: string; name: string; displayName?: string; avatarUrl?: string; role?: 'admin' | 'user' } | null = null;
+let user: { sub: string; name: string; displayName?: string; avatarUrl?: string; role?: 'admin' | 'user'; sanguoshaPoints?: number; sanguoshaCareer?: { games: number; wins: number } } | null = null;
 let onAdmin: (() => void) | null = null;
 
 /** 个人资料弹窗里待上传的头像（已压缩）。 */
@@ -601,6 +601,7 @@ function profileModalHtml() {
         <label class="lob-field-label">昵称（对其他玩家展示）</label>
         <input id="pf-name" maxlength="24" placeholder="${esc(displayNameOf(user))}" />
         <p class="lob-muted" style="font-size:12px">登录名：${esc(user!.name)}（不可更改）</p>
+        <p class="lob-muted" style="font-size:12px">三国杀积分：<b>${Number(user!.sanguoshaPoints ?? 0)}</b> · 生涯 ${Number(user!.sanguoshaCareer?.wins ?? 0)} 胜 / ${Number(user!.sanguoshaCareer?.games ?? 0)} 场</p>
         <div class="lob-row" style="justify-content:flex-end">
           <button id="pf-cancel" class="lob-secondary">取消</button>
           <button id="pf-save" class="lob-primary-btn">保存资料</button>
@@ -1164,7 +1165,15 @@ async function boot() {
   if (token) {
     try {
       const p: UserProfile = await me();
-      user = { sub: p.id, name: p.name, displayName: p.displayName, avatarUrl: p.avatarUrl, role: p.role };
+      user = {
+        sub: p.id,
+        name: p.name,
+        displayName: p.displayName,
+        avatarUrl: p.avatarUrl,
+        role: p.role,
+        sanguoshaPoints: p.sanguoshaPoints,
+        sanguoshaCareer: p.sanguoshaCareer
+      };
     } catch {
       // token 过期/账号被删：清掉本地会话，落到登录页而不是半登录状态。
       localStorage.removeItem('token');

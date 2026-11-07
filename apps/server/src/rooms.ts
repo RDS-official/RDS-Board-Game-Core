@@ -266,7 +266,12 @@ export function setAiSeats(hostId: string, roomId: string, aiSeats: number) {
   if (r.status !== 'open') return { error: '对局进行中不能调整 AI' };
   const game = gameById(r.gameId);
   if (!game?.aiSeats) return { error: '该玩法不支持添加 AI' };
-  const ceiling = Math.max(0, (game.maxPlayers ?? 0) - r.players.length);
+  // A fixed scenario (classic 4p, identity_5, team_4) has its own ceiling; only
+  // variable scenarios such as kill_next may use the module's 8-seat maximum.
+  const module = GAME_REGISTRY[r.gameId];
+  const range = module ? seatRangeOf(module, r.scenarioId) : { max: game.maxPlayers ?? 0 };
+  const cap = range.max;
+  const ceiling = Math.max(0, cap - r.players.length);
   const wanted = Math.min(ceiling, Math.max(0, Math.floor(aiSeats)));
   rooms.update(roomId, { aiSeats: wanted });
   return changed(rooms.byId(roomId)! as RoomRec);
