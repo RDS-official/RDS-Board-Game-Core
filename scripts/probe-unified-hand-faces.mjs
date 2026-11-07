@@ -70,6 +70,8 @@ try {
       expected: expected.length,
       artCards: document.querySelectorAll('#action-hand .ah-art').length,
       commandFallbacks: document.querySelectorAll('#action-hand .ah-ico').length,
+      cards: document.querySelectorAll('#action-hand .ah-card').length,
+      faces: document.querySelectorAll('#action-hand .ah-card .ah-art, #action-hand .ah-card .ah-ico').length,
       mismatches,
       loaded,
       firstSource: document.querySelector('#action-hand .ah-art')?.getAttribute('src')?.slice(0, 24) ?? '',
@@ -83,7 +85,13 @@ try {
   record('unified: images equal board textures exactly', faces.mismatches.length === 0, faces.mismatches.join(','));
   record('unified: every artwork image decoded', faces.loaded === faces.expected, `${faces.loaded}/${faces.expected}`);
   record('unified: procedural art is a real image', faces.firstSource.startsWith('data:image/'), faces.firstSource);
-  record('unified: command cards keep icon fallback', faces.commandFallbacks > 0, String(faces.commandFallbacks));
+  // 每张牌都必须有"脸"：真实卡面（.ah-art）或图标兜底（.ah-ico）。三国杀全套都是实体牌，
+  // 所以这里只要求两者之和覆盖所有卡片，而不是硬性要求图标兜底出现。
+  record(
+    'unified: every card renders a face',
+    faces.faces >= faces.cards && faces.cards > 0,
+    faces.faces + '/' + faces.cards + ' (icons ' + faces.commandFallbacks + ')',
+  );
   record('unified: no SVG markup leaks as text', !faces.textLeak);
 
   await page.screenshot({ path: 'shots/unified-hand-sanguosha.png', fullPage: false });

@@ -2180,6 +2180,12 @@ export class BoardGameHUD {
       </aside>
       <!-- Unified action hand: shadow render, off unless ?unified-hand. -->
       <aside class="action-hand" id="action-hand" data-enabled="0" aria-hidden="true" aria-label="动作手牌"></aside>
+      <!-- 翻页器：>1 页才出现。手牌不横向滚动，翻页与拖拽不抢同一个手势轴。 -->
+      <div class="hand-pager" id="hand-pager" role="group" aria-label="手牌翻页" hidden>
+        <button class="hp-btn" type="button" data-page-step="-1" aria-label="上一页">‹</button>
+        <span class="hp-label" id="hand-pager-label" aria-live="polite">1 / 1</span>
+        <button class="hp-btn" type="button" data-page-step="1" aria-label="下一页">›</button>
+      </div>
       <div class="announcement-banner" id="announce" style="display:none"></div>
       <div class="payload-layer" id="payload-layer" style="display:none"></div>
       <div class="shell-scrim" data-shell-scrim aria-hidden="true"></div>
@@ -2350,6 +2356,12 @@ export class BoardGameHUD {
     });
     this.container.querySelector('#btn-inspector')?.addEventListener('click', () => {
       this.ports.toggleInspector();
+    });
+
+    this.container.querySelector('#hand-pager')?.addEventListener('click', event => {
+      const button = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-page-step]');
+      if (!button) return;
+      this.actionHand?.stepPage(Number(button.dataset.pageStep) || 0);
     });
 
     this.container.querySelector('#btn-shortcuts')?.addEventListener('click', () => {
@@ -3840,7 +3852,7 @@ export class BoardGameHUD {
       return false;
     }
     this.runAction(action);
-    this.showTableEcho(action.label, '你');
+    this.showTableEcho(action.label, '你', action.entityId);
     return true;
   }
 
@@ -3852,14 +3864,24 @@ export class BoardGameHUD {
    * 中央并停留一会儿；同一个渲染函数既服务本地出牌，也服务远端历史（见
    * `renderTableEcho`），所以两边看到的是同一件事。
    */
-  private showTableEcho(title: string, actor: string): void {
+  private showTableEcho(title: string, actor: string, entityId?: string): void {
     const host = this.container;
     const echo = document.createElement('div');
     echo.className = 'hand-play-echo';
     const anchor = this.tableAnchor();
     echo.style.setProperty('--echo-x', `${Math.round(anchor.x)}px`);
     echo.style.setProperty('--echo-y', `${Math.round(anchor.y)}px`);
-    setHtml(echo, html`<span class="hpe-actor">${actor}</span><span class="hpe-title">${title}</span>`);
+    // 有实体就画真实卡面：别人打出的动作卡也落一张"看得见的牌"，而不是只有文字。
+    const art = entityId ? this.ports.entityCardArt?.(entityId) : undefined;
+    if (art) {
+      echo.classList.add('with-art');
+      setHtml(
+        echo,
+        html`<img class="hpe-face" src="${art}" alt="" draggable="false" /><span class="hpe-actor">${actor}</span><span class="hpe-title">${title}</span>`
+      );
+    } else {
+      setHtml(echo, html`<span class="hpe-actor">${actor}</span><span class="hpe-title">${title}</span>`);
+    }
     host.appendChild(echo);
     window.setTimeout(() => echo.remove(), 2100);
   }
@@ -3870,7 +3892,7 @@ export class BoardGameHUD {
     if (!entry || entry.id === this.lastEchoId) return;
     this.lastEchoId = entry.id;
     if (entry.kind !== 'card') return;
-    this.showTableEcho(entry.title, entry.actorName ?? '');
+    this.showTableEcho(entry.title, entry.actorName ?? '', entry.entityId);
   }
 
   /** 桌面上"打出去"的落点（视口坐标）：手牌条上方、屏幕横向居中。 */
@@ -3888,7 +3910,8 @@ export class BoardGameHUD {
       playZone: () => this.handPlayZone(el),
       onActivate: id => this.activateHandCard(id),
       onDrop: (id, at) => this.playHandCard(id, at),
-      flyTarget: () => this.tableAnchor()
+      flyTarget: () => this.tableAnchor(),
+      onPageChange: (page, pageCount) => this.syncHandPager(page, pageCount)
     });
     return this.actionHand;
   }
@@ -3908,6 +3931,19 @@ export class BoardGameHUD {
     const points = rectPolygon({ left: 8, top: 8, right: window.innerWidth - 8, bottom });
     this.handZone = { at: now, points };
     return points;
+  }
+
+  /** 翻页器：只有一页时整体隐藏，标签保持「2 / 3」。 */
+  private syncHandPager(page: number, pageCount: number): void {
+    const pager = this.container.querySelector('#hand-pager') as HTMLElement | null;
+    const label = this.container.querySelector('#hand-pager-label') as HTMLElement | null;
+    if (!pager) return;
+    pager.hidden = pageCount <= 1;
+    if (label) label.textContent = `${page + 1} / ${pageCount}`;
+    pager.querySelectorAll<HTMLButtonElement>('[data-page-step]').forEach(button => {
+      const step = Number(button.dataset.pageStep) || 0;
+      button.disabled = step < 0 ? page <= 0 : page >= pageCount - 1;
+    });
   }
 
   private handCardElement(id: string): HTMLElement | null {
@@ -3938,6 +3974,7 @@ export class BoardGameHUD {
       button.className = 'ah-card ah-held';
       button.dataset.actionId = id;
       button.dataset.kind = 'held';
+      button.dataset.group = 'card';
       button.dataset.targetMode = 'none';
       button.setAttribute('aria-label', `${display.title || '手牌'} · 仅展示`);
       button.title = `${display.title} · 点击查看`;
@@ -3970,6 +4007,7 @@ export class BoardGameHUD {
     button.className = `ah-card${art ? ' ah-with-art' : ''}`;
     button.dataset.actionId = card.id;
     button.dataset.kind = card.kind;
+    button.dataset.group = card.group;
     button.dataset.targetMode = card.targetMode;
     button.setAttribute('aria-label', aria);
     button.title = aria;
@@ -4095,7 +4133,12 @@ export class BoardGameHUD {
     el.setAttribute('aria-hidden', 'false');
 
     this.handArt.clear();
-    const items: HandCardItem[] = snapshot.actions.map(action => {
+    // 手牌分区：牌 → 装备 → 技能 → 命令。同一分区内保持引擎给的顺序（稳定排序）。
+    const GROUP_ORDER: Record<string, number> = { card: 0, equip: 1, skill: 2, command: 3 };
+    const ordered = [...snapshot.actions].sort(
+      (a, b) => (GROUP_ORDER[a.group ?? 'command'] ?? 3) - (GROUP_ORDER[b.group ?? 'command'] ?? 3)
+    );
+    const items: HandCardItem[] = ordered.map(action => {
       const card = deriveActionCard(action);
       const art = card.entityId ? this.ports.entityCardArt?.(card.entityId) : undefined;
       if (art) this.handArt.set(card.id, art);

@@ -2374,6 +2374,90 @@
   }
 }
 
+/* ---- 手牌翻页器 ------------------------------------------------------
+   手牌不横向滚动：滚动手势会与拖拽抢同一个轴。翻页只换"当前页"，卡片位置仍由
+   弧形布局算出，拖动永远发生在页内。 */
+.hand-pager {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--shell-edge, 16px) + 178px);
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border: 1px solid rgba(217, 180, 91, 0.35);
+  border-radius: 999px;
+  background: rgba(12, 16, 22, 0.84);
+  color: #e8edf5;
+  font-size: 11px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.hand-pager[hidden] {
+  display: none;
+}
+
+.hp-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(217, 180, 91, 0.16);
+  color: #f3e6c8;
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.hp-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.hp-label {
+  min-width: 44px;
+  text-align: center;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 1199px) {
+  .hand-pager {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px + 148px);
+  }
+}
+
+/* ---- 手牌分区色标（牌 / 装备 / 技能 / 命令） -------------------------
+   只改描边颜色，不靠颜色单独传达信息：卡面本身已有类别角标与文字。 */
+.action-hand[data-physics='1'] .ah-card[data-group='skill'] .ah-face {
+  border-color: rgba(160, 140, 255, 0.5);
+}
+
+.action-hand[data-physics='1'] .ah-card[data-group='equip'] .ah-face {
+  border-color: rgba(120, 200, 255, 0.5);
+}
+
+.action-hand[data-physics='1'] .ah-card[data-group='command'] .ah-face {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+/* ---- 出牌回响的真实卡面 --------------------------------------------- */
+.hand-play-echo.with-art {
+  padding: 8px 12px 10px;
+  gap: 4px;
+}
+
+.hpe-face {
+  width: 74px;
+  height: 106px;
+  object-fit: cover;
+  border: 1px solid rgba(217, 180, 91, 0.5);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
+}
+
 /* Linear listbox for keyboard / screen readers: present but visually hidden. */
 .rp-list {
   position: absolute;

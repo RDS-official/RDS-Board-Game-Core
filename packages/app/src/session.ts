@@ -86,6 +86,13 @@ export interface BoundAction {
   highlight?: string[];
   type?: string;
   idKey?: 'targetEdgeId' | 'targetNodeId' | 'entityId';
+  /**
+   * 目标塌缩后的候选表：候选 id（targetPlayerId）→ 那条具体合法动作。
+   *
+   * 一张「杀」在合法动作里其实有 N 条（每个目标一条）。手牌只显示一张，玩家在
+   * 径向选择器里点谁，就派发哪一条——合法性仍由引擎判定，UI 不自造规则。
+   */
+  targetVariants?: Map<string, Action>;
 }
 
 /**
@@ -434,6 +441,11 @@ export class UniversalSession implements GamePresenter {
     const action: Action = { ...bound.action };
     if (payload && Object.keys(payload).length > 0) {
       action.payload = { ...(bound.action.payload ?? {}), ...payload };
+    }
+    if (targets && targets.length === 1 && bound.targetVariants?.has(targets[0])) {
+      // 目标塌缩的卡片：用玩家选中的目标换回那条具体动作再派发。
+      const chosen = bound.targetVariants.get(targets[0]) as Action;
+      return this.dispatch({ ...chosen, ...(payload ? { payload: { ...(chosen.payload ?? {}), ...payload } } : {}) });
     }
     if (targets && targets.length > 0) action.targets = targets;
 
@@ -1015,6 +1027,10 @@ export class UniversalSession implements GamePresenter {
       kind,
       icon: EVENT_ICON[event.type] ?? EVENT_ICONS[event.type] ?? '•',
       title: event.title,
+      // 打出的牌/摸到的牌：让"落桌回响"能画出真实卡面（别人出牌也看得见）。
+      entityId:
+        (event.payload?.entityId as string | undefined) ??
+        (kind === 'card' ? event.targetId : undefined),
       round: state.round,
       turn: state.turn,
       critical: kind === 'haunt' || /死亡|作祟/.test(event.title)
@@ -1661,39 +1677,112 @@ export function buildActionsView(
         idKey: config.idKey
       });
     }
+    const actorNameOf = (id: string): string =>
+      state.players[id]?.name ??
+      (state.npcs as Record<string, { name?: string } | undefined> | undefined)?.[id]?.name ??
+      id;
+
+    /**
+     * 手牌分区：从动作形态推导，不看游戏名。
+     * 实体在手牌/装备区 → 牌；技能 → 技能；装备动作 → 装（仍归到牌）；其余 → 命令。
+     */
+    const groupOf = (action: Action): UiAction['group'] => {
+      if (action.type === 'USE_SKILL') return 'skill';
+      if (action.type === 'EQUIP_CARD') return 'equip';
+      const entity = action.entityId ? state.entities[action.entityId] : undefined;
+      const zone = entity?.zoneId ? state.zones[entity.zoneId] : undefined;
+      if (entity && (zone?.type === 'HAND' || zone?.type === 'EQUIP')) return 'card';
+      if (action.entityId) return 'card';
+      return 'command';
+    };
+
+    // ---- 目标塌缩 ------------------------------------------------------
+    // 同一张牌只因为 `targetPlayerId` 不同而产生的多条合法动作，合并成一张卡：
+    // 手牌里「杀」永远只有一张，选谁交给径向选择器 / 二级菜单（而且候选就是引擎
+    // 认可的合法目标，选错会被引擎驳回，UI 不自造规则）。
+    // 只合并"目标维度单一"的动作：payload 带额外目标（方天画戟 extraTargetIds、
+    // 借刀 victimId、铁索 targetIds）或自带 selection 的动作保持原样，否则会丢信息。
+    const TARGET_ONLY_KEYS = ['extraTargetIds', 'victimId', 'targetIds'];
+    const mergeKeyOf = (action: Action): string | null => {
+      if (!action.targetPlayerId || action.selection) return null;
+      const payload = { ...(action.payload ?? {}) };
+      for (const key of TARGET_ONLY_KEYS) {
+        if (key in payload) return null;
+      }
+      return `${action.actorId ?? action.playerId}|${action.type}|${action.entityId ?? ''}|${
+        action.targetNodeId ?? ''
+      }|${action.targetEdgeId ?? ''}|${JSON.stringify(payload)}`;
+    };
+
     const seen = new Set<string>();
+    const mergeBuckets = new Map<string, { first: Action; targets: Map<string, Action> }>();
+    const ordered: Action[] = [];
     for (const action of actions) {
       // 被高亮组吸收的动作不再单独出按钮。唯一的例外是「有 idKey 但这条动作
       // 恰好没带该字段」——目前仅 splendor 的按阶盲抽 RESERVE_CARD（没有
-      // entityId），它必须继续落到这里的独立按钮分支。
+      // entityId），它必须继续落到独立按钮分支。
       const group = boardGroups[action.type];
       const groupKey = group?.idKey;
       const absorbed = !!group && (!groupKey || !!action[groupKey]);
       if (absorbed) continue;
+
+      const mergeKey = mergeKeyOf(action);
+      if (mergeKey) {
+        const bucket = mergeBuckets.get(mergeKey);
+        const targetId = action.targetPlayerId as string;
+        if (bucket) {
+          if (!bucket.targets.has(targetId)) bucket.targets.set(targetId, action);
+          continue;
+        }
+        mergeBuckets.set(mergeKey, { first: action, targets: new Map([[targetId, action]]) });
+        ordered.push(action);
+        continue;
+      }
+
       // 宝可梦璀璨宝石的 RESERVE_CARD 有两种形态：指定明牌（entityId）或按阶
       // 盲抽（payload.fromTier）。旧实现把所有保留动作塌缩成一个按钮，导致只能
       // 保留第一张/第一阶；这里按「阶段 + 具体卡牌」区分，未知形态再退回按阶。
       const reserveKey = `${action.entityId ?? ''}|${String(action.payload?.fromTier ?? '')}`;
       const dedupeKey = `${action.actorId ?? action.playerId}:${
-        action.type === 'PLAY_STRIKE'
-          ? `${action.type}:${action.targetPlayerId}:${JSON.stringify(action.payload ?? {})}`
-          : action.type === 'RESERVE_CARD'
+        action.type === 'RESERVE_CARD'
           ? `${action.type}:${reserveKey}`
-          : `${action.type}:${action.entityId ?? ''}:${action.targetPlayerId ?? ''}:${action.targetNodeId ?? ''}:${action.targetEdgeId ?? ''}:${JSON.stringify(action.payload ?? {})}`
+          : `${action.type}:${action.entityId ?? ''}:${action.targetNodeId ?? ''}:${
+              action.targetEdgeId ?? ''
+            }:${JSON.stringify(action.payload ?? {})}`
       }`;
       if (seen.has(dedupeKey)) continue;
       seen.add(dedupeKey);
+      ordered.push(action);
+    }
 
-      const view = describeActionView(state, action);
+    for (const action of ordered) {
+      const mergeKey = mergeKeyOf(action);
+      const bucket = mergeKey ? mergeBuckets.get(mergeKey) : undefined;
+      const collapsed = !!bucket && bucket.targets.size > 1;
+      // 单目标也把目标名去掉（「杀」就是「杀」），但保留一键直达，不逼玩家多点一次。
+      const silentTarget = !!bucket && bucket.targets.size === 1;
+      const labelSource =
+        collapsed || silentTarget ? { ...action, targetPlayerId: undefined } : action;
+      const view = describeActionView(state, labelSource);
       if (!view) continue;
+      const label = (collapsed || silentTarget ? view.label.trim().replace(/[·→\s]+$/u, '') : view.label) || view.label;
 
-      const selection = action.selection
+      const selection = collapsed
         ? {
-            spec: action.selection,
-            candidates: getSelectionCandidates(action.actorId ?? action.playerId, action.selection)
-              .map(candidate => ({ id: candidate.id, label: candidate.label, icon: candidate.icon }))
+            spec: { source: 'player' as const, min: 1, max: 1 },
+            candidates: [...(bucket as { targets: Map<string, Action> }).targets.keys()].map(id => ({
+              id,
+              label: actorNameOf(id)
+            }))
           }
-        : undefined;
+        : action.selection
+          ? {
+              spec: action.selection,
+              candidates: getSelectionCandidates(action.actorId ?? action.playerId, action.selection).map(
+                candidate => ({ id: candidate.id, label: candidate.label, icon: candidate.icon })
+              )
+            }
+          : undefined;
 
       const placementNodeId =
         action.type === 'PLACE_ENTITY' && action.targetSlotId
@@ -1704,8 +1793,9 @@ export function buildActionsView(
         ui: {
           id: `a${bound.length}`,
           actionType: action.type,
+          group: groupOf(action),
           icon: view.icon,
-          label: view.label,
+          label,
           hint: view.hint,
           tone: view.tone,
           selection,
@@ -1716,8 +1806,24 @@ export function buildActionsView(
             : {}),
           ...(action.entityId ? { entityId: action.entityId } : {})
         },
-        action
+        action: collapsed ? (bucket as { first: Action }).first : action,
+        ...(collapsed ? { targetVariants: (bucket as { targets: Map<string, Action> }).targets } : {})
       });
+    }
+
+    // 同名不同牌：塌缩之后两张「出【杀】」看着一样，用牌面标题补上身份。
+    // 只在"真的撞名"时才加后缀，绝大多数动作保持原来的短标签。
+    const labelCounts = new Map<string, number>();
+    for (const entry of bound) labelCounts.set(entry.ui.label, (labelCounts.get(entry.ui.label) ?? 0) + 1);
+    for (const entry of bound) {
+      if ((labelCounts.get(entry.ui.label) ?? 0) < 2) continue;
+      const entityId = entry.ui.entityId;
+      const title = entityId
+        ? (state.entities[entityId]?.components?.cardFace?.title as string | undefined)
+        : undefined;
+      if (title && !entry.ui.label.includes(title)) {
+        entry.ui.label = entry.ui.label + ' · ' + title;
+      }
     }
 
     // Never truncate the dock; keep END_TURN last so a long list cannot bury it.

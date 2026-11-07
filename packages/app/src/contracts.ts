@@ -75,10 +75,21 @@ export interface UiActionSelection {
   candidates: UiSelectionCandidate[];
 }
 
+/**
+ * 手牌分区（capability，不是游戏词汇）：
+ * - `card`    手里那类实体牌（杀/闪/桃、道具卡……出牌时消耗实体）
+ * - `skill`   技能（USE_SKILL），不绑定手牌实体
+ * - `equip`   装备（把牌放进装备位）
+ * - `command` 无实体的命令（结束回合、掷骰、过牌……）
+ */
+export type UiActionGroup = 'card' | 'skill' | 'equip' | 'command';
+
 export interface UiAction {
   id: string;
   /** Underlying kernel action type (also present for board-group shortcuts). */
   actionType?: string;
+  /** 手牌分区：由 presenter 从动作形态推导，UI 只按它排序与上色。 */
+  group?: UiActionGroup;
   icon: string;
   label: string;
   hint: string;
@@ -226,6 +237,8 @@ export interface UiHistoryEntry {
   turn?: number;
   actorName?: string;
   actorColor?: string;
+  /** 这条动态涉及的实体（打出的牌/摸到的牌），用于把真实卡面画进"落桌回响"。 */
+  entityId?: string;
   /** Signed magnitude for numeric effects (-2 damage / +1 heal). */
   delta?: number;
   /** Trait display name when the entry is a trait change. */

@@ -298,6 +298,100 @@ try {
   await page.screenshot({ path: 'shots/card-hand-physics.png' });
   await page.close();
 
+  /* ---- sanguosha: collapsed targets, zoning and paging ---------------- */
+  const sgs = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await sgs.goto(dev.url + '?game=sanguosha&unified-hand', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await sgs.waitForTimeout(4200);
+  if (await sgs.locator('#boot-enter').count()) await sgs.click('#boot-enter').catch(() => {});
+  await sgs.waitForTimeout(1600);
+
+  const collapse = await sgs.evaluate(() => {
+    const snapshot = window.__boardGameApp?.session?.getSnapshot?.();
+    const actions = snapshot?.actions ?? [];
+    const names = (snapshot?.players ?? []).map(player => player.name).filter(Boolean);
+    const mounted = Array.from(document.querySelectorAll('#action-hand .ah-card')).map(el => ({
+      id: el.dataset.actionId,
+      group: el.dataset.group,
+      mode: el.dataset.targetMode,
+      label: el.getAttribute('aria-label') ?? ''
+    }));
+    return {
+      actions: actions.length,
+      labels: actions.map(action => action.label),
+      withTargetName: actions.filter(action => names.some(name => action.label.includes(name))).map(a => a.label),
+      selection: actions
+        .filter(action => action.selection)
+        .map(action => ({ label: action.label, candidates: action.selection.candidates.map(c => c.label) })),
+      // 只数"能打出的杀"：判定的是同一张牌是否只出现一次（仁德等技能里带的牌名不算）。
+      strikeCards: new Set(
+        actions
+          .filter(action => /^出【杀】/.test(action.label))
+          .map(action => action.label)
+      ).size,
+      strikeLabelCount: actions.filter(action => /^出【杀】/.test(action.label)).length,
+      groups: actions.map(action => action.group),
+      mounted
+    };
+  });
+  record('sanguosha: no action label carries a target name', collapse.withTargetName.length === 0, collapse.withTargetName.join(','));
+  record(
+    'sanguosha: one card per physical card (「杀」not split per target)',
+    collapse.strikeCards <= 2 && collapse.strikeCards === collapse.strikeLabelCount,
+    collapse.strikeCards + ' labels / ' + collapse.strikeLabelCount + ' cards'
+  );
+  record(
+    'sanguosha: multi-target cards expose legal candidates',
+    collapse.selection.length > 0 &&
+      collapse.selection.every(entry => entry.candidates.length >= 1),
+    JSON.stringify(collapse.selection.slice(0, 2))
+  );
+  {
+    const order = { card: 0, equip: 1, skill: 2, command: 3 };
+    const sequence = collapse.groups.map(group => order[group] ?? 3);
+    record(
+      'sanguosha: hand is sorted by zone (card → equip → skill → command)',
+      sequence.every((value, index) => index === 0 || sequence[index - 1] <= value),
+      collapse.groups.join(',')
+    );
+  }
+
+  const paging = await sgs.evaluate(() => ({
+    mounted: document.querySelectorAll('#action-hand .ah-card').length,
+    pagerHidden: document.querySelector('#hand-pager')?.hasAttribute('hidden') ?? true,
+    label: document.querySelector('#hand-pager-label')?.textContent ?? ''
+  }));
+  record('paging: only the current page is mounted', paging.mounted >= 1 && paging.mounted <= 9, String(paging.mounted));
+  if (!paging.pagerHidden) {
+    const before = await sgs.evaluate(() =>
+      document.querySelector('#action-hand .ah-card')?.dataset.actionId ?? ''
+    );
+    await sgs.click('#hand-pager [data-page-step="1"]');
+    await sgs.waitForTimeout(320);
+    const after = await sgs.evaluate(() => ({
+      first: document.querySelector('#action-hand .ah-card')?.dataset.actionId ?? '',
+      label: document.querySelector('#hand-pager-label')?.textContent ?? '',
+      prevDisabled: document.querySelector('#hand-pager [data-page-step="-1"]')?.disabled ?? false
+    }));
+    record('paging: next page swaps the mounted cards', after.first !== before, before + ' -> ' + after.first);
+    record('paging: page label follows', after.label !== paging.label, after.label);
+    record('paging: back arrow becomes usable', after.prevDisabled === false, String(after.prevDisabled));
+    await sgs.click('#hand-pager [data-page-step="-1"]');
+    await sgs.waitForTimeout(260);
+  }
+
+  // echo with the real card face (driven through the same call the game uses)
+  const echoArt = await sgs.evaluate(() => {
+    const app = window.__boardGameApp;
+    const snapshot = app?.session?.getSnapshot?.();
+    const entityId = snapshot?.board?.ownHand?.[0];
+    if (!entityId) return { skipped: true };
+    app.hud.showTableEcho('测试出牌', '你', entityId);
+    const el = document.querySelector('.hand-play-echo.with-art img.hpe-face');
+    return { art: el ? (el.getAttribute('src') ?? '').slice(0, 12) : null };
+  });
+  record('echo: the played card draws its real face', echoArt.skipped || Boolean(echoArt.art), JSON.stringify(echoArt));
+  await sgs.close();
+
   /* ---- poker: hole cards are held, not actions, and must still show ---- */
   const poker = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await poker.goto(dev.url + '?game=poker&unified-hand', { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -324,7 +418,12 @@ try {
   });
   record('poker: hole cards are rendered in the hand', held.held >= 2, JSON.stringify(held));
   record('poker: hole cards use the real card face', held.withArt === held.held, held.arts.join(','));
-  record('poker: held cards sit alongside the action cards', held.total > held.held, String(held.total));
+  // 两拍之间可能正好没有动作卡（actions = 0），此时手牌里只剩底牌也是对的。
+  record(
+    'poker: held cards sit alongside the action cards',
+    held.actions === 0 ? held.total === held.held : held.total > held.held,
+    `total ${held.total}, held ${held.held}, actions ${held.actions}`
+  );
   await poker.close();
 } finally {
   await browser.close();

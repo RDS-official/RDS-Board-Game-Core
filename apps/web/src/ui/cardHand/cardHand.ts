@@ -74,6 +74,10 @@ export interface CardHandConfig {
   zoneExitPadding?: number;
   /** 单帧 dt 上限（s）。 */
   maxDt?: number;
+  /** 每页张数；不传则按手牌条宽度自适应（4–9）。0 = 不分页。 */
+  pageSize?: number;
+  /** 页码变化（含首挂载）时回调，供 HUD 画「‹ 2/3 ›」。 */
+  onPageChange?: (page: number, pageCount: number) => void;
 }
 
 interface CardView {
@@ -123,7 +127,11 @@ export class CardHand {
   private readonly config: CardHandConfig;
   private readonly springs: { follow: SpringConfig; back: SpringConfig };
   private readonly views = new Map<string, CardView>();
+  /** 全量卡片（含未挂载的页），按展示顺序。 */
   private readonly order: string[] = [];
+  private readonly items = new Map<string, HandCardItem>();
+  private page = 0;
+  private pageSize = 0;
   private readonly rootRect = { left: 0, top: 0, width: 0, height: 0 };
   private readonly resizeObserver?: ResizeObserver;
 
@@ -187,19 +195,61 @@ export class CardHand {
    */
   public sync(items: readonly HandCardItem[]): void {
     if (this.destroyed) return;
-    const alive = new Set<string>();
+    this.items.clear();
     this.order.length = 0;
-
     for (const item of items) {
-      alive.add(item.id);
+      this.items.set(item.id, item);
       this.order.push(item.id);
-      const existing = this.views.get(item.id);
+    }
+    // 翻页后总数可能变少：先把页码夹回合法区间，再挂载本页。
+    const pageCount = this.pageCount();
+    this.page = Math.min(this.page, Math.max(0, pageCount - 1));
+    this.mountPage();
+    this.config.onPageChange?.(this.page, pageCount);
+  }
+
+  public getPage(): { page: number; pageCount: number; pageSize: number } {
+    return { page: this.page, pageCount: this.pageCount(), pageSize: this.pageSize };
+  }
+
+  /** 翻页：夹紧到合法范围，越界直接忽略（避免空白页）。 */
+  public setPage(page: number): void {
+    const pageCount = this.pageCount();
+    const next = Math.max(0, Math.min(pageCount - 1, Math.trunc(page)));
+    if (next === this.page) return;
+    this.page = next;
+    this.mountPage();
+    this.config.onPageChange?.(this.page, pageCount);
+  }
+
+  public stepPage(delta: number): void {
+    this.setPage(this.page + delta);
+  }
+
+  private pageCount(): number {
+    if (this.pageSize <= 0) return 1;
+    return Math.max(1, Math.ceil(this.order.length / this.pageSize));
+  }
+
+  private mountPage(): void {
+    if (this.pageSize <= 0) this.pageSize = this.pageSizeForWidth();
+    const start = this.page * Math.max(1, this.pageSize);
+    const slice = this.pageSize <= 0 ? [...this.order] : this.order.slice(start, start + this.pageSize);
+    const visible = new Set(slice);
+
+    for (const [id, view] of [...this.views]) {
+      if (visible.has(id) || view.fly) continue;
+      view.el.remove();
+      this.views.delete(id);
+    }
+
+    for (const id of slice) {
+      const item = this.items.get(id);
+      if (!item) continue;
+      const existing = this.views.get(id);
       if (!existing) {
-        const el = this.config.createCard(item.id);
-        if (!el) {
-          this.order.pop();
-          continue;
-        }
+        const el = this.config.createCard(id);
+        if (!el) continue;
         const view: CardView = {
           id: item.id,
           signature: item.signature,
@@ -219,13 +269,13 @@ export class CardHand {
           gone: false
         };
         this.root.appendChild(el);
-        this.views.set(item.id, view);
+        this.views.set(id, view);
         continue;
       }
       existing.gone = false;
       existing.appearTarget = 1;
       if (existing.signature !== item.signature) {
-        const el = this.config.createCard(item.id);
+        const el = this.config.createCard(id);
         if (el) {
           existing.el.replaceWith(el);
           existing.el = el;
@@ -239,15 +289,21 @@ export class CardHand {
       }
     }
 
-    for (const [id, view] of this.views) {
-      if (alive.has(id) || view.fly) continue;
-      view.appearTarget = 0;
-      view.gone = true;
-    }
-
     this.relayout();
     this.applyStyle();
     this.start();
+  }
+
+  /**
+   * 每页张数：按手牌条宽度自适应。
+   *
+   * 翻页而不是横向滚动——滚动会和拖拽抢同一个手势轴（玩家想翻页却拖走了牌）。
+   * 宽度 / 112 保证每张牌仍有 ~112px 的站台，4–9 之间夹紧。
+   */
+  private pageSizeForWidth(): number {
+    if (this.config.pageSize !== undefined) return this.config.pageSize;
+    const width = this.rootRect.width || this.config.layout?.handWidth || 900;
+    return Math.max(4, Math.min(9, Math.floor(width / 112)));
   }
 
   public getState(): CardHandState {
@@ -279,7 +335,15 @@ export class CardHand {
     this.rootRect.top = rect.top;
     this.rootRect.width = rect.width;
     this.rootRect.height = rect.height;
-    this.relayout();
+    // 宽度变了 → 每页容量可能变，重排一次分页（页码会被夹回合法范围）。
+    const size = this.pageSizeForWidth();
+    if (size !== this.pageSize) {
+      this.pageSize = size;
+      this.mountPage();
+      this.config.onPageChange?.(this.page, this.pageCount());
+    } else {
+      this.relayout();
+    }
     this.start();
   }
 
