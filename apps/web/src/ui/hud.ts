@@ -3861,19 +3861,26 @@ export class BoardGameHUD {
       }
       return;
     }
+    // Enable before measuring: while `data-enabled="0"` the strip is
+    // `display:none`, so clientWidth is 0 and a fallback width would place the
+    // cards for a much wider row than the one they are shown in (the phone
+    // overflow this fixes).
+    el.setAttribute('data-enabled', '1');
+    el.setAttribute('aria-hidden', 'false');
     const width = el.clientWidth || 900;
+    const wide = typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 1200px)').matches;
     const count = snapshot.actions.length;
     const focusX = count > 0 ? (this.heldIndex + 0.5) / count : null;
     const view = layoutActionHand(snapshot.actions, {
       containerWidth: width,
-      cardWidth: 108,
+      cardWidth: wide ? 108 : 92,
       focusX,
       focusStrength: 1,
-      maxTiltDeg: 9,
+      // A rotated card's bounding box is wider than its slot; the narrow strip
+      // has only ~12px of margin, so flatten the fan there instead of clipping.
+      maxTiltDeg: wide ? 9 : 4,
     });
     setHtml(el, raw(actionHandHtml(view)));
-    el.setAttribute('data-enabled', '1');
-    el.setAttribute('aria-hidden', 'false');
   }
 
   private renderDock(snapshot: GameSnapshot): void {

@@ -2220,10 +2220,22 @@
   white-space: nowrap;
 }
 
-/* Below 1200px the legacy dock stays in charge until P8 lands the mobile
-   drawer; showing the unified hand here would duplicate the action list. */
+/* Below 1200px the unified hand becomes a horizontal strip above the collapsed
+   dock handle, and the legacy fan/held stage step aside (P8). */
 @media (max-width: 1199px) {
-  .app-shell > .action-hand[data-enabled='1'] {
+  .app-shell[data-hand='unified'] > .action-hand[data-enabled='1'] {
+    display: block;
+    left: 50%;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    width: calc(100vw - 24px);
+    height: 156px;
+  }
+  .app-shell[data-hand='unified'] > .action-hand .ah-card {
+    width: 92px;
+    height: 128px;
+  }
+  .app-shell[data-hand='unified']:not([data-placement='1']) .dock-actions,
+  .app-shell[data-hand='unified']:not([data-placement='1']) .dock-held {
     display: none !important;
   }
 }

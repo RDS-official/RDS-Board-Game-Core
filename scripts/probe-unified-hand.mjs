@@ -242,6 +242,48 @@ try {
   }
 
   await page.close();
+
+  /* ---- 5. P8: phone strip sits above the dock handle ---------------- */
+  const phone = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await phone.goto(`${URL_BASE}&unified-hand`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await boot(phone);
+  const mobile = await phone.evaluate(() => {
+    const hand = document.querySelector('#action-hand');
+    const handle = document.querySelector('.dock-handle');
+    const actions = document.querySelector('#action-dock .dock-actions');
+    const cards = [...document.querySelectorAll('#action-hand .ah-card')];
+    const hr = handle?.getBoundingClientRect();
+    return {
+      display: hand ? getComputedStyle(hand).display : 'missing',
+      cards: cards.length,
+      inViewport: cards.every((c) => {
+        const r = c.getBoundingClientRect();
+        return r.left >= -1 && r.right <= window.innerWidth + 1;
+      }),
+      minLeft: cards.length ? Math.min(...cards.map((c) => c.getBoundingClientRect().left)) : null,
+      maxRight: cards.length ? Math.max(...cards.map((c) => c.getBoundingClientRect().right)) : null,
+      innerWidth: window.innerWidth,
+      cardMinHeight: cards.length ? Math.min(...cards.map((c) => c.getBoundingClientRect().height)) : 0,
+      handleTop: hr?.top ?? null,
+      cardBottom: cards.length ? Math.max(...cards.map((c) => c.getBoundingClientRect().bottom)) : null,
+      dockActions: actions ? getComputedStyle(actions).display : 'missing',
+    };
+  });
+  record('phone: hand strip visible', mobile.display === 'block', mobile.display);
+  record('phone: cards rendered', mobile.cards > 0, String(mobile.cards));
+  record(
+    'phone: cards inside the viewport',
+    mobile.inViewport,
+    `${mobile.minLeft}..${mobile.maxRight} of ${mobile.innerWidth}`,
+  );
+  record('phone: legacy dock fan hidden', mobile.dockActions === 'none', mobile.dockActions);
+  record(
+    'phone: strip stays above the dock handle',
+    mobile.cardBottom !== null && mobile.handleTop !== null && mobile.cardBottom <= mobile.handleTop + 1,
+    `${mobile.cardBottom} vs ${mobile.handleTop}`,
+  );
+  record('phone: cards stay tappable (>=44px)', mobile.cardMinHeight >= 44, String(mobile.cardMinHeight));
+  await phone.close();
 } finally {
   await browser.close();
 }
