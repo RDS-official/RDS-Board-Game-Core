@@ -301,3 +301,26 @@ drag(numeric card) → 卡片飞向桌面（视觉"打出"）
 | G6 目标选择偏隐式 | 径向选择器 + 非法分区置灰 + 计数（§4/§5.3） |
 | G7 移动端缺位 | 全端统一抽屉（§7） |
 | G11 错误只在 toast | 就近 shake + 分区预置灰（§5.3） |
+
+---
+
+## 13. 实现状态（2026-11-07）
+
+代码已按 P1–P8 落地，**默认走 `?unified-hand` 特性开关**；未加参数时旧 dock/hand-slot 行为不变，便于灰度与回退。
+
+| 阶段 | 产物 | 验证 |
+| --- | --- | --- |
+| P1 | `apps/web/src/ui/actionCards.ts`（CardModel + `executionRoute`） | `pnpm probe:action-cards`（10 形态 / 48 组等价） |
+| P2 | `apps/web/src/ui/actionHand.ts`（散形视图模型） | `pnpm probe:action-hand` |
+| P3 | `actionHandHtml.ts` + `#action-hand` 影子渲染 | `pnpm probe:action-hand-html` |
+| P4 | `radialPicker.ts`（几何 + 命中）、`radialPickerHtml.ts`（SVG） | `pnpm probe:radial` / `probe:radial-html` |
+| P5 | `radialPickerModel.ts`（指针/键盘状态机）、`radialPickerOverlay.ts`（浮层 + listbox） | `pnpm probe:radial-model` |
+| P5b/P6 | 影子手牌接线；数值卡"先甩后数"；Escape 豁免输入框 | `pnpm probe:unified-hand` / `probe:unified-hand-numeric` |
+| P7 | `data-hand=unified`：桌面隐藏旧扇形/手持位，dock 只留告警/状态；放置模式例外 | 同上（26 项） |
+| P8 | `<1200px` 底部横滑带，位于 dock 手柄之上 | 同上（32 项，含 390 档） |
+
+启用方式：`…?unified-hand`（叠加在现有 `?game=` 参数上）。
+
+回归口径：`pnpm verify:all`；专项 `pnpm probe:unified-hand`、`pnpm probe:unified-hand-numeric`。
+
+**尚未做**（后续 PR）：默认开启并删除旧 dock 代码；3D 手牌拖拽移除；径向选择器的多目标环；非法分区"拖动时预置灰"。
