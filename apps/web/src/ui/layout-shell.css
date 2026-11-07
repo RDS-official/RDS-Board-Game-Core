@@ -2047,3 +2047,220 @@
   transform: translateY(0);
   box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5);
 }
+
+/* ---- Unified action hand (shadow render, enabled by ?unified-hand) -----
+   Off by default so the legacy dock/hand-slot keep every gesture until P7.
+   When enabled it fans cards from the same snapshot.actions via inline
+   --x/--s/--r/--z/--lift custom properties set by actionHandHtml. */
+.app-shell > .action-hand {
+  display: none;
+}
+.app-shell > .action-hand[data-enabled='1'] {
+  display: block;
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--shell-edge, 16px) + 10px);
+  transform: translateX(-50%);
+  width: min(900px, 92vw);
+  height: 190px;
+  z-index: 27;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+}
+.action-hand .ah-card {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 108px;
+  height: 150px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform-origin: 50% 100%;
+  transform: translateX(calc(-50% + var(--x))) rotate(var(--r)) scale(var(--s))
+    translateY(calc(var(--lift) * -14px));
+  z-index: calc(var(--z) + 1);
+  cursor: pointer;
+  transition: transform 120ms ease-out;
+}
+.action-hand .ah-face {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 8px 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(217, 180, 91, 0.5);
+  background: linear-gradient(160deg, rgba(38, 32, 24, 0.96), rgba(22, 18, 14, 0.98));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  color: #f3e6c8;
+  overflow: hidden;
+}
+.action-hand .ah-ico {
+  font-size: 30px;
+  line-height: 1;
+}
+.action-hand .ah-label {
+  text-align: center;
+  line-height: 1.15;
+  max-height: 2.6em;
+  overflow: hidden;
+}
+.action-hand .ah-badge {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 12px;
+  color: #d9b45b;
+}
+.action-hand .ah-cool {
+  position: absolute;
+  bottom: 4px;
+  right: 6px;
+  font-size: 11px;
+  color: #ffb27a;
+}
+.action-hand .ah-card:focus-visible {
+  outline: 2px solid #d9b45b;
+  outline-offset: 2px;
+}
+/* P6: numeric cards are thrown onto the table before the amount sheet opens.
+   Only the face animates, so the fan slot keeps its geometry and the card can
+   return intact if the form is cancelled. */
+.action-hand .ah-card.is-playing .ah-face {
+  animation: ah-play 220ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+@keyframes ah-play {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  55% {
+    transform: translateY(-70px) scale(1.08) rotate(-2deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-96px) scale(0.92) rotate(-4deg);
+    opacity: 0;
+  }
+}
+
+/* ---- Radial target picker (P5) ---------------------------------------- */
+.rp-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+}
+.rp-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  background: rgba(8, 6, 4, 0.3);
+}
+.rp-dialog {
+  position: fixed;
+  width: 320px;
+  height: 320px;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  outline: none;
+  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.55));
+}
+.rp-wheel {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.rp-seg {
+  fill: rgba(30, 26, 20, 0.92);
+  stroke: rgba(217, 180, 91, 0.55);
+  stroke-width: 1.5;
+  cursor: pointer;
+  transition: fill 90ms ease-out;
+}
+.rp-seg.is-active {
+  fill: rgba(217, 180, 91, 0.32);
+  stroke: #f0cd7a;
+}
+.rp-center {
+  fill: rgba(16, 13, 10, 0.96);
+  stroke: rgba(217, 180, 91, 0.7);
+  stroke-width: 1.5;
+  cursor: pointer;
+  transition: fill 90ms ease-out;
+}
+.rp-center.is-active {
+  fill: rgba(217, 180, 91, 0.42);
+}
+.rp-label {
+  fill: #f3e6c8;
+  font-size: 13px;
+  pointer-events: none;
+}
+.rp-center-label {
+  fill: #d9b45b;
+  font-size: 13px;
+  pointer-events: none;
+}
+/* Linear listbox for keyboard / screen readers: present but visually hidden. */
+.rp-list {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Below 1200px the unified hand becomes a horizontal strip above the collapsed
+   dock handle, and the legacy fan/held stage step aside (P8). */
+@media (max-width: 1199px) {
+  .app-shell[data-hand='unified'] > .action-hand[data-enabled='1'] {
+    display: block;
+    left: 50%;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    width: calc(100vw - 24px);
+    height: 156px;
+  }
+  .app-shell[data-hand='unified'] > .action-hand .ah-card {
+    width: 92px;
+    height: 128px;
+  }
+  .app-shell[data-hand='unified']:not([data-placement='1']) .dock-actions,
+  .app-shell[data-hand='unified']:not([data-placement='1']) .dock-held {
+    display: none !important;
+  }
+}
+
+/* ---- Unified hand mode: desktop de-duplication (P7) -------------------
+   The same snapshot.actions used to be painted by both the dock fan and the
+   unified hand. In unified mode (>=1200px) only the latter carries actions;
+   the dock keeps alerts, mission, floors and the status bar, and placement
+   keeps its rotate/confirm panel. Below 1200px the legacy dock stays until
+   P8 lands the mobile drawer. */
+@media (min-width: 1200px) {
+  .app-shell[data-hand='unified'] > .hand-slot {
+    display: none !important;
+  }
+  .app-shell[data-hand='unified']:not([data-placement='1']) .dock-actions,
+  .app-shell[data-hand='unified']:not([data-placement='1']) .dock-held {
+    display: none !important;
+  }
+  .app-shell[data-hand='unified'] > .action-dock {
+    left: 50%;
+    bottom: calc(var(--shell-edge, 16px) + 204px);
+    width: min(900px, calc(100vw - 2 * var(--shell-edge, 16px)));
+    transform: translateX(-50%);
+  }
+  .app-shell[data-hand='unified'] > .action-hand[data-enabled='1'] {
+    bottom: var(--shell-edge, 16px);
+  }
+}

@@ -31,10 +31,14 @@ export class BoardRaycaster {
   private onDragStartCallback?: (entityId: string) => void;
   private onDragEndCallback?: () => void;
   private onDragMoveCallback?: (entityId: string, clientX: number, clientY: number) => void;
-  private onEntityPressCallback?: (entityId: string) => void;
+  private onEntityPressCallback?: (data: InteractiveObjectData) => void;
   private pointerDownData: InteractiveObjectData | null = null;
   private pointerDownAt: { x: number; y: number } | null = null;
   private dragging = false;
+  /** Any 6px+ move after a press, even when the surface is not draggable. */
+  private pointerMoved = false;
+  /** This press must keep the camera still (a drag prop or a locked surface). */
+  private pointerPressedLocked = false;
 
   constructor(camera: THREE.Camera, domElement: HTMLElement) {
     this.camera = camera;
@@ -79,7 +83,7 @@ export class BoardRaycaster {
   }
 
   /** Fires immediately on pointerdown over an entity, before the 6px drag threshold. */
-  public onEntityPress(callback: (entityId: string) => void): void {
+  public onEntityPress(callback: (data: InteractiveObjectData) => void): void {
     this.onEntityPressCallback = callback;
   }
 
@@ -117,6 +121,7 @@ export class BoardRaycaster {
     if (this.pointerDownAt && event.buttons === 1) {
       const distance = Math.hypot(event.clientX - this.pointerDownAt.x, event.clientY - this.pointerDownAt.y);
       if (distance >= 6) {
+        this.pointerMoved = true;
         const wasDragging = this.dragging;
         this.dragging = true;
         this.domElement.style.cursor = 'grabbing';
@@ -166,21 +171,24 @@ export class BoardRaycaster {
   private onPointerDown(event: PointerEvent): void {
     if (event.button !== 0) return; // Only primary click
     this.pointerDownAt = { x: event.clientX, y: event.clientY };
+    this.pointerMoved = false;
     this.dragging = false;
     this.pointerDownData = this.pickAt(event.clientX, event.clientY);
+    this.pointerPressedLocked = false;
 
-    if (this.isDraggable(this.pointerDownData)) {
-      // Stop OrbitControls from consuming the first few pixels before the
-      // drag threshold is crossed.
-      this.onEntityPressCallback?.(this.pointerDownData.id);
-      // Capturing a drag keeps pointermove/pointerup flowing even when the
-      // cursor leaves the canvas or is released over the HUD. Without this,
-      // the drop callback never runs, the card stays at its lifted height and
-      // OrbitControls can remain disabled.
-      try {
-        this.domElement.setPointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture is not available for synthetic/older pointers.
+    if (this.pointerDownData) {
+      const meta = this.pointerDownData.metadata as { orbitLock?: boolean } | undefined;
+      this.pointerPressedLocked = this.isDraggable(this.pointerDownData) || meta?.orbitLock === true;
+      this.onEntityPressCallback?.(this.pointerDownData);
+      if (this.pointerPressedLocked) {
+        // Stop OrbitControls from consuming the first few pixels. Capturing
+        // keeps the matching release flowing even when the pointer leaves the
+        // canvas, so OrbitControls can never be left disabled.
+        try {
+          this.domElement.setPointerCapture(event.pointerId);
+        } catch {
+          // Pointer capture is not available for synthetic/older pointers.
+        }
       }
     }
   }
@@ -210,14 +218,21 @@ export class BoardRaycaster {
         this.onDropCallback?.(data.id, target, event.clientX, event.clientY);
       }
       this.domElement.style.cursor = data.type === 'ZONE' ? 'grab' : 'default';
-    } else if (data.type !== 'ZONE' && this.onClickCallback) {
+    } else if (!this.pointerMoved && data.type !== 'ZONE' && this.onClickCallback) {
+      // A press-and-drag on a read-only surface (the hand) is a deliberate
+      // gesture, not a click: never open a detail sheet on release.
       this.onClickCallback(data);
     }
-    if (this.dragging) this.onDragEndCallback?.();
+    // Re-enable the camera whenever the press had locked it, including a
+    // read-only hand press that never became a drag.
+    if (data && (this.dragging || this.pointerPressedLocked)) this.onDragEndCallback?.();
     this.dragging = false;
+    this.pointerMoved = false;
+    this.pointerPressedLocked = false;
   }
 
   private onPointerCancel(event: PointerEvent): void {
+    const hadLock = this.pointerPressedLocked;
     try {
       if (this.domElement.hasPointerCapture(event.pointerId)) {
         this.domElement.releasePointerCapture(event.pointerId);
@@ -225,10 +240,12 @@ export class BoardRaycaster {
     } catch {
       // ignore
     }
-    if (this.dragging) this.onDragEndCallback?.();
+    if (hadLock || this.dragging) this.onDragEndCallback?.();
     this.pointerDownData = null;
     this.pointerDownAt = null;
     this.dragging = false;
+    this.pointerMoved = false;
+    this.pointerPressedLocked = false;
   }
 
   private applyHoverHighlight(obj: THREE.Object3D): void {

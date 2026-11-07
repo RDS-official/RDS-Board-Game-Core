@@ -955,7 +955,10 @@ class BoardGameSimulatorApp {
 
   private wireKeyboard(): void {
     window.addEventListener('keydown', event => {
-      if (event.target instanceof HTMLInputElement) return;
+      // Escape must keep working while a form control has focus: the amount
+      // sheet opens with its slider focused, and the old blanket input guard
+      // swallowed the only way out of it.
+      if (event.target instanceof HTMLInputElement && event.key !== 'Escape') return;
 
       if (event.key === 'Escape') {
         this.hud.closePayload();

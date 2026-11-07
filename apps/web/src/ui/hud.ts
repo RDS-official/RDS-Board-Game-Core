@@ -3,6 +3,10 @@ import confetti from 'canvas-confetti';
 import { cardArtSvg } from './cardArt';
 import { detailTone } from './detailView';
 import { OverlayArbiter, OverlayEntry, OverlayState } from './overlay';
+import { deriveActionCard, executionRoute, isSimpleCard } from './actionCards';
+import { layoutActionHand } from './actionHand';
+import { actionHandHtml } from './actionHandHtml';
+import { RadialPickerOverlay } from './radialPickerOverlay';
 import { handLayout } from './handLayout';
 import { diagnostics } from '../diagnostics/install';
 import { hash, reconcileKeyed, reconcileKeyedPreservingScroll } from './dom/keyed';
@@ -215,6 +219,11 @@ export class BoardGameHUD {
   /** Action currently held by the hand slot, mirrored on its fan card. */
   private heldActionId: string | null = null;
   private heldIndex = 0;
+  /** Shadow unified action hand (docs/INTERACTION-REDESIGN.md). Off by default;
+   *  flip with `?unified-hand` until P7 removes the legacy dock. */
+  private actionHandEnabled = false;
+  /** Radial target chooser, created lazily while the shadow hand is enabled. */
+  private radialPicker: RadialPickerOverlay | null = null;
   private handPress: HandPressState | null = null;
   private handSuppressClick = false;
   private handWheelDelta = 0;
@@ -1962,6 +1971,9 @@ export class BoardGameHUD {
 
   private renderSkeleton(): void {
     this.container.classList.add('app-shell');
+    // Shadow unified hand is opt-in until P7 swaps the legacy dock out.
+    this.actionHandEnabled = new URLSearchParams(window.location.search).has('unified-hand');
+    this.container.dataset.hand = this.actionHandEnabled ? 'unified' : 'legacy';
     setHtml(this.container, html`
       <header class="topbar">
         <button class="shell-toggle menu-btn" data-toggle="menu" aria-label="主菜单" aria-haspopup="dialog" aria-controls="menu-dialog" aria-expanded="false"><span class="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span></button>
@@ -2044,6 +2056,8 @@ export class BoardGameHUD {
         </svg>
         <div class="hs-stage"></div>
       </aside>
+      <!-- Unified action hand: shadow render, off unless ?unified-hand. -->
+      <aside class="action-hand" id="action-hand" data-enabled="0" aria-hidden="true" aria-label="动作手牌"></aside>
       <div class="announcement-banner" id="announce" style="display:none"></div>
       <div class="payload-layer" id="payload-layer" style="display:none"></div>
       <div class="shell-scrim" data-shell-scrim aria-hidden="true"></div>
@@ -2054,6 +2068,7 @@ export class BoardGameHUD {
     this.applyShellLayout();
     this.syncShellAria();
     this.syncShellInert();
+    this.bindActionHandEvents();
     this.notifyViewportInsets();
     window.addEventListener('resize', () => this.applyShellLayout());
     this.shellMedia = window.matchMedia('(max-width: 767px)');
@@ -2241,6 +2256,9 @@ export class BoardGameHUD {
     // Betrayal uses a candle-lit parchment palette; other fixtures stay slate.
     this.lastSnapshot = snapshot;
     this.container.dataset.theme = snapshot.gameId === 'betrayal' ? 'gothic' : '';
+    // Placement is a board mode, not an action list: the legacy dock owns its
+    // rotate/confirm panel, so unified mode must leave that panel visible.
+    this.container.dataset.placement = snapshot.placement ? '1' : '0';
     this.container.querySelectorAll<HTMLElement>('.game-pill').forEach(button => {
       button.classList.toggle('active', button.dataset.game === snapshot.gameId);
     });
@@ -2258,6 +2276,7 @@ export class BoardGameHUD {
     this.reconcileHeldAction(snapshot.actions);
     this.renderDock(snapshot);
     this.renderHandSlot(snapshot);
+    this.renderActionHand(snapshot);
     this.maybeRevealNode(snapshot);
     this.maybeShowMoment();
   }
@@ -3310,7 +3329,7 @@ export class BoardGameHUD {
   }
 
   private isSimpleAction(action: UiAction): boolean {
-    return !(action.fields?.length || action.selection || action.highlightIds?.length || action.placementEntityId);
+    return isSimpleCard(deriveActionCard(action));
   }
 
   private renderHandSlot(snapshot: GameSnapshot, direction: -1 | 0 | 1 = 0): void {
@@ -3612,6 +3631,121 @@ export class BoardGameHUD {
 
   private suppressHandClick(): void {
     this.handSuppressClick = true;
+  }
+
+  /**
+   * Shadow hand gestures (P5b). Only active when `?unified-hand` is on, so the
+   * legacy dock/hand-slot remain the only interactive path in normal builds.
+   */
+  private bindActionHandEvents(): void {
+    const hand = this.container.querySelector('#action-hand') as HTMLElement | null;
+    if (!hand) return;
+    hand.addEventListener('click', event => {
+      if (!this.actionHandEnabled) return;
+      const button = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-action-id]');
+      const id = button?.dataset.actionId;
+      if (!button || !id) return;
+      const action = this.latest?.actions.find(candidate => candidate.id === id);
+      if (!action) return;
+      const card = deriveActionCard(action);
+      if (card.targetMode === 'selection' && action.selection) {
+        // Multi-target stays in the payload form until the wheel grows a
+        // multi-select mode; single-target is the common case.
+        if ((action.selection.spec.max ?? 1) > 1) {
+          this.openPayloadForm(action);
+          return;
+        }
+        this.openRadialPicker(action, button);
+        return;
+      }
+      if (card.targetMode === 'none' || card.targetMode === 'highlight') {
+        this.runAction(action);
+        return;
+      }
+      if (card.kind === 'numeric' && card.targetMode === 'fields') {
+        // P6: throw the card first, then ask for the amount. Nothing is
+        // dispatched until the form is submitted, so cancel leaves state clean.
+        button.classList.add('is-playing');
+        window.setTimeout(() => {
+          button.classList.remove('is-playing');
+          this.runAction(action);
+        }, 220);
+        return;
+      }
+      this.openActionDetail(action);
+    });
+  }
+
+  /** Open the radial target chooser anchored on the card that was played. */
+  private openRadialPicker(action: UiAction, anchorEl: HTMLElement): void {
+    const candidates = (action.selection?.candidates ?? []).map(candidate => ({
+      id: candidate.id,
+      label: candidate.label
+    }));
+    if (candidates.length === 0) {
+      this.openPayloadForm(action);
+      return;
+    }
+    const rect = anchorEl.getBoundingClientRect();
+    const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    this.radialPicker ??= new RadialPickerOverlay();
+    this.radialPicker.open({
+      candidates,
+      anchor: {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2 - (coarse ? 80 : 0)
+      },
+      radius: Math.max(
+        140,
+        Math.min(260, 90 + candidates.length * 10, window.innerWidth * 0.42, window.innerHeight * 0.42)
+      ),
+      seed: `${action.id}:${candidates.map(candidate => candidate.id).join(',')}`,
+      title: action.label,
+      onPick: candidate => {
+        const result = this.performAction(action.id, undefined, [candidate.id]);
+        if (!result.ok) this.pushToast('⚠️', result.error ?? '动作被拒绝');
+      },
+      onCenter: () => this.openPayloadForm(action),
+      onCancel: () => {}
+    });
+  }
+
+  /**
+   * Shadow unified action hand (P3). Renders the fanned cards from the same
+   * `snapshot.actions` the dock uses, but takes over no interaction: the legacy
+   * hand slot and dock keep every gesture until P7. Enabled only via
+   * `?unified-hand`, so the default build stays byte-for-byte unchanged.
+   */
+  private renderActionHand(snapshot: GameSnapshot): void {
+    const el = this.container.querySelector('#action-hand') as HTMLElement | null;
+    if (!el) return;
+    if (!this.actionHandEnabled) {
+      if (el.getAttribute('data-enabled') !== '0') {
+        el.setAttribute('data-enabled', '0');
+        el.setAttribute('aria-hidden', 'true');
+        el.replaceChildren();
+      }
+      return;
+    }
+    // Enable before measuring: while `data-enabled="0"` the strip is
+    // `display:none`, so clientWidth is 0 and a fallback width would place the
+    // cards for a much wider row than the one they are shown in.
+    el.setAttribute('data-enabled', '1');
+    el.setAttribute('aria-hidden', 'false');
+    const width = el.clientWidth || 900;
+    const wide = typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 1200px)').matches;
+    const count = snapshot.actions.length;
+    const focusX = count > 0 ? (this.heldIndex + 0.5) / count : null;
+    const view = layoutActionHand(snapshot.actions, {
+      containerWidth: width,
+      cardWidth: wide ? 108 : 92,
+      focusX,
+      focusStrength: 1,
+      // A rotated card's bounding box is wider than its slot; the narrow strip
+      // has only ~12px of margin, so flatten the fan there instead of clipping.
+      maxTiltDeg: wide ? 9 : 4
+    });
+    setHtml(el, raw(actionHandHtml(view)));
   }
 
   private renderDock(snapshot: GameSnapshot): void {
@@ -4452,19 +4586,24 @@ export class BoardGameHUD {
 
   /** Execute an action exactly as the dock/keyboard paths do. */
   private runAction(action: UiAction): void {
-    if (action.fields?.length || action.selection) {
-      this.openPayloadForm(action);
-      return;
+    switch (executionRoute(deriveActionCard(action))) {
+      case 'payload':
+        this.openPayloadForm(action);
+        return;
+      case 'placement':
+        if (action.highlightIds) this.ports.highlightBoard(action.highlightIds);
+        else this.ports.highlightBoard(null);
+        this.armPlacement(action);
+        return;
+      default:
+        if (action.highlightIds) this.ports.highlightBoard(action.highlightIds);
+        else this.ports.highlightBoard(null);
+        this.performAction(action.id);
     }
+  }
 
-    if (action.highlightIds) this.ports.highlightBoard(action.highlightIds);
-    else this.ports.highlightBoard(null);
-
-    if (action.placementEntityId) {
-      const result = this.presenter.armPlacement(action.id);
-      if (!result.ok) this.pushToast('⚠️', result.error ?? '无法进入放置模式');
-      return;
-    }
-    this.performAction(action.id);
+  private armPlacement(action: UiAction): void {
+    const result = this.presenter.armPlacement(action.id);
+    if (!result.ok) this.pushToast('⚠️', result.error ?? '无法进入放置模式');
   }
 }
