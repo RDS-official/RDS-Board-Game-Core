@@ -103,6 +103,51 @@ try {
     JSON.stringify(hand.rects),
   );
 
+  /* ---- 2b. P7 desktop de-duplication -------------------------------- */
+  const p7 = await page.evaluate(() => {
+    const box = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { display: getComputedStyle(el).display, top: r.top, bottom: r.bottom };
+    };
+    const cards = [...document.querySelectorAll('#action-hand .ah-card')].map((c) =>
+      c.getBoundingClientRect(),
+    );
+    return {
+      handSlot: box('#hand-slot'),
+      dockActions: box('#action-dock .dock-actions'),
+      dockHeld: box('#action-dock .dock-held'),
+      dockShell: box('#action-dock .dock-shell'),
+      handTop: cards.length ? Math.min(...cards.map((r) => r.top)) : null,
+      cardCount: cards.length,
+    };
+  });
+  record('unified: legacy hand slot hidden', p7.handSlot?.display === 'none', JSON.stringify(p7.handSlot));
+  record('unified: dock fan hidden', p7.dockActions?.display === 'none', p7.dockActions?.display);
+  record('unified: dock held stage hidden', p7.dockHeld?.display === 'none', p7.dockHeld?.display);
+  record(
+    'unified: hand sits below the status dock',
+    p7.handTop !== null && p7.dockShell !== null && p7.handTop > p7.dockShell.bottom - 1,
+    `${p7.handTop} vs ${p7.dockShell?.bottom}`,
+  );
+
+  const placementCss = await page.evaluate(() => {
+    const shell = document.querySelector('.app-shell');
+    const actions = document.querySelector('#action-dock .dock-actions');
+    if (!shell || !actions) return 'missing';
+    const before = getComputedStyle(actions).display;
+    shell.setAttribute('data-placement', '1');
+    const during = getComputedStyle(actions).display;
+    shell.setAttribute('data-placement', '0');
+    return { before, during };
+  });
+  record(
+    'unified: placement keeps the dock panel',
+    placementCss !== 'missing' && placementCss.before === 'none' && placementCss.during !== 'none',
+    JSON.stringify(placementCss),
+  );
+
   /* ---- 3. radial picker opens from a selection card ----------------- */
   const selectionCard = page.locator('#action-hand .ah-card[data-target-mode="selection"]').first();
   record('flagged: at least one selection card', (await selectionCard.count()) > 0);

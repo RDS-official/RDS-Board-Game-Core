@@ -2040,6 +2040,7 @@ export class BoardGameHUD {
     this.container.classList.add('app-shell');
     // Shadow unified hand is opt-in until P7 swaps the legacy dock out.
     this.actionHandEnabled = new URLSearchParams(window.location.search).has('unified-hand');
+    this.container.dataset.hand = this.actionHandEnabled ? 'unified' : 'legacy';
     setHtml(
       this.container,
       html`
@@ -2331,6 +2332,9 @@ export class BoardGameHUD {
     // Betrayal uses a candle-lit parchment palette; other fixtures stay slate.
     this.lastSnapshot = snapshot;
     this.container.dataset.theme = snapshot.gameId === 'betrayal' ? 'gothic' : '';
+    // Placement is a board mode, not an action list: the legacy dock owns its
+    // rotate/confirm panel, so unified mode must leave that panel visible.
+    this.container.dataset.placement = snapshot.placement ? '1' : '0';
     this.container.querySelectorAll<HTMLElement>('.game-pill').forEach((button) => {
       button.classList.toggle('active', button.dataset.game === snapshot.gameId);
     });

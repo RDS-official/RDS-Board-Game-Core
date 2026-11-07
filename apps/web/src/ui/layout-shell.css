@@ -2219,3 +2219,36 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* Below 1200px the legacy dock stays in charge until P8 lands the mobile
+   drawer; showing the unified hand here would duplicate the action list. */
+@media (max-width: 1199px) {
+  .app-shell > .action-hand[data-enabled='1'] {
+    display: none !important;
+  }
+}
+
+/* ---- Unified hand mode: desktop de-duplication (P7) -------------------
+   The same snapshot.actions used to be painted by both the dock fan and the
+   unified hand. In unified mode (>=1200px) only the latter carries actions;
+   the dock keeps alerts, mission, floors and the status bar, and placement
+   keeps its rotate/confirm panel. Below 1200px the legacy dock stays until
+   P8 lands the mobile drawer. */
+@media (min-width: 1200px) {
+  .app-shell[data-hand='unified'] > .hand-slot {
+    display: none !important;
+  }
+  .app-shell[data-hand='unified']:not([data-placement='1']) .dock-actions,
+  .app-shell[data-hand='unified']:not([data-placement='1']) .dock-held {
+    display: none !important;
+  }
+  .app-shell[data-hand='unified'] > .action-dock {
+    left: 50%;
+    bottom: calc(var(--shell-edge, 16px) + 204px);
+    width: min(900px, calc(100vw - 2 * var(--shell-edge, 16px)));
+    transform: translateX(-50%);
+  }
+  .app-shell[data-hand='unified'] > .action-hand[data-enabled='1'] {
+    bottom: var(--shell-edge, 16px);
+  }
+}
