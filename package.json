@@ -38,6 +38,7 @@
     "probe:radial-html": "node scripts/probe-radial-html.mjs",
     "probe:radial-model": "node scripts/probe-radial-model.mjs",
     "probe:unified-hand": "node scripts/probe-unified-hand.mjs",
+    "probe:unified-hand-numeric": "node scripts/probe-unified-hand-numeric.mjs",
     "probe:board": "node scripts/probe-board-facing.mjs",
     "probe:hand:view": "node scripts/probe-hand-visibility.mjs",
     "probe:tokens": "node scripts/probe-design-tokens.mjs",

@@ -3792,6 +3792,16 @@ export class BoardGameHUD {
         this.runAction(action);
         return;
       }
+      if (card.kind === 'numeric' && card.targetMode === 'fields') {
+        // P6: throw the card first, then ask for the amount. Nothing is
+        // dispatched until the form is submitted, so cancel leaves state clean.
+        button.classList.add('is-playing');
+        window.setTimeout(() => {
+          button.classList.remove('is-playing');
+          this.runAction(action);
+        }, 220);
+        return;
+      }
       this.openActionDetail(action);
     });
   }

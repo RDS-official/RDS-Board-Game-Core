@@ -2131,6 +2131,26 @@
   outline: 2px solid #d9b45b;
   outline-offset: 2px;
 }
+/* P6: numeric cards are thrown onto the table before the amount sheet opens.
+   Only the face animates, so the fan slot keeps its geometry and the card can
+   return intact if the form is cancelled. */
+.action-hand .ah-card.is-playing .ah-face {
+  animation: ah-play 220ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+@keyframes ah-play {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  55% {
+    transform: translateY(-70px) scale(1.08) rotate(-2deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-96px) scale(0.92) rotate(-4deg);
+    opacity: 0;
+  }
+}
 
 /* ---- Radial target picker (P5) ---------------------------------------- */
 .rp-layer {

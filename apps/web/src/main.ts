@@ -16,7 +16,7 @@ import {
   PresentationPorts,
   entityDetailKey,
   fixedDetailKey,
-  nodeDetailKey
+  nodeDetailKey,
 } from '@rds/app/contracts';
 import { layoutForGame } from '@rds/app/layout';
 import { NetSession, NetSessionOptions } from '@rds/app/netSession';
@@ -97,29 +97,25 @@ class BoardGameSimulatorApp {
         this.scene.focusFloor(floorId);
         this.hud.setSelectedFloor(floorId);
       },
-      showTraitChange: change => {
+      showTraitChange: (change) => {
         const tone = change.delta < 0 ? (change.damageKind === 'MENTAL' ? 'mental' : 'physical') : 'heal';
         const sign = change.delta > 0 ? '+' : '';
-        this.scene.popTraitBurst(
-          change.playerId,
-          `${change.traitLabel} ${sign}${change.delta}`,
-          tone
-        );
+        this.scene.popTraitBurst(change.playerId, `${change.traitLabel} ${sign}${change.delta}`, tone);
         if (tone === 'heal') BoardGameAudio.playItemPickup();
         else BoardGameAudio.playCombat(tone === 'mental' ? 'MENTAL' : 'PHYSICAL', true);
-      }
+      },
     };
 
     this.hud = new BoardGameHUD(hudContainer, this.session, this.ports, {
-      onSwitchGame: gameId => this.switchGame(gameId),
-      onSwitchScenario: scenarioId => this.restartScenario(scenarioId),
+      onSwitchGame: (gameId) => this.switchGame(gameId),
+      onSwitchScenario: (scenarioId) => this.restartScenario(scenarioId),
       // The UI measures its own overlay boxes; the renderer only ever sees the
       // four plain edges. Keeping this wiring here preserves ui → contracts.
-      onViewportInsets: insets => this.scene.setViewportInsets(insets)
+      onViewportInsets: (insets) => this.scene.setViewportInsets(insets),
     });
 
     this.inspector = new MathematicalInspectorUI(inspectorContainer, this.session, {
-      onClose: () => this.hud.setInspectorActive(false)
+      onClose: () => this.hud.setInspectorActive(false),
     });
 
     // 「退出牌桌」由装配根决定去哪：联机回大厅（房主负责关房），单机回入口页。
@@ -130,10 +126,12 @@ class BoardGameSimulatorApp {
     if (this.netOptions) {
       const exitBtn = document.getElementById('btn-exit-net');
       if (exitBtn) exitBtn.hidden = false;
-      exitBtn?.addEventListener('click', () => { void this.leaveTable(); });
+      exitBtn?.addEventListener('click', () => {
+        void this.leaveTable();
+      });
     }
 
-    document.addEventListener('click', event => {
+    document.addEventListener('click', (event) => {
       const target = event.target as HTMLElement | null;
       const floor = target?.closest<HTMLElement>('[data-floor]')?.dataset.floor;
       if (floor) {
@@ -147,15 +145,19 @@ class BoardGameSimulatorApp {
         this.session.pickTarget({ kind: 'node', id: roomId });
       }
     });
-    this.scene.onInteractiveClick(data => {
+    this.scene.onInteractiveClick((data) => {
       // Clicking a room entity is also the inspection camera gesture: the
       // dossier and the 2.5D close-up should come from the same click.
-      if (data.type === 'NODE' && (data.metadata as { floor?: unknown } | undefined)?.floor && this.currentGameId === 'betrayal') {
+      if (
+        data.type === 'NODE' &&
+        (data.metadata as { floor?: unknown } | undefined)?.floor &&
+        this.currentGameId === 'betrayal'
+      ) {
         this.scene.focusNode(data.id);
       }
       this.handleBoardPick(data);
     });
-    this.scene.onInteractiveHover(data => {
+    this.scene.onInteractiveHover((data) => {
       if (!data) {
         this.hud.showSeatPeek(null);
         this.hud.showHoverHint(null);
@@ -173,7 +175,11 @@ class BoardGameSimulatorApp {
       this.hud.showSeatPeek(null);
       if (data.type === 'ZONE') {
         this.hud.showHoverHint(
-          peekView({ key: fixedDetailKey(data.id), title: String(meta.label ?? '牌堆'), desc: '按住拖动，可摆到桌面任意位置' })
+          peekView({
+            key: fixedDetailKey(data.id),
+            title: String(meta.label ?? '牌堆'),
+            desc: '按住拖动，可摆到桌面任意位置',
+          }),
         );
         return;
       }
@@ -184,8 +190,8 @@ class BoardGameSimulatorApp {
             peekView({
               key: nodeDetailKey(data.id),
               title: `→ 进入【${targetName}】`,
-              desc: '点击地上高亮箭头直接走入该房间（消耗 1 步）'
-            })
+              desc: '点击地上高亮箭头直接走入该房间（消耗 1 步）',
+            }),
           );
           return;
         }
@@ -194,8 +200,8 @@ class BoardGameSimulatorApp {
             peekView({
               key: nodeDetailKey(data.id),
               title: `${String(meta.name ?? '门位')} · 探索未开启的门`,
-              desc: '点击地上高亮箭头开启并抽取新房间'
-            })
+              desc: '点击地上高亮箭头开启并抽取新房间',
+            }),
           );
           return;
         }
@@ -204,8 +210,8 @@ class BoardGameSimulatorApp {
             peekView({
               key: nodeDetailKey(data.id),
               title: String(meta.name),
-              desc: '点击查看房间档案与陈设'
-            })
+              desc: '点击查看房间档案与陈设',
+            }),
           );
           return;
         }
@@ -222,16 +228,14 @@ class BoardGameSimulatorApp {
               key: entityDetailKey(data.id),
               title: String(cardFace.title),
               desc: '点击查看卡牌详情',
-              art
-            })
+              art,
+            }),
           );
           return;
         }
       }
       if (data.type === 'DICE') {
-        this.hud.showHoverHint(
-          peekView({ key: fixedDetailKey('dice'), title: '骰子', desc: '点击掷骰' })
-        );
+        this.hud.showHoverHint(peekView({ key: fixedDetailKey('dice'), title: '骰子', desc: '点击掷骰' }));
         return;
       }
       this.hud.showHoverHint(null);
@@ -263,19 +267,19 @@ class BoardGameSimulatorApp {
       this.scene.clearDropTargets();
       this.hud.pushToast('↔', '卡牌位置已调整（仅本视图）');
     });
-    this.scene.onEntityDragStart(entityId => {
+    this.scene.onEntityDragStart((entityId) => {
       if (entityId.startsWith('deck:')) return;
       const targets = this.session.getPlacementTargets(entityId);
       const entity = this.session.getSnapshot().board.entities[entityId];
       this.freeDragEntityId = targets.length === 0 && entity?.type === 'CARD' ? entityId : undefined;
-      this.scene.setDropTargets(targets.map(target => target.nodeId));
+      this.scene.setDropTargets(targets.map((target) => target.nodeId));
     });
     this.scene.onEntityDragEnd(() => {
       this.freeDragEntityId = undefined;
       this.scene.clearDropTargets();
     });
     this.bindSession(this.session);
-    this.session.onVisualEvent(events => {
+    this.session.onVisualEvent((events) => {
       this.scene.enqueueAnimations(events);
       for (const ev of events) {
         if (ev.type === 'EXPLORE_ROOM') {
@@ -368,9 +372,15 @@ class BoardGameSimulatorApp {
       | undefined;
     if (!snapshot) return { note: 'session not ready' };
 
-    const raw = (this.session as unknown as { engine?: { getRawState?: () => Record<string, unknown> } })?.engine?.getRawState?.();
+    const raw = (
+      this.session as unknown as { engine?: { getRawState?: () => Record<string, unknown> } }
+    )?.engine?.getRawState?.();
     const globalVars = (raw?.globalVars ?? {}) as Record<string, unknown>;
-    const decisions = (raw?.pendingDecisions ?? []) as { status?: string; participants?: string[]; payload?: unknown }[];
+    const decisions = (raw?.pendingDecisions ?? []) as {
+      status?: string;
+      participants?: string[];
+      payload?: unknown;
+    }[];
 
     return {
       gameId: snapshot.gameId,
@@ -379,17 +389,15 @@ class BoardGameSimulatorApp {
       actor: snapshot.actorName,
       focusActors: snapshot.focusActors ?? [],
       // If this list is empty the turn is stuck; that is the first thing to look at.
-      actions: (snapshot.actions ?? []).map(action => ({
+      actions: (snapshot.actions ?? []).map((action) => ({
         id: action.id ?? '?',
         type: action.actionType ?? null,
-        label: action.label ?? null
+        label: action.label ?? null,
       })),
-      lastRoll: snapshot.lastRoll
-        ? { label: snapshot.lastRoll.label, total: snapshot.lastRoll.total }
-        : null,
+      lastRoll: snapshot.lastRoll ? { label: snapshot.lastRoll.label, total: snapshot.lastRoll.total } : null,
       openDecisions: decisions
-        .filter(entry => entry.status === 'OPEN')
-        .map(entry => ({ participants: entry.participants, payload: entry.payload })),
+        .filter((entry) => entry.status === 'OPEN')
+        .map((entry) => ({ participants: entry.participants, payload: entry.payload })),
       // 操作栏抖动现场：重绘 / 换形 / 卡片重建 / 鱼眼布局的时间线。
       dock: this.hud?.getDockTrace?.() ?? null,
       pendingDamage: globalVars.pendingDamage ?? null,
@@ -401,11 +409,14 @@ class BoardGameSimulatorApp {
       // Movement gates moving/exploring, so record it: "only END_TURN left" almost
       // always means movesLeft hit 0.
       activeMovesLeft: (() => {
-        const players = (raw?.players ?? {}) as Record<string, { alive?: boolean; customProps?: { movesLeft?: number } }>;
+        const players = (raw?.players ?? {}) as Record<
+          string,
+          { alive?: boolean; customProps?: { movesLeft?: number } }
+        >;
         const player = players[String(raw?.activePlayerId ?? '')];
         if (!player) return null;
         return { alive: player.alive ?? true, movesLeft: Number(player.customProps?.movesLeft ?? 0) };
-      })()
+      })(),
     };
   }
 
@@ -418,14 +429,21 @@ class BoardGameSimulatorApp {
       const el = document.createElement('div');
       el.id = 'net-wait';
       const s = el.style;
-      s.position = 'fixed'; s.inset = '0'; s.zIndex = '9998';
-      s.display = 'flex'; s.flexDirection = 'column'; s.alignItems = 'center'; s.justifyContent = 'center';
-      s.gap = '12px'; s.background = 'rgba(13,17,23,.94)'; s.color = '#d9b45b';
+      s.position = 'fixed';
+      s.inset = '0';
+      s.zIndex = '9998';
+      s.display = 'flex';
+      s.flexDirection = 'column';
+      s.alignItems = 'center';
+      s.justifyContent = 'center';
+      s.gap = '12px';
+      s.background = 'rgba(13,17,23,.94)';
+      s.color = '#d9b45b';
       s.fontFamily = '"Alibaba PuHuiTi", system-ui, sans-serif';
       setHtml(
         el,
         html`<div class="nw-title" style="font-size:20px;letter-spacing:2px"></div>
-        <div class="nw-sub" style="font-size:13px;color:#8b949e"></div>`
+        <div class="nw-sub" style="font-size:13px;color:#8b949e"></div>`,
       );
       document.body.appendChild(el);
       this.netWaitEl = el;
@@ -448,7 +466,9 @@ class BoardGameSimulatorApp {
       if (left <= 0) {
         this.stopHostWait();
         this.showNetWait('对局已结束', '房主超时未归，正在返回大厅…');
-        setTimeout(() => { location.href = location.pathname; }, 1500);
+        setTimeout(() => {
+          location.href = location.pathname;
+        }, 1500);
         return;
       }
       const mm = String(Math.floor(left / 60000)).padStart(2, '0');
@@ -483,15 +503,21 @@ class BoardGameSimulatorApp {
     const isHost = opts.role === 'host';
     const msg = isHost ? '确定结束对局吗？全员将被送回大厅。' : '确定退出对局吗？对局将继续进行。';
     if (!window.confirm(msg)) return;
-    try { (this.session as NetSession).dispose?.(); } catch { /* 尽力断开 */ }
+    try {
+      (this.session as NetSession).dispose?.();
+    } catch {
+      /* 尽力断开 */
+    }
     if (isHost) {
       try {
         await fetch('/api/rooms/' + opts.roomId + '/status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + opts.token },
-          body: JSON.stringify({ status: 'closed' })
+          body: JSON.stringify({ status: 'closed' }),
         });
-      } catch { /* 关房失败也允许返回，大厅轮询兑底 */ }
+      } catch {
+        /* 关房失败也允许返回，大厅轮询兑底 */
+      }
     }
     location.href = location.pathname;
   }
@@ -513,20 +539,22 @@ class BoardGameSimulatorApp {
       // 阶段二：presence → HUD 在线点。
       // P2P 模式额外把「房主座位离线」变成等待遮罩；中心模式没有房主权威，
       // 房主掉线不影响对局，因此不进入等待态。
-      const hostPid = !centreMode && opts.role === 'guest'
-        ? (Object.entries(opts.seatOwners ?? {}) as [string, string][])
-            .find(([, uid]) => uid === opts.hostId)?.[0]
-        : undefined;
-      net.onPresence = ids => {
+      const hostPid =
+        !centreMode && opts.role === 'guest'
+          ? (Object.entries(opts.seatOwners ?? {}) as [string, string][]).find(
+              ([, uid]) => uid === opts.hostId,
+            )?.[0]
+          : undefined;
+      net.onPresence = (ids) => {
         this.hud?.setOnlinePlayers(ids);
         if (hostPid && !ids.includes(hostPid)) this.startHostWait();
         else this.stopHostWait();
       };
       // 断线重连遮罩（中心模式重连服务器，P2P 重连房主浏览器）。
-      net.onGuestReconnecting = attempt => {
+      net.onGuestReconnecting = (attempt) => {
         this.showNetWait(
           '连接已断开',
-          (centreMode ? '正在重新连接对局服务器…' : '正在重新连接房主…') + '（第 ' + attempt + ' 次尝试）'
+          (centreMode ? '正在重新连接对局服务器…' : '正在重新连接房主…') + '（第 ' + attempt + ' 次尝试）',
         );
       };
       net.onGuestReconnected = () => {
@@ -535,7 +563,9 @@ class BoardGameSimulatorApp {
       };
       net.onRoomClosed = () => {
         this.hud?.showAnnouncement('对局已结束');
-        setTimeout(() => { location.href = location.pathname; }, 1200);
+        setTimeout(() => {
+          location.href = location.pathname;
+        }, 1200);
       };
       // Async connect; failures surface as onNotice toasts, not boot crashes.
       void net.start();
@@ -546,7 +576,7 @@ class BoardGameSimulatorApp {
 
   private bindSession(session: UniversalSession | NetSession): void {
     let firstSubscription = true;
-    session.subscribe(snapshot => {
+    session.subscribe((snapshot) => {
       // NetSession.subscribe() immediately replays its placeholder bootstrap
       // snapshot. That is not the server projection and must not consume the
       // "apply the first real network frame" allowance.
@@ -566,8 +596,7 @@ class BoardGameSimulatorApp {
       // server's first full projection can also be revision 0, so revision alone
       // would discard it and leave the 3D board (seat lamps, turn arrows) showing
       // the placeholder until the next action. Force that first server paint.
-      const firstNetProjection =
-        !!this.netOptions && !this.appliedInitialNetSnapshot && !isNetBootstrap;
+      const firstNetProjection = !!this.netOptions && !this.appliedInitialNetSnapshot && !isNetBootstrap;
       // Every kernel transition (including viewer projection changes) bumps the
       // revision. Rotation-only placement previews do not.
       if (
@@ -584,7 +613,7 @@ class BoardGameSimulatorApp {
         // The dock's footprint changes with the game, the viewer and the
         // viewport, and it decides how far out the player's own cards can sit
         // without being covered. Measured from the live DOM, not a breakpoint.
-          this.scene.syncState(snapshot.board, snapshot.placement, layoutForGame(this.currentGameId));
+        this.scene.syncState(snapshot.board, snapshot.placement, layoutForGame(this.currentGameId));
       }
 
       // 切到某名玩家的认知滤镜时，镜头也跟着坐到他那一侧：这就是「每个玩家自己
@@ -626,16 +655,14 @@ class BoardGameSimulatorApp {
         const focusId = snapshot.focus[0] ?? snapshot.viewer;
         const player = snapshot.board.players[focusId];
         const npc = snapshot.board.npcs?.[focusId];
-        const roomId = String(
-          player?.customProps?.currentRoomId ?? npc?.customProps?.roomId ?? ''
-        );
+        const roomId = String(player?.customProps?.currentRoomId ?? npc?.customProps?.roomId ?? '');
         if (roomId && roomId !== this.lastRoomId) {
           this.lastRoomId = roomId;
           const node = snapshot.board.mapGraph.nodes[roomId];
           BoardGameAudio.playRoomAccent(
             roomId,
             String(node?.props?.name ?? ''),
-            Array.isArray(node?.props?.tags) ? node.props.tags.map(String) : []
+            Array.isArray(node?.props?.tags) ? node.props.tags.map(String) : [],
           );
         }
       }
@@ -685,15 +712,15 @@ class BoardGameSimulatorApp {
 
     // Enumerate who is actually still standing, so "还有一个英雄存活吗" never
     // has to be guessed from dimmed cards.
-    const alive = snapshot.players.filter(player => player.alive);
+    const alive = snapshot.players.filter((player) => player.alive);
     const roster = document.createElement('div');
     roster.style.cssText = 'margin:0 0 18px;text-align:left;font-size:12px;line-height:1.7';
     setHtml(
       roster,
-      html`<div style="color:#57ffa8">存活：${alive.length ? alive.map(p => `${p.avatar} ${p.name}`) : '无'}</div>
+      html`<div style="color:#57ffa8">存活：${alive.length ? alive.map((p) => `${p.avatar} ${p.name}`) : '无'}</div>
       <div style="color:#8b94a3">已退场：${
-        snapshot.players.filter(p => !p.alive).map(p => `${p.avatar} ${p.name}`) || '无'
-      }</div>`
+        snapshot.players.filter((p) => !p.alive).map((p) => `${p.avatar} ${p.name}`) || '无'
+      }</div>`,
     );
 
     const row = document.createElement('div');
@@ -756,7 +783,9 @@ class BoardGameSimulatorApp {
     const snapshot = this.session.getSnapshot();
     this.scene.syncState(snapshot.board, snapshot.placement, layoutForGame(gameId));
     this.lastRevision = snapshot.revision;
-    this.lastPlacementKey = snapshot.placement ? `${snapshot.placement.defId}:${snapshot.placement.rotation}` : '';
+    this.lastPlacementKey = snapshot.placement
+      ? `${snapshot.placement.defId}:${snapshot.placement.rotation}`
+      : '';
     this.hud.syncCamera('iso');
     this.applyDefaultView();
 
@@ -801,7 +830,9 @@ class BoardGameSimulatorApp {
     const snapshot = this.session.getSnapshot();
     this.scene.syncState(snapshot.board, snapshot.placement, layoutForGame(this.currentGameId));
     this.lastRevision = snapshot.revision;
-    this.lastPlacementKey = snapshot.placement ? `${snapshot.placement.defId}:${snapshot.placement.rotation}` : '';
+    this.lastPlacementKey = snapshot.placement
+      ? `${snapshot.placement.defId}:${snapshot.placement.rotation}`
+      : '';
     this.hud.syncCamera('iso');
     this.applyDefaultView();
 
@@ -818,7 +849,6 @@ class BoardGameSimulatorApp {
     const label = scenario ? String(module.scenarios?.[scenario]?.description ?? scenario) : '标准开局';
     this.hud.showAnnouncement(`剧本已重开 · ${label}`);
   }
-
 
   private toggleInspector(): void {
     this.inspector.toggleCollapse();
@@ -856,10 +886,10 @@ class BoardGameSimulatorApp {
     const viewer = snapshot.viewer;
     if (!viewer || viewer === 'GOD') return null;
     const seat = Object.values(snapshot.board.mapGraph.nodes).find(
-      node => node.type === 'SEAT' && String(node.props?.playerId ?? '') === viewer
+      (node) => node.type === 'SEAT' && String(node.props?.playerId ?? '') === viewer,
     );
     if (seat) return `${viewer}@${String(seat.props?.seatIndex ?? '')}`;
-    const watching = snapshot.observers?.find(entry => entry.playerId === viewer);
+    const watching = snapshot.observers?.find((entry) => entry.playerId === viewer);
     if (watching?.seatIndex !== undefined) return `${viewer}@obs${watching.seatIndex}`;
     return null;
   }
@@ -872,11 +902,11 @@ class BoardGameSimulatorApp {
   private applySeatView(preferred?: string): void {
     const snapshot = this.session.getSnapshot();
     const seats = Object.values(snapshot.board.mapGraph.nodes).filter(
-      node => node.type === 'SEAT' && node.props?.playerId
+      (node) => node.type === 'SEAT' && node.props?.playerId,
     );
     if (seats.length === 0) return;
     const viewer = preferred ?? snapshot.viewer;
-    const own = seats.find(node => String(node.props.playerId) === viewer);
+    const own = seats.find((node) => String(node.props.playerId) === viewer);
     if (own) {
       if (!this.scene.setSeatView({ playerId: String(own.props.playerId) })) return;
       this.hud.syncCamera('seat');
@@ -884,7 +914,7 @@ class BoardGameSimulatorApp {
       return;
     }
     // 观察者看自己原来的座位：输了也还在牌桌的同一侧看牌。
-    const watching = snapshot.observers?.find(entry => entry.playerId === viewer);
+    const watching = snapshot.observers?.find((entry) => entry.playerId === viewer);
     if (watching?.seatIndex !== undefined) {
       if (!this.scene.setSeatView({ seatIndex: watching.seatIndex })) return;
       this.hud.syncCamera('seat');
@@ -912,7 +942,7 @@ class BoardGameSimulatorApp {
     // board's stand-in for the player card, and seats are not action targets.
     const seatMeta = data.metadata as { type?: string; playerId?: string } | undefined;
     if (data.type === 'NODE' && seatMeta?.type === 'SEAT' && seatMeta.playerId) {
-      const player = this.session.getSnapshot().players.find(entry => entry.id === seatMeta.playerId);
+      const player = this.session.getSnapshot().players.find((entry) => entry.id === seatMeta.playerId);
       if (player) {
         this.hud.openPlayerSheet(player);
         return;
@@ -923,15 +953,15 @@ class BoardGameSimulatorApp {
       data.type === 'NODE'
         ? 'node'
         : data.type === 'EDGE'
-        ? 'edge'
-        : data.type === 'DICE'
-        ? 'dice'
-        : 'entity';
+          ? 'edge'
+          : data.type === 'DICE'
+            ? 'dice'
+            : 'entity';
 
     this.session.pickTarget({
       kind,
       id: data.id,
-      metadata: { ...((data.metadata as object) || {}), intent: 'interact' }
+      metadata: { ...((data.metadata as object) || {}), intent: 'interact' },
     });
   }
 
@@ -954,8 +984,11 @@ class BoardGameSimulatorApp {
   }
 
   private wireKeyboard(): void {
-    window.addEventListener('keydown', event => {
-      if (event.target instanceof HTMLInputElement) return;
+    window.addEventListener('keydown', (event) => {
+      // Escape must keep working while a form control has focus: the amount
+      // sheet opens with its slider focused, and the old blanket input guard
+      // swallowed the only way out of it.
+      if (event.target instanceof HTMLInputElement && event.key !== 'Escape') return;
 
       if (event.key === 'Escape') {
         this.hud.closePayload();
@@ -1006,7 +1039,7 @@ function bootApp(): void {
       } catch (error) {
         return { note: 'summary failed', error: String(error) };
       }
-    }
+    },
   });
   window.addEventListener('beforeunload', () => diagnostics.log.push('info', 'lifecycle', '页面即将卸载'));
 
@@ -1051,7 +1084,9 @@ function parseNetSessionOptions(params: URLSearchParams): NetSessionOptions | un
   const hostId = params.get('hostId') ?? params.get('host') ?? undefined;
   // 只有旧的 P2P 房客路径需要 hostId（要拨号到房主浏览器）；中心模式不需要。
   if (authority === 'p2p' && role === 'guest' && !hostId) {
-    console.warn('[net-session] p2p guest role requires &host=<hostHubUserId>; falling back to local session');
+    console.warn(
+      '[net-session] p2p guest role requires &host=<hostHubUserId>; falling back to local session',
+    );
     return undefined;
   }
   // 阶段一：座位 → hub 身份（JSON），房主开局时写进内核 Player 展示字段。
@@ -1059,13 +1094,17 @@ function parseNetSessionOptions(params: URLSearchParams): NetSessionOptions | un
   try {
     const raw = params.get('roster');
     if (raw) roster = JSON.parse(raw);
-  } catch { /* 忽略坏 roster，退回内核默认名 */ }
+  } catch {
+    /* 忽略坏 roster，退回内核默认名 */
+  }
   // 阶段二：座位 → hub userId（JSON），presence 反映射回玩家卡在线点。
   let seatOwners: NetSessionOptions['seatOwners'];
   try {
     const raw = params.get('owners');
     if (raw) seatOwners = JSON.parse(raw);
-  } catch { /* 忽略坏 owners，在线点不显示 */ }
+  } catch {
+    /* 忽略坏 owners，在线点不显示 */
+  }
   return {
     hub,
     roomId: room,
@@ -1078,7 +1117,7 @@ function parseNetSessionOptions(params: URLSearchParams): NetSessionOptions | un
     // P2P 房主权威模式按房间人数发牌；中心模式由服务器决定，这里仅作兜底。
     seats: parseSeats(params.get('seats') ?? String(Object.keys(roster ?? {}).length || '')),
     roster,
-    seatOwners
+    seatOwners,
   };
 }
 
@@ -1098,9 +1137,11 @@ function showNetGameOverOverlay(opts: NetSessionOptions): void {
   const isHost = opts.role === 'host';
   const overlay = document.createElement('div');
   overlay.id = 'net-gameover-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:900;display:flex;align-items:center;justify-content:center;background:rgba(13,17,23,.78)';
+  overlay.style.cssText =
+    'position:fixed;inset:0;z-index:900;display:flex;align-items:center;justify-content:center;background:rgba(13,17,23,.78)';
   const card = document.createElement('div');
-  card.style.cssText = 'background:#161d29;border:1px solid #2b3442;border-radius:12px;padding:28px 36px;text-align:center;font-family:system-ui,sans-serif;color:#e6e1d5;box-shadow:0 12px 48px rgba(0,0,0,.55)';
+  card.style.cssText =
+    'background:#161d29;border:1px solid #2b3442;border-radius:12px;padding:28px 36px;text-align:center;font-family:system-ui,sans-serif;color:#e6e1d5;box-shadow:0 12px 48px rgba(0,0,0,.55)';
   const title = document.createElement('h2');
   title.textContent = '对局结束';
   title.style.cssText = 'margin:0 0 8px;color:#d9b45b;letter-spacing:1px';
@@ -1111,7 +1152,8 @@ function showNetGameOverOverlay(opts: NetSessionOptions): void {
   hint.style.cssText = 'margin:0 0 18px;color:#8b94a3;font-size:14px';
   const back = document.createElement('button');
   back.textContent = '⟵ 返回大厅';
-  back.style.cssText = 'background:#d9b45b;color:#17130a;border:none;border-radius:6px;padding:10px 22px;font-size:15px;font-weight:600;cursor:pointer';
+  back.style.cssText =
+    'background:#d9b45b;color:#17130a;border:none;border-radius:6px;padding:10px 22px;font-size:15px;font-weight:600;cursor:pointer';
   back.addEventListener('click', async () => {
     back.disabled = true;
     if (isHost) {
@@ -1120,9 +1162,11 @@ function showNetGameOverOverlay(opts: NetSessionOptions): void {
         await fetch('/api/rooms/' + opts.roomId + '/status', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + opts.token },
-          body: JSON.stringify({ status: 'open' })
+          body: JSON.stringify({ status: 'open' }),
         });
-      } catch { /* 返回大厅后房间轮询兜底 */ }
+      } catch {
+        /* 返回大厅后房间轮询兜底 */
+      }
     }
     location.href = location.pathname;
   });
