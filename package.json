@@ -31,6 +31,7 @@
     "test:centre:ui": "node scripts/verify-centre-mode-browser.mjs",
     "probe:ui": "node scripts/probe-ui-layout.mjs",
     "probe:hand": "node scripts/probe-hand-layout.mjs",
+    "probe:action-cards": "node scripts/probe-action-cards.mjs",
     "probe:board": "node scripts/probe-board-facing.mjs",
     "probe:hand:view": "node scripts/probe-hand-visibility.mjs",
     "probe:tokens": "node scripts/probe-design-tokens.mjs",

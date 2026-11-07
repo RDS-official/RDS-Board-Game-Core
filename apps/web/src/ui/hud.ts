@@ -3,6 +3,7 @@ import confetti from 'canvas-confetti';
 import { cardArtSvg } from './cardArt';
 import { detailTone } from './detailView';
 import { OverlayArbiter, OverlayEntry, OverlayState } from './overlay';
+import { deriveActionCard, executionRoute, isSimpleCard } from './actionCards';
 import { handLayout } from './handLayout';
 import { diagnostics } from '../diagnostics/install';
 import { hash, reconcileKeyed, reconcileKeyedPreservingScroll } from './dom/keyed';
@@ -20,7 +21,7 @@ import {
   UiObserver,
   UiPokerRanking,
   UiTraitChange,
-  UiPlayer
+  UiPlayer,
 } from '@rds/app/contracts';
 import { html, raw, setHtml } from './dom/html';
 
@@ -243,7 +244,7 @@ export class BoardGameHUD {
     container: HTMLElement,
     presenter: GamePresenter,
     ports: PresentationPorts,
-    options: HUDOptions
+    options: HUDOptions,
   ) {
     this.container = container;
     this.presenter = presenter;
@@ -256,7 +257,7 @@ export class BoardGameHUD {
     // One subscription drives both surfaces: the hover chip and the card sheet
     // are two renderings of the same arbiter state, so they can never disagree
     // about who owns the screen.
-    this.overlays.subscribe(state => this.paintOverlays(state));
+    this.overlays.subscribe((state) => this.paintOverlays(state));
     this.bindRankingPanel();
     this.bindPresenter(presenter);
   }
@@ -272,7 +273,7 @@ export class BoardGameHUD {
     this.rankingBound = true;
     const panel = this.container.querySelector('#chip-ranking') as HTMLElement | null;
     if (!panel) return;
-    panel.addEventListener('click', event => {
+    panel.addEventListener('click', (event) => {
       const target = event.target as HTMLElement | null;
       if (!target) return;
       const tabButton = target.closest<HTMLElement>('[data-rank-tab]');
@@ -364,7 +365,7 @@ export class BoardGameHUD {
   /** Trigger an action as the user would (keyboard shortcuts). */
   public promptAction(actionId: string): void {
     const snapshot = this.latest;
-    const action = snapshot?.actions.find(candidate => candidate.id === actionId);
+    const action = snapshot?.actions.find((candidate) => candidate.id === actionId);
     if (!snapshot || !action) return;
     // Placement is handled by the inline rotate/confirm controls, not a modal.
     if (snapshot.placement) return;
@@ -392,20 +393,24 @@ export class BoardGameHUD {
     const totalCommits = typeof __TOTAL_COMMITS__ !== 'undefined' ? __TOTAL_COMMITS__ : '';
 
     const rawContributors: Array<{ login: string; commits?: number } | string> =
-      typeof __CONTRIBUTORS__ !== 'undefined' && Array.isArray(__CONTRIBUTORS__) && __CONTRIBUTORS__.length > 0
+      typeof __CONTRIBUTORS__ !== 'undefined' &&
+      Array.isArray(__CONTRIBUTORS__) &&
+      __CONTRIBUTORS__.length > 0
         ? __CONTRIBUTORS__
         : typeof __COMMIT_AUTHOR__ !== 'undefined' && __COMMIT_AUTHOR__
-        ? [__COMMIT_AUTHOR__]
-        : ['unknown'];
+          ? [__COMMIT_AUTHOR__]
+          : ['unknown'];
 
     // 只展示 GitHub contributor ID，剥除可能附带的邮箱地址，并保留对应的 commit 次数统计。
     const contributors = rawContributors
-      .map(item => {
+      .map((item) => {
         if (typeof item === 'string') {
           const login = item.replace(/<[^>]+>/g, '').trim();
           return login ? { login, commits: 0 } : null;
         }
-        const login = String(item?.login || '').replace(/<[^>]+>/g, '').trim();
+        const login = String(item?.login || '')
+          .replace(/<[^>]+>/g, '')
+          .trim();
         return login ? { login, commits: Number(item?.commits) || 0 } : null;
       })
       .filter((item): item is { login: string; commits: number } => Boolean(item));
@@ -418,11 +423,13 @@ export class BoardGameHUD {
       value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
     const commitBreakdown = contributors
-      .filter(c => c.commits > 0)
-      .map(c => `${esc(c.login)}: ${c.commits}`)
+      .filter((c) => c.commits > 0)
+      .map((c) => `${esc(c.login)}: ${c.commits}`)
       .join(' · ');
 
-    setHtml(layer, html`
+    setHtml(
+      layer,
+      html`
       <div class="about-backdrop" data-about-close></div>
       <div class="about-card" role="dialog" aria-modal="true" aria-label="关于 · 版本信息">
         <div class="pf-head">
@@ -439,26 +446,31 @@ export class BoardGameHUD {
           </div>
           <div class="about-row">
             <dt>Contributors</dt>
-            <dd class="about-contributors">${raw(contributors.length > 0
+            <dd class="about-contributors">${raw(
+              contributors.length > 0
                 ? contributors
-                    .map(c => {
+                    .map((c) => {
                       const safeId = esc(c.login);
                       const isGhUser = /^[\w-]+$/.test(c.login);
-                      const countBadge = c.commits > 0
-                        ? `<span class="contributor-commits" title="${c.commits} 次提交">${c.commits}</span>`
-                        : '';
+                      const countBadge =
+                        c.commits > 0
+                          ? `<span class="contributor-commits" title="${c.commits} 次提交">${c.commits}</span>`
+                          : '';
                       return isGhUser
                         ? `<a class="contributor-tag" href="https://github.com/${safeId}" target="_blank" rel="noopener noreferrer">${safeId}${countBadge}</a>`
                         : `<span class="contributor-tag">${safeId}${countBadge}</span>`;
                     })
                     .join('')
-                : 'unknown')}</dd>
+                : 'unknown',
+            )}</dd>
           </div>
           <div class="about-row">
             <dt>Repository</dt>
-            <dd class="about-repo">${raw(repoHref
+            <dd class="about-repo">${raw(
+              repoHref
                 ? `<a href="${esc(repoHref)}" target="_blank" rel="noopener noreferrer">${esc(repoUrl)}</a>`
-                : esc(repoUrl) || 'unknown')}</dd>
+                : esc(repoUrl) || 'unknown',
+            )}</dd>
           </div>
           <div class="about-row">
             <dt>Commits</dt>
@@ -474,11 +486,12 @@ export class BoardGameHUD {
           <button class="pf-btn primary about-close" data-about-close>关闭</button>
         </div>
       </div>
-    `);
+    `,
+    );
     this.container.appendChild(layer);
 
     const close = () => this.closeAbout();
-    layer.addEventListener('click', event => {
+    layer.addEventListener('click', (event) => {
       if ((event.target as HTMLElement).closest('[data-about-close]')) close();
     });
     layer.addEventListener('keydown', (event: KeyboardEvent) => {
@@ -506,7 +519,7 @@ export class BoardGameHUD {
    * 口径写在弹窗脚注里，改口径只改一处。
    */
   public openAccountDetail(userId: string): void {
-    const row = this.accountRanking?.accounts.find(entry => entry.userId === userId);
+    const row = this.accountRanking?.accounts.find((entry) => entry.userId === userId);
     if (!row) return;
     this.closeAccountDetail();
 
@@ -520,18 +533,24 @@ export class BoardGameHUD {
     const layer = document.createElement('div');
     layer.className = 'about-layer account-detail-layer';
     layer.id = 'account-detail-layer';
-    setHtml(layer, html`
+    setHtml(
+      layer,
+      html`
       <div class="about-backdrop" data-account-close></div>
       <div class="about-card account-detail" role="dialog" aria-modal="true" aria-label="账号生涯战绩">
         <div class="pf-head">
-          <div class="pf-ico">${raw(row.avatarUrl
+          <div class="pf-ico">${raw(
+            row.avatarUrl
               ? `<img class="ad-avatar" src="${escapeAttr(row.avatarUrl)}" alt="" />`
-              : escHtml(row.name.slice(0, 1).toUpperCase()))}</div>
+              : escHtml(row.name.slice(0, 1).toUpperCase()),
+          )}</div>
           <div>
             <div class="pf-title">${row.name}</div>
-            <div class="pf-hint">${raw(row.roomId
-              ? `正在对局 · ${escHtml(row.roomId)} · ${escHtml(row.seat ?? '')} 座位`
-              : '当前不在牌桌')}</div>
+            <div class="pf-hint">${raw(
+              row.roomId
+                ? `正在对局 · ${escHtml(row.roomId)} · ${escHtml(row.seat ?? '')} 座位`
+                : '当前不在牌桌',
+            )}</div>
           </div>
         </div>
         <div class="ad-hero">
@@ -557,11 +576,12 @@ export class BoardGameHUD {
           <button class="pf-btn primary account-close" data-account-close>关闭</button>
         </div>
       </div>
-    `);
+    `,
+    );
     this.container.appendChild(layer);
 
     const close = (): void => this.closeAccountDetail();
-    layer.addEventListener('click', event => {
+    layer.addEventListener('click', (event) => {
       if ((event.target as HTMLElement).closest('[data-account-close]')) close();
     });
     layer.addEventListener('keydown', (event: KeyboardEvent) => {
@@ -579,7 +599,7 @@ export class BoardGameHUD {
 
   /** Reflect the renderer's camera state without owning the camera. */
   public syncCamera(view: CameraView): void {
-    this.container.querySelectorAll<HTMLElement>('.cam-btn').forEach(button => {
+    this.container.querySelectorAll<HTMLElement>('.cam-btn').forEach((button) => {
       button.classList.toggle('active', button.dataset.cam === view);
     });
   }
@@ -604,7 +624,7 @@ export class BoardGameHUD {
       '.app-shell > .hand-slot',
       '#player-rail',
       '#activity-feed',
-      '#room-card'
+      '#room-card',
     ];
     for (const selector of selectors) {
       const el = this.container.querySelector(selector) as HTMLElement | null;
@@ -691,8 +711,15 @@ export class BoardGameHUD {
     // A card face gets a full preview above the caption: a one-line tooltip
     // cannot convey a card's art at board scale.
     el.classList.toggle('with-art', !!hint.art);
-    setHtml(el, raw((hint.art ? `<img class="hh-art" src="${escapeAttr(hint.art)}" alt="${escapeAttr(hint.title)}" />` : '') +
-      `<span class="hh-body"><b>${escHtml(hint.title)}</b>${hint.desc ? `<span>${escHtml(hint.desc)}</span>` : ''}</span>`));
+    setHtml(
+      el,
+      raw(
+        (hint.art
+          ? `<img class="hh-art" src="${escapeAttr(hint.art)}" alt="${escapeAttr(hint.title)}" />`
+          : '') +
+          `<span class="hh-body"><b>${escHtml(hint.title)}</b>${hint.desc ? `<span>${escHtml(hint.desc)}</span>` : ''}</span>`,
+      ),
+    );
     el.classList.add('on');
   }
 
@@ -722,15 +749,21 @@ export class BoardGameHUD {
     if (el.dataset.key !== view.key) {
       el.dataset.key = view.key;
       const rows = view.sections
-        .map(row => `<div class="sp-row"><span class="sp-k">${escHtml(row.label)}</span><span class="sp-v">${escHtml(row.value)}</span></div>`)
+        .map(
+          (row) =>
+            `<div class="sp-row"><span class="sp-k">${escHtml(row.label)}</span><span class="sp-v">${escHtml(row.value)}</span></div>`,
+        )
         .join('');
-      setHtml(el, html`
+      setHtml(
+        el,
+        html`
         <div class="sp-coin">${view.seal ?? '👤'}</div>
         <div class="sp-name">${view.title}</div>
         ${raw(view.badge ? `<div class="sp-badge">${escHtml(view.badge)}</div>` : '')}
         ${raw(view.subtitle ? `<div class="sp-sub">${escHtml(view.subtitle)}</div>` : '')}
         <div class="sp-rows">${raw(rows)}</div>
-      `);
+      `,
+      );
     }
 
     const rect = el.getBoundingClientRect();
@@ -738,10 +771,7 @@ export class BoardGameHUD {
     const gap = 26;
     const fitsRight = this.pointerAt.x + gap + rect.width <= window.innerWidth - 8;
     const left = fitsRight ? this.pointerAt.x + gap : this.pointerAt.x - gap - rect.width;
-    const top = Math.min(
-      Math.max(8, this.pointerAt.y - height / 2),
-      window.innerHeight - height - 8
-    );
+    const top = Math.min(Math.max(8, this.pointerAt.y - height / 2), window.innerHeight - height - 8);
     el.style.left = `${Math.max(8, left)}px`;
     el.style.top = `${top}px`;
     el.classList.add('on');
@@ -753,7 +783,10 @@ export class BoardGameHUD {
 
     const el = document.createElement('div');
     el.className = 'toast';
-    setHtml(el, html`<span class="t-ico">${raw(icon)}</span><span class="t-txt">${raw(text)}${raw(detail ? `<span class="t-detail">${detail}</span>` : '')}</span>`);
+    setHtml(
+      el,
+      html`<span class="t-ico">${raw(icon)}</span><span class="t-txt">${raw(text)}${raw(detail ? `<span class="t-detail">${detail}</span>` : '')}</span>`,
+    );
     stack.appendChild(el);
 
     while (stack.children.length > 4) stack.removeChild(stack.firstElementChild!);
@@ -775,23 +808,31 @@ export class BoardGameHUD {
     banner.classList.remove('out');
 
     if (/Winner|HU!|Game Over|胜利|结束/.test(title)) {
-      confetti({ particleCount: 90, spread: 78, origin: { y: 0.62 }, colors: ['#d9b45b', '#f6dc9c', '#ffffff'] });
+      confetti({
+        particleCount: 90,
+        spread: 78,
+        origin: { y: 0.62 },
+        colors: ['#d9b45b', '#f6dc9c', '#ffffff'],
+      });
     }
 
-    this.announceTimer = window.setTimeout(() => {
-      banner.classList.add('out');
-      window.setTimeout(() => {
-        banner.style.display = 'none';
-        banner.classList.remove('out');
-      }, 280);
-    }, Math.max(1200, durationMs));
+    this.announceTimer = window.setTimeout(
+      () => {
+        banner.classList.add('out');
+        window.setTimeout(() => {
+          banner.style.display = 'none';
+          banner.classList.remove('out');
+        }, 280);
+      },
+      Math.max(1200, durationMs),
+    );
   }
 
   /* ------------------------------------------------------------------ */
 
   private bindPresenter(presenter: GamePresenter): void {
-    this.unsubSnapshot = presenter.subscribe(snapshot => this.render(snapshot));
-    this.unsubNotice = presenter.onNotice(notice => this.renderNotice(notice));
+    this.unsubSnapshot = presenter.subscribe((snapshot) => this.render(snapshot));
+    this.unsubNotice = presenter.onNotice((notice) => this.renderNotice(notice));
   }
 
   /** Drawers only exist as overlays below 1200px (landscape phones included). */
@@ -800,7 +841,9 @@ export class BoardGameHUD {
   }
 
   private drawerFor(which: 'rail' | 'side'): HTMLElement | null {
-    return this.container.querySelector(which === 'rail' ? '#player-rail' : '#side-column') as HTMLElement | null;
+    return this.container.querySelector(
+      which === 'rail' ? '#player-rail' : '#side-column',
+    ) as HTMLElement | null;
   }
 
   private openDrawerWhich(): 'rail' | 'side' | null {
@@ -811,9 +854,10 @@ export class BoardGameHUD {
 
   /** Buttons/links/tabs reachable with Tab inside one drawer, in DOM order. */
   private drawerFocusables(drawer: HTMLElement): HTMLElement[] {
-    const selectors = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const selectors =
+      'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
     return Array.from(drawer.querySelectorAll<HTMLElement>(selectors)).filter(
-      el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+      (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden',
     );
   }
 
@@ -823,7 +867,7 @@ export class BoardGameHUD {
     const selectors =
       'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
     return Array.from(this.menuRoot.querySelectorAll<HTMLElement>(selectors)).filter(
-      el => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
+      (el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden',
     );
   }
 
@@ -884,7 +928,9 @@ export class BoardGameHUD {
     this.closeAccountDetail();
     this.closePayload();
 
-    setHtml(layer, html`
+    setHtml(
+      layer,
+      html`
       <div class="payload-backdrop" data-menu-backdrop></div>
       <div class="menu-card" id="menu-dialog" role="dialog" aria-modal="true" aria-labelledby="menu-dialog-title" tabindex="-1">
         <header class="menu-head">
@@ -905,7 +951,8 @@ export class BoardGameHUD {
           </section>
         </div>
       </div>
-    `);
+    `,
+    );
     const root = layer.querySelector('.menu-card') as HTMLElement | null;
     const gamesSlot = layer.querySelector('[data-menu-slot="games"]') as HTMLElement | null;
     const controlsSlot = layer.querySelector('[data-menu-slot="controls"]') as HTMLElement | null;
@@ -928,24 +975,25 @@ export class BoardGameHUD {
 
     layer.querySelector('.payload-backdrop')?.addEventListener('click', () => this.closeMenu(true));
     layer.querySelector('[data-menu-close]')?.addEventListener('click', () => this.closeMenu(true));
-    layer.onclick = event => {
+    layer.onclick = (event) => {
       const target = event.target as HTMLElement | null;
       if (!target || target.closest('[data-menu-backdrop], [data-menu-close]')) return;
       if (
         target.closest(
-          '.game-pill, #btn-about, #btn-undo, #btn-inspector, #btn-diagnostics, [data-toggle="rail"], [data-toggle="side"]'
+          '.game-pill, #btn-about, #btn-undo, #btn-inspector, #btn-diagnostics, [data-toggle="rail"], [data-toggle="side"]',
         )
       ) {
         this.closeMenu(false);
       }
     };
-    layer.onchange = event => {
+    layer.onchange = (event) => {
       if ((event.target as HTMLElement | null)?.closest('#scenario-select')) this.closeMenu(false);
     };
 
     this.syncMenuInert();
     requestAnimationFrame(() => {
-      const first = (root.querySelector('.menu-body .game-pill') as HTMLElement | null) ?? this.menuFocusables()[0];
+      const first =
+        (root.querySelector('.menu-body .game-pill') as HTMLElement | null) ?? this.menuFocusables()[0];
       (first ?? this.menuRoot)?.focus({ preventScroll: true });
     });
   }
@@ -1109,7 +1157,7 @@ export class BoardGameHUD {
       left: Math.min(left, width - 1),
       right: Math.min(right, Math.max(0, width - left - 1)),
       bottom: Math.min(bottom, height - 1),
-      top
+      top,
     };
     const last = this.lastViewportInsets;
     if (
@@ -1139,7 +1187,7 @@ export class BoardGameHUD {
   private syncShellAria(): void {
     for (const [attr, sel, target] of [
       ['data-side', '[data-toggle="side"]', 'side-column'],
-      ['data-rail', '[data-toggle="rail"]', 'player-rail']
+      ['data-rail', '[data-toggle="rail"]', 'player-rail'],
     ] as const) {
       const button = this.container.querySelector(sel) as HTMLElement | null;
       const drawer = this.container.querySelector(`#${target}`) as HTMLElement | null;
@@ -1195,7 +1243,7 @@ export class BoardGameHUD {
     host.dataset.sideTab = this.sideTab;
     const panels: Array<[SideTab, string]> = [
       ['ranking', '#chip-ranking'],
-      ['feed', '#activity-feed']
+      ['feed', '#activity-feed'],
     ];
     for (const [key, selector] of panels) {
       const panel = this.container.querySelector(selector) as HTMLElement | null;
@@ -1212,10 +1260,10 @@ export class BoardGameHUD {
     if (!layer || (!action.fields?.length && !action.selection)) return;
 
     const fields = (action.fields ?? [])
-      .map(field => {
+      .map((field) => {
         if (field.kind === 'enum') {
           const options = (field.options ?? [])
-            .map(option => {
+            .map((option) => {
               const selected = field.default === option.value ? ' selected' : '';
               return `<option value="${option.value}"${selected}>${option.label}</option>`;
             })
@@ -1265,8 +1313,11 @@ export class BoardGameHUD {
           field.max !== undefined
         ) {
           const marks = (field.marks ?? [])
-            .filter(mark => mark.value >= (field.min ?? -Infinity) && mark.value <= (field.max ?? Infinity))
-            .map(mark => `<button type="button" class="pf-quick" data-quick="${mark.value}">${mark.label}</button>`)
+            .filter((mark) => mark.value >= (field.min ?? -Infinity) && mark.value <= (field.max ?? Infinity))
+            .map(
+              (mark) =>
+                `<button type="button" class="pf-quick" data-quick="${mark.value}">${mark.label}</button>`,
+            )
             .join('');
           return `
             <div class="pf-row pf-slider-row" data-field-row="${field.key}">
@@ -1305,11 +1356,11 @@ export class BoardGameHUD {
               action.selection.candidates.length > 0
                 ? action.selection.candidates
                     .map(
-                      candidate => `
+                      (candidate) => `
                         <label class="pf-target">
                           <input type="checkbox" data-target="${candidate.id}" />
                           <span>${candidate.icon ? `${candidate.icon} ` : ''}${candidate.label}</span>
-                        </label>`
+                        </label>`,
                     )
                     .join('')
                 : '<div class="pf-empty">当前没有可选目标</div>'
@@ -1318,7 +1369,9 @@ export class BoardGameHUD {
         </div>`
       : '';
 
-    setHtml(layer, html`
+    setHtml(
+      layer,
+      html`
       <div class="payload-backdrop"></div>
       <form class="payload-card" autocomplete="off">
         <header class="pf-head">
@@ -1334,7 +1387,8 @@ export class BoardGameHUD {
           <button type="submit" class="pf-btn primary">确认</button>
         </footer>
       </form>
-    `);
+    `,
+    );
     layer.style.display = 'flex';
 
     const close = () => {
@@ -1371,12 +1425,12 @@ export class BoardGameHUD {
           dep.truthy !== undefined
             ? Boolean(value) === dep.truthy
             : dep.equals !== undefined
-            ? String(value) === String(dep.equals)
-            : true;
+              ? String(value) === String(dep.equals)
+              : true;
         row.style.display = visible ? '' : 'none';
       }
     };
-    form.querySelectorAll('[data-field]').forEach(control => {
+    form.querySelectorAll('[data-field]').forEach((control) => {
       control.addEventListener('change', applyFieldVisibility);
       control.addEventListener('input', applyFieldVisibility);
     });
@@ -1405,22 +1459,24 @@ export class BoardGameHUD {
         slider.value = String(Math.min(Number(slider.max), Math.max(Number(slider.min), amount)));
         paintSlider();
       });
-      form.querySelectorAll<HTMLButtonElement>(`[data-slider-quick="${field.key}"] .pf-quick`).forEach(button => {
-        button.addEventListener('click', () => {
-          const amount = Number(button.dataset.quick);
-          if (!Number.isFinite(amount)) return;
-          // 快捷档（含「全押」）必须写**精确值**：range 的 value 会被 step 吸附到
-          // 最近的整盲注，1185 的全押会变成 1180，按钮就退化成了普通加注（issue #191）。
-          // 数字输入框是最终提交来源，滑块只负责视觉位置。
-          numberBox.value = String(amount);
-          slider.value = String(Math.min(Number(slider.max), Math.max(Number(slider.min), amount)));
-          paintSlider();
+      form
+        .querySelectorAll<HTMLButtonElement>(`[data-slider-quick="${field.key}"] .pf-quick`)
+        .forEach((button) => {
+          button.addEventListener('click', () => {
+            const amount = Number(button.dataset.quick);
+            if (!Number.isFinite(amount)) return;
+            // 快捷档（含「全押」）必须写**精确值**：range 的 value 会被 step 吸附到
+            // 最近的整盲注，1185 的全押会变成 1180，按钮就退化成了普通加注（issue #191）。
+            // 数字输入框是最终提交来源，滑块只负责视觉位置。
+            numberBox.value = String(amount);
+            slider.value = String(Math.min(Number(slider.max), Math.max(Number(slider.min), amount)));
+            paintSlider();
+          });
         });
-      });
       paintSlider();
     }
 
-    form.addEventListener('submit', event => {
+    form.addEventListener('submit', (event) => {
       event.preventDefault();
       const payload: Record<string, unknown> = {};
       for (const field of action.fields ?? []) {
@@ -1447,7 +1503,7 @@ export class BoardGameHUD {
       }
 
       const targets = Array.from(form.querySelectorAll<HTMLInputElement>('[data-target]:checked')).map(
-        input => input.dataset.target ?? ''
+        (input) => input.dataset.target ?? '',
       );
       if (action.selection) {
         if (targets.length < action.selection.spec.min || targets.length > action.selection.spec.max) {
@@ -1503,7 +1559,7 @@ export class BoardGameHUD {
 
     // 2. Card shake, pip flash and floating delta over the affected sheet.
     const card = this.container.querySelector<HTMLElement>(
-      `#player-rail .pc[data-player-id="${change.playerId}"]`
+      `#player-rail .pc[data-player-id="${change.playerId}"]`,
     );
     if (card) {
       card.classList.remove('trait-hit', 'trait-heal');
@@ -1511,7 +1567,7 @@ export class BoardGameHUD {
       void card.offsetWidth;
       card.classList.add(loss ? 'trait-hit' : 'trait-heal');
 
-      card.querySelectorAll<HTMLElement>('.trait-row').forEach(row => {
+      card.querySelectorAll<HTMLElement>('.trait-row').forEach((row) => {
         if (row.dataset.traitKey !== change.traitKey) return;
         row.classList.remove('flash-down', 'flash-up');
         void row.offsetWidth;
@@ -1556,7 +1612,7 @@ export class BoardGameHUD {
       mode: options.reveal ? 'modal' : 'pinned',
       view,
       footer: options.footer,
-      reveal: options.reveal
+      reveal: options.reveal,
     });
   }
 
@@ -1586,26 +1642,34 @@ export class BoardGameHUD {
     // Ink is the *light* text on the dark plate; ribbon is the dark category band.
     const theme = detailTone(view.tone);
     const facts = (view.sections ?? [])
-      .map(row => `<li><span>${escHtml(row.label)}</span><b>${escHtml(row.value)}</b></li>`)
+      .map((row) => `<li><span>${escHtml(row.label)}</span><b>${escHtml(row.value)}</b></li>`)
       .join('');
 
     layer.classList.toggle('is-reveal', !!entry.reveal);
-    setHtml(layer, html`
+    setHtml(
+      layer,
+      html`
       <article class="card-sheet" data-tone="${view.tone ?? 'neutral'}" style="--ink:${raw(theme.ink)};--ribbon:${raw(theme.ribbon)}">
         <button class="cs-close" type="button" aria-label="关闭">×</button>
         ${raw(view.badge ? `<div class="cs-ribbon"><span>${escHtml(view.badge)}</span></div>` : '')}
         <div class="cs-body">
-          <div class="cs-art">${raw(view.art
+          <div class="cs-art">${raw(
+            view.art
               ? `<img class="cs-art-img" src="${escapeAttr(view.art)}" alt="${escapeAttr(view.title)}" />`
-              : cardArtSvg(view))}</div>
-          ${raw(view.actions?.length ? `<div class="cs-actions">${view.actions
-            .map(
-              action =>
-                `<button type="button" class="cs-action" data-card-action="${escapeAttr(action.id)}"><span>${escHtml(
-                  action.icon
-                )}</span>${escHtml(action.label)}</button>`
-            )
-            .join('')}</div>` : '')}
+              : cardArtSvg(view),
+          )}</div>
+          ${raw(
+            view.actions?.length
+              ? `<div class="cs-actions">${view.actions
+                  .map(
+                    (action) =>
+                      `<button type="button" class="cs-action" data-card-action="${escapeAttr(action.id)}"><span>${escHtml(
+                        action.icon,
+                      )}</span>${escHtml(action.label)}</button>`,
+                  )
+                  .join('')}</div>`
+              : '',
+          )}
           ${raw(view.seal ? `<div class="cs-seal">${escHtml(view.seal)}</div>` : '')}
           <h2 class="cs-title">${view.title}</h2>
           ${raw(view.subtitle ? `<div class="cs-en">${escHtml(view.subtitle)}</div>` : '')}
@@ -1615,13 +1679,14 @@ export class BoardGameHUD {
         </div>
         <div class="cs-foot">${entry.footer ?? '点击牌堆或场景实体继续'}</div>
       </article>
-    `);
+    `,
+    );
     layer.classList.add('open');
 
     const close = () => this.overlays.close(entry.mode);
     layer.querySelector('.cs-close')?.addEventListener('click', close);
-    layer.querySelectorAll<HTMLElement>('[data-card-action]').forEach(button => {
-      button.addEventListener('click', event => {
+    layer.querySelectorAll<HTMLElement>('[data-card-action]').forEach((button) => {
+      button.addEventListener('click', (event) => {
         event.stopPropagation();
         const actionId = button.dataset.cardAction;
         close();
@@ -1629,7 +1694,7 @@ export class BoardGameHUD {
       });
     });
     if (this.sheetBackdrop) layer.removeEventListener('click', this.sheetBackdrop);
-    this.sheetBackdrop = event => {
+    this.sheetBackdrop = (event) => {
       if (event.target === layer) close();
     };
     layer.addEventListener('click', this.sheetBackdrop);
@@ -1645,7 +1710,7 @@ export class BoardGameHUD {
   private performAction(
     actionId: string,
     payload?: Record<string, unknown>,
-    targets?: string[]
+    targets?: string[],
   ): { ok: boolean; error?: string } {
     // Must call the presenter, not this method: an earlier mechanical edit turned
     // this line into a self-call, so every action recursed until the stack blew.
@@ -1667,16 +1732,16 @@ export class BoardGameHUD {
     const nodes = Object.values(snapshot.board.mapGraph.nodes);
     if (!this.knownNodes) {
       // First paint: register the opening layout without a cutscene.
-      this.knownNodes = new Set(nodes.map(node => node.id));
+      this.knownNodes = new Set(nodes.map((node) => node.id));
       return;
     }
-    const fresh = nodes.filter(node => !this.knownNodes!.has(node.id));
+    const fresh = nodes.filter((node) => !this.knownNodes!.has(node.id));
     for (const node of nodes) this.knownNodes.add(node.id);
     if (fresh.length === 0) return;
 
     const found = fresh
-      .map(node => ({ node, detail: this.presenter.nodeDetail?.(node.id) ?? null }))
-      .filter(entry => entry.detail)
+      .map((node) => ({ node, detail: this.presenter.nodeDetail?.(node.id) ?? null }))
+      .filter((entry) => entry.detail)
       .pop();
     if (!found?.detail) return;
 
@@ -1716,7 +1781,7 @@ export class BoardGameHUD {
     // 同一个 key 也要重绘：账本里的「继续下一局」会随冷却从灰变亮，
     // 只在 key 变了才画会让按钮永远停在第一次渲染的样子。
     const signature = `${moment.key}:${(moment.actions ?? [])
-      .map(action => `${action.id}${action.enabled ? '1' : '0'}`)
+      .map((action) => `${action.id}${action.enabled ? '1' : '0'}`)
       .join(',')}`;
     if (this.lastMomentKey === signature) return;
     this.lastMomentKey = signature;
@@ -1739,17 +1804,17 @@ export class BoardGameHUD {
     }
     if (this.momentClickHandler) layer.removeEventListener('click', this.momentClickHandler);
     const cast = (moment.cast ?? [])
-      .map(entry => `<div class="mc-cast">${escHtml(entry.label)} · <b>${escHtml(entry.name)}</b></div>`)
+      .map((entry) => `<div class="mc-cast">${escHtml(entry.label)} · <b>${escHtml(entry.name)}</b></div>`)
       .join('');
     const ledger = moment.ledger?.length
       ? `<div class="mc-ledger">${moment.ledger
-          .map(row => {
+          .map((row) => {
             const cards = (row.cards ?? [])
-              .map(card => `<span class="mc-card">${escHtml(card)}</span>`)
+              .map((card) => `<span class="mc-card">${escHtml(card)}</span>`)
               .join('');
             const backs = Array.from(
               { length: Math.max(0, row.hidden ?? 0) },
-              () => '<span class="mc-card back">🂠</span>'
+              () => '<span class="mc-card back">🂠</span>',
             ).join('');
             return `
               <div class="mc-row ${escHtml(row.tone ?? 'neutral')}${row.self ? ' self' : ''}">
@@ -1766,14 +1831,14 @@ export class BoardGameHUD {
       : '';
     const actionButtons = (moment.actions ?? [])
       .map(
-        action => `
+        (action) => `
           <button type="button" class="mc-btn ${escHtml(action.tone ?? 'normal')}"
                   data-moment-action="${escapeAttr(action.id)}"
                   data-moment-enabled="${action.enabled ? '1' : '0'}"
                   ${action.enabled && !locked ? '' : 'disabled'}
                   title="${escapeAttr(action.hint ?? action.label)}">
             ${escHtml(action.label)}${action.enabled ? '' : `<small>${escHtml(action.hint ?? '')}</small>`}
-          </button>`
+          </button>`,
       )
       .join('');
     const closeButton =
@@ -1783,13 +1848,13 @@ export class BoardGameHUD {
           }>${locked ? `${Math.ceil((this.momentLockUntil - Date.now()) / 1000)}s 后可关闭` : '关闭'}</button>`
         : '';
     const buttons =
-      actionButtons || closeButton
-        ? `<div class="mc-actions">${actionButtons}${closeButton}</div>`
-        : '';
+      actionButtons || closeButton ? `<div class="mc-actions">${actionButtons}${closeButton}</div>` : '';
     layer.setAttribute('role', 'dialog');
     layer.setAttribute('aria-modal', 'true');
     layer.setAttribute('aria-labelledby', 'mc-title');
-    setHtml(layer, html`
+    setHtml(
+      layer,
+      html`
       <div class="mc-vignette"></div>
       <div class="mc-inner" tabindex="-1">
         <div class="mc-live" aria-live="assertive" aria-atomic="true">${moment.title}</div>
@@ -1803,7 +1868,8 @@ export class BoardGameHUD {
         ${raw(moment.objective ? `<p class="mc-objective">${escHtml(moment.objective)}</p>` : '')}
         ${raw(buttons || '<div class="mc-hint">点击任意处继续</div>')}
       </div>
-    `);
+    `,
+    );
     layer.classList.add('open');
     layer.classList.toggle('locked', locked);
     // a11y：把焦点移进幕布，并在幕布内循环 Tab；关闭时还原（issue #194）。
@@ -1812,8 +1878,10 @@ export class BoardGameHUD {
     this.momentKeyHandler = (event: KeyboardEvent) => {
       if (event.key !== 'Tab') return;
       const focusables = Array.from(
-        layer!.querySelectorAll<HTMLElement>('button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')
-      ).filter(node => node.getClientRects().length > 0);
+        layer!.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((node) => node.getClientRects().length > 0);
       // 锁定期间按钮全 disabled，此时把焦点钉在幕布容器上，Tab 也不能跑出去。
       if (focusables.length === 0) {
         event.preventDefault();
@@ -1927,7 +1995,7 @@ export class BoardGameHUD {
         close.textContent = locked ? `${Math.ceil(left / 1000)}s 后可关闭` : '关闭';
       }
       layer.classList.toggle('locked', locked);
-      layer.querySelectorAll<HTMLButtonElement>('[data-moment-action]').forEach(button => {
+      layer.querySelectorAll<HTMLButtonElement>('[data-moment-action]').forEach((button) => {
         const enabled = button.dataset.momentEnabled === '1';
         button.disabled = locked || !enabled;
         button.classList.toggle('is-locked', locked && enabled);
@@ -1962,18 +2030,22 @@ export class BoardGameHUD {
 
   private renderSkeleton(): void {
     this.container.classList.add('app-shell');
-    setHtml(this.container, html`
+    setHtml(
+      this.container,
+      html`
       <header class="topbar">
         <button class="shell-toggle menu-btn" data-toggle="menu" aria-label="主菜单" aria-haspopup="dialog" aria-controls="menu-dialog" aria-expanded="false"><span class="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span></button>
 
         <nav class="game-switch" id="game-switch">
-          ${raw(GAME_TABS.map(
-            tab => `
+          ${raw(
+            GAME_TABS.map(
+              (tab) => `
             <button class="game-pill" data-game="${tab.id}">
               <span class="gp-ico">${tab.icon}</span><span>${tab.name}</span>
             </button>
-          `
-          ).join(''))}
+          `,
+            ).join(''),
+          )}
         </nav>
 
         <div class="topbar-actions">
@@ -2047,7 +2119,8 @@ export class BoardGameHUD {
       <div class="announcement-banner" id="announce" style="display:none"></div>
       <div class="payload-layer" id="payload-layer" style="display:none"></div>
       <div class="shell-scrim" data-shell-scrim aria-hidden="true"></div>
-    `);
+    `,
+    );
 
     // Tablet/phone slide-overs. Only one panel is open at a time so the board
     // is never covered by two overlays.
@@ -2059,7 +2132,7 @@ export class BoardGameHUD {
     this.shellMedia = window.matchMedia('(max-width: 767px)');
     this.shellMedia.addEventListener('change', () => this.applyShellLayout());
 
-    this.container.addEventListener('click', event => {
+    this.container.addEventListener('click', (event) => {
       const target = event.target as HTMLElement | null;
       const close = target?.closest<HTMLElement>('[data-drawer-close]');
       if (!close) return;
@@ -2079,12 +2152,12 @@ export class BoardGameHUD {
     });
     this.shellObserver.observe(this.container, {
       attributes: true,
-      attributeFilter: ['data-rail', 'data-side']
+      attributeFilter: ['data-rail', 'data-side'],
     });
 
     // Escape closes the centered menu first, then any slide-over. Tab stays
     // inside the active modal surface, and focus returns to its opener.
-    window.addEventListener('keydown', event => {
+    window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
         const moment = this.container.querySelector('#moment-cine.open');
         if (moment) {
@@ -2117,38 +2190,40 @@ export class BoardGameHUD {
     // payload modal layer and temporarily moves the real controls inside, so
     // listeners and current state survive the trip.
     const menuButton = this.container.querySelector('[data-toggle="menu"]') as HTMLElement | null;
-    menuButton?.addEventListener('click', event => {
+    menuButton?.addEventListener('click', (event) => {
       event.stopPropagation();
       if (this.menuOpen) this.closeMenu(true);
       else this.openMenu(menuButton);
     });
 
-    this.container.querySelectorAll<HTMLElement>('[data-toggle="rail"], [data-toggle="side"]').forEach(button => {
-      button.addEventListener('click', () => {
-        const which = button.dataset.toggle === 'rail' ? 'rail' : 'side';
-        if (!this.isOverlayShell()) {
-          // Desktop keeps its persistent panels: the same menu entry expands
-          // them in place instead of opening a drawer.
-          const panel = this.drawerFor(which);
-          if (!panel) return;
-          const expanded = panel.getAttribute('data-expanded') === '1';
-          if (expanded) panel.removeAttribute('data-expanded');
-          else panel.setAttribute('data-expanded', '1');
-          this.syncShellAria();
-          requestAnimationFrame(() => {
-            this.syncRailExpandedGeometry();
-            const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
-            if (rail) this.layoutPlayerRail(rail);
-          });
-          return;
-        }
-        const isOpen = this.container.getAttribute(which === 'rail' ? 'data-rail' : 'data-side') === 'open';
-        if (isOpen) this.closeDrawer(which, true);
-        else this.openDrawer(which, this.menuOpen ? this.menuOpener : button);
+    this.container
+      .querySelectorAll<HTMLElement>('[data-toggle="rail"], [data-toggle="side"]')
+      .forEach((button) => {
+        button.addEventListener('click', () => {
+          const which = button.dataset.toggle === 'rail' ? 'rail' : 'side';
+          if (!this.isOverlayShell()) {
+            // Desktop keeps its persistent panels: the same menu entry expands
+            // them in place instead of opening a drawer.
+            const panel = this.drawerFor(which);
+            if (!panel) return;
+            const expanded = panel.getAttribute('data-expanded') === '1';
+            if (expanded) panel.removeAttribute('data-expanded');
+            else panel.setAttribute('data-expanded', '1');
+            this.syncShellAria();
+            requestAnimationFrame(() => {
+              this.syncRailExpandedGeometry();
+              const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
+              if (rail) this.layoutPlayerRail(rail);
+            });
+            return;
+          }
+          const isOpen = this.container.getAttribute(which === 'rail' ? 'data-rail' : 'data-side') === 'open';
+          if (isOpen) this.closeDrawer(which, true);
+          else this.openDrawer(which, this.menuOpen ? this.menuOpener : button);
+        });
       });
-    });
 
-    this.container.querySelectorAll<HTMLElement>('[data-side-tab-target]').forEach(button => {
+    this.container.querySelectorAll<HTMLElement>('[data-side-tab-target]').forEach((button) => {
       button.addEventListener('click', () => {
         const tab = button.dataset.sideTabTarget;
         if (tab !== 'ranking' && tab !== 'feed') return;
@@ -2158,19 +2233,19 @@ export class BoardGameHUD {
       });
     });
 
-    this.container.querySelectorAll<HTMLElement>('.game-pill').forEach(button => {
+    this.container.querySelectorAll<HTMLElement>('.game-pill').forEach((button) => {
       button.addEventListener('click', () => {
         const id = button.dataset.game;
         if (id) this.options.onSwitchGame(id);
       });
     });
 
-    this.container.querySelector('#viewer-select')?.addEventListener('change', event => {
+    this.container.querySelector('#viewer-select')?.addEventListener('change', (event) => {
       this.presenter.setViewer((event.target as HTMLSelectElement).value);
     });
 
     // 观察席「重新上桌」：面板每次重绘都会换掉行，所以在容器上做事件委托。
-    this.container.querySelector('#observer-rail')?.addEventListener('click', event => {
+    this.container.querySelector('#observer-rail')?.addEventListener('click', (event) => {
       const button = (event.target as HTMLElement).closest('.ob-join') as HTMLElement | null;
       if (!button) return;
       const playerId = button.dataset.ob;
@@ -2184,16 +2259,18 @@ export class BoardGameHUD {
       this.pushToast('🪑', '已申请重新上桌 · 本轮结束后落座');
     });
 
-    this.container.querySelector('#scenario-select')?.addEventListener('change', event => {
+    this.container.querySelector('#scenario-select')?.addEventListener('change', (event) => {
       const id = (event.target as HTMLSelectElement).value;
       this.options.onSwitchScenario?.(id);
     });
 
-    this.container.querySelectorAll<HTMLElement>('.cam-btn').forEach(button => {
+    this.container.querySelectorAll<HTMLElement>('.cam-btn').forEach((button) => {
       button.addEventListener('click', () => {
         const view = button.dataset.cam as CameraView | undefined;
         if (!view) return;
-        this.container.querySelectorAll('.cam-btn').forEach(b => { b.classList.remove('active'); });
+        this.container.querySelectorAll('.cam-btn').forEach((b) => {
+          b.classList.remove('active');
+        });
         button.classList.add('active');
         this.ports.setCamera(view);
       });
@@ -2241,7 +2318,7 @@ export class BoardGameHUD {
     // Betrayal uses a candle-lit parchment palette; other fixtures stay slate.
     this.lastSnapshot = snapshot;
     this.container.dataset.theme = snapshot.gameId === 'betrayal' ? 'gothic' : '';
-    this.container.querySelectorAll<HTMLElement>('.game-pill').forEach(button => {
+    this.container.querySelectorAll<HTMLElement>('.game-pill').forEach((button) => {
       button.classList.toggle('active', button.dataset.game === snapshot.gameId);
     });
 
@@ -2284,68 +2361,82 @@ export class BoardGameHUD {
     // short label, falling back to the full floor name.
     const floors = [...spatial.floors]
       .sort((a, b) => b.index - a.index)
-      .map(f => ({ id: f.id, level: f.tag ?? f.name, name: f.name }));
+      .map((f) => ({ id: f.id, level: f.tag ?? f.name, name: f.name }));
 
     const isAll = this.selectedFloor === 'ALL';
     const actorRoomId = spatial.activeNodeId ?? '';
     const actorRoom = snapshot.board.mapGraph.nodes[actorRoomId];
     const actorFloor = String(actorRoom?.layer ?? actorRoom?.props?.floor ?? '');
 
-    const floorItems = floors.map(floor => {
-      const rooms = Object.values(snapshot.board.mapGraph.nodes).filter(
-        n => n.type === 'ROOM' && String(n.layer ?? n.props?.floor ?? '') === floor.id
-      );
+    const floorItems = floors
+      .map((floor) => {
+        const rooms = Object.values(snapshot.board.mapGraph.nodes).filter(
+          (n) => n.type === 'ROOM' && String(n.layer ?? n.props?.floor ?? '') === floor.id,
+        );
 
-      // Players on this floor: the game says which node each one stands on.
-      const playersOnFloor = Object.values(snapshot.board.players).filter(p => {
-        if (!p.alive) return false;
-        const r = snapshot.board.mapGraph.nodes[this.presenter.playerNodeId?.(p.id) ?? ''];
-        return String(r?.layer ?? r?.props?.floor ?? '') === floor.id;
-      });
+        // Players on this floor: the game says which node each one stands on.
+        const playersOnFloor = Object.values(snapshot.board.players).filter((p) => {
+          if (!p.alive) return false;
+          const r = snapshot.board.mapGraph.nodes[this.presenter.playerNodeId?.(p.id) ?? ''];
+          return String(r?.layer ?? r?.props?.floor ?? '') === floor.id;
+        });
 
-      // Non-player cast members (monsters) on this floor, game-declared.
-      const monstersOnFloor = (this.presenter.castMembers?.() ?? []).filter(cast => {
-        const r = snapshot.board.mapGraph.nodes[cast.nodeId];
-        return String(r?.layer ?? r?.props?.floor ?? '') === floor.id;
-      });
+        // Non-player cast members (monsters) on this floor, game-declared.
+        const monstersOnFloor = (this.presenter.castMembers?.() ?? []).filter((cast) => {
+          const r = snapshot.board.mapGraph.nodes[cast.nodeId];
+          return String(r?.layer ?? r?.props?.floor ?? '') === floor.id;
+        });
 
-      let svgHtml = '';
-      if (rooms.length === 0) {
-        svgHtml = `<div class="mm-empty-floor">未探索</div>`;
-      } else {
-        const cols = rooms.map(r => Number(r.props?.col ?? 2));
-        const rows = rooms.map(r => Number(r.props?.row ?? 2));
-        const minCol = Math.min(...cols);
-        const maxCol = Math.max(...cols);
-        const minRow = Math.min(...rows);
-        const maxRow = Math.max(...rows);
+        let svgHtml = '';
+        if (rooms.length === 0) {
+          svgHtml = `<div class="mm-empty-floor">未探索</div>`;
+        } else {
+          const cols = rooms.map((r) => Number(r.props?.col ?? 2));
+          const rows = rooms.map((r) => Number(r.props?.row ?? 2));
+          const minCol = Math.min(...cols);
+          const maxCol = Math.max(...cols);
+          const minRow = Math.min(...rows);
+          const maxRow = Math.max(...rows);
 
-        const cellSize = 16;
-        const roomSize = 13;
-        const padding = 3;
-        const svgW = (maxCol - minCol + 1) * cellSize + padding * 2;
-        const svgH = (maxRow - minRow + 1) * cellSize + padding * 2;
+          const cellSize = 16;
+          const roomSize = 13;
+          const padding = 3;
+          const svgW = (maxCol - minCol + 1) * cellSize + padding * 2;
+          const svgH = (maxRow - minRow + 1) * cellSize + padding * 2;
 
-        const roomRects = rooms.map(r => {
-          const c = Number(r.props?.col ?? 2);
-          const rw = Number(r.props?.row ?? 2);
-          const rx = (c - minCol) * cellSize + padding;
-          const ry = (rw - minRow) * cellSize + padding;
-          const isActorHere = actorRoomId === r.id;
-          const isPinned = this.pinnedNodeId === r.id;
+          const roomRects = rooms
+            .map((r) => {
+              const c = Number(r.props?.col ?? 2);
+              const rw = Number(r.props?.row ?? 2);
+              const rx = (c - minCol) * cellSize + padding;
+              const ry = (rw - minRow) * cellSize + padding;
+              const isActorHere = actorRoomId === r.id;
+              const isPinned = this.pinnedNodeId === r.id;
 
-          const herePlayers = playersOnFloor.filter(p => (this.presenter.playerNodeId?.(p.id) ?? '') === r.id);
-          const hereMonsters = monstersOnFloor.filter(cast => cast.nodeId === r.id);
+              const herePlayers = playersOnFloor.filter(
+                (p) => (this.presenter.playerNodeId?.(p.id) ?? '') === r.id,
+              );
+              const hereMonsters = monstersOnFloor.filter((cast) => cast.nodeId === r.id);
 
-          const dots = [
-            ...herePlayers.map((p, idx) => `<circle cx="${rx + 3.5 + idx * 5}" cy="${ry + roomSize / 2}" r="2.8" fill="${p.color}" stroke="#000" stroke-width="0.8"/>`),
-            ...hereMonsters.map((_, idx) => `<circle cx="${rx + roomSize - 3.5 - idx * 5}" cy="${ry + roomSize / 2}" r="2.8" fill="#b07bf0" stroke="#ff4d4d" stroke-width="0.8"/>`)
-          ].join('');
+              const dots = [
+                ...herePlayers.map(
+                  (p, idx) =>
+                    `<circle cx="${rx + 3.5 + idx * 5}" cy="${ry + roomSize / 2}" r="2.8" fill="${p.color}" stroke="#000" stroke-width="0.8"/>`,
+                ),
+                ...hereMonsters.map(
+                  (_, idx) =>
+                    `<circle cx="${rx + roomSize - 3.5 - idx * 5}" cy="${ry + roomSize / 2}" r="2.8" fill="#b07bf0" stroke="#ff4d4d" stroke-width="0.8"/>`,
+                ),
+              ].join('');
 
-          const fill = isActorHere ? 'rgba(217, 180, 91, 0.45)' : isPinned ? 'rgba(87, 192, 139, 0.4)' : 'rgba(217, 180, 91, 0.14)';
-          const stroke = isActorHere ? '#f6dc9c' : isPinned ? '#57c08b' : 'rgba(217, 180, 91, 0.38)';
+              const fill = isActorHere
+                ? 'rgba(217, 180, 91, 0.45)'
+                : isPinned
+                  ? 'rgba(87, 192, 139, 0.4)'
+                  : 'rgba(217, 180, 91, 0.14)';
+              const stroke = isActorHere ? '#f6dc9c' : isPinned ? '#57c08b' : 'rgba(217, 180, 91, 0.38)';
 
-          return `
+              return `
             <g class="mm-room-node" data-room-id="${r.id}" data-floor="${floor.id}">
               <rect x="${rx}" y="${ry}" width="${roomSize}" height="${roomSize}" rx="2" fill="${fill}" stroke="${stroke}" stroke-width="${isActorHere || isPinned ? 1.5 : 1}">
                 <title>${r.props?.name ?? ''} (${floor.name})</title>
@@ -2353,19 +2444,20 @@ export class BoardGameHUD {
               ${dots}
             </g>
           `;
-        }).join('');
+            })
+            .join('');
 
-        svgHtml = `
+          svgHtml = `
           <svg class="mm-floor-svg" viewBox="0 0 ${svgW} ${svgH}" style="width:${Math.min(130, svgW)}px; height:${Math.min(50, svgH)}px;">
             ${roomRects}
           </svg>
         `;
-      }
+        }
 
-      const isCurrentFloor = this.selectedFloor === floor.id;
-      const isActorFloor = actorFloor === floor.id;
+        const isCurrentFloor = this.selectedFloor === floor.id;
+        const isActorFloor = actorFloor === floor.id;
 
-      return `
+        return `
         <div class="mm-floor-card ${isCurrentFloor ? 'active' : ''} ${isAll ? 'in-view' : ''}" data-floor="${floor.id}">
           <div class="mm-card-left">
             <span class="mm-level-tag ${isActorFloor ? 'has-actor' : ''}">${floor.level}</span>
@@ -2380,7 +2472,8 @@ export class BoardGameHUD {
           </div>
         </div>
       `;
-    }).join('');
+      })
+      .join('');
 
     const minimapHtml = `
       <div class="mm-head">
@@ -2404,7 +2497,7 @@ export class BoardGameHUD {
       el.dataset.sig = minimapSig;
     }
 
-    el.querySelector('#mm-toggle')?.addEventListener('click', e => {
+    el.querySelector('#mm-toggle')?.addEventListener('click', (e) => {
       e.stopPropagation();
       this.minimapCollapsed = !this.minimapCollapsed;
       if (this.latest) this.renderMinimap(this.latest);
@@ -2433,7 +2526,7 @@ export class BoardGameHUD {
   /** Floor display name from the game-declared topology layers. */
   private floorNameOf(floorId: string, snapshot: GameSnapshot): string {
     const floors = snapshot.spatial?.floors ?? [];
-    return floors.find(f => f.id === floorId)?.name ?? floorId;
+    return floors.find((f) => f.id === floorId)?.name ?? floorId;
   }
 
   /** Badge text for a game token (room symbol); unknown tokens print as-is. */
@@ -2445,7 +2538,7 @@ export class BoardGameHUD {
   }
 
   private rollLabel(roll: NonNullable<GameSnapshot['lastRoll']>): string {
-    const trait = roll.trait ? this.presenter.traitLabel?.(roll.trait) ?? roll.trait : '';
+    const trait = roll.trait ? (this.presenter.traitLabel?.(roll.trait) ?? roll.trait) : '';
     const source = roll.label?.trim();
     if (source && trait) return `${source} · ${trait}检定`;
     if (source) return source;
@@ -2471,13 +2564,16 @@ export class BoardGameHUD {
       panel.style.display = '';
       if (panel.dataset.signature !== 'empty') {
         panel.dataset.signature = 'empty';
-        setHtml(panel, html`
+        setHtml(
+          panel,
+          html`
           <div class="cr-head">
             <span class="cr-title">排行榜</span>
             <span class="cr-total">—</span>
           </div>
           <div class="cr-empty">本局暂无排行榜数据</div>
-        `);
+        `,
+        );
       }
       if (!this.sideTabTouched && this.sideTab === 'ranking') {
         this.sideTab = 'feed';
@@ -2493,7 +2589,7 @@ export class BoardGameHUD {
     const accounts = this.accountRanking?.accounts ?? [];
     const tab = hasGlobal ? this.rankingTab : 'table';
     const signature = `${tab}|${hasGlobal ? 1 : 0}|${rows
-      .map(row => `${row.playerId}:${row.chips}`)
+      .map((row) => `${row.playerId}:${row.chips}`)
       .join('|')}|${this.accountRanking?.updatedAt ?? ''}`;
     if (panel.dataset.signature === signature) return;
     panel.dataset.signature = signature;
@@ -2541,26 +2637,33 @@ export class BoardGameHUD {
       .join('');
 
     const tabs = hasGlobal
-        ? `<div class="cr-tabs" role="tablist">
+      ? `<div class="cr-tabs" role="tablist">
              <button type="button" class="cr-tab${tab === 'table' ? ' on' : ''}" data-rank-tab="table" role="tab" aria-selected="${tab === 'table'}">本桌</button>
              <button type="button" class="cr-tab${tab === 'global' ? ' on' : ''}" data-rank-tab="global" role="tab" aria-selected="${tab === 'global'}">全服</button>
            </div>`
-        : '';
+      : '';
 
-    setHtml(panel, html`
+    setHtml(
+      panel,
+      html`
       <div class="cr-head">
         <span class="cr-title">筹码排行</span>
-        <span class="cr-total">${raw(tab === 'table' ? total : this.accountRanking?.rooms ?? 0)} ${raw(tab === 'table' ? '' : '桌')}</span>
+        <span class="cr-total">${raw(tab === 'table' ? total : (this.accountRanking?.rooms ?? 0))} ${raw(tab === 'table' ? '' : '桌')}</span>
       </div>
       ${raw(tabs)}
-      <div class="cr-body">${raw(tab === 'table'
+      <div class="cr-body">${raw(
+        tab === 'table'
           ? tableBody
           : accountBody ||
-            `<div class="cr-empty">${this.accountRanking ? '还没有账号战绩' : '读取全服排行失败 · 点「全服」重试'}</div>`)}</div>
-      <div class="cr-foot">${raw(tab === 'table'
+              `<div class="cr-empty">${this.accountRanking ? '还没有账号战绩' : '读取全服排行失败 · 点「全服」重试'}</div>`,
+      )}</div>
+      <div class="cr-foot">${raw(
+        tab === 'table'
           ? '占比 = 该玩家筹码 / 全桌总筹码'
-          : '占比 = 该账号筹码 / 全服总筹码 · 点击查看生涯战绩')}</div>
-    `);
+          : '占比 = 该账号筹码 / 全服总筹码 · 点击查看生涯战绩',
+      )}</div>
+    `,
+    );
   }
 
   /** 打开全服页签时拉一次数据；失败就沉默保留本桌视图。 */
@@ -2572,7 +2675,7 @@ export class BoardGameHUD {
     this.accountRankingPending = true;
     void fetchRanking
       .call(this.presenter)
-      .then(ranking => {
+      .then((ranking) => {
         this.accountRanking = ranking;
         // 数据到货后强制重画：签名里带着 updatedAt，无需手动清空。
         if (this.latest) this.renderChipRanking(this.latest);
@@ -2601,13 +2704,16 @@ export class BoardGameHUD {
     }
     panel.style.display = '';
     const signature = rows
-      .map(row => `${row.playerId}:${row.chips}:${row.pendingLabel ?? ''}:${row.canRejoin}:${row.stipendInSeconds}:${row.stipendAmount}`)
+      .map(
+        (row) =>
+          `${row.playerId}:${row.chips}:${row.pendingLabel ?? ''}:${row.canRejoin}:${row.stipendInSeconds}:${row.stipendAmount}`,
+      )
       .join('|');
     if (panel.dataset.signature === signature) return;
     panel.dataset.signature = signature;
 
     const body = rows
-      .map(row => {
+      .map((row) => {
         const self = row.playerId === snapshot.viewer ? ' self' : '';
         const meta = row.pendingLabel
           ? `<span class="ob-wait">等本轮结束 · ${escHtml(row.pendingLabel)}</span>`
@@ -2626,14 +2732,17 @@ export class BoardGameHUD {
       })
       .join('');
 
-    setHtml(panel, html`
+    setHtml(
+      panel,
+      html`
       <div class="ob-head">
         <span class="ob-title">观察席</span>
         <span class="ob-count">${raw(rows.length)}</span>
       </div>
       <div class="ob-body">${raw(body)}</div>
       <div class="ob-foot">输光不散场：座位由 AI 接手，攒够买入即可申请回桌（轮末生效）</div>
-    `);
+    `,
+    );
     this.startObserverTicker(rows);
   }
 
@@ -2676,14 +2785,17 @@ export class BoardGameHUD {
     let head = feed.querySelector('#af-toggle') as HTMLButtonElement | null;
     let body = feed.querySelector('.af-body') as HTMLElement | null;
     if (!head || !body) {
-      setHtml(feed, html`
+      setHtml(
+        feed,
+        html`
         <button class="af-head" id="af-toggle" type="button" title="展开 / 收起近期记录">
           <span class="af-title">近期动态</span>
           <span class="af-count"></span>
           <span class="af-caret"></span>
         </button>
         <div class="af-body"></div>
-      `);
+      `,
+      );
       head = feed.querySelector('#af-toggle') as HTMLButtonElement;
       body = feed.querySelector('.af-body') as HTMLElement;
       head.addEventListener('click', () => {
@@ -2706,7 +2818,7 @@ export class BoardGameHUD {
       body.querySelector('.af-empty')?.remove();
       reconcileKeyedPreservingScroll(
         body,
-        visible.map(entry => ({ key: entry.id, html: this.historyRow(entry) }))
+        visible.map((entry) => ({ key: entry.id, html: this.historyRow(entry) })),
       );
     }
   }
@@ -2748,42 +2860,54 @@ export class BoardGameHUD {
       const floorLabel = this.floorNameOf(String(placement.floor ?? ''), snapshot);
       const symbolBadge = this.tokenBadgeOf(placement.symbol) || '· 无符号';
 
-      const connMap = new Map((placement.connections ?? []).map(c => [c.dir, c]));
+      const connMap = new Map((placement.connections ?? []).map((c) => [c.dir, c]));
       const compass = ['N', 'E', 'S', 'W']
-        .map(dir => {
+        .map((dir) => {
           const conn = connMap.get(dir);
           const cls = conn?.connected
             ? 'on connected'
             : conn?.status === 'blocked'
-            ? 'blocked'
+              ? 'blocked'
+              : conn?.status === 'open'
+                ? 'on open'
+                : '';
+          const glyph = conn?.connected
+            ? '🔗'
             : conn?.status === 'open'
-            ? 'on open'
-            : '';
-          const glyph = conn?.connected ? '🔗' : conn?.status === 'open' ? '▲' : conn?.status === 'blocked' ? '✕' : dir;
+              ? '▲'
+              : conn?.status === 'blocked'
+                ? '✕'
+                : dir;
           const title = conn?.connected
             ? `${conn.dirZh} ↔ ${conn.neighborRoomName}`
             : conn?.status === 'blocked'
-            ? `${conn.dirZh}（面墙阻挡）`
-            : conn?.status === 'open'
-            ? `${conn.dirZh}（通向未探索空间）`
-            : `${dir}（实墙）`;
+              ? `${conn.dirZh}（面墙阻挡）`
+              : conn?.status === 'open'
+                ? `${conn.dirZh}（通向未探索空间）`
+                : `${dir}（实墙）`;
           return `<span class="rc-door ${cls}" title="${title}">${glyph}</span>`;
         })
         .join('');
 
-      const connectedList = (placement.connections ?? []).filter(c => c.connected);
-      const connChips = connectedList.length > 0
-        ? connectedList
-            .map(c => `<span class="rc-chip" style="--chip:#22dd77"><i></i>${c.dirZh} ↔ ${c.neighborRoomName}</span>`)
-            .join('')
-        : '<span class="rc-chip" style="--chip:#e0604e"><i></i>暂未打通相邻门</span>';
+      const connectedList = (placement.connections ?? []).filter((c) => c.connected);
+      const connChips =
+        connectedList.length > 0
+          ? connectedList
+              .map(
+                (c) =>
+                  `<span class="rc-chip" style="--chip:#22dd77"><i></i>${c.dirZh} ↔ ${c.neighborRoomName}</span>`,
+              )
+              .join('')
+          : '<span class="rc-chip" style="--chip:#e0604e"><i></i>暂未打通相邻门</span>';
 
       const signature = `placement|${placement.defId}|${placement.rotation}|${connectedList.length}|${placement.col}:${placement.row}`;
       if (card.dataset.signature === signature) return;
       card.dataset.signature = signature;
 
       card.style.display = '';
-      setHtml(card, html`
+      setHtml(
+        card,
+        html`
         <div class="rc-head">
           <span class="rc-floor">[待定放置] ${raw(floorLabel)}</span>
           <span class="rc-angle">${raw(placement.rotation * 90)}°</span>
@@ -2796,7 +2920,8 @@ export class BoardGameHUD {
         </div>
         <p class="rc-text">${raw(placement.text ?? '探索发现的新房间，请选择朝向确认放置。')}</p>
         <div class="rc-occupants">${raw(connChips)}</div>
-      `);
+      `,
+      );
       return;
     }
 
@@ -2823,30 +2948,32 @@ export class BoardGameHUD {
     const doors = Array.isArray(props.doors) ? (props.doors as string[]) : [];
     const floorLabel = this.floorNameOf(String(node.layer ?? props.floor ?? ''), snapshot);
     const occupants = Object.values(board.players).filter(
-      p => p.alive && (this.presenter.playerNodeId?.(p.id) ?? '') === roomId
+      (p) => p.alive && (this.presenter.playerNodeId?.(p.id) ?? '') === roomId,
     );
-    const monsters = (this.presenter.castMembers?.() ?? []).filter(cast => cast.nodeId === roomId);
+    const monsters = (this.presenter.castMembers?.() ?? []).filter((cast) => cast.nodeId === roomId);
     const loot = this.presenter.roomLoot?.(roomId) ?? null;
 
-    const signature = `${roomId}|${doors.join('')}|${occupants.map(p => p.id).join(',')}|${monsters.length}|${loot?.count ?? 0}`;
+    const signature = `${roomId}|${doors.join('')}|${occupants.map((p) => p.id).join(',')}|${monsters.length}|${loot?.count ?? 0}`;
     if (card.dataset.signature === signature) return;
     card.dataset.signature = signature;
 
     const compass = ['N', 'E', 'S', 'W']
-      .map(dir => `<span class="rc-door ${doors.includes(dir) ? 'on' : ''}">${dir}</span>`)
+      .map((dir) => `<span class="rc-door ${doors.includes(dir) ? 'on' : ''}">${dir}</span>`)
       .join('');
 
     const ppl = occupants
-      .map(p => {
+      .map((p) => {
         const role = this.presenter.roleLabel?.(String(p.role ?? '')) ?? '';
         const tag = role ? ` · ${escHtml(role)}` : '';
         return `<span class="rc-chip" style="--chip:${escHtml(p.color)}"><i></i>${escHtml(p.name)}${tag}</span>`;
       })
       .join('');
     const mobs = monsters
-      .map(m => `<span class="rc-chip monster"><i></i>${escHtml(m.label)}</span>`)
+      .map((m) => `<span class="rc-chip monster"><i></i>${escHtml(m.label)}</span>`)
       .join('');
-    const items = loot ? `<span class="rc-chip loot"><i></i>${escHtml(loot.label)} ×${loot.count}</span>` : '';
+    const items = loot
+      ? `<span class="rc-chip loot"><i></i>${escHtml(loot.label)} ×${loot.count}</span>`
+      : '';
 
     card.style.display = '';
     const dossierHtml = `
@@ -2896,23 +3023,27 @@ export class BoardGameHUD {
 
     const floorLabel = this.floorNameOf(String(node.layer ?? props.floor ?? ''), snapshot);
     const compass = ['N', 'E', 'S', 'W']
-      .map(dir => `<span class="rc-door ${doors.includes(dir) ? 'on' : ''}">${dir}</span>`)
+      .map((dir) => `<span class="rc-door ${doors.includes(dir) ? 'on' : ''}">${dir}</span>`)
       .join('');
 
     const occupants = Object.values(snapshot.board.players).filter(
-      p => p.alive && (this.presenter.playerNodeId?.(p.id) ?? '') === roomId
+      (p) => p.alive && (this.presenter.playerNodeId?.(p.id) ?? '') === roomId,
     );
-    const monsters = (this.presenter.castMembers?.() ?? []).filter(cast => cast.nodeId === roomId);
+    const monsters = (this.presenter.castMembers?.() ?? []).filter((cast) => cast.nodeId === roomId);
     const loot = this.presenter.roomLoot?.(roomId) ?? null;
 
     const chips =
-      occupants.map(p => `<span class="rc-chip" style="--chip:${escHtml(p.color)}"><i></i>${escHtml(p.name)}</span>`).join('') +
-      monsters
-        .map(m => `<span class="rc-chip monster"><i></i>${escHtml(m.label)}</span>`)
+      occupants
+        .map(
+          (p) => `<span class="rc-chip" style="--chip:${escHtml(p.color)}"><i></i>${escHtml(p.name)}</span>`,
+        )
         .join('') +
+      monsters.map((m) => `<span class="rc-chip monster"><i></i>${escHtml(m.label)}</span>`).join('') +
       (loot ? `<span class="rc-chip loot"><i></i>${escHtml(loot.label)} ×${loot.count}</span>` : '');
 
-    setHtml(layer, html`
+    setHtml(
+      layer,
+      html`
       <div class="payload-backdrop"></div>
       <div class="payload-card room-card-window">
         <header class="rc-head">
@@ -2928,7 +3059,8 @@ export class BoardGameHUD {
         <p class="rc-text">${raw(String(props.text ?? ''))}</p>
         <div class="rc-occupants">${raw(chips || '<span class="rc-empty">空无一人</span>')}</div>
       </div>
-    `);
+    `,
+    );
     layer.style.display = 'flex';
 
     const close = () => {
@@ -2943,11 +3075,14 @@ export class BoardGameHUD {
     const select = this.container.querySelector('#viewer-select') as HTMLSelectElement | null;
     if (!select) return;
 
-    const signature = snapshot.viewers.map(v => `${v.id}:${v.name}`).join('|');
+    const signature = snapshot.viewers.map((v) => `${v.id}:${v.name}`).join('|');
     if (select.dataset.signature !== signature) {
-      setHtml(select, raw(snapshot.viewers
-        .map(viewer => `<option value="${viewer.id}">${viewer.name}</option>`)
-        .join('')));
+      setHtml(
+        select,
+        raw(
+          snapshot.viewers.map((viewer) => `<option value="${viewer.id}">${viewer.name}</option>`).join(''),
+        ),
+      );
       select.dataset.signature = signature;
     }
     select.value = snapshot.viewer;
@@ -2969,91 +3104,93 @@ export class BoardGameHUD {
     }
     host.style.display = '';
 
-    const signature = options.map(option => `${option.id}:${option.description}`).join('|');
+    const signature = options.map((option) => `${option.id}:${option.description}`).join('|');
     if (select.dataset.signature !== signature) {
-      setHtml(select, raw(options
-        .map(option => `<option value="${option.id}">${option.description}</option>`)
-        .join('')));
+      setHtml(
+        select,
+        raw(options.map((option) => `<option value="${option.id}">${option.description}</option>`).join('')),
+      );
       select.dataset.signature = signature;
       // The description doubles as the option label, so keep the control compact.
-      select.title = options.find(option => option.selected)?.description ?? '';
+      select.title = options.find((option) => option.selected)?.description ?? '';
     }
-    const selected = options.find(option => option.selected)?.id;
+    const selected = options.find((option) => option.selected)?.id;
     if (selected) select.value = selected;
   }
-
 
   private renderPlayers(snapshot: GameSnapshot): void {
     const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
     if (!rail) return;
 
-    const playerCards = snapshot.players
-      .map(player => {
-        const hp = player.hp
-          ? `<div class="hp-track">${Array.from({ length: player.hp.max })
-              .map((_, index) => `<span class="hp-seg ${index < player.hp!.current ? 'on' : ''}"></span>`)
-              .join('')}</div>`
-          : '';
+    const playerCards = snapshot.players.map((player) => {
+      const hp = player.hp
+        ? `<div class="hp-track">${Array.from({ length: player.hp.max })
+            .map((_, index) => `<span class="hp-seg ${index < player.hp!.current ? 'on' : ''}"></span>`)
+            .join('')}</div>`
+        : '';
 
-        // Betrayal traits carry a printed 0..8 track: draw a character-sheet
-        // style ladder with the start value ringed instead of a flat pill.
-        const ladder = player.pips.filter(pip => typeof pip.max === 'number' && pip.max > 0);
-        const plainPips = player.pips.filter(pip => !(typeof pip.max === 'number' && pip.max > 0));
+      // Betrayal traits carry a printed 0..8 track: draw a character-sheet
+      // style ladder with the start value ringed instead of a flat pill.
+      const ladder = player.pips.filter((pip) => typeof pip.max === 'number' && pip.max > 0);
+      const plainPips = player.pips.filter((pip) => !(typeof pip.max === 'number' && pip.max > 0));
 
-        const traitRows = ladder.length
-          ? `<div class="pc-traits">${ladder
-              .map(pip => {
-                const max = pip.max ?? 8;
-                const value = Number(pip.value);
-                const start = Number(pip.start ?? -1);
-                const segs = Array.from({ length: max })
-                  .map((_, index) => {
-                    const on = Number.isFinite(value) && index < value ? 'on' : '';
-                    const mark = index === start ? 'start' : '';
-                    return `<span class="trait-seg ${on} ${mark}"></span>`;
-                  })
-                  .join('');
-                const bonus = Number(pip.modifier ?? 0);
-                const bonusChip =
-                  bonus === 0
-                    ? ''
-                    : `<span class="trait-mod ${bonus > 0 ? 'up' : 'down'}" title="携带物品加成">${bonus > 0 ? '+' : ''}${bonus}</span>`;
-                return `<div class="trait-row ${player.alive ? '' : 'dead'}" style="--trait-color:${pip.color}" title="${pip.label}" data-trait-key="${escapeAttr(pip.key ?? '')}">
+      const traitRows = ladder.length
+        ? `<div class="pc-traits">${ladder
+            .map((pip) => {
+              const max = pip.max ?? 8;
+              const value = Number(pip.value);
+              const start = Number(pip.start ?? -1);
+              const segs = Array.from({ length: max })
+                .map((_, index) => {
+                  const on = Number.isFinite(value) && index < value ? 'on' : '';
+                  const mark = index === start ? 'start' : '';
+                  return `<span class="trait-seg ${on} ${mark}"></span>`;
+                })
+                .join('');
+              const bonus = Number(pip.modifier ?? 0);
+              const bonusChip =
+                bonus === 0
+                  ? ''
+                  : `<span class="trait-mod ${bonus > 0 ? 'up' : 'down'}" title="携带物品加成">${bonus > 0 ? '+' : ''}${bonus}</span>`;
+              return `<div class="trait-row ${player.alive ? '' : 'dead'}" style="--trait-color:${pip.color}" title="${pip.label}" data-trait-key="${escapeAttr(pip.key ?? '')}">
                   <span class="trait-key">${pip.short ?? ''}</span>
                   <span class="trait-track">${segs}</span>
                   <span class="trait-val">${pip.value}</span>${bonusChip}
                 </div>`;
-              })
+            })
+            .join('')}</div>`
+        : '';
+
+      const pips =
+        plainPips.length > 0
+          ? `<div class="pc-pips">${plainPips
+              .map(
+                (pip) =>
+                  `<span class="pip" title="${pip.label}">${
+                    pip.icon ? `<span>${pip.icon}</span>` : ''
+                  }${pip.short ? `<span class="pip-k">${pip.short}</span>` : ''}<i style="background:${pip.color}"></i>${pip.value}</span>`,
+              )
               .join('')}</div>`
           : '';
 
-        const pips =
-          plainPips.length > 0
-            ? `<div class="pc-pips">${plainPips
-                .map(
-                  pip =>
-                    `<span class="pip" title="${pip.label}">${
-                      pip.icon ? `<span>${pip.icon}</span>` : ''
-                    }${pip.short ? `<span class="pip-k">${pip.short}</span>` : ''}<i style="background:${pip.color}"></i>${pip.value}</span>`
-                )
-                .join('')}</div>`
-            : '';
+      const stats = player.stats
+        .map(
+          (stat) =>
+            `<div class="pc-row"><span class="k">${stat.label}</span><span class="v">${stat.value}</span></div>`,
+        )
+        .join('');
 
-        const stats = player.stats
-          .map(stat => `<div class="pc-row"><span class="k">${stat.label}</span><span class="v">${stat.value}</span></div>`)
-          .join('');
+      const effectChips = (player.effects ?? [])
+        .map(
+          (effect) =>
+            `<span class="pc-effect ${effect.tone ?? 'neutral'}" title="${escHtml(effect.detail ?? effect.label)}">${escHtml(effect.label)}</span>`,
+        )
+        .join('');
+      const effectRow = effectChips
+        ? `<div class="pc-effects">${effectChips}<button class="pc-effects-more" data-effect-open="${player.id}" title="查看全部状态">${(player.effects ?? []).length}</button></div>`
+        : '';
 
-        const effectChips = (player.effects ?? [])
-          .map(
-            effect =>
-              `<span class="pc-effect ${effect.tone ?? 'neutral'}" title="${escHtml(effect.detail ?? effect.label)}">${escHtml(effect.label)}</span>`
-          )
-          .join('');
-        const effectRow = effectChips
-          ? `<div class="pc-effects">${effectChips}<button class="pc-effects-more" data-effect-open="${player.id}" title="查看全部状态">${(player.effects ?? []).length}</button></div>`
-          : '';
-
-        const card = `
+      const card = `
           <article class="pc ${player.isFocus ? 'active' : ''} ${player.alive ? '' : 'dead'}" data-player-id="${player.id}" style="--pc-color:${player.color}">
             <div class="pc-head">
               <div class="pc-avatar"><span class="pc-online${this.onlinePlayerIds.has(player.id) ? ' on' : ''}" title="在线状态"></span>${player.avatarUrl ? `<img src="${escHtml(player.avatarUrl)}" alt="" loading="lazy" />` : player.avatar}</div>
@@ -3076,15 +3213,17 @@ export class BoardGameHUD {
             </div>
           </article>
         `;
-        return { key: player.id, html: card };
-      });
+      return { key: player.id, html: card };
+    });
 
-    const npcCards = (snapshot.npcs ?? [])
-      .map(npc => {
-        const stats = npc.stats
-          .map(stat => `<div class="pc-row"><span class="k">${stat.label}</span><span class="v">${stat.value}</span></div>`)
-          .join('');
-        const card = `
+    const npcCards = (snapshot.npcs ?? []).map((npc) => {
+      const stats = npc.stats
+        .map(
+          (stat) =>
+            `<div class="pc-row"><span class="k">${stat.label}</span><span class="v">${stat.value}</span></div>`,
+        )
+        .join('');
+      const card = `
           <article class="pc npc ${npc.isFocus ? 'active' : ''}" style="--pc-color:${npc.color}">
             <div class="pc-head">
               <div class="pc-avatar">${npc.avatar}</div>
@@ -3099,8 +3238,8 @@ export class BoardGameHUD {
             <div class="pc-body">${stats}</div>
           </article>
         `;
-        return { key: npc.id, html: card };
-      });
+      return { key: npc.id, html: card };
+    });
 
     // Reconcile instead of rebuilding: a player card holds focus and hover, and
     // the rail holds the scroll position.
@@ -3143,11 +3282,11 @@ export class BoardGameHUD {
 
     // Natural content height: clear the fisheye height before measuring.
     for (const card of cards) card.style.removeProperty('height');
-    const naturalHeight = Math.max(...cards.map(card => card.scrollHeight));
+    const naturalHeight = Math.max(...cards.map((card) => card.scrollHeight));
     const cardHeight = Math.max(PLAYER_CARD_HEIGHT, naturalHeight);
     const activeIndex = Math.max(
       0,
-      cards.findIndex(card => card.classList.contains('active'))
+      cards.findIndex((card) => card.classList.contains('active')),
     );
     const focusIndex =
       this.railFocusY === null
@@ -3163,7 +3302,7 @@ export class BoardGameHUD {
       focusStrength: 1,
       hoverIndex: focusIndex,
       lockCardWidth: true,
-      maxPitchRatio: 1
+      maxPitchRatio: 1,
     });
 
     rail.dataset.layout = 'fisheye';
@@ -3235,8 +3374,8 @@ export class BoardGameHUD {
         w: window.innerWidth,
         h: window.innerHeight,
         dpr: window.devicePixelRatio,
-        reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      }
+        reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+      },
     };
   }
 
@@ -3278,7 +3417,7 @@ export class BoardGameHUD {
       this.heldActionId = null;
       return;
     }
-    const byId = this.heldActionId ? actions.findIndex(action => action.id === this.heldActionId) : -1;
+    const byId = this.heldActionId ? actions.findIndex((action) => action.id === this.heldActionId) : -1;
     if (byId >= 0) {
       this.heldIndex = byId;
       return;
@@ -3297,7 +3436,7 @@ export class BoardGameHUD {
     this.heldIndex = 0;
     this.handWheelDelta = 0;
     this.handSuppressClick = false;
-    this.container.querySelectorAll<HTMLElement>('.hs-stage').forEach(stage => {
+    this.container.querySelectorAll<HTMLElement>('.hs-stage').forEach((stage) => {
       stage.replaceChildren();
       delete stage.dataset.handKey;
     });
@@ -3310,7 +3449,7 @@ export class BoardGameHUD {
   }
 
   private isSimpleAction(action: UiAction): boolean {
-    return !(action.fields?.length || action.selection || action.highlightIds?.length || action.placementEntityId);
+    return isSimpleCard(deriveActionCard(action));
   }
 
   private renderHandSlot(snapshot: GameSnapshot, direction: -1 | 0 | 1 = 0): void {
@@ -3354,7 +3493,7 @@ export class BoardGameHUD {
     action: UiAction | null,
     total: number,
     direction: -1 | 0 | 1,
-    dock: boolean
+    dock: boolean,
   ): void {
     target.dataset.empty = action ? '0' : '1';
     target.dataset.tone = action?.tone ?? 'neutral';
@@ -3363,7 +3502,7 @@ export class BoardGameHUD {
       'aria-label',
       action
         ? `${where}：${action.label}，第 ${this.heldIndex + 1} / ${total} 个。点击查看，长按执行，左右方向键切换。`
-        : `${where}：无可执行动作`
+        : `${where}：无可执行动作`,
     );
 
     const key = action?.id ?? '';
@@ -3375,7 +3514,7 @@ export class BoardGameHUD {
       return;
     }
 
-    stage.querySelectorAll('.hs-leaving').forEach(node => {
+    stage.querySelectorAll('.hs-leaving').forEach((node) => {
       node.remove();
     });
     const next = document.createElement('div');
@@ -3421,7 +3560,7 @@ export class BoardGameHUD {
   /** Keep the fan card and the held plaque in sync without rebuilding the fan. */
   private syncHeldHighlight(): void {
     const id = this.heldActionId;
-    this.container.querySelectorAll<HTMLElement>('#action-dock .dock-fan .act').forEach(card => {
+    this.container.querySelectorAll<HTMLElement>('#action-dock .dock-fan .act').forEach((card) => {
       if (id && card.dataset.actionId === id) card.dataset.held = '1';
       else delete card.dataset.held;
     });
@@ -3448,19 +3587,15 @@ export class BoardGameHUD {
   }
 
   private bindHandSlot(slot: HTMLElement): void {
-    slot.addEventListener('pointerdown', event => this.startHandPress(slot, event));
-    slot.addEventListener('pointermove', event => this.moveHandPress(slot, event));
-    slot.addEventListener('pointerup', event => this.endHandPress(slot, event, false));
-    slot.addEventListener('pointercancel', event => this.endHandPress(slot, event, true));
-    slot.addEventListener(
-      'wheel',
-      event => this.handleHandWheel(event),
-      { passive: false }
-    );
-    slot.addEventListener('contextmenu', event => {
+    slot.addEventListener('pointerdown', (event) => this.startHandPress(slot, event));
+    slot.addEventListener('pointermove', (event) => this.moveHandPress(slot, event));
+    slot.addEventListener('pointerup', (event) => this.endHandPress(slot, event, false));
+    slot.addEventListener('pointercancel', (event) => this.endHandPress(slot, event, true));
+    slot.addEventListener('wheel', (event) => this.handleHandWheel(event), { passive: false });
+    slot.addEventListener('contextmenu', (event) => {
       if (this.handPress) event.preventDefault();
     });
-    slot.addEventListener('click', event => {
+    slot.addEventListener('click', (event) => {
       if (this.handSuppressClick) {
         this.handSuppressClick = false;
         event.preventDefault();
@@ -3470,7 +3605,7 @@ export class BoardGameHUD {
       const action = this.currentHeldAction();
       if (action) this.openActionDetail(action);
     });
-    slot.addEventListener('keydown', event => {
+    slot.addEventListener('keydown', (event) => {
       if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
         event.preventDefault();
         this.cycleHeld(event.key === 'ArrowRight' ? 1 : -1);
@@ -3517,7 +3652,7 @@ export class BoardGameHUD {
       stepCount: 0,
       moved: false,
       frame: 0,
-      timer: null
+      timer: null,
     };
     this.handPress = press;
     slot.classList.add('pressing');
@@ -3635,17 +3770,17 @@ export class BoardGameHUD {
             }
             ${snapshot.decision.participants
               .map(
-                participant =>
-                  `<span class="chip ${participant.committed ? 'done' : 'wait'}"><span class="c-dot"></span>${
-                    escHtml(participant.name)
-                  }${participant.committed ? ' · 已锁定' : ' · 待提交'}</span>`
+                (participant) =>
+                  `<span class="chip ${participant.committed ? 'done' : 'wait'}"><span class="c-dot"></span>${escHtml(
+                    participant.name,
+                  )}${participant.committed ? ' · 已锁定' : ' · 待提交'}</span>`,
               )
               .join('')}
           </div>
         </div>
       `
       : snapshot.stackDepth > 0 && snapshot.stack[0]?.window
-      ? `
+        ? `
         <div class="alert-strip">
           <div class="al-ico">⚡</div>
           <div class="al-body">
@@ -3660,14 +3795,14 @@ export class BoardGameHUD {
             }
             ${snapshot.stack[0].window.eligible
               .map(
-                player =>
-                  `<span class="chip ${player.pending ? 'wait' : 'done'}"><span class="c-dot"></span>${escHtml(player.name)}</span>`
+                (player) =>
+                  `<span class="chip ${player.pending ? 'wait' : 'done'}"><span class="c-dot"></span>${escHtml(player.name)}</span>`,
               )
               .join('')}
           </div>
         </div>
       `
-      : '';
+        : '';
 
     const total = snapshot.actions.length;
     const buttons = snapshot.actions
@@ -3702,8 +3837,8 @@ export class BoardGameHUD {
           <button class="floor-tab ${isAll ? 'active' : ''}" data-floor="ALL">全部</button>
           ${snapshot.spatial.floors
             .map(
-              floor =>
-                `<button class="floor-tab ${this.selectedFloor === floor.id ? 'active' : ''}" data-floor="${floor.id}">${floor.name}</button>`
+              (floor) =>
+                `<button class="floor-tab ${this.selectedFloor === floor.id ? 'active' : ''}" data-floor="${floor.id}">${floor.name}</button>`,
             )
             .join('')}
         </div>`
@@ -3712,9 +3847,9 @@ export class BoardGameHUD {
     const placement = snapshot.placement;
     const placementPanel = placement
       ? (() => {
-          const connectedList = (placement.connections ?? []).filter(c => c.connected);
-          const openDoors = (placement.connections ?? []).filter(c => c.status === 'open');
-          const blockedDoors = (placement.connections ?? []).filter(c => c.status === 'blocked');
+          const connectedList = (placement.connections ?? []).filter((c) => c.connected);
+          const openDoors = (placement.connections ?? []).filter((c) => c.status === 'open');
+          const blockedDoors = (placement.connections ?? []).filter((c) => c.status === 'blocked');
 
           const symBadge = placement.symbol ? this.presenter.tokenBadge?.(String(placement.symbol)) : null;
           const symbolBadge = symBadge
@@ -3724,18 +3859,18 @@ export class BoardGameHUD {
           const connHtml =
             connectedList.length > 0
               ? `<div class="pp-conn ok">🔗 已打通 ${connectedList.length} 门：${connectedList
-                  .map(c => `<b>${c.dirZh}</b> ↔ ${c.neighborRoomName}`)
+                  .map((c) => `<b>${c.dirZh}</b> ↔ ${c.neighborRoomName}`)
                   .join('，')}</div>`
               : '<div class="pp-conn warn">⚠️ 当前朝向尚未与任何相邻门打通</div>';
 
           const openHtml =
             openDoors.length > 0
-              ? `<div class="pp-conn open">🚪 敞开通路：${openDoors.map(c => c.dirZh).join('、')}（通向未探索空间）</div>`
+              ? `<div class="pp-conn open">🚪 敞开通路：${openDoors.map((c) => c.dirZh).join('、')}（通向未探索空间）</div>`
               : '';
 
           const blockedHtml =
             blockedDoors.length > 0
-              ? `<div class="pp-conn blocked">⛔ 贴墙截断：${blockedDoors.map(c => c.dirZh).join('、')}（直对邻室实墙）</div>`
+              ? `<div class="pp-conn blocked">⛔ 贴墙截断：${blockedDoors.map((c) => c.dirZh).join('、')}（直对邻室实墙）</div>`
               : '';
 
           return `
@@ -3754,7 +3889,7 @@ export class BoardGameHUD {
                   ${blockedHtml}
                 </div>
                 <div class="pp-hint">合法朝向 ${placement.rotations.length} 个（${placement.rotations
-                  .map(rotation => `${rotation * 90}°`)
+                  .map((rotation) => `${rotation * 90}°`)
                   .join(' / ')}）；点击3D铜环或按钮旋转，确认后落板块进入</div>
               </div>
               <button class="act primary placement-btn" data-place-rotate>
@@ -3775,7 +3910,9 @@ export class BoardGameHUD {
     // the fan cards mid-gesture and dropped their hover state. The skeleton and
     // its delegated listeners now survive; each render only patches what moved.
     if (!dock.querySelector('.dock-shell')) {
-      setHtml(dock, html`
+      setHtml(
+        dock,
+        html`
         <button class="dock-handle" data-dock-toggle aria-expanded="false">
           <span class="dh-grip"></span>
           <span class="dh-label"></span>
@@ -3808,17 +3945,18 @@ export class BoardGameHUD {
           <div class="dock-actions" data-slot="actions"></div>
         </div>
         <span class="sr-only" data-held-live aria-live="polite"></span>
-      `);
+      `,
+      );
       this.bindDockEvents(dock);
       this.bindPlayerRail();
       // The seat peek window is placed beside the pointer, so its position has to
       // be tracked globally: the board hover callback carries no coordinates.
       window.addEventListener(
         'pointermove',
-        event => {
+        (event) => {
           this.pointerAt = { x: event.clientX, y: event.clientY };
         },
-        { passive: true }
+        { passive: true },
       );
     }
 
@@ -3860,7 +3998,7 @@ export class BoardGameHUD {
                <div class="al-desc">${snapshot.mission}</div>
              </div>
            </div>`
-        : ''
+        : '',
     );
     paintSlot(slot('floors'), floorTabs);
 
@@ -3878,10 +4016,10 @@ export class BoardGameHUD {
       const mode = placement
         ? 'placement'
         : snapshot.actions.length > 0
-        ? 'fan'
-        : snapshot.gameOver
-        ? 'over'
-        : 'idle';
+          ? 'fan'
+          : snapshot.gameOver
+            ? 'over'
+            : 'idle';
 
       const onlyEndTurn =
         snapshot.actions.length === 1 && (snapshot.actions[0]?.actionType ?? '') === 'END_TURN';
@@ -3897,11 +4035,16 @@ export class BoardGameHUD {
         actionsSlot.dataset.shape = dockShape;
         actionsSlot.dataset.mode = mode;
         actionsSlot.removeAttribute('data-sig');
-        setHtml(actionsSlot, raw(mode === 'fan'
-            ? onlyEndTurn
-              ? `<div class="fan-hint" data-fan-hint><span class="fh-label">${blockedReason || '本回合已无可用动作'}</span><span class="fh-detail">点「结束回合」交给下一位</span></div><div class="dock-fan" data-fan></div>`
-              : `<div class="fan-hint" data-fan-hint><span class="fh-label">悬停查看动作</span><span class="fh-detail">点击牌面执行该动作 · 数字键直接执行</span></div><div class="dock-fan" data-fan></div>`
-            : ''));
+        setHtml(
+          actionsSlot,
+          raw(
+            mode === 'fan'
+              ? onlyEndTurn
+                ? `<div class="fan-hint" data-fan-hint><span class="fh-label">${blockedReason || '本回合已无可用动作'}</span><span class="fh-detail">点「结束回合」交给下一位</span></div><div class="dock-fan" data-fan></div>`
+                : `<div class="fan-hint" data-fan-hint><span class="fh-label">悬停查看动作</span><span class="fh-detail">点击牌面执行该动作 · 数字键直接执行</span></div><div class="dock-fan" data-fan></div>`
+              : '',
+          ),
+        );
       }
 
       if (mode === 'placement') {
@@ -3911,12 +4054,12 @@ export class BoardGameHUD {
           actionsSlot,
           `<div class="empty-hint"><span class="e-ico">🏁</span><span>对局已结束${
             snapshot.winnerLabel ? ` — 胜者：${snapshot.winnerLabel}` : ''
-          }${snapshot.winnerReason ? ` · ${snapshot.winnerReason}` : ''}</span></div>`
+          }${snapshot.winnerReason ? ` · ${snapshot.winnerReason}` : ''}</span></div>`,
         );
       } else if (mode === 'idle') {
         paintSlot(
           actionsSlot,
-          '<div class="empty-hint"><span class="e-ico">◌</span><span>暂无可执行的合法动作 — 等待其他玩家，或正在结算响应栈。</span></div>'
+          '<div class="empty-hint"><span class="e-ico">◌</span><span>暂无可执行的合法动作 — 等待其他玩家，或正在结算响应栈。</span></div>',
         );
       } else {
         // Fan mode: reconcile the cards by action id so hover survives a repaint.
@@ -3928,8 +4071,7 @@ export class BoardGameHUD {
             fan,
             snapshot.actions.map((action, index) => {
               const offset = index - mid;
-              const tone =
-                action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : '';
+              const tone = action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : '';
               return {
                 key: action.id,
                 html: `<button class="act ${tone}"
@@ -3943,9 +4085,9 @@ export class BoardGameHUD {
                   title="${action.label}">
                   <span class="act-ico">${action.icon}</span>
                   <span class="act-key">${index + 1}</span>
-                </button>`
+                </button>`,
               };
-            })
+            }),
           );
           if (changedCards > 0) {
             this.traceDock({ ev: 'cards', n: total, changed: true });
@@ -3964,7 +4106,7 @@ export class BoardGameHUD {
         n: snapshot.actions.length,
         mode: dockMode,
         open: this.dockOpen,
-        cw: actionsSlot?.clientWidth ?? 0
+        cw: actionsSlot?.clientWidth ?? 0,
       });
     }
     if (!this.dockTraceOverlay) this.mountDockTrace();
@@ -4043,7 +4185,7 @@ export class BoardGameHUD {
       hoverIndex: focusIndex,
       lockCardWidth: true,
       focusPitchRatio: 1.15,
-      contextPitchRatio: 0.1
+      contextPitchRatio: 0.1,
     });
 
     // Gaps are capped at one card width, so a short row can be narrower than the
@@ -4078,12 +4220,10 @@ export class BoardGameHUD {
         span: Math.round(span),
         fx: Number(this.fanFocusX.toFixed(2)),
         fs: this.fanFocusStrength,
-        changed: true
+        changed: true,
       });
     }
   }
-
-
 
   /**
    * Dock listeners, bound once with the skeleton.
@@ -4124,20 +4264,20 @@ export class BoardGameHUD {
   private bindPlayerRail(): void {
     const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
     if (!rail) return;
-    rail.addEventListener('click', event => {
+    rail.addEventListener('click', (event) => {
       const target = event.target as HTMLElement | null;
       const trigger = target?.closest('[data-effect-open]') as HTMLElement | null;
       const card = target?.closest('.pc[data-player-id]') as HTMLElement | null;
       const playerId = trigger?.dataset.effectOpen ?? card?.dataset.playerId;
       if (!playerId) return;
-      const player = this.lastSnapshot?.players.find(entry => entry.id === playerId);
+      const player = this.lastSnapshot?.players.find((entry) => entry.id === playerId);
       if (!player) return;
       if (player.effects && player.effects.length > 0) this.openEffectsWindow(player);
     });
 
     // Fisheye focus follows the pointer: whichever card it is over opens up and
     // the rest compress into slivers (the dock behaves the same way).
-    rail.addEventListener('mousemove', event => {
+    rail.addEventListener('mousemove', (event) => {
       const rect = rail.getBoundingClientRect();
       if (rect.height <= 0) return;
       const next = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
@@ -4174,28 +4314,30 @@ export class BoardGameHUD {
         dot ? `<i class="ps-dot" style="--dot:${dot}"></i>` : ''
       }${escHtml(label)}</span><span class="ps-v">${value}</span></div>`;
 
-    const stats = (player.stats ?? []).map(entry => row(entry.label, escHtml(entry.value))).join('');
+    const stats = (player.stats ?? []).map((entry) => row(entry.label, escHtml(entry.value))).join('');
     const pips = (player.pips ?? [])
-      .map(pip =>
+      .map((pip) =>
         row(
           pip.label,
           `${escHtml(String(pip.value))}${
             pip.modifier ? ` <em class="ps-mod">${pip.modifier > 0 ? '+' : ''}${pip.modifier}</em>` : ''
           }`,
-          pip.color
-        )
+          pip.color,
+        ),
       )
       .join('');
     const effects = (player.effects ?? [])
       .map(
-        effect => `<li class="fx-row ${effect.tone ?? 'neutral'}">
+        (effect) => `<li class="fx-row ${effect.tone ?? 'neutral'}">
           <span class="fx-name">${escHtml(effect.label)}</span>
           <span class="fx-detail">${escHtml(effect.detail ?? '')}</span>
-        </li>`
+        </li>`,
       )
       .join('');
 
-    setHtml(layer, html`
+    setHtml(
+      layer,
+      html`
       <div class="payload-backdrop"></div>
       <div class="payload-card player-sheet" style="--pc-color:${raw(player.color)}">
         <header class="ps-head">
@@ -4213,7 +4355,8 @@ export class BoardGameHUD {
           ${raw(effects ? `<ul class="ps-fx">${effects}</ul>` : '')}
         </div>
       </div>
-    `);
+    `,
+    );
     layer.style.display = 'flex';
 
     const close = (): void => {
@@ -4230,14 +4373,16 @@ export class BoardGameHUD {
 
     const rows = (player.effects ?? [])
       .map(
-        effect => `<li class="fx-row ${effect.tone ?? 'neutral'}">
+        (effect) => `<li class="fx-row ${effect.tone ?? 'neutral'}">
           <span class="fx-name">${escHtml(effect.label)}</span>
           <span class="fx-detail">${escHtml(effect.detail ?? '')}</span>
-        </li>`
+        </li>`,
       )
       .join('');
 
-    setHtml(layer, html`
+    setHtml(
+      layer,
+      html`
       <div class="payload-backdrop"></div>
       <div class="payload-card effects-window">
         <header class="rc-head">
@@ -4247,7 +4392,8 @@ export class BoardGameHUD {
         <div class="rc-title">${player.name}</div>
         <ul class="fx-list">${raw(rows || '<li class="fx-row neutral"><span class="fx-name">无</span></li>')}</ul>
       </div>
-    `);
+    `,
+    );
     layer.style.display = 'flex';
 
     const close = () => {
@@ -4261,7 +4407,7 @@ export class BoardGameHUD {
   private bindDockEvents(dock: HTMLElement): void {
     this.startCooldownTicker(dock);
     // Wheel over the dock cycles the held hand card, same as wheel over the slot.
-    dock.addEventListener('wheel', event => this.handleHandWheel(event), { passive: false });
+    dock.addEventListener('wheel', (event) => this.handleHandWheel(event), { passive: false });
     const REST_HINT =
       '<span class="fh-label">悬停查看动作</span><span class="fh-detail">点击牌面执行该动作 · 数字键直接执行</span>';
 
@@ -4307,7 +4453,7 @@ export class BoardGameHUD {
       this.relayoutDock();
     });
     this.dockResizeObserver.observe(dock);
-    dock.addEventListener('transitionend', event => {
+    dock.addEventListener('transitionend', (event) => {
       if (event.target !== dock) return;
       if (event.propertyName !== 'max-height' && event.propertyName !== 'height') return;
       this.relayoutDock();
@@ -4315,7 +4461,7 @@ export class BoardGameHUD {
     });
     const dockHeld = dock.querySelector('[data-dock-held]') as HTMLElement | null;
     if (dockHeld) this.bindHandSlot(dockHeld);
-    dock.addEventListener('click', event => {
+    dock.addEventListener('click', (event) => {
       // 冷却角标每 250ms 刷一次：到点自动摘掉 disabled，不需要一次状态同步。
       const target = event.target as HTMLElement | null;
       if (!target) return;
@@ -4357,7 +4503,7 @@ export class BoardGameHUD {
           event.stopPropagation();
           return;
         }
-        const action = this.latest?.actions.find(candidate => candidate.id === id);
+        const action = this.latest?.actions.find((candidate) => candidate.id === id);
         if (action) this.openActionDetail(action);
       }
     });
@@ -4368,7 +4514,7 @@ export class BoardGameHUD {
       if (!el) return;
       setHtml(
         el,
-        html`<span class="fh-label">${card.dataset.fanLabel ?? ''}</span><span class="fh-detail">${card.dataset.fanHint ?? ''}</span>`
+        html`<span class="fh-label">${card.dataset.fanLabel ?? ''}</span><span class="fh-detail">${card.dataset.fanHint ?? ''}</span>`,
       );
       el.classList.add('active');
     };
@@ -4380,19 +4526,19 @@ export class BoardGameHUD {
     };
     // relatedTarget checks keep the hint from flickering as the pointer crosses
     // the card's inner spans.
-    dock.addEventListener('mouseover', event => {
+    dock.addEventListener('mouseover', (event) => {
       const card = (event.target as HTMLElement | null)?.closest('.dock-fan .act') as HTMLElement | null;
       if (!card) return;
       if ((event.relatedTarget as HTMLElement | null)?.closest?.('.dock-fan .act') === card) return;
       showHint(card);
     });
-    dock.addEventListener('mouseout', event => {
+    dock.addEventListener('mouseout', (event) => {
       const card = (event.target as HTMLElement | null)?.closest('.dock-fan .act') as HTMLElement | null;
       if (!card) return;
       if ((event.relatedTarget as HTMLElement | null)?.closest?.('.dock-fan .act') === card) return;
       hideHint();
     });
-    dock.addEventListener('focusin', event => {
+    dock.addEventListener('focusin', (event) => {
       const card = (event.target as HTMLElement | null)?.closest('.dock-fan .act') as HTMLElement | null;
       if (card) showHint(card);
     });
@@ -4410,7 +4556,9 @@ export class BoardGameHUD {
     const needsInput = !!(action.fields?.length || action.selection);
     const toneClass = action.tone === 'primary' ? 'primary' : action.tone === 'danger' ? 'danger' : '';
 
-    setHtml(layer, html`
+    setHtml(
+      layer,
+      html`
       <div class="payload-backdrop"></div>
       <div class="payload-card action-detail ${raw(toneClass)}">
         <header class="pf-head">
@@ -4422,19 +4570,24 @@ export class BoardGameHUD {
         </header>
         <div class="pf-body">
           <div class="ad-row"><span class="ad-k">动作</span><span class="ad-v">${raw(action.actionType ?? action.id)}</span></div>
-          ${raw(action.highlightIds?.length
+          ${raw(
+            action.highlightIds?.length
               ? `<div class="ad-row"><span class="ad-k">可选目标</span><span class="ad-v">${action.highlightIds.length} 处</span></div>`
-              : '')}
-          ${raw(needsInput
+              : '',
+          )}
+          ${raw(
+            needsInput
               ? `<div class="ad-note">该动作需要补充参数，执行时会打开选择面板。</div>`
-              : `<div class="ad-note">该动作无需额外参数，点击执行立即生效。</div>`)}
+              : `<div class="ad-note">该动作无需额外参数，点击执行立即生效。</div>`,
+          )}
         </div>
         <footer class="pf-foot">
           <button type="button" class="pf-btn" id="ad-close">关闭</button>
           <button type="button" class="pf-btn primary" id="ad-run">执行</button>
         </footer>
       </div>
-    `);
+    `,
+    );
     layer.style.display = 'flex';
 
     const close = () => {
@@ -4452,19 +4605,24 @@ export class BoardGameHUD {
 
   /** Execute an action exactly as the dock/keyboard paths do. */
   private runAction(action: UiAction): void {
-    if (action.fields?.length || action.selection) {
-      this.openPayloadForm(action);
-      return;
+    switch (executionRoute(deriveActionCard(action))) {
+      case 'payload':
+        this.openPayloadForm(action);
+        return;
+      case 'placement':
+        if (action.highlightIds) this.ports.highlightBoard(action.highlightIds);
+        else this.ports.highlightBoard(null);
+        this.armPlacement(action);
+        return;
+      default:
+        if (action.highlightIds) this.ports.highlightBoard(action.highlightIds);
+        else this.ports.highlightBoard(null);
+        this.performAction(action.id);
     }
+  }
 
-    if (action.highlightIds) this.ports.highlightBoard(action.highlightIds);
-    else this.ports.highlightBoard(null);
-
-    if (action.placementEntityId) {
-      const result = this.presenter.armPlacement(action.id);
-      if (!result.ok) this.pushToast('⚠️', result.error ?? '无法进入放置模式');
-      return;
-    }
-    this.performAction(action.id);
+  private armPlacement(action: UiAction): void {
+    const result = this.presenter.armPlacement(action.id);
+    if (!result.ok) this.pushToast('⚠️', result.error ?? '无法进入放置模式');
   }
 }
