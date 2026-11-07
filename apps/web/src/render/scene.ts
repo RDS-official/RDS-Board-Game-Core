@@ -881,9 +881,14 @@ export class BoardGameScene {
 
     // 6. Raycaster & Animation Queue
     this.raycaster = new BoardRaycaster(this.camera, this.renderer.domElement);
-    this.raycaster.onEntityPress(() => {
+    this.raycaster.onEntityPress(data => {
       // Lock the camera before OrbitControls processes the first drag pixels.
-      this.controls.enabled = false;
+      // Draggable props already did this; a read-only hand needs it too, or
+      // dragging the hand rotates the whole view.
+      const meta = data.metadata as { draggable?: boolean; orbitLock?: boolean } | undefined;
+      const draggable =
+        (data.type === 'ENTITY' || data.type === 'ZONE') && meta?.draggable !== false;
+      if (draggable || meta?.orbitLock === true) this.controls.enabled = false;
     });
     this.raycaster.onClick((data) => {
       this.controls.enabled = true;
@@ -4659,8 +4664,8 @@ export class BoardGameScene {
         type: 'ENTITY',
         id: entity.id,
         // A hand is a read-only HUD surface: still clickable for details, but
-        // never a drag prop (the raycaster checks this flag before arming a drag).
-        metadata: { ...face, draggable: false }
+        // never a drag prop, and a press on it must not orbit the camera.
+        metadata: { ...face, draggable: false, orbitLock: true }
       });
       ids.push(entity.id);
     }
