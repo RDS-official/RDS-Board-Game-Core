@@ -6,6 +6,7 @@ import { OverlayArbiter, OverlayEntry, OverlayState } from './overlay';
 import { deriveActionCard, executionRoute, isSimpleCard } from './actionCards';
 import { layoutActionHand } from './actionHand';
 import { actionHandHtml } from './actionHandHtml';
+import { RadialPickerOverlay } from './radialPickerOverlay';
 import { handLayout } from './handLayout';
 import { diagnostics } from '../diagnostics/install';
 import { hash, reconcileKeyed, reconcileKeyedPreservingScroll } from './dom/keyed';
@@ -221,6 +222,8 @@ export class BoardGameHUD {
   /** Shadow unified action hand (docs/INTERACTION-REDESIGN.md). Off by default;
    *  flip with `?unified-hand` until P7 removes the legacy dock. */
   private actionHandEnabled = false;
+  /** Radial target chooser, created lazily while the shadow hand is enabled. */
+  private radialPicker: RadialPickerOverlay | null = null;
   private handPress: HandPressState | null = null;
   private handSuppressClick = false;
   private handWheelDelta = 0;
@@ -2136,6 +2139,7 @@ export class BoardGameHUD {
     this.applyShellLayout();
     this.syncShellAria();
     this.syncShellInert();
+    this.bindActionHandEvents();
     this.notifyViewportInsets();
     window.addEventListener('resize', () => this.applyShellLayout());
     this.shellMedia = window.matchMedia('(max-width: 767px)');
@@ -3757,6 +3761,73 @@ export class BoardGameHUD {
 
   private suppressHandClick(): void {
     this.handSuppressClick = true;
+  }
+
+  /**
+   * Shadow hand gestures (P5b). Only active when `?unified-hand` is on, so the
+   * legacy dock/hand-slot remain the only interactive path in normal builds.
+   */
+  private bindActionHandEvents(): void {
+    const hand = this.container.querySelector('#action-hand') as HTMLElement | null;
+    if (!hand) return;
+    hand.addEventListener('click', (event) => {
+      if (!this.actionHandEnabled) return;
+      const button = (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-action-id]');
+      const id = button?.dataset.actionId;
+      if (!button || !id) return;
+      const action = this.latest?.actions.find((candidate) => candidate.id === id);
+      if (!action) return;
+      const card = deriveActionCard(action);
+      if (card.targetMode === 'selection' && action.selection) {
+        // Multi-target stays in the payload form until the wheel grows a
+        // multi-select mode; single-target is the common case.
+        if ((action.selection.spec.max ?? 1) > 1) {
+          this.openPayloadForm(action);
+          return;
+        }
+        this.openRadialPicker(action, button);
+        return;
+      }
+      if (card.targetMode === 'none' || card.targetMode === 'highlight') {
+        this.runAction(action);
+        return;
+      }
+      this.openActionDetail(action);
+    });
+  }
+
+  /** Open the radial target chooser anchored on the card that was played. */
+  private openRadialPicker(action: UiAction, anchorEl: HTMLElement): void {
+    const candidates = (action.selection?.candidates ?? []).map((candidate) => ({
+      id: candidate.id,
+      label: candidate.label,
+    }));
+    if (candidates.length === 0) {
+      this.openPayloadForm(action);
+      return;
+    }
+    const rect = anchorEl.getBoundingClientRect();
+    const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    this.radialPicker ??= new RadialPickerOverlay();
+    this.radialPicker.open({
+      candidates,
+      anchor: {
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2 - (coarse ? 80 : 0),
+      },
+      radius: Math.max(
+        140,
+        Math.min(260, 90 + candidates.length * 10, window.innerWidth * 0.42, window.innerHeight * 0.42),
+      ),
+      seed: `${action.id}:${candidates.map((candidate) => candidate.id).join(',')}`,
+      title: action.label,
+      onPick: (candidate) => {
+        const result = this.performAction(action.id, undefined, [candidate.id]);
+        if (!result.ok) this.pushToast('⚠️', result.error ?? '动作被拒绝');
+      },
+      onCenter: () => this.openPayloadForm(action),
+      onCancel: () => {},
+    });
   }
 
   /**
