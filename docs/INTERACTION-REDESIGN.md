@@ -318,9 +318,16 @@ drag(numeric card) → 卡片飞向桌面（视觉"打出"）
 | P5b/P6 | 影子手牌接线；数值卡"先甩后数"；Escape 豁免输入框 | `pnpm probe:unified-hand` / `probe:unified-hand-numeric` |
 | P7 | `data-hand=unified`：桌面隐藏旧扇形/手持位，dock 只留告警/状态；放置模式例外 | 同上（26 项） |
 | P8 | `<1200px` 底部横滑带，位于 dock 手柄之上 | 同上（32 项，含 390 档） |
+| P9 | `ui/cardHand/`：弧形布局 + hover 让位 + 跟手拖拽 + 弹簧回弹 + 出牌区三态 | `pnpm probe:card-hand`（52 项，纯函数 + 浏览器） |
 
 启用方式：`…?unified-hand`（叠加在现有 `?game=` 参数上）。
 
 回归口径：`pnpm verify:all`；专项 `pnpm probe:unified-hand`、`pnpm probe:unified-hand-numeric`。
 
 **尚未做**（后续 PR）：默认开启并删除旧 dock 代码；3D 手牌拖拽移除；径向选择器的多目标环；非法分区"拖动时预置灰"。
+
+**P9（已实现）**：手牌的运动与手势从"一次性写死的内联 transform"改成 `ui/cardHand`
+（`spring.ts` / `easing.ts` / `layout.ts` / `polygon.ts` / `cardHand.ts`）。三条不变量写在
+`cardHand.ts` 头注释里：单写者（transform 只由 rAF 写，CSS 不再给 transform 加过渡）、帧内零布局
+读取（容器矩形按 250ms 缓存）、可中断（新 `pointerdown` 从当前渲染位接管）。
+

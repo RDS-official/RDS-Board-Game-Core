@@ -4,7 +4,7 @@
 >
 > 性质：**只做审查与调研，不改代码。**
 > 审查基线：`main`（2026-11），代码引用以 `文件:行号` 标注，行号可能随重构漂移，符号名为准。
-> 最近核对：2026-11-07。
+> 最近核对：2026-11-08（实现状态见 §10）。
 
 ---
 
@@ -256,7 +256,53 @@
 
 ---
 
-## 9. 参考链接
+## 9. 实现状态（2026-11-08 核对）
+
+> 本节的每一条都对应代码与一条可复跑的探针；"部分"表示主路径已解、边界仍留着。
+
+| 差距 | 状态 | 交付物 | 怎么验 |
+| --- | --- | --- | --- |
+| G1 点击语义不统一 | **已解**：统一手牌三手势分工——单击=看详情/执行、拖出=打、Esc 取消 | `apps/web/src/ui/cardHand/cardHand.ts`、`hud.ts` 的 `activateHandCard` / `playHandCard` | `pnpm probe:unified-hand`、`pnpm probe:card-hand` |
+| G2 破坏性动作无确认 | **部分**：可直接执行的动作仍需拖出/单击才发；需要目标或数量的动作一律先进选择器或表单，不 dispatch | `cardHand.ts`、`hud.ts`（`playHandCard` 返回 false 即回弹） | `pnpm probe:unified-hand-numeric` |
+| G3 拖放不可取消 | **已解**：松手在区外、`pointercancel`、窗口失焦都走弹簧回弹，且把拖拽速度灌进弹簧 | `cardHand.ts`（`releaseBack`） | `pnpm probe:card-hand`（"non-playable card springs home"） |
+| G4 快捷键不可发现 | **已解**：`ui/keymap.ts` 单一键位表 → `?` 清单 + 首屏一次提示 + ☰ 菜单 ⌨ 入口 | `ui/keymap.ts`、`ui/shortcutHelp.ts`、`hud.ts#openShortcutHelp` | `pnpm probe:keymap`、`pnpm probe:shortcut-help` |
+| G5 一手势多义 | **已解**（统一手牌内）：手势按"看 / 打 / 取消"分离，不再靠时长猜意图 | `cardHand.ts` | `pnpm probe:card-hand`（拖拽跟手 1:1、回弹 2px 内归位） |
+| G6 目标选择偏隐式 | **部分**：拖出即弹径向选择器（锚点=松手点）；非法分区预置灰仍未做 | `radialPicker.ts`、`hud.ts#openRadialPicker` | `pnpm probe:unified-hand` |
+| G7 移动端缺位 | **部分**：<1200px 底部横滑带 + 触控手势（`touch-action:none`、大 slop/外扩容差）；底部抽屉仍未做 | `layout-shell.css`、`cardHand.ts` | `pnpm probe:unified-hand`（390 档） |
+| G8 手牌排序/分组 | 未做 | — | — |
+| G9 右键上下文菜单 | 未做（拖拽中右键只用于取消） | — | — |
+| G10 撤销语义单一 | 未做 | — | — |
+| G11 错误只在 toast | **部分**：出牌区三态高亮（valid/invalid）+ 回弹，失败仍靠 toast | `cardHand.ts`（`data-drop`）、`layout-shell.css` | `pnpm probe:card-hand` |
+| G12 键盘边界 | **已解**：`isEditableTarget` 覆盖 input/textarea/select/contenteditable，Esc 例外 | `ui/keymap.ts` | `pnpm probe:keymap`、`pnpm probe:shortcut-help` |
+| G13 首次引导 | **部分**：快捷键首屏提示一次（`rds.shortcuts.hinted`）；无分步 coach mark | `hud.ts#maybeHintShortcuts` | — |
+
+### 9.1 对应原路线（§7）
+
+| 原 PR | 状态 |
+| --- | --- |
+| PR-1 点击语义统一 | 已解（统一手牌 + `CardHand` 手势分离） |
+| PR-2 破坏性动作确认 | 部分（选择/表单前置；尚无"限时确认条"） |
+| PR-3 拖放可取消 | 已解 |
+| PR-4 快捷键帮助层 | 已解 |
+| PR-5 手持/手势再设计 | 部分（旧 `#hand-slot` 仍保留，统一模式下桌面隐藏） |
+| PR-6 目标选择引导 | 部分（径向选择器已上线；非法项预置灰未做） |
+| PR-7 可发现性与打磨 | 未做（G8/G9/G10/G13 的剩余部分） |
+
+### 9.2 手感参数（`cardHand.ts` 的默认值，调参即调手感）
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `hoverMs` | 170 | hover 过渡时长（150–200 最跟手） |
+| `hoverLift` / `hoverScale` | 16px / 1.1 | 上浮与放大 |
+| `neighbourPush` | 12px | 邻居让位幅度，改弹簧目标而非位置 |
+| `spring` | 240 / 26 | 阻尼比 ≈0.84：有回弹但不过冲 |
+| `returnSpring` | 210 / 23 | 回弹专用；松手速度灌进速度项 |
+| `slopPx` | 6 | 起拖阈值（触屏建议 8–10） |
+| `tiltPerPx` / `tiltMaxDeg` | 0.35 / 9 | 甩动倾斜 |
+| `zonePadding` / `zoneExitPadding` | 14 / 4 | 出牌区滞回，边界不闪 |
+| `flyMs` / `flyScale` | 260ms / 0.8 | 打出飞桌 |
+
+## 10. 参考链接
 
 - [BGA Studio Guidelines（UX/UI）](https://en.doc.boardgamearena.com/BGA_Studio_Guidelines)　官方 PDF：[Guidelines_UX.pdf](https://doc.studio.boardgamearena.com/assets/framework-documentation/guidelines/Guidelines_UX.pdf)
 - [Hand Overhaul · Dustin's Designer Den](https://dustinsdesignerden.com/news/hand-overhaul)（手牌拖拽/重排/缩放/隐私幽灵）
