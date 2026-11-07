@@ -4,6 +4,8 @@ import { cardArtSvg } from './cardArt';
 import { detailTone } from './detailView';
 import { OverlayArbiter, OverlayEntry, OverlayState } from './overlay';
 import { deriveActionCard, executionRoute, isSimpleCard } from './actionCards';
+import { layoutActionHand } from './actionHand';
+import { actionHandHtml } from './actionHandHtml';
 import { handLayout } from './handLayout';
 import { diagnostics } from '../diagnostics/install';
 import { hash, reconcileKeyed, reconcileKeyedPreservingScroll } from './dom/keyed';
@@ -216,6 +218,9 @@ export class BoardGameHUD {
   /** Action currently held by the hand slot, mirrored on its fan card. */
   private heldActionId: string | null = null;
   private heldIndex = 0;
+  /** Shadow unified action hand (docs/INTERACTION-REDESIGN.md). Off by default;
+   *  flip with `?unified-hand` until P7 removes the legacy dock. */
+  private actionHandEnabled = false;
   private handPress: HandPressState | null = null;
   private handSuppressClick = false;
   private handWheelDelta = 0;
@@ -2030,6 +2035,8 @@ export class BoardGameHUD {
 
   private renderSkeleton(): void {
     this.container.classList.add('app-shell');
+    // Shadow unified hand is opt-in until P7 swaps the legacy dock out.
+    this.actionHandEnabled = new URLSearchParams(window.location.search).has('unified-hand');
     setHtml(
       this.container,
       html`
@@ -2116,6 +2123,8 @@ export class BoardGameHUD {
         </svg>
         <div class="hs-stage"></div>
       </aside>
+      <!-- Unified action hand: shadow render, off unless ?unified-hand. -->
+      <aside class="action-hand" id="action-hand" data-enabled="0" aria-hidden="true" aria-label="动作手牌"></aside>
       <div class="announcement-banner" id="announce" style="display:none"></div>
       <div class="payload-layer" id="payload-layer" style="display:none"></div>
       <div class="shell-scrim" data-shell-scrim aria-hidden="true"></div>
@@ -2335,6 +2344,7 @@ export class BoardGameHUD {
     this.reconcileHeldAction(snapshot.actions);
     this.renderDock(snapshot);
     this.renderHandSlot(snapshot);
+    this.renderActionHand(snapshot);
     this.maybeRevealNode(snapshot);
     this.maybeShowMoment();
   }
@@ -3747,6 +3757,38 @@ export class BoardGameHUD {
 
   private suppressHandClick(): void {
     this.handSuppressClick = true;
+  }
+
+  /**
+   * Shadow unified action hand (P3). Renders the fanned cards from the same
+   * `snapshot.actions` the dock uses, but takes over no interaction: the legacy
+   * hand slot and dock keep every gesture until P7. Enabled only via
+   * `?unified-hand`, so the default build stays byte-for-byte unchanged.
+   */
+  private renderActionHand(snapshot: GameSnapshot): void {
+    const el = this.container.querySelector('#action-hand') as HTMLElement | null;
+    if (!el) return;
+    if (!this.actionHandEnabled) {
+      if (el.getAttribute('data-enabled') !== '0') {
+        el.setAttribute('data-enabled', '0');
+        el.setAttribute('aria-hidden', 'true');
+        el.replaceChildren();
+      }
+      return;
+    }
+    const width = el.clientWidth || 900;
+    const count = snapshot.actions.length;
+    const focusX = count > 0 ? (this.heldIndex + 0.5) / count : null;
+    const view = layoutActionHand(snapshot.actions, {
+      containerWidth: width,
+      cardWidth: 108,
+      focusX,
+      focusStrength: 1,
+      maxTiltDeg: 9,
+    });
+    setHtml(el, raw(actionHandHtml(view)));
+    el.setAttribute('data-enabled', '1');
+    el.setAttribute('aria-hidden', 'false');
   }
 
   private renderDock(snapshot: GameSnapshot): void {

@@ -2047,3 +2047,87 @@
   transform: translateY(0);
   box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.5);
 }
+
+/* ---- Unified action hand (shadow render, enabled by ?unified-hand) -----
+   Off by default so the legacy dock/hand-slot keep every gesture until P7.
+   When enabled it fans cards from the same snapshot.actions via inline
+   --x/--s/--r/--z/--lift custom properties set by actionHandHtml. */
+.app-shell > .action-hand {
+  display: none;
+}
+.app-shell > .action-hand[data-enabled='1'] {
+  display: block;
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--shell-edge, 16px) + 10px);
+  transform: translateX(-50%);
+  width: min(900px, 92vw);
+  height: 190px;
+  z-index: 27;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+}
+.action-hand .ah-card {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 108px;
+  height: 150px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform-origin: 50% 100%;
+  transform: translateX(calc(-50% + var(--x))) rotate(var(--r)) scale(var(--s))
+    translateY(calc(var(--lift) * -14px));
+  z-index: calc(var(--z) + 1);
+  cursor: pointer;
+  transition: transform 120ms ease-out;
+}
+.action-hand .ah-face {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 8px 6px;
+  border-radius: 12px;
+  border: 1px solid rgba(217, 180, 91, 0.5);
+  background: linear-gradient(160deg, rgba(38, 32, 24, 0.96), rgba(22, 18, 14, 0.98));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  color: #f3e6c8;
+  overflow: hidden;
+}
+.action-hand .ah-ico {
+  font-size: 30px;
+  line-height: 1;
+}
+.action-hand .ah-label {
+  text-align: center;
+  line-height: 1.15;
+  max-height: 2.6em;
+  overflow: hidden;
+}
+.action-hand .ah-badge {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 12px;
+  color: #d9b45b;
+}
+.action-hand .ah-cool {
+  position: absolute;
+  bottom: 4px;
+  right: 6px;
+  font-size: 11px;
+  color: #ffb27a;
+}
+.action-hand .ah-card:focus-visible {
+  outline: 2px solid #d9b45b;
+  outline-offset: 2px;
+}
