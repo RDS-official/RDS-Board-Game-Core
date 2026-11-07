@@ -9,7 +9,7 @@
  */
 
 import { buildWheel } from '../apps/web/src/ui/radialPicker.ts';
-import { radialPickerSvg } from '../apps/web/src/ui/radialPickerHtml.ts';
+import { radialPickerListHtml, radialPickerSvg } from '../apps/web/src/ui/radialPickerHtml.ts';
 
 const failures = [];
 function check(ok, msg) {
@@ -63,6 +63,24 @@ eq(radialPickerSvg(buildWheel([], { radius: 100 })), '', 'empty wheel emits noth
 
 /* labels can be turned off */
 eq(count(radialPickerSvg(wheel, { showLabels: false }), /class="rp-label"/g), 0, 'labels off');
+
+/* ---- accessible linear list ---------------------------------------- */
+const list = radialPickerListHtml(wheel, 1, false);
+eq(count(list, /role="option"/g), CANDS.length + 1, 'one option per candidate + centre');
+eq(count(list, /aria-selected="true"/g), 1, 'exactly one selected option');
+contains(list, 'data-seg-index="1" aria-selected="true"', 'active segment marked selected');
+contains(list, 'id="rp-opt-center"', 'centre option present');
+eq(
+  count(radialPickerListHtml(wheel, null, true), /aria-selected="true"/g),
+  1,
+  'centre selectable when active',
+);
+eq(radialPickerListHtml(buildWheel([], { radius: 100 }), null, false), '', 'empty list emits nothing');
+/* centre caption escaping */
+check(
+  !radialPickerListHtml(wheel, null, true, { centerLabel: '<i>x</i>' }).includes('<i>x</i>'),
+  'centre caption escaped',
+);
 
 /* ---- report -------------------------------------------------------- */
 if (failures.length > 0) {

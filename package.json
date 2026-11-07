@@ -36,6 +36,7 @@
     "probe:action-hand-html": "node scripts/probe-action-hand-html.mjs",
     "probe:radial": "node scripts/probe-radial.mjs",
     "probe:radial-html": "node scripts/probe-radial-html.mjs",
+    "probe:radial-model": "node scripts/probe-radial-model.mjs",
     "probe:board": "node scripts/probe-board-facing.mjs",
     "probe:hand:view": "node scripts/probe-hand-visibility.mjs",
     "probe:tokens": "node scripts/probe-design-tokens.mjs",
