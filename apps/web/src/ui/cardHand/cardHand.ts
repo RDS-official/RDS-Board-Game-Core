@@ -56,8 +56,14 @@ export interface CardHandConfig {
   tiltPerPx?: number;
   /** 倾斜角上限（deg）。 */
   tiltMaxDeg?: number;
-  /** 拖拽时整体放大倍数。 */
+  /** 拖拽时整体放大倍数；`dragScaleFromViewport` 为真时按视口高度重算（默认开）。 */
   dragScale?: number;
+  /** 拖起来的牌缩到"屏幕高度的 1/3"，保证看得清（默认开）。 */
+  dragScaleFromViewport?: boolean;
+  /** 视口缩放的封顶：避免 4K 屏上一张牌占满屏。 */
+  dragMaxScale?: number;
+  /** 飞场落点（视口坐标）；未提供时退化为出牌区质心。 */
+  flyTarget?: () => Point | null;
   /** 飞场时长（ms）。 */
   flyMs?: number;
   /** 飞场终点缩放。 */
@@ -104,6 +110,7 @@ const DEFAULTS = {
   tiltPerPx: 0.35,
   tiltMaxDeg: 9,
   dragScale: 1.06,
+  dragMaxScale: 2.8,
   flyMs: 260,
   flyScale: 0.8,
   zonePadding: 14,
@@ -132,6 +139,8 @@ export class CardHand {
     lastTime: number;
     velX: number;
     moved: boolean;
+    /** 本次拖拽的放大倍数（视口 1/3 高度，起拖时测一次）。 */
+    scaleFactor: number;
   } | null = null;
   private hovered: CardView | null = null;
   private inZone = false;
@@ -221,6 +230,11 @@ export class CardHand {
           existing.el.replaceWith(el);
           existing.el = el;
           existing.signature = item.signature;
+          // 新节点没有内联样式：清掉缓存，下一帧把 transform / z-index 重新写一遍，
+          // 否则重建过的牌会既没有层级也没有位置（表现为"被盖住"或跳一下）。
+          existing.lastZ = 0;
+          this.relayout();
+          this.writeCard(existing, performance.now());
         }
       }
     }
@@ -357,7 +371,7 @@ export class CardHand {
     const hoverScale = 1 + ((this.config.hoverScale ?? DEFAULTS.hoverScale) - 1) * hover;
     const tilt = dragged ? view.tilt : 0;
     const rotation = view.rot.value * (1 - hover) + tilt;
-    const baseScale = view.scale.value * hoverScale * (dragged ? (this.config.dragScale ?? DEFAULTS.dragScale) : 1);
+    const baseScale = view.scale.value * hoverScale * (dragged ? (this.drag?.scaleFactor ?? 1) : 1);
 
     let x = view.x.value + (dragged ? (this.drag?.dx ?? 0) : 0);
     let y = view.y.value + lift + (dragged ? (this.drag?.dy ?? 0) : 0);
@@ -379,7 +393,10 @@ export class CardHand {
       `translate3d(calc(-50% + ${x.toFixed(2)}px), ${y.toFixed(2)}px, 0) ` +
       `rotate(${rotation.toFixed(2)}deg) scale(${scale.toFixed(3)})`;
     view.el.style.opacity = opacity >= 1 ? '' : opacity.toFixed(3);
-    const z = view.fly || dragged ? 900 : view.slot.z;
+    // 层级：飞场 > 拖拽 > 悬停 > 布局顺序。
+    // 悬停必须置顶：放大后的牌比邻居高，若沿用布局 z 会被右边的邻居盖住一半。
+    const raised = view.hoverTarget > 0 || view.hover > 0.01;
+    const z = view.fly ? 3000 : dragged ? 2500 : raised ? 2000 : view.slot.z;
     if (view.lastZ !== z) {
       view.lastZ = z;
       view.el.style.zIndex = String(z);
@@ -430,12 +447,29 @@ export class CardHand {
       lastX: event.clientX,
       lastTime: event.timeStamp,
       velX: 0,
-      moved: false
+      moved: false,
+      // 一次布局读取，换整段拖拽的"看得清"：牌高约占屏幕 1/3。
+      scaleFactor: this.dragScaleFor(view)
     };
     this.setState('armed');
     this.setHover(null);
     this.start();
   };
+
+  /**
+   * 拖起来的牌的放大倍数。
+   *
+   * 手感与可读性是一对矛盾：小牌方便排布，但拖起来看就需要"举到眼前"。所以拖拽期间
+   * 单独按视口高度算——目标牌高 ≈ 视口 1/3，封顶 `dragMaxScale`，下限 1（只会放大）。
+   */
+  private dragScaleFor(view: CardView): number {
+    if (this.config.dragScaleFromViewport === false) return this.config.dragScale ?? DEFAULTS.dragScale;
+    const height = view.el.offsetHeight || 0;
+    if (height <= 0) return this.config.dragScale ?? DEFAULTS.dragScale;
+    const desired = (window.innerHeight / 3) / height;
+    const cap = this.config.dragMaxScale ?? DEFAULTS.dragMaxScale;
+    return Math.max(1, Math.min(cap, desired));
+  }
 
   private onPointerMove = (event: PointerEvent): void => {
     if (!this.drag || event.pointerId !== this.drag.pointerId) {
@@ -636,7 +670,7 @@ export class CardHand {
 
   private flyOut(view: CardView, at: Point): void {
     const zone = this.zonePoints();
-    const target = zone ? polygonCentroid(zone) : at;
+    const target = this.config.flyTarget?.() ?? (zone ? polygonCentroid(zone) : at);
     this.setState('flying');
     view.fly = {
       start: performance.now(),

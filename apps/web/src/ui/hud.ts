@@ -255,6 +255,8 @@ export class BoardGameHUD {
   private readonly handArt = new Map<string, string>();
   /** 出牌区（桌面矩形）的缓存：指针移动时不能每次都读布局。 */
   private handZone = { at: 0, points: null as Point[] | null };
+  /** 已经回响过的最新一条历史（"打出的牌落在桌上"的幂等标记）。 */
+  private lastEchoId = '';
   private handPress: HandPressState | null = null;
   private handSuppressClick = false;
   private handWheelDelta = 0;
@@ -3771,6 +3773,12 @@ export class BoardGameHUD {
    * 需要目标的开径向选择器、可直接执行的立即派发、数值卡先甩后填、其余看详情。
    */
   private activateHandCard(id: string): void {
+    const display = this.displayEntity(id);
+    if (display) {
+      // 持有牌没有动作可执行：点击=看档案（inspect-first，不改状态）。
+      this.presenter.pickTarget({ kind: 'entity', id: display.entityId, metadata: { intent: 'inspect' } });
+      return;
+    }
     const action = this.latest?.actions.find(candidate => candidate.id === id);
     if (!action) return;
     if (action.cooldownMs && action.cooldownMs > 0) {
@@ -3832,7 +3840,45 @@ export class BoardGameHUD {
       return false;
     }
     this.runAction(action);
+    this.showTableEcho(action.label, '你');
     return true;
+  }
+
+  /**
+   * 出牌回响：一张牌"落到桌上"的可见结果。
+   *
+   * 为什么要它：动作卡（过牌/跟注/结束回合）在 3D 桌面上没有实体，只靠手牌消失来
+   * 表示"打出去了"，远端的玩家完全看不出发生了什么。回响把"谁打了什么"画在桌面
+   * 中央并停留一会儿；同一个渲染函数既服务本地出牌，也服务远端历史（见
+   * `renderTableEcho`），所以两边看到的是同一件事。
+   */
+  private showTableEcho(title: string, actor: string): void {
+    const host = this.container;
+    const echo = document.createElement('div');
+    echo.className = 'hand-play-echo';
+    const anchor = this.tableAnchor();
+    echo.style.setProperty('--echo-x', `${Math.round(anchor.x)}px`);
+    echo.style.setProperty('--echo-y', `${Math.round(anchor.y)}px`);
+    setHtml(echo, html`<span class="hpe-actor">${actor}</span><span class="hpe-title">${title}</span>`);
+    host.appendChild(echo);
+    window.setTimeout(() => echo.remove(), 2100);
+  }
+
+  /** 远端 / 引擎产生的出牌与掷骰：历史变了就回响一次（幂等按 id）。 */
+  private renderTableEcho(snapshot: GameSnapshot): void {
+    const entry = snapshot.history?.[0];
+    if (!entry || entry.id === this.lastEchoId) return;
+    this.lastEchoId = entry.id;
+    if (entry.kind !== 'card') return;
+    this.showTableEcho(entry.title, entry.actorName ?? '');
+  }
+
+  /** 桌面上"打出去"的落点（视口坐标）：手牌条上方、屏幕横向居中。 */
+  private tableAnchor(): Point {
+    const hand = this.container.querySelector('#action-hand') as HTMLElement | null;
+    const rect = hand?.getBoundingClientRect();
+    const bottom = rect && rect.top > 0 ? rect.top : window.innerHeight * 0.78;
+    return { x: window.innerWidth / 2, y: Math.max(120, bottom - window.innerHeight * 0.26) };
   }
 
   /** 手牌条的物理层（懒创建，只在 `?unified-hand` 下存在）。 */
@@ -3841,7 +3887,8 @@ export class BoardGameHUD {
       createCard: id => this.buildHandCard(id),
       playZone: () => this.handPlayZone(el),
       onActivate: id => this.activateHandCard(id),
-      onDrop: (id, at) => this.playHandCard(id, at)
+      onDrop: (id, at) => this.playHandCard(id, at),
+      flyTarget: () => this.tableAnchor()
     });
     return this.actionHand;
   }
@@ -3873,7 +3920,45 @@ export class BoardGameHUD {
    * 一张动作卡的 DOM。结构只在"签名变了"时重建（见 `handCardSignature`），
    * 之后位置全部由 `CardHand` 的 rAF 写 transform，这里不再参与布局。
    */
+  /** `display:` 前缀 = 只展示、不出牌的持有牌（底牌/道具）。 */
+  private displayEntity(id: string): { entityId: string; title: string } | null {
+    if (!id.startsWith('display:')) return null;
+    const entityId = id.slice('display:'.length);
+    const entity = this.latest?.board.entities[entityId];
+    const title = String(entity?.components?.cardFace?.title ?? '');
+    return { entityId, title };
+  }
+
   private buildHandCard(id: string): HTMLElement | null {
+    const display = this.displayEntity(id);
+    if (display) {
+      const art = this.handArt.get(id) ?? '';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'ah-card ah-held';
+      button.dataset.actionId = id;
+      button.dataset.kind = 'held';
+      button.dataset.targetMode = 'none';
+      button.setAttribute('aria-label', `${display.title || '手牌'} · 仅展示`);
+      button.title = `${display.title} · 点击查看`;
+      const face = document.createElement('span');
+      face.className = 'ah-face ah-held';
+      if (art) {
+        const img = document.createElement('img');
+        img.className = 'ah-art';
+        img.alt = '';
+        img.src = art;
+        img.draggable = false;
+        face.appendChild(img);
+      }
+      const badge = document.createElement('span');
+      badge.className = 'ah-badge';
+      badge.setAttribute('aria-hidden', 'true');
+      badge.textContent = '✋';
+      face.appendChild(badge);
+      button.appendChild(face);
+      return button;
+    }
     const action = this.latest?.actions.find(candidate => candidate.id === id);
     if (!action) return null;
     const card = deriveActionCard(action);
@@ -4017,7 +4102,30 @@ export class BoardGameHUD {
       return { id: card.id, signature: this.handCardSignature(card.id, action) };
     });
 
+    // 手里还有"不是动作"的牌：德州的两张底牌、山屋的道具卡……
+    // 它们没有对应 action，但玩家必须看得见，所以排在动作卡右侧一起持有。
+    const claimed = new Set(
+      snapshot.actions
+        .map(action => deriveActionCard(action).entityId)
+        .filter((entityId): entityId is string => Boolean(entityId))
+    );
+    // 上帝视角没有"自己的手牌"：改看当前行动者的手牌（否则会把所有玩家的手牌铺开）。
+    const handOwner = snapshot.viewer === 'GOD' ? (snapshot.focus[0] ?? '') : snapshot.viewer;
+    const handZone = handOwner ? snapshot.board.zones?.[`zone_hand_${handOwner}`] : undefined;
+    const handIds = (handZone?.orderedEntities ?? []).slice(0, 12);
+    for (const entityId of handIds) {
+      if (claimed.has(entityId)) continue;
+      const entity = snapshot.board.entities[entityId];
+      if (!entity || entity.isMasked) continue;
+      const id = `display:${entityId}`;
+      const art = this.ports.entityCardArt?.(entityId) ?? '';
+      this.handArt.set(id, art);
+      const title = String(entity.components?.cardFace?.title ?? '');
+      items.push({ id, signature: `display|${title}|${art ? fnv1a(art) : ''}` });
+    }
+
     this.ensureActionHand(el).sync(items);
+    this.renderTableEcho(snapshot);
   }
 
   private renderDock(snapshot: GameSnapshot): void {

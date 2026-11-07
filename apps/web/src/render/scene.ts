@@ -2177,7 +2177,8 @@ export class BoardGameScene {
    * hidden information through `imageUrl`.
    */
   public entityCardArt(entityId: string, fallbackState?: ProjectedGameState): string | undefined {
-    const state = this.lastState ?? this.lastRawState ?? fallbackState;
+    // 调用方给的是"这一刻"的投影：优先用它，缓存可能还落后一次 syncState。
+    const state = fallbackState ?? this.lastState ?? this.lastRawState;
     const entity = state?.entities[entityId];
     const face = entity?.components?.cardFace;
     if (!state || !entity || !face) return undefined;

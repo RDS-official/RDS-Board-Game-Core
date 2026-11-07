@@ -101,112 +101,193 @@ for (const count of [1, 2, 5, 12, 30]) {
   record('polygon: centroid of a square', Math.abs(centre.x - 50) < 0.01 && Math.abs(centre.y - 50) < 0.01);
 }
 
-/* ---- 4. browser: hover / yield / drag / spring back ----------------- */
+/* ---- 4. browser: hover / drag / drop / echo / held cards ------------ */
 const dev = await ensureSoloServer();
 const browser = await launchChromium();
+
+/** 一张牌的可测几何：pivot（底边中点）随指针走，不受缩放影响。 */
+const GEOM = () =>
+  Array.from(document.querySelectorAll('#action-hand .ah-card')).map(el => {
+    const r = el.getBoundingClientRect();
+    return {
+      id: el.dataset.actionId,
+      mode: el.dataset.targetMode,
+      cx: r.left + r.width / 2,
+      cy: r.top + r.height / 2,
+      bx: r.left + r.width / 2,
+      by: r.bottom,
+      height: r.height
+    };
+  });
+
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await page.goto(dev.url + '?game=betrayal&scenario=exploration&unified-hand', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(dev.url + '?game=betrayal&scenario=exploration&unified-hand', {
+    waitUntil: 'domcontentloaded',
+    timeout: 60000
+  });
   await page.waitForTimeout(4200);
   if (await page.locator('#boot-enter').count()) await page.click('#boot-enter').catch(() => {});
   await page.waitForTimeout(1400);
 
-  const boxes = async () =>
-    page.evaluate(() =>
-      Array.from(document.querySelectorAll('#action-hand .ah-card')).map(el => {
-        const r = el.getBoundingClientRect();
-        return { id: el.dataset.actionId, mode: el.dataset.targetMode, left: r.left, top: r.top, width: r.width, height: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
-      })
-    );
+  const boxes = () => page.evaluate(GEOM);
+  /** 先 hover，等弧线稳住，再取坐标：否则抓的是"让位前"的位置。 */
+  const settleOn = async id => {
+    let card = (await boxes()).find(c => c.id === id);
+    if (!card) return null;
+    await page.mouse.move(card.cx, card.cy);
+    await page.waitForTimeout(240);
+    card = (await boxes()).find(c => c.id === id) ?? card;
+    return card;
+  };
+  const draggedGeometry = () =>
+    page.evaluate(() => {
+      const el = document.querySelector('#action-hand [data-drag="1"]');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return {
+        id: el.dataset.actionId,
+        bx: r.left + r.width / 2,
+        by: r.bottom,
+        height: r.height,
+        z: Number(getComputedStyle(el).zIndex || 0),
+        viewport: window.innerHeight
+      };
+    });
 
   const base = await boxes();
   record('browser: cards mounted', base.length >= 3, String(base.length));
-  record('browser: physics layer active', await page.evaluate(() => document.querySelector('#action-hand')?.dataset.physics === '1'));
-  record('browser: no CSS transform transition (@@single-writer@@)', await page.evaluate(() => {
-    const el = document.querySelector('#action-hand .ah-card');
-    return el ? getComputedStyle(el).transitionProperty.includes('transform') === false : false;
-  }));
+  record(
+    'browser: physics layer active',
+    await page.evaluate(() => document.querySelector('#action-hand')?.dataset.physics === '1')
+  );
+  record(
+    'browser: no CSS transform transition (@@single-writer@@)',
+    await page.evaluate(() => {
+      const el = document.querySelector('#action-hand .ah-card');
+      return el ? getComputedStyle(el).transitionProperty.includes('transform') === false : false;
+    })
+  );
 
-  // hover the middle card
+  /* ---- hover ---- */
   const mid = base[Math.floor(base.length / 2)];
   await page.mouse.move(mid.cx, mid.cy);
-  await page.waitForTimeout(280);
+  await page.waitForTimeout(300);
   const hovered = await boxes();
   const hoveredMid = hovered.find(c => c.id === mid.id);
-  record('hover: card lifts >= 8px', hoveredMid.top <= mid.top - 8, (mid.top - hoveredMid.top).toFixed(1));
-  record('hover: card scales up', hoveredMid.width > mid.width + 1, (hoveredMid.width - mid.width).toFixed(1));
-  const neighbour = hovered.find(c => c.id !== mid.id && Math.abs(c.cx - mid.cx) < 400);
+  record('hover: card lifts >= 8px', hoveredMid.cy <= mid.cy - 8, (mid.cy - hoveredMid.cy).toFixed(1));
+  record('hover: card scales up', hoveredMid.height > mid.height + 1, (hoveredMid.height - mid.height).toFixed(1));
+  const neighbour = hovered.find(c => c.id !== mid.id);
   const neighbourBase = base.find(c => c.id === neighbour.id);
   record(
     'hover: neighbour yields sideways',
     Math.abs(neighbour.cx - neighbourBase.cx) >= 1.5,
     (neighbour.cx - neighbourBase.cx).toFixed(1)
   );
-
-  // leave the strip: everything returns
+  record(
+    'hover: the grown card draws above its neighbours',
+    await page.evaluate(({ x, y }) => {
+      const under = document.elementFromPoint(x, y)?.closest('.ah-card');
+      if (!under) return false;
+      const mine = Number(getComputedStyle(under).zIndex || 0);
+      const others = Array.from(document.querySelectorAll('#action-hand .ah-card'))
+        .filter(el => el !== under)
+        .map(el => Number(getComputedStyle(el).zIndex || 0));
+      return others.every(z => z < mine);
+    }, { x: mid.cx, y: mid.cy }),
+    'z-order'
+  );
   await page.mouse.move(20, 200);
   await page.waitForTimeout(420);
   const rest = await boxes();
-  const restMid = rest.find(c => c.id === mid.id);
-  record('hover: returns to the arc', Math.abs(restMid.top - mid.top) <= 1.5, (restMid.top - mid.top).toFixed(1));
+  record(
+    'hover: returns to the arc',
+    Math.abs(rest.find(c => c.id === mid.id).cy - mid.cy) <= 1.5,
+    (rest.find(c => c.id === mid.id).cy - mid.cy).toFixed(1)
+  );
 
-  // drag a selection card onto the board: it must spring back, not stick
+  /* ---- drag: tracking, viewport scale, top layer, drop highlight ---- */
   const selection = rest.find(c => c.mode === 'selection');
   record('browser: a selection card exists', Boolean(selection));
   if (selection) {
-    await page.mouse.move(selection.cx, selection.cy);
+    const grab = (await settleOn(selection.id)) ?? selection;
+    await page.mouse.move(grab.cx, grab.cy);
     await page.waitForTimeout(120);
     await page.mouse.down();
-    await page.mouse.move(selection.cx + 60, selection.cy - 150, { steps: 6 });
+    await page.mouse.move(grab.cx + 12, grab.cy - 12, { steps: 2 }); // 越过 slop，进入 dragging
     await page.waitForTimeout(120);
-    const dragging = await page.evaluate(() => ({
+    const started = await draggedGeometry();
+    await page.mouse.move(grab.cx + 60, grab.cy - 150, { steps: 6 });
+    await page.waitForTimeout(200);
+    const moved = await draggedGeometry();
+    const state = await page.evaluate(() => ({
       state: document.querySelector('#action-hand')?.dataset.state,
-      drop: document.querySelector('#action-hand')?.dataset.drop,
-      drag: document.querySelector('#action-hand [data-drag="1"]') !== null
+      drop: document.querySelector('#action-hand')?.dataset.drop
     }));
-    record('drag: state machine enters dragging', dragging.state === 'dragging', JSON.stringify(dragging));
-    record('drag: card is marked as dragging', dragging.drag, JSON.stringify(dragging));
-    record('drag: board hit sets data-drop=valid', dragging.drop === 'valid', String(dragging.drop));
-    const moved = (await boxes()).find(c => c.id === selection.id);
+
+    record('drag: state machine enters dragging', state.state === 'dragging', JSON.stringify(state));
+    record('drag: board hit sets data-drop=valid', state.drop === 'valid', String(state.drop));
     record(
       'drag: card tracks the pointer 1:1',
-      Math.abs(moved.cx - (selection.cx + 60)) <= 14 && Math.abs(moved.cy - (selection.cy - 150)) <= 14,
-      (moved.cx - selection.cx).toFixed(1) + ',' + (moved.cy - selection.cy).toFixed(1)
+      Boolean(started && moved) &&
+        Math.abs(moved.bx - started.bx - 48) <= 6 &&
+        Math.abs(moved.by - started.by + 138) <= 6,
+      moved && started ? (moved.bx - started.bx).toFixed(1) + ',' + (moved.by - started.by).toFixed(1) : 'missing'
     );
+    const ratio = moved ? moved.height / moved.viewport : 0;
+    record(
+      'drag: card grows to ~1/3 of the viewport height',
+      ratio > 0.28 && ratio < 0.42,
+      ratio.toFixed(2)
+    );
+    record('drag: dragged card is on top', Boolean(moved) && moved.z >= 2500, String(moved?.z));
+
     await page.mouse.up();
     await page.waitForTimeout(950);
-    const after = await boxes();
-    const back = after.find(c => c.id === selection.id);
+    const back = (await boxes()).find(c => c.id === selection.id);
     record(
       'drop: non-playable card springs home',
-      back && Math.abs(back.cx - selection.cx) <= 2 && Math.abs(back.cy - selection.cy) <= 2,
-      back ? (back.cx - selection.cx).toFixed(1) + ',' + (back.cy - selection.cy).toFixed(1) : 'missing'
+      Boolean(back) &&
+        Math.abs(back.bx - selection.bx) <= 3 &&
+        Math.abs(back.by - selection.by) <= 3,
+      back ? (back.bx - selection.bx).toFixed(1) + ',' + (back.by - selection.by).toFixed(1) : 'missing'
     );
-    record(
-      'drop: the target picker opened instead',
-      (await page.locator('.rp-dialog').count()) === 1
-    );
+    record('drop: the target picker opened instead', (await page.locator('.rp-dialog').count()) === 1);
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(160);
+    await page.waitForTimeout(200);
   }
 
-  // drag a directly playable card onto the board: it must leave the hand
-  await page.waitForTimeout(200);
-  const releasable = (await boxes()).find(c => c.mode === 'none' || c.mode === 'highlight');
-  record('browser: a directly playable card exists', Boolean(releasable));
-  if (releasable) {
-    const before = (await boxes()).length;
-    await page.mouse.move(releasable.cx, releasable.cy);
-    await page.waitForTimeout(100);
+  /* ---- drag a directly playable card: it leaves the hand + echoes ---- */
+  await page.waitForTimeout(250);
+  const playable = (await boxes()).find(c => c.mode === 'none' || c.mode === 'highlight');
+  record('browser: a directly playable card exists', Boolean(playable));
+  if (playable) {
+    const grab = (await settleOn(playable.id)) ?? playable;
+    await page.mouse.move(grab.cx, grab.cy);
+    await page.waitForTimeout(120);
     await page.mouse.down();
-    await page.mouse.move(releasable.cx, releasable.cy - 180, { steps: 6 });
+    await page.mouse.move(grab.cx, grab.cy - 180, { steps: 6 });
     await page.waitForTimeout(120);
     await page.mouse.up();
-    await page.waitForTimeout(900);
-    const after = (await boxes()).length;
-    record('drop: playable card leaves the hand', after < before || after === 0, before + ' -> ' + after);
+    // 出牌成功的直接证据是"飞场"：状态机进入 flying，卡片朝桌面落点缩小淡出。
+    // （不能只看 DOM 是否还在——同一个动作 id 打完可能立刻又被投影出来。）
+    let flew = false;
+    for (let i = 0; i < 20; i += 1) {
+      flew = await page.evaluate(() => document.querySelector('#action-hand')?.dataset.state === 'flying');
+      if (flew) break;
+      await page.waitForTimeout(60);
+    }
+    record('drop: the played card flies onto the table', flew, 'state=flying');
+    await page.waitForTimeout(500);
+    const echo = await page.evaluate(() => {
+      const el = document.querySelector('.hand-play-echo');
+      return el
+        ? { title: el.querySelector('.hpe-title')?.textContent ?? '', actor: el.querySelector('.hpe-actor')?.textContent ?? '' }
+        : null;
+    });
+    record('play: a table echo announces the card', Boolean(echo) && (echo.title ?? '').length > 0, JSON.stringify(echo));
     record(
-      'drop: the action actually ran',
+      'play: the action actually ran',
       await page.evaluate(() => {
         const snapshot = window.__boardGameApp?.session?.getSnapshot?.();
         return (snapshot?.board?.actionLog?.length ?? 0) > 0 || (snapshot?.actions?.length ?? 0) > 0;
@@ -216,6 +297,35 @@ try {
 
   await page.screenshot({ path: 'shots/card-hand-physics.png' });
   await page.close();
+
+  /* ---- poker: hole cards are held, not actions, and must still show ---- */
+  const poker = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await poker.goto(dev.url + '?game=poker&unified-hand', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await poker.waitForTimeout(4200);
+  if (await poker.locator('#boot-enter').count()) await poker.click('#boot-enter').catch(() => {});
+  await poker.waitForTimeout(1600);
+  for (let i = 0; i < 12; i += 1) {
+    const dealt = await poker.evaluate(
+      () => (window.__boardGameApp?.session?.getSnapshot?.()?.board?.ownHand?.length ?? 0) > 0
+    );
+    if (dealt) break;
+    await poker.waitForTimeout(1000);
+  }
+  const held = await poker.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll('#action-hand .ah-card.ah-held'));
+    return {
+      total: document.querySelectorAll('#action-hand .ah-card').length,
+      held: cards.length,
+      withArt: cards.filter(card => Boolean(card.querySelector('img.ah-art'))).length,
+      arts: cards.map(card => (card.querySelector('img.ah-art')?.getAttribute('src') ?? '').slice(0, 12)),
+      ownHand: window.__boardGameApp?.session?.getSnapshot?.()?.board?.ownHand?.length ?? 0,
+      actions: window.__boardGameApp?.session?.getSnapshot?.()?.actions?.length ?? 0
+    };
+  });
+  record('poker: hole cards are rendered in the hand', held.held >= 2, JSON.stringify(held));
+  record('poker: hole cards use the real card face', held.withArt === held.held, held.arts.join(','));
+  record('poker: held cards sit alongside the action cards', held.total > held.held, String(held.total));
+  await poker.close();
 } finally {
   await browser.close();
 }

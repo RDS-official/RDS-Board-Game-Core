@@ -2301,6 +2301,79 @@
   }
 }
 
+/* 持有牌（非动作卡：底牌 / 道具）：看得见、点得开，但拖不出去。 */
+.action-hand[data-physics='1'] .ah-card.ah-held {
+  cursor: pointer;
+}
+
+.action-hand[data-physics='1'] .ah-card.ah-held .ah-face {
+  border-color: rgba(120, 170, 255, 0.45);
+}
+
+.action-hand[data-physics='1'] .ah-card.ah-held .ah-badge {
+  color: #9fd0ff;
+}
+
+/* ---- 出牌回响：桌面上留一句"谁打了什么" --------------------------------
+   动作卡在 3D 桌面上没有实体，只靠手牌消失看不出发生了什么。回响由"本地出牌"与
+   远端历史共同驱动，所以两端看到的是同一件事。 */
+.hand-play-echo {
+  position: fixed;
+  left: var(--echo-x, 50vw);
+  top: var(--echo-y, 50vh);
+  z-index: 26;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 26px;
+  border: 1px solid rgba(217, 180, 91, 0.5);
+  border-radius: 12px;
+  background: radial-gradient(ellipse at center, rgba(20, 26, 34, 0.94), rgba(10, 13, 18, 0.78));
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  color: #f3e6c8;
+  pointer-events: none;
+  animation: hpe-rise 2100ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.hpe-actor {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: #9fd0ff;
+}
+
+.hpe-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+@keyframes hpe-rise {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translateY(14px) scale(0.82);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -50%) translateY(0) scale(1);
+  }
+  78% {
+    opacity: 1;
+    transform: translate(-50%, -52%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -62%) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hand-play-echo {
+    animation: none;
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
 /* Linear listbox for keyboard / screen readers: present but visually hidden. */
 .rp-list {
   position: absolute;
