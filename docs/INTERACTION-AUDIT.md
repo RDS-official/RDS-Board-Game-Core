@@ -4,7 +4,7 @@
 >
 > 性质：**只做审查与调研，不改代码。**
 > 审查基线：`main`（2026-11），代码引用以 `文件:行号` 标注，行号可能随重构漂移，符号名为准。
-> 最近核对：2026-11-08（实现状态见 §10）。
+> 最近核对：2026-11-08（实现状态见 §9，收尾计划见 [INTERACTION-ROADMAP.md](INTERACTION-ROADMAP.md)）。
 
 ---
 
@@ -267,9 +267,9 @@
 | G3 拖放不可取消 | **已解**：松手在区外、`pointercancel`、窗口失焦都走弹簧回弹，且把拖拽速度灌进弹簧 | `cardHand.ts`（`releaseBack`） | `pnpm probe:card-hand`（"non-playable card springs home"） |
 | G4 快捷键不可发现 | **已解**：`ui/keymap.ts` 单一键位表 → `?` 清单 + 首屏一次提示 + ☰ 菜单 ⌨ 入口 | `ui/keymap.ts`、`ui/shortcutHelp.ts`、`hud.ts#openShortcutHelp` | `pnpm probe:keymap`、`pnpm probe:shortcut-help` |
 | G5 一手势多义 | **已解**（统一手牌内）：手势按"看 / 打 / 取消"分离，不再靠时长猜意图 | `cardHand.ts` | `pnpm probe:card-hand`（拖拽跟手 1:1、回弹 2px 内归位） |
-| G6 目标选择偏隐式 | **部分**：拖出即弹径向选择器（锚点=松手点）；非法分区预置灰仍未做 | `radialPicker.ts`、`hud.ts#openRadialPicker` | `pnpm probe:unified-hand` |
+| G6 目标选择偏隐式 | **已解**：目标塌缩成"一张卡 + 合法候选"，拖出即弹径向选择器（锚点=松手点），非法目标由引擎驳回；非法分区预置灰仍未做 | `session.ts#buildActionsView`、`radialPicker.ts` | `probe:unified-hand`、`probe:card-hand` |
 | G7 移动端缺位 | **部分**：<1200px 底部横滑带 + 触控手势（`touch-action:none`、大 slop/外扩容差）；底部抽屉仍未做 | `layout-shell.css`、`cardHand.ts` | `pnpm probe:unified-hand`（390 档） |
-| G8 手牌排序/分组 | 未做 | — | — |
+| G8 手牌排序/分组 | **已解**：按 `UiAction.group` 排序 + 分区色标 + >9 张自动翻页 | `session.ts#groupOf`、`hud.ts`、`cardHand.ts` | `probe:card-hand`（分区序/翻页） |
 | G9 右键上下文菜单 | 未做（拖拽中右键只用于取消） | — | — |
 | G10 撤销语义单一 | 未做 | — | — |
 | G11 错误只在 toast | **部分**：出牌区三态高亮（valid/invalid）+ 回弹，失败仍靠 toast | `cardHand.ts`（`data-drop`）、`layout-shell.css` | `pnpm probe:card-hand` |
@@ -299,6 +299,34 @@
 现在"谁打了什么"会以 `.hand-play-echo` 落在桌面中央并停留约 2s；它同时由**本地出牌**与
 **权威历史**（`snapshot.history` 的 `kind:'card'` 条目，按 id 幂等）驱动，所以联机时两端看到的是
 同一件事。飞场动画的落点也取同一个锚点（`tableAnchor()`），拖出去的那张牌正好落在回响出现的位置。
+
+### 9.3 目标塌缩与手牌分区（2026-11-08 补，回应"一张杀就是一张杀"）
+
+**问题**：合法动作是按"动作 × 目标"展开的，所以一张【杀】会裂成「杀曹操」「杀关羽」「杀吕布」三张卡——
+手牌被目标名撑爆，玩家看到的是"十张杀"而不是"三张杀"。
+
+**做法**（`packages/app/src/session.ts#buildActionsView`）：
+1. **合并键**：`actor | type | entityId | targetNodeId | targetEdgeId | payload`（剔除目标维度）。
+   只合并"目标维度单一"的动作——payload 里带 `extraTargetIds`（方天画戟）、`victimId`（借刀）、
+   `targetIds`（铁索）或自带 `selection` 的动作保持原样，否则会丢信息。
+2. **多目标 → 一张卡 + 候选**：`UiAction.selection = { spec:{source:'player',min:1,max:1}, candidates }`，
+   候选就是引擎认可的目标集合；点开走径向选择器（`probe:unified-hand` 33 项覆盖），
+   玩家拖到棋盘松手也走同一个选择器。
+3. **单目标 → 去掉目标名，仍然一键直达**：不逼玩家为"只有一个目标"多点一次。
+4. **派发**：`BoundAction.targetVariants`（候选 id → 那条具体合法动作），`perform()` 用玩家选中的
+   目标换回对应动作再 dispatch。**合法性仍由引擎判定**，UI 不自造规则；非法目标会被引擎驳回。
+5. **同名不同牌**：塌缩后两张「出【杀】」会长得一样，于是给撞名的卡补上牌面标题
+   （`出【杀】 · 杀 ♣J`）。
+
+**手牌分区**：`UiAction.group`（`card / equip / skill / command`）由 presenter 从动作形态推导
+（实体在手牌/装备区→牌；USE_SKILL→技能；EQUIP_CARD→装备；其余→命令），手牌按 牌→装备→技能→命令
+排序并加描边色标，卡面角标仍表示"要目标/要数量/要放置"。
+
+**翻页**：>1 页时出现「‹ n/N ›」翻页器（`#hand-pager`）。**不做横向滚动**——滚动手势与拖拽抢同一个
+轴，玩家想翻页会把牌拖走。每页容量按宽度自适应（4–9 张），只挂载当前页的卡片。
+
+**出牌回响带真实卡面**：`UiHistoryEntry.entityId` 让"谁打了什么"落一张真牌在桌面上（`.hpe-face`），
+别人出牌同样可见；本地出牌与权威历史共用同一渲染函数。
 
 ### 9.3 手感参数（`cardHand.ts` 的默认值，调参即调手感）
 
