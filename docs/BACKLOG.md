@@ -70,7 +70,7 @@ __boardGameApp.scene.getRenderStats()
 
 - Catan 官方版图与全部规则细节；
 - 更多山屋剧本、完整 50 个 haunt（当前 5 个：HAUNT #1/#3/#5/#6/#10）；
-- 三国杀/沙丘/璀璨宝石的完整卡表与规则；
+- 沙丘/璀璨宝石的完整卡表与规则（三国杀已升级为标准身份局，见 [SANGUOSHA.md](SANGUOSHA.md)）；
 - 房间/卡牌官方美术。
 
 ## 6. 已明确不做（won't fix / 已结案）

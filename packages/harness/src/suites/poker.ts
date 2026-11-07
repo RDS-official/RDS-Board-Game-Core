@@ -1386,11 +1386,19 @@ test('poker: the headline shows what the viewer still owes, not the table bet', 
   );
   assert(!!smallBlind, 'a seat posted the small blind');
   const view = engine.getProjectedStateFor(smallBlind!);
-  assertEqual(phaseLabelOf(view).includes('需跟 5'), true, `small blind still owes 5, got: ${phaseLabelOf(view)}`);
+  assertEqual(
+    phaseLabelOf(view, GAME_REGISTRY.poker.presentation).includes('需跟 5'),
+    true,
+    `small blind still owes 5, got: ${phaseLabelOf(view, GAME_REGISTRY.poker.presentation)}`
+  );
   // 没有投入的座位看到的仍是完整注额。
   const other = engine.getRawState().playerOrder.find(pid => pid !== smallBlind);
   const otherView = engine.getProjectedStateFor(other!);
-  assertEqual(phaseLabelOf(otherView).includes('需跟 10'), true, `a fresh seat owes the full bet, got: ${phaseLabelOf(otherView)}`);
+  assertEqual(
+    phaseLabelOf(otherView, GAME_REGISTRY.poker.presentation).includes('需跟 10'),
+    true,
+    `a fresh seat owes the full bet, got: ${phaseLabelOf(otherView, GAME_REGISTRY.poker.presentation)}`
+  );
 });
 test('poker: a solo table starts seated, not omniscient', async () => {
   const { UniversalSession } = await import('@rds/app/session');

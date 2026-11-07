@@ -9,7 +9,10 @@ import {
   betrayalDescribeMoment,
   betrayalDescribeNode,
   betrayalDescribeTrait,
+  betrayalMissionLine,
+  betrayalPhaseLabel,
   betrayalPlayerNode,
+  betrayalPlayerView,
   betrayalRoleLabel,
   betrayalRoomLoot,
   betrayalTokenBadge,
@@ -23,7 +26,9 @@ import { traitModifiers } from './betrayal/helpers';
 import { CatanRules } from './catan/rules';
 import { setupCatan } from './catan/setup';
 import { CATAN_SCENARIOS } from './catan/scenarios';
+import { catanPhaseLabel, catanPlayerView } from './catan/presentation';
 import { DuneMahjongRules } from './dune_mahjong/rules';
+import { dunePhaseLabel, dunePlayerView } from './dune_mahjong/presentation';
 import {
   checkBetrayalInvariants,
   checkCatanInvariants,
@@ -34,14 +39,34 @@ import {
 import { setupDuneMahjong } from './dune_mahjong/setup';
 import { PokerRules } from './poker/rules';
 import { pokerScenario, setupPoker } from './poker/setup';
-import { pokerDefaultViewer, pokerSettlementMoment } from './poker/presentation';
-import { isAiSeat, POKER_TABLE } from './poker/seating';
+import {
+  pokerDefaultViewer,
+  pokerMissionLine,
+  pokerPhaseLabel,
+  pokerPlayerView,
+  pokerRankedPlayers,
+  pokerSettlementMoment
+} from './poker/presentation';
+import { isAiSeat as isPokerAiSeat, POKER_TABLE } from './poker/seating';
 import { SANGUOSHA_HOOKS } from './sanguosha/hooks';
-import { sanguoshaRoleLabel } from './sanguosha/presentation';
+import {
+  sanguoshaCardFacts,
+  sanguoshaCardStyle,
+  sanguoshaDefaultViewer,
+  sanguoshaDescribeMoment,
+  sanguoshaMissionLine,
+  sanguoshaPhaseLabel,
+  sanguoshaPlayerView,
+  sanguoshaRoleLabel
+} from './sanguosha/presentation';
+import { isAiSeat } from './sanguosha/ai';
 import { SanguoshaRules } from './sanguosha/rules';
-import { setupSanguosha } from './sanguosha/setup';
+import { SANGUOSHA_CUSTOM_PROPS, SANGUOSHA_GLOBAL_VARS } from './sanguosha/schema';
+import type { SgsPendingChoice } from './sanguosha/types';
+import { sanguoshaScenario, setupSanguosha } from './sanguosha/setup';
 import { SplendorRules } from './splendor/rules';
 import { setupSplendor } from './splendor/setup';
+import { splendorPhaseLabel, splendorPlayerView } from './splendor/presentation';
 
 /**
  * Game fixtures for kernel conformance testing.
@@ -93,6 +118,10 @@ export const catanModule: GameModule = defineGame({
   },
   // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
   checkInvariants: state => checkCatanInvariants(state),
+  presentation: definePresentation({
+    phaseLabel: catanPhaseLabel,
+    playerView: catanPlayerView
+  }),
   // C-7：资源获取经 ctx.reward() 记账（掷骰产出 / 港口兑换 / 强盗抢夺）。
   charter: { requiresRewardLedger: true },
   hooks: [],
@@ -164,14 +193,24 @@ export const catanModule: GameModule = defineGame({
   outcome: state => toOutcome(CatanRules.checkWinCondition(state))
 });
 
+/**
+ * 三国杀 (Sanguosha) — 标准身份局。
+ *
+ * The fixture is intentionally a full tabletop loop rather than a single
+ * interrupt demo: all six phases run as explicit automatic follow-ups, the
+ * 108-card standard deck (and an optional military deck) is represented as ECS
+ * cards, and every response/decision is a normal kernel action that replays
+ * bit-exactly.
+ */
 export const sanguoshaModule: GameModule = defineGame({
   meta: {
     id: 'sanguosha',
     name: '三国杀 (Sanguosha)',
-    description: '递归中断栈、身份暗置、装备/技能规则切面',
-    version: '1.0.0',
-    // 座位数契约（issue #214）：与 setup 的 playerOrder 保持一致，由回归用例守着。
-    seatRange: { min: 4, max: 4 },
+    description: '4/5/8人身份局 · 4人2v2 · 2–8人杀下家 · AI补位 · 积分 · 108张牌 · 六阶段 · 17名武将',
+    version: '2.1.0',
+    schemaVersion: 3,
+    // 2–8 座：身份局标准 5/8 人、4 人对抗、以及任意人数的杀下家村规。
+    seatRange: { min: 2, max: 8, default: 4, variable: true },
     capabilities: {
       simultaneousMoves: false,
       hiddenInformation: true,
@@ -185,40 +224,160 @@ export const sanguoshaModule: GameModule = defineGame({
      * 未登记的 key 出现，内核记 CHARTER_C9_UNDECLARED_GLOBAL_VAR。
      */
     stateSchema: {
-      globalVars: ['drawDeckCount', 'hasPlayedStrikeThisTurn'],
-      customProps: ['characterSkill', 'hero', 'hp', 'maxHp']
+      globalVars: [...SANGUOSHA_GLOBAL_VARS],
+      customProps: [...SANGUOSHA_CUSTOM_PROPS]
     }
   },
   // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
   checkInvariants: state => checkSanguoshaInvariants(state),
-  // 身份 token（主公/忠臣/反贼/内奸）是本包词汇，通用层只显示字符串。
-  presentation: definePresentation({ roleLabel: sanguoshaRoleLabel }),
+  // C-7：伤害、回复、击杀反贼的收益都经 ctx.reward() 留下理由。
+  charter: { requiresRewardLedger: true },
+  // 身份 token（主公/忠臣/反贼/内奸）、牌面分类与终局幕布都是本包词汇。
+  presentation: definePresentation({
+    roleLabel: sanguoshaRoleLabel,
+    cardFacts: sanguoshaCardFacts,
+    cardStyle: sanguoshaCardStyle,
+    describeMoment: sanguoshaDescribeMoment,
+    phaseLabel: sanguoshaPhaseLabel,
+    missionLine: sanguoshaMissionLine,
+    playerView: sanguoshaPlayerView,
+    // 单机开局坐在第一个真人座位上；否则 GOD 视角会把 AI 手牌全画出来。
+    defaultViewer: sanguoshaDefaultViewer
+  }),
   hooks: SANGUOSHA_HOOKS,
+  timing: { decision: 6, response: 4 },
+  driver: defineDriver({
+    // AI seats are marked in `globalVars.seats`; the app/server driver dispatches
+    // their legal action at a readable pace (same pipeline as humans).
+    isAutomated: (state, actorId) => isAiSeat(state, actorId),
+    aiActionDelayMs: 1200
+  }),
   project: {
     player: (player, viewer, state) => {
       if (viewer === 'GOD' || player.id === viewer) return player;
-      if (player.role === 'LORD') return player; // the Lord is public knowledge
+      // 阵营/村规模式的身份本来就是公开信息；身份局里主公身份始终公开。
+      if (String(state.globalVars.mode ?? 'identity') !== 'identity') return player;
+      // 阵亡与终局后的身份公开。
+      if (!player.alive || state.gameOver || player.role === 'LORD') return player;
       return { ...player, role: undefined, secretRole: undefined };
+    },
+    globalVars: (vars, _state, viewer) => {
+      const choice = vars.pendingChoice as SgsPendingChoice | undefined;
+      if (!choice || viewer === 'GOD' || choice.playerId === viewer) return vars;
+      // The choosing player's hand options must not leak faces (or even entity
+      // ids) to the rest of the table. Public equipment/judgement options stay
+      // visible; hand options collapse to an opaque label.
+      return {
+        ...vars,
+        pendingChoice: {
+          ...choice,
+          options: choice.options.map(option =>
+            option.zone === 'HAND'
+              ? { id: option.id, label: option.label, zone: option.zone }
+              : { id: option.id, label: option.label, zone: option.zone, cardId: option.cardId }
+          )
+        }
+      };
     }
   },
   actionSchemas: {
     PLAY_STRIKE: {
       type: 'PLAY_STRIKE',
-      fields: { entityId: { kind: 'string', required: true }, targetPlayerId: { kind: 'string', required: true } }
+      fields: { entityId: { kind: 'string', required: true }, targetPlayerId: { kind: 'string' } }
     },
     PLAY_DODGE: { type: 'PLAY_DODGE', fields: { entityId: { kind: 'string', required: true } } },
-    PLAY_PEACH: { type: 'PLAY_PEACH', fields: { entityId: { kind: 'string', required: true } } },
+    PLAY_PEACH: {
+      type: 'PLAY_PEACH',
+      fields: { entityId: { kind: 'string', required: true }, targetPlayerId: { kind: 'string' } }
+    },
     PLAY_WUXIE: { type: 'PLAY_WUXIE', fields: { entityId: { kind: 'string', required: true } } },
-    JUDGE_BAGUA: { type: 'JUDGE_BAGUA', allowPayload: false },
+    PLAY_CARD: {
+      type: 'PLAY_CARD',
+      fields: { entityId: { kind: 'string', required: true }, targetPlayerId: { kind: 'string' } }
+    },
+    EQUIP_CARD: { type: 'EQUIP_CARD', fields: { entityId: { kind: 'string', required: true } } },
+    USE_SKILL: {
+      type: 'USE_SKILL',
+      fields: { entityId: { kind: 'string' }, targetPlayerId: { kind: 'string' } }
+    },
+    DISCARD_CARD: { type: 'DISCARD_CARD', fields: { entityId: { kind: 'string', required: true } } },
+    RESOLVE_CHOICE: { type: 'RESOLVE_CHOICE', fields: { entityId: { kind: 'string' } } },
+    JUDGE_BAGUA: { type: 'JUDGE_BAGUA' },
     PASS: { type: 'PASS', allowPayload: false },
-    // 回合流程：摸牌与结束回合。`legalActions` 无条件提供，`reduce` 里有对应分支，
-    // 但历史上漏登记在代数声明里（宪章 C-1 抓到的真实缺口）。
-    DRAW_CARDS: { type: 'DRAW_CARDS', allowPayload: false },
-    END_TURN: { type: 'END_TURN', allowPayload: false }
+    END_TURN: { type: 'END_TURN', allowPayload: false },
+    START_TURN: { type: 'START_TURN', allowPayload: false },
+    RESOLVE_JUDGE: { type: 'RESOLVE_JUDGE', allowPayload: false },
+    DRAW_PHASE: { type: 'DRAW_PHASE', allowPayload: false },
+    FINISH_DISCARD: { type: 'FINISH_DISCARD', allowPayload: false },
+    FINISH_TURN: { type: 'FINISH_TURN', allowPayload: false },
+    RESOLVE_PENDING_TRICK: { type: 'RESOLVE_PENDING_TRICK', allowPayload: false },
+    EXECUTE_DAMAGE: { type: 'EXECUTE_DAMAGE' },
+    CHECK_DEATH: { type: 'CHECK_DEATH', allowPayload: false },
+    DUEL_DAMAGE: { type: 'DUEL_DAMAGE', allowPayload: false },
+    MASS_TRICK_NEXT: { type: 'MASS_TRICK_NEXT', allowPayload: false },
+    BORROW_SWORD_FAIL: { type: 'BORROW_SWORD_FAIL', allowPayload: false },
+    CONTINUE_STRIKE_QUEUE: { type: 'CONTINUE_STRIKE_QUEUE', allowPayload: false },
+    DRAW_CARDS: { type: 'DRAW_CARDS', allowPayload: false }
   },
-  setup: seed => setupSanguosha(seed),
+  scenarios: {
+    classic: {
+      seats: 4,
+      description: '经典四人局 · 标准108张 · 刘关曹吕',
+      setup: sanguoshaScenario('classic')
+    },
+    identity_5: {
+      seats: 5,
+      description: '标准5人身份局 · 1主1忠2反1内 · 随机选将',
+      setup: sanguoshaScenario('warlords', 'identity', 5)
+    },
+    identity_8: {
+      seats: 8,
+      description: '标准8人身份局 · 1主2忠4反1内 · 随机选将',
+      setup: sanguoshaScenario('warlords', 'identity', 8)
+    },
+    team_4: {
+      seats: 4,
+      description: '4人对抗 · 2v2赤蓝阵营 · 随机选将',
+      setup: sanguoshaScenario('warlords', 'team', 4)
+    },
+    kill_next: {
+      description: '杀下家村规 · 2–8人 · 杀死下家立即获胜',
+      setup: sanguoshaScenario('warlords', 'kill_next')
+    },
+    warlords: {
+      seats: 4,
+      description: '群雄逐鹿 · 17名武将随机选将 · 标准108张',
+      setup: sanguoshaScenario('warlords', 'identity', 4)
+    },
+    military: {
+      seats: 4,
+      description: '军争篇 · 标准牌堆 + 火杀/雷杀/酒/铁索/火攻/兵粮',
+      setup: sanguoshaScenario('military', 'identity', 4)
+    },
+    military_warlords: {
+      seats: 4,
+      description: '军争群雄 · 军争牌堆 + 随机选将',
+      setup: sanguoshaScenario('military_warlords', 'identity', 4)
+    },
+    ai_standard_4: {
+      seats: 4,
+      description: '单机入门 · 1真人 + 3 AI · 经典4人身份局',
+      setup: (seed, options) =>
+        setupSanguosha(seed, {
+          ...(options ?? {}),
+          variant: 'classic',
+          mode: 'identity',
+          seats: 4,
+          humans: 1,
+          aiSeats: 3
+        })
+    }
+  },
+  setup: (seed, options) => setupSanguosha(seed, options),
   legalActions: (state, playerId) => SanguoshaRules.getLegalActions(state, playerId),
   reduce: (state, action, ctx) => SanguoshaRules.applyAction(state, action, ctx),
+  resolveFollowUp: (state, ctx) => SanguoshaRules.resolveFollowUp(state, ctx),
+  onDecisionResolved: (state, window, ctx) => SanguoshaRules.onDecisionResolved(state, window, ctx),
   outcome: state => toOutcome(SanguoshaRules.checkWinCondition(state))
 });
 
@@ -260,7 +419,11 @@ export const splendorModule: GameModule = defineGame({
   checkInvariants: state => checkSplendorInvariants(state),
   // The market row already previews faces on hover; a click must not open a
   // second card view for the same card.
-  presentation: definePresentation({ cardPreviewOnHover: true }),
+  presentation: definePresentation({
+    cardPreviewOnHover: true,
+    phaseLabel: splendorPhaseLabel,
+    playerView: splendorPlayerView
+  }),
   hooks: [],
   actionSchemas: {
     TAKE_3_DIFF_GEMS: {
@@ -393,6 +556,9 @@ export const betrayalModule: GameModule = defineGame({
     describeTrait: betrayalDescribeTrait,
     traits: betrayalTraits,
     describeMoment: betrayalDescribeMoment,
+    phaseLabel: betrayalPhaseLabel,
+    missionLine: betrayalMissionLine,
+    playerView: betrayalPlayerView,
     roleLabel: betrayalRoleLabel,
     mapTitle: BETRAYAL_MAP_TITLE,
     playerNode: betrayalPlayerNode,
@@ -584,6 +750,10 @@ export const duneMahjongModule: GameModule = defineGame({
   },
   // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
   checkInvariants: state => checkDuneInvariants(state),
+  presentation: definePresentation({
+    phaseLabel: dunePhaseLabel,
+    playerView: dunePlayerView
+  }),
   hooks: [],
   timing: { decision: 8, response: 8 },
   project: {
@@ -756,7 +926,11 @@ export const pokerModule: GameModule = defineGame({
     describeMoment: state => pokerSettlementMoment(state),
     // 单机开局坐在第一个真人座位上：默认停在 GOD 视角会把全部底牌与牌堆顺序
     // 直接画给玩家（issue #189）。中心模式的查看者由服务器绑定，不受影响。
-    defaultViewer: state => pokerDefaultViewer(state)
+    defaultViewer: state => pokerDefaultViewer(state),
+    phaseLabel: pokerPhaseLabel,
+    missionLine: pokerMissionLine,
+    playerView: pokerPlayerView,
+    rankedPlayers: pokerRankedPlayers
   }),
   /**
    * C-8：`𝒦_driver` —— 全部驱动方语义集中在这里。
@@ -772,7 +946,7 @@ export const pokerModule: GameModule = defineGame({
      * 内置 AI 座位。驱动方按 `aiActionDelayMs` 代它们派发动作；`legalActions`
      * 直接给出具体动作，AI 和真人因此走的是同一条管线（结算阶段也一样）。
      */
-    isAutomated: (state, actorId) => isAiSeat(state, actorId),
+    isAutomated: (state, actorId) => isPokerAiSeat(state, actorId),
     /**
      * 观察者低保心跳：内核没有时钟，驱动方（app / server）每 20 秒派一拍，
      * PokerRules 把这些秒数累计成「满 60 秒 +10 筹码」。桌上没有观察者时不派发。

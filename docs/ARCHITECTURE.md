@@ -1112,16 +1112,19 @@ SETUP_SETTLEMENT → SETUP_ROAD → ... → ROLL → ACTION
 
 ### 10.3 Sanguosha 实现
 
-文件：[setup.ts](../packages/games/src/sanguosha/setup.ts) · [rules.ts](../packages/games/src/sanguosha/rules.ts) · [hooks.ts](../packages/games/src/sanguosha/hooks.ts)
+文件：[setup.ts](../packages/games/src/sanguosha/setup.ts) · [cards.ts](../packages/games/src/sanguosha/cards.ts) · [heroes.ts](../packages/games/src/sanguosha/heroes.ts) · [legal.ts](../packages/games/src/sanguosha/legal.ts) · [resolve.ts](../packages/games/src/sanguosha/resolve.ts) · [rules.ts](../packages/games/src/sanguosha/rules.ts) · [hooks.ts](../packages/games/src/sanguosha/hooks.ts) · [完整规则集](SANGUOSHA.md)
 
-- 4 名玩家：主公、忠臣、反贼、内奸；
-- 圆桌座位图 + 手牌/装备/判定区；
-- 卡牌：杀、闪、桃、无懈可击、过河拆桥、顺手牵羊、南蛮入侵、八卦阵、青龙偃月刀；
-- `PLAY_STRIKE` 入栈 `STRIKE_RESOLUTION`，目标可出闪/八卦/放弃；
-- 伤害帧可链到 `CHECK_DEATH` / `DYING_RESCUE`（桃）；
-- 锦囊与无懈可击可递归压栈；
-- `bagua_armor` 是 `BEFORE_REPLACE` 钩子，在目标被【杀】时提示并可进入八卦判定；具体判定与“视为闪”的结算在 rules 中；
-- 身份通过 `project.player` 对非主公/非本人擦除。
+- 4 人身份局：主公、忠臣、反贼、内奸；主公体力上限 +1，身份在阵亡/终局后公开；
+- 标准 108 张牌堆（53 基本 / 35 锦囊 / 20 装备）+ 可选军争 52 张；
+- 六阶段回合：准备、判定、摸牌、出牌、弃牌、结束；自动阶段走 `resolveFollowUp`，每步单独进入 actionLog；
+- 基础牌、普通锦囊、延时锦囊、武器/防具/坐骑；`闪电`/`乐不思蜀`/`兵粮寸断` 使用真实牌堆顶判定；
+- 中断栈帧：`STRIKE_RESOLUTION`、`DUEL_RESOLUTION`、`MASS_TRICK_RESOLUTION`、`TRICK_RESOLUTION`、`WUXIE_RESOLUTION`、`JUDGE_TRICK_RESOLUTION`、`DYING_RESCUE`、`BORROW_SWORD_RESOLUTION`；
+- 单人选牌（拆桥/顺手/五谷/火攻）使用单参与者 `DecisionWindow`，焦点、超时与回执由内核统一处理；
+- 伤害支持普通/火焰/雷电、藤甲/白银狮子/青釭剑、铁索传导、濒死救援、身份奖惩与角色胜负；
+- 17 名可玩武将，全部印刷技能落地（仁德/激将、武圣、咆哮、龙胆、铁骑、集智/奇才、奸雄/护驾、刚烈、倾国/洛神、制衡/救援、奇袭、苦肉、谦逊/连营、结姻/枭姬、急救/青囊、无双、离间/闭月）；
+- `bagua_armor` 仍是 `BEFORE_REPLACE` 钩子：`JUDGE_BAGUA` 的参数由 hook payload 提供，reducer 只执行通用判定；
+- Presenter 通过 `GamePresentationHints` 取得牌面、身份、阶段/任务文案、玩家卡事实、排行榜与终局幕布；
+  `packages/app/src/session.ts` 不再按 `gameId` 分支决定表现。
 
 ### 10.4 Splendor 实现
 
@@ -1349,7 +1352,7 @@ scenarios: {
 ### 14.1 游戏规则简化
 
 - Catan：弃半自动、玩家交易固定 1:1、发展卡仅 ACTION、资源计数器、程序化港口、银行短缺截断；
-- 三国杀/沙丘/璀璨宝石为演示级规则覆盖；山屋为 44 房间 + 三剧本的深度夹具，但仍不是商业规则全集（见 [BETRAYAL.md](BETRAYAL.md)）。
+- 三国杀为多模式规则夹具（4/5/8 人身份局、4 人 2v2、2–8 人杀下家、AI 补位与积分，见 [SANGUOSHA.md](SANGUOSHA.md)）；沙丘/璀璨宝石为演示级规则覆盖；山屋为 44 房间 + 三剧本的深度夹具，但仍不是商业规则全集（见 [BETRAYAL.md](BETRAYAL.md)）。
 
 ### 14.2 架构与运行时
 

@@ -8,6 +8,7 @@ import { Action, DispatchResult, GameState, PlayerId } from '@rds/kernel/types';
 import type { PokerHandResult } from '@rds/games/poker/rules';
 import { leaveSeat, settleHand, takeSeat } from './pokerSettle.ts';
 import { isLedgerDegraded, peekAccount, tryGrantAiRelief } from './pokerLedger.ts';
+import { settleSanguosha } from './sanguoshaSettle.ts';
 import { POKER_AI_NAMES, getAiHeroName } from '@rds/games/poker/seating';
 
 /**
@@ -175,6 +176,7 @@ export class ServerMatch {
       // 每手结束先把事实记进账号账本，再推给订阅者：客户端看到结算画面的同一刻，
       // 账本已经是这一手之后的状态，刷新排行榜不会读到旧数据。
       this.settleLatestHand();
+      this.settleLatestSanguosha();
       for (const listener of this.listeners) {
         try {
           listener();
@@ -200,6 +202,27 @@ export class ServerMatch {
     const lastHand = raw.globalVars.lastHand as PokerHandResult | undefined;
     if (!lastHand?.players?.length) return;
     settleHand(this.roomId, lastHand.handNo, lastHand.players, (seat) => this.userOf(seat));
+  }
+
+  /**
+   * 三国杀终局结算：按游戏模块给出的 `scoreDeltas` 给真人账号加减分。
+   *
+   * 账本按 `roomId` 去重，重连、投影刷新、服务端重建都不会重复扣分。
+   * AI 座位没有账号，`userOf` 返回 undefined，自然不进入账本。
+   */
+  private settleLatestSanguosha(): void {
+    if (this.module.meta.id !== 'sanguosha') return;
+    const raw = this.room.engine.getRawState();
+    if (!raw.gameOver) return;
+    const deltas = raw.globalVars.scoreDeltas as Record<string, number> | undefined;
+    if (!deltas) return;
+    const finalWinner = raw.globalVars.finalWinner;
+    const winners = Array.isArray(finalWinner)
+      ? finalWinner.map(String)
+      : finalWinner === null || finalWinner === undefined
+        ? []
+        : [String(finalWinner)];
+    settleSanguosha(this.roomId, deltas, winners, seat => this.userOf(seat));
   }
 
   /** 座位 → 账号 id（内置 AI 座位映射到其专属 AI 账号，如 ai:hero:...）。 */
@@ -455,7 +478,12 @@ export class ServerMatch {
     const engine = this.room.engine;
     const state = engine.getRawState();
     if (state.gameOver) return;
-    const actor = engine.getActiveActorId();
+    // A response window focuses its target while activePlayerId still points at
+    // the attacker. Search the whole focus set for an automated seat, otherwise
+    // an AI target would wait forever on a Dodge/Peach prompt.
+    const focus = engine.getFocusActors() as string[];
+    const active = engine.getActiveActorId();
+    const actor = focus.find(pid => !!this.module.driver?.isAutomated?.(state, pid)) ?? active;
     // 行动者换人就把计时归零：超时只针对"同一个人卡在这一手"。
     if (actor !== this.turnActor) {
       this.turnActor = actor ?? undefined;

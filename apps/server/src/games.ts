@@ -1,12 +1,30 @@
 import type { HubGameInfo } from '@rds/room-protocol';
+import { GAME_REGISTRY } from '@rds/games/registry';
+import { seatRangeOf } from '@rds/kernel/seating';
+
+/** Keep the lobby menu and the kernel scenario table in lockstep. */
+function variantsOf(gameId: string): { id: string; label: string }[] | undefined {
+  const scenarios = GAME_REGISTRY[gameId]?.scenarios;
+  if (!scenarios) return undefined;
+  const rows = Object.entries(scenarios).map(([id, scenario]) => ({
+    id,
+    label: scenario.description ?? id
+  }));
+  return rows.length > 0 ? rows : undefined;
+}
+
+function seatRangeOfGame(gameId: string): { minPlayers: number; maxPlayers: number } {
+  const module = GAME_REGISTRY[gameId];
+  const range = module ? seatRangeOf(module) : { min: 2, max: 4 };
+  return { minPlayers: range.min, maxPlayers: range.max };
+}
 
 /**
  * 游戏清单：新游戏接入 = 这里加一条（后续可改为 DB/远程 manifest）。
  * 人数必须与夹具 setup 实际创建的座位一致，否则多出来的
  * 玩家会进入对局却没有任何合法动作（引擎里根本没有他的座位）。
- * 当前事实（packages/games/src 下各夹具 setup.ts 的 playerOrder/DEFAULT_ROSTER）：
- *   splendor p1-p2 / catan p1-p3 / betrayal DEFAULT_ROSTER 3 人。
- * 待内核支持 setup(seed, playerCount) 后再放宽到真实游戏人数。
+ * 固定阵容的玩法仍由 `meta.seatRange` / scenario.seats 决定；三国杀、德州扑克等
+ * 可变人数玩法由夹具读取 `setup(seed, { seats, humans, aiSeats })`。
  */
 export const GAMES: HubGameInfo[] = [
   {
@@ -65,15 +83,16 @@ export const GAMES: HubGameInfo[] = [
     ],
   },
   {
-    // 三国杀：夹具默认 4 座（packages/games/src/sanguosha/setup.ts 的 playerOrder）。
+    // 三国杀：2–8 座；标准身份局 5/8 人、4 人对抗与杀下家村规都由 scenario 声明。
     id: 'sanguosha',
     name: '三国杀',
-    minPlayers: 4,
-    maxPlayers: 4,
+    ...seatRangeOfGame('sanguosha'),
     clientUrl: '/games/rds-board-core/',
     protocol: 'rds-room/1',
     durationMin: 45,
     accent: '#d9a441',
+    aiSeats: true,
+    variants: variantsOf('sanguosha'),
   },
   {
     // 沙丘 & 麻将：夹具默认 3 座（packages/games/src/dune_mahjong/setup.ts 的 playerOrder）。

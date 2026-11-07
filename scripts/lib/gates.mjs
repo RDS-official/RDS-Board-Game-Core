@@ -18,7 +18,10 @@ const SCALE = Math.max(0.1, Number(process.env.GATE_SCALE ?? 1) || 1);
 
 /** Defaults measured on the dev machine, with 2× headroom. */
 export const DEFAULT_BUDGETS = {
-  core: { ms: 90_000, mb: 900 },
+  // The expanded Sanguosha fixture now projects a 108-card standard deck and
+  // evaluates its action matrix; `verify:all` runs the shards alongside the
+  // matrix/UI gates, so the old 90s ceiling no longer covers the contended run.
+  core: { ms: 120_000, mb: 900 },
   matrix: { ms: 180_000, mb: 900 },
   // The UI matrix is 356s solo but 477s when `verify:all` runs all eight gates
   // at once — the browser pool and the CPU-parallel core shards compete for the

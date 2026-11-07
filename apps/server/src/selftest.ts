@@ -13,9 +13,9 @@ const ADMIN_PASSWORD = crypto.randomBytes(9).toString('base64url');
 process.env.ADMIN_PASSWORD = ADMIN_PASSWORD;
 const {
   register, login, verifyJwt, userFromAuthHeader, createUser, isAdminUser, changeOwnPassword,
-  adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser
+  adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser, profileOf
 } = await import('./auth.ts');
-const { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo, leaveRoom, seatedPlayers } = await import('./rooms.ts');
+const { createRoom, joinRoom, listRooms, setRoomStatus, setReady, kickPlayer, transferHost, getRoomInfo, leaveRoom, seatedPlayers, setAiSeats } = await import('./rooms.ts');
 const { GAMES } = await import('./games.ts');
 const { GAME_REGISTRY } = await import('@rds/games/registry');
 const { MatchManager } = await import('./match.ts');
@@ -24,6 +24,7 @@ const { settleHand, takeSeat, leaveSeat } = await import('./pokerSettle.ts');
 const { accountOf, peekAccount, updateAccount } = await import('./pokerLedger.ts');
 const { rankAccounts } = await import('./pokerLeaderboard.ts');
 const { getAiHeroName } = await import('@rds/games/poker/seating');
+const { settleSanguosha } = await import('./sanguoshaSettle.ts');
 
 let failed = 0;
 const ok = (cond: boolean, name: string) => { if (!cond) { failed++; console.error('FAIL', name); } else console.log('ok -', name); };
@@ -54,6 +55,15 @@ const reg: any = createUser(name, 'secret123', { displayName: '测试员1' });
 ok(reg.token && reg.user.id && reg.user.name === name, 'createUser issues token and user');
 ok((createUser(name, 'secret123') as any).error, 'duplicate name rejected by createUser');
 ok(verifyJwt(reg.token)?.sub === reg.user.id, 'jwt roundtrip');
+// 三国杀积分：胜负双方按模块表加减，同一房间只结算一次。
+const sgsScoreUser = createUser('sgs_score_' + Date.now(), 'secret123');
+if ('user' in sgsScoreUser) {
+  settleSanguosha('r_sgs_score', { p1: 500, p2: -500 }, ['p1'], seat => (seat === 'p1' ? sgsScoreUser.user.id : undefined));
+  const afterFirst = profileOf(sgsScoreUser.user.id);
+  ok(afterFirst?.sanguoshaPoints === 500 && afterFirst?.sanguoshaCareer?.wins === 1, 'sanguosha score settles a winner');
+  settleSanguosha('r_sgs_score', { p1: 500, p2: -500 }, ['p1'], seat => (seat === 'p1' ? sgsScoreUser.user.id : undefined));
+  ok(profileOf(sgsScoreUser.user.id)?.sanguoshaPoints === 500, 'replaying a settled room does not double-count points');
+}
 const login_r: any = await login(name, 'secret123');
 ok(login_r.token, 'login works');
 ok((await login(name, 'wrong!!') as any).error, 'wrong password rejected');
@@ -138,6 +148,12 @@ ok(priv.maxPlayers === 2, 'create room clamps maxPlayers to fixture seats (S9)')
 const scen: any = createRoom(reg.user.id, '变体房', 'betrayal', { scenarioId: 'exploration' });
 ok(scen.scenarioId === 'exploration', 'scenario variant stored');
 ok((createRoom(reg.user.id, 'x', 'betrayal', { scenarioId: 'nope' }) as any).error, 'unknown variant rejected');
+const sgsRoom: any = createRoom(reg.user.id, '三国杀五人房', 'sanguosha', { scenarioId: 'identity_5' });
+ok(sgsRoom.maxPlayers === 5, 'identity_5 room exposes five seats');
+const sgsAi = setAiSeats(reg.user.id, sgsRoom.id, 4) as any;
+ok(sgsAi.aiSeats === 4, 'sanguosha room accepts four AI fillers');
+ok((setRoomStatus(reg.user.id, sgsRoom.id, 'playing') as any).status === 'playing', 'a one-human + four-AI identity room starts');
+leaveRoom(reg.user.id, sgsRoom.id);
 
 // 德州扑克：默认桌是「1 真人 + 5 AI」的 6 人桌（不足 6 人由 AI 补齐），
 // 房间座位数跟着所选场景走。
@@ -217,6 +233,23 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
       ok(chips === charged, `AI ${seat.playerId} starts with the charged stack, not the fixture default`);
     }
     matches.close('r_ai_buyin');
+  }
+  // 三国杀 AI 补位：1 真人 + 3 AI，座位标记与驱动入口必须一致。
+  {
+    const sgsMatch = matches.ensure({
+      roomId: 'r_sgs_ai',
+      gameId: 'sanguosha',
+      players: [{ userId: host, name: '测试员1' }],
+      seats: 1,
+      aiSeats: 3,
+      seed: 77
+    });
+    const raw: any = sgsMatch.rawState();
+    const tableSeats = (raw.globalVars.seats as { playerId: string; isAi: boolean }[]) ?? [];
+    ok(tableSeats.filter(seat => seat.isAi).length === 3, 'sanguosha hosted room seats three AI fillers');
+    ok(GAME_REGISTRY.sanguosha.driver?.isAutomated?.(raw, 'p2') === true, 'sanguosha AI seat is marked automated');
+    ok(GAME_REGISTRY.sanguosha.driver?.isAutomated?.(raw, 'p1') === false, 'sanguosha human seat is not automated');
+    matches.close('r_sgs_ai');
   }
   // 内核控制通道（__ 前缀）不可被客户端使用
   const control = match.submit(host, { type: '__TICK__', playerId: 'p1', payload: { ticks: 1 } });

@@ -114,33 +114,6 @@ interface ActiveBoardGroup {
 /** 读面板动作的元数据；缺失时给空对象，避免到处判空。 */
 const metaOf = (pick: { metadata?: unknown }): PickMetadata => (pick.metadata ?? {}) as PickMetadata;
 
-const RESOURCES: Record<string, { icon: string; label: string; color: string }> = {
-  wood: { icon: '🌲', label: '木材', color: '#3f9d5a' },
-  brick: { icon: '🧱', label: '砖', color: '#c9603f' },
-  sheep: { icon: '🐑', label: '羊毛', color: '#9bc94f' },
-  wheat: { icon: '🌾', label: '麦', color: '#e0b23c' },
-  ore: { icon: '⛏️', label: '矿', color: '#8b93a1' }
-};
-
-/**
- * 宝可梦璀璨宝石的六色精灵球。
- *
- * 与 `@rds/games/splendor/setup` 的 `POKEBALL_COLORS` 一一对应：红 / 蓝 / 黑 /
- * 粉 / 黄，以及作为万能替代色的紫色大师球。DTO 层只持有颜色与标签，不 import
- * 游戏模块（分层约束）。
- */
-const POKEBALLS: { id: string; short: string; label: string; color: string }[] = [
-  { id: 'red', short: '红', label: '红色精灵球', color: '#e53935' },
-  { id: 'blue', short: '蓝', label: '蓝色精灵球', color: '#1e88e5' },
-  { id: 'black', short: '黑', label: '黑色精灵球', color: '#212121' },
-  { id: 'pink', short: '粉', label: '粉色精灵球', color: '#ec407a' },
-  { id: 'yellow', short: '黄', label: '黄色精灵球', color: '#fdd835' },
-  { id: 'purple', short: '紫', label: '大师球', color: '#8e24aa' }
-];
-
-/** 紫色大师球：万能替代色，保留宝可梦时获得。 */
-const MASTER_BALL = 'purple';
-
 const EVENT_ICONS: Record<string, string> = {
   CARD_DRAW: '🎴',
   CARD_PLAY: '✧',
@@ -930,7 +903,7 @@ export class UniversalSession implements GamePresenter {
    *
    * AI 与真人同一条管线：`legalActions` 直接给出它这一步要做的具体动作，这里
    * 只按 `aiActionDelayMs` 的节奏派发。每次状态变化后重排定时器，于是 AI 与 AI
-   * 之间的间隔正好是 5 秒，真人看得清每一步。
+   * 之间保持可读的间隔，真人看得清每一步。
    */
   private scheduleAiTurn(): void {
     if (this.aiTimer !== null) {
@@ -940,15 +913,15 @@ export class UniversalSession implements GamePresenter {
     const delay = this.module.driver?.aiActionDelayMs;
     if (!delay) return;
     const state = this.engine.getRawState();
-    const actor = this.engine.getActiveActorId();
-    if (!actor || !this.module.driver?.isAutomated?.(state, actor)) return;
+    const actor = this.automatedFocusActor(state);
+    if (!actor) return;
     if (this.engine.getLegalActions(actor).length === 0) return;
     this.aiTimer = setTimeout(() => {
       this.aiTimer = null;
-      // 这 5 秒里状态可能已经变了（真人先手、换座、牌局结束），到点重新问一次。
+      // 这 1.2 秒里状态可能已经变了（真人先手、换座、牌局结束），到点重新问一次。
       const live = this.engine.getRawState();
-      const liveActor = this.engine.getActiveActorId();
-      if (!liveActor || !this.module.driver?.isAutomated?.(live, liveActor)) {
+      const liveActor = this.automatedFocusActor(live);
+      if (!liveActor) {
         this.scheduleAiTurn();
         return;
       }
@@ -957,6 +930,23 @@ export class UniversalSession implements GamePresenter {
       this.engine.dispatch(action);
       this.scheduleAiTurn();
     }, delay);
+  }
+
+  /**
+   * The automated actor that currently owns the input.
+   *
+   * A response window can focus the strike target while the active player is
+   * still the attacker, so looking only at `activePlayerId` would let an AI
+   * target sit on a Dodge/Peach prompt forever.
+   */
+  private automatedFocusActor(state: ReturnType<UniversalGameEngine['getRawState']>): string | undefined {
+    const isAutomated = this.module.driver?.isAutomated;
+    if (!isAutomated) return undefined;
+    const focus = this.engine.getFocusActors() as string[];
+    const focused = focus.find(actorId => isAutomated(state, actorId));
+    if (focused) return focused;
+    const active = this.engine.getActiveActorId();
+    return active && isAutomated(state, active) ? active : undefined;
   }
 
   /**
@@ -1206,8 +1196,8 @@ export class UniversalSession implements GamePresenter {
         }));
       })(),
 
-      phaseLabel: phaseLabelOf(state),
-      mission: missionLineOf(state),
+      phaseLabel: phaseLabelOf(state, module.presentation),
+      mission: missionLineOf(state, module.presentation),
       round: state.round,
       turn: state.turn,
       clock: state.clock,
@@ -1371,30 +1361,16 @@ export class UniversalSession implements GamePresenter {
    * 其他游戏没有筹码概念，返回 undefined 让 HUD 不渲染这个面板。
    */
   private buildChipRanking(state: ProjectedGameState): UiChipRank[] | undefined {
-    if (state.gameId !== 'poker') return undefined;
-    const seats = (state as unknown as GameState).globalVars?.seats as
-      | { playerId: string; isAi: boolean; aiTier?: string }[]
-      | undefined;
-    const seatOf = new Map((seats ?? []).map(seat => [seat.playerId, seat]));
-    const TIER_LABEL: Record<string, string> = { beginner: '初级', intermediate: '中级', advanced: '高级' };
-    const rows = state.playerOrder.map(playerId => {
-      const player = state.players[playerId];
-      const chips = Number(player?.customProps?.chips ?? 0);
-      const seat = seatOf.get(playerId);
-      const tier = seat?.aiTier;
-      return {
-        playerId,
-        name: player?.name ?? playerId,
-        chips,
-        share: 0,
-        isAi: !!seat?.isAi,
-        tierLabel: tier ? TIER_LABEL[tier] ?? tier : undefined
-      };
-    });
-    const total = rows.reduce((sum, row) => sum + row.chips, 0);
-    for (const row of rows) row.share = total > 0 ? row.chips / total : 0;
-    rows.sort((a, b) => b.chips - a.chips);
-    return rows;
+    const rows = this.module.presentation?.rankedPlayers?.(state);
+    if (!rows) return undefined;
+    return rows.map(row => ({
+      playerId: row.playerId,
+      name: row.name,
+      chips: row.value,
+      share: row.share,
+      isAi: row.isAi ?? false,
+      tierLabel: row.tierLabel
+    }));
   }
 
   private buildSpatial(state: ProjectedGameState, actor?: string): UiSpatialInfo | undefined {
@@ -1469,129 +1445,24 @@ export class UniversalSession implements GamePresenter {
 /* Shared by UniversalSession (host/local) and NetSession (network guest).     */
 /* -------------------------------------------------------------------------- */
 
-export function phaseLabelOf(state: ProjectedGameState): string {
-    const openDecision = state.pendingDecisions.find(window => window.status === 'OPEN');
-    if (openDecision) {
-      return openDecision.secret ? 'SECRET DECISION · 同步盲提' : 'DECISION · 等待提交';
-    }
-    if (state.interruptStack.length > 0) return 'INTERRUPT RESOLUTION · 响应结算';
-
-    switch (state.gameId) {
-      case 'catan': {
-        const labels: Record<string, string> = {
-          SETUP_SETTLEMENT: 'SETUP · 选择起始定居点',
-          SETUP_ROAD: 'SETUP · 铺设起始道路',
-          ROLL: 'ROLL · 掷骰子',
-          ACTION: 'ACTION · 建造 / 交易 / 发展卡',
-          DISCARD: 'DISCARD · 七点弃牌',
-          MOVE_ROBBER: 'ROBBER · 移动强盗',
-          STEAL: 'STEAL · 选择偷取对象',
-          ROAD_BUILDING: 'ROAD BUILDING · 免费修路',
-          TRADE_PENDING: 'PLAYER TRADE · 等待回应'
-        };
-        return labels[state.phase] ?? state.phase;
-      }
-      case 'sanguosha':
-        return 'PLAY PHASE · 出牌阶段';
-      case 'splendor': {
-        // 行动阶段：收服精灵球 / 捕捉宝可梦 / 保留 / 进化（进化免费且不结束回合）。
-        const evolved = state.globalVars.evolvedThisTurn === true;
-        const lastRound = state.globalVars.lastRound === true;
-        return [
-          'TRAINER TURN · 训练家行动',
-          `目标 ${Number(state.globalVars.scoreToWin ?? 18)} 分`,
-          evolved ? '本回合已进化' : '可进化 1 次',
-          lastRound ? '终局回合' : null
-        ]
-          .filter(Boolean)
-          .join(' · ');
-      }
-      case 'betrayal': {
-        const haunt = state.globalVars.haunt as
-          | { number?: number; title?: string; progress?: number; eyesDestroyed?: number; bonesFound?: boolean }
-          | null
-          | undefined;
-        if (!haunt) return `EXPLORATION · 探索阶段 · 预兆 ${Number(state.globalVars.omensRevealed ?? 0)}`;
-        const bits = [`HAUNT #${haunt.number} · ${haunt.title}`];
-        if (haunt.title?.includes('木乃伊')) bits.push(`封印 ${haunt.progress ?? 0}/2`);
-        if (haunt.title?.includes('幽灵')) bits.push(`安魂 ${haunt.progress ?? 0}/3`);
-        if (haunt.title?.includes('巨眼')) bits.push(`巨眼 ${haunt.eyesDestroyed ?? 0}/2`);
-        return bits.join(' · ');
-      }
-      case 'dune_mahjong':
-        return state.globalVars.battleMode === 'MAHJONG' ? 'PRIORITY CLAIM · 抢断窗口' : 'SIMULTANEOUS COMMIT · 同步盲提';
-      case 'poker': {
-        const hand = state.globalVars.hand as
-          | {
-              street?: string;
-              pot?: number;
-              streetBets?: Record<string, number>;
-              currentBet?: number;
-              buttonSeat?: number;
-              handNo?: number;
-            }
-          | undefined;
-        if (!hand) return 'HAND OVER · 等待发牌';
-        const street = hand.street ?? 'COMPLETE';
-        if (street === 'COMPLETE') return `HAND OVER · 第 ${Number(hand.handNo ?? 0) + 1} 手待发`;
-        const streetLabels: Record<string, string> = {
-          PREFLOP: 'PRE-FLOP · 翻前',
-          FLOP: 'FLOP · 翻牌圈',
-          TURN: 'TURN · 转牌圈',
-          RIVER: 'RIVER · 河牌圈'
-        };
-        const streetChips = Object.values(hand.streetBets ?? {}).reduce(
-          (sum, amount) => sum + Number(amount ?? 0),
-          0
-        );
-        const pot = Number(hand.pot ?? 0) + streetChips;
-        // 「需跟」是**还差多少**，不是当前注额：小盲已投 5、注额 10 时应显示 5。
-        // 之前直接显示 currentBet，小盲和大盲都会看到比实际多一截的数字（issue #192）。
-        const mine = Number((hand.streetBets as Record<string, number> | undefined)?.[state.viewerId] ?? 0);
-        const owed = Math.max(0, Number(hand.currentBet ?? 0) - (Number.isFinite(mine) ? mine : 0));
-        return `${streetLabels[street] ?? street} · 底池 ${pot} · 需跟 ${owed}`;
-      }
-      default:
-        return state.phase;
-    }
+export function phaseLabelOf(
+  state: ProjectedGameState,
+  presentation?: GameModule['presentation']
+): string {
+  const openDecision = state.pendingDecisions.find(window => window.status === 'OPEN');
+  if (openDecision) {
+    return openDecision.secret ? 'SECRET DECISION · 同步盲提' : 'DECISION · 等待提交';
   }
+  if (state.interruptStack.length > 0) return 'INTERRUPT RESOLUTION · 响应结算';
+  return presentation?.phaseLabel?.(state) ?? state.phase;
+}
 
-export function missionLineOf(state: ProjectedGameState): string | undefined {
-    if (state.gameId === 'poker') {
-      const hand = state.globalVars.hand as { handNo?: number; buttonSeat?: number } | undefined;
-      const config = state.globalVars.config as
-        | { startingStack?: number; smallBlind?: number; bigBlind?: number }
-        | undefined;
-      const last = state.globalVars.lastHand as
-        | { pots?: { amount: number; winners: string[] }[]; endedBy?: string }
-        | null
-        | undefined;
-      const buttonId = state.playerOrder[Number(hand?.buttonSeat ?? 0)];
-      const bits = [
-        `盲注 ${Number(config?.smallBlind ?? 5)} / ${Number(config?.bigBlind ?? 10)}`,
-        `初始 ${Number(config?.startingStack ?? 1000)}`,
-        `第 ${Number(hand?.handNo ?? 0)} 手`,
-        buttonId ? `庄家 ${state.players[buttonId]?.name ?? buttonId}` : null
-      ].filter(Boolean) as string[];
-      const pots = last?.pots ?? [];
-      if (pots.length > 0) {
-        const winners = [...new Set(pots.flatMap(pot => pot.winners.map(pid => state.players[pid]?.name ?? pid)))];
-        const total = pots.reduce((sum, pot) => sum + Number(pot.amount ?? 0), 0);
-        bits.push(`上一手：${winners.join(' / ')} 赢得 ${total}`);
-      }
-      return bits.join(' · ');
-    }
-    if (state.gameId !== 'betrayal') return undefined;
-    const objectives = state.globalVars.hauntObjectives as { hero?: string; traitor?: string } | undefined;
-    if (!objectives) {
-      return `探索阶段 · 已揭示预兆 ${Number(state.globalVars.omensRevealed ?? 0)} 张 · 抽到预兆后结束回合触发作祟检定`;
-    }
-    if (state.viewerId === 'GOD') {
-      return `英雄：${objectives.hero ?? '—'} ｜ 叛徒：${objectives.traitor ?? '—'}`;
-    }
-    const role = state.players[state.viewerId]?.role;
-    return role === 'TRAITOR' ? `叛徒目标：${objectives.traitor ?? '—'}` : `英雄目标：${objectives.hero ?? '—'}`;
-  }
+export function missionLineOf(
+  state: ProjectedGameState,
+  presentation?: GameModule['presentation']
+): string | undefined {
+  return presentation?.missionLine?.(state);
+}
 
 export function buildPlayersView(
   state: ProjectedGameState,
@@ -1641,7 +1512,7 @@ export function buildPlayersView(
         avatar: player?.avatar ?? '👤',
         avatarUrl: player?.avatarUrl,
         score: player?.score ?? 0,
-        scoreLabel: state.gameId === 'sanguosha' ? 'HP' : 'VP',
+        scoreLabel: 'VP',
         alive: player?.alive ?? true,
         roleLabel: player?.role ? presentation?.roleLabel?.(player.role) ?? player.role : undefined,
         roleClass: player?.role?.toLowerCase(),
@@ -1653,155 +1524,21 @@ export function buildPlayersView(
 
       if (!player) return base;
 
-      if (state.gameId === 'catan') {
-        const resources = player.customProps.resources ?? {};
-        base.pips = Object.entries(RESOURCES).map(([key, meta]) => ({
-          color: meta.color,
-          label: meta.label,
-          icon: meta.icon,
-          value: String(resources[key] ?? 0)
-        }));
-        const owned = Object.values(state.entities).filter(e => e?.ownerId === pid && e.components?.building);
-        const devCount = state.zones[`zone_dev_${pid}`]?.orderedEntities.length ?? 0;
-        const knights = Number(player.customProps.knightsPlayed ?? 0);
-        const longest = state.globalVars.longestRoadOwner === pid;
-        const army = state.globalVars.largestArmyOwner === pid;
-        base.stats = [
-          {
-            label: '建筑',
-            value: `${owned.filter(e => e.components!.building!.type === 'SETTLEMENT').length} 村 · ${
-              owned.filter(e => e.components!.building!.type === 'CITY').length
-            } 城 · ${owned.filter(e => e.components!.building!.type === 'ROAD').length} 路`
-          },
-          { label: '发展卡 / 骑士', value: `${devCount} / ${knights}` },
-          ...(longest || army
-            ? [{ label: '特殊卡', value: `${longest ? '最长道路' : ''}${longest && army ? ' · ' : ''}${army ? '最大军队' : ''}` }]
-            : [])
-        ];
-      } else if (state.gameId === 'sanguosha') {
-        const hp = player.customProps.hp ?? 0;
-        const maxHp = player.customProps.maxHp ?? 4;
-        base.hp = { current: hp, max: maxHp };
-        base.stats = [
-          { label: player.customProps.hero ?? '武将', value: `${hp} / ${maxHp} HP` },
-          { label: '手牌 / 装备', value: `${handCount} / ${equipCount}` }
-        ];
-      } else if (state.gameId === 'splendor') {
-        // 宝可梦语义词条：彩虹徽章是该色加成数，紫色徽章是手上的大师球。
-        const bonuses = player.customProps.bonuses ?? {};
-        const tokens = player.customProps.tokens ?? {};
-        base.pips = POKEBALLS.map(ball => ({
-          color: ball.color,
-          label: ball.id === MASTER_BALL ? `${ball.label}（持有）` : `${ball.label}（加成）`,
-          short: ball.short,
-          value: String((ball.id === MASTER_BALL ? tokens[ball.id] : bonuses[ball.id]) ?? 0)
-        }));
-        const tokenTotal = POKEBALLS.reduce((sum, ball) => sum + Number(tokens[ball.id] ?? 0), 0);
-        // 场上宝可梦 = 图鉴区（进化会替换掉基础形态），保留区 = 手牌区。
-        const fielded = state.zones[`zone_tableau_${pid}`]?.orderedEntities.length ?? 0;
-        base.stats = [
-          { label: '精灵球 / 大师球', value: `${tokenTotal - Number(tokens[MASTER_BALL] ?? 0)} / ${Number(tokens[MASTER_BALL] ?? 0)}` },
-          { label: '宝可梦 / 保留', value: `${fielded} / ${handCount}` }
-        ];
-      } else if (state.gameId === 'betrayal') {
-        const room = state.mapGraph.nodes[player.customProps.currentRoomId];
-        const traits = player.customProps.traits ?? {};
-        const hand = state.zones[`zone_hand_${pid}`]?.orderedEntities ?? [];
-        const omens = hand.filter(id => state.entities[id]?.components?.custom?.cardType === 'OMEN').length;
-        const items = hand.length - omens;
-        const floorNames: Record<string, string> = { BASEMENT: '地下室', GROUND: '一楼', UPPER: '二楼' };
-        const start = player.customProps.startIndex ?? {};
-        const bonuses = statModifiers?.(pid) ?? {};
-        base.score = omens;
-        base.scoreLabel = '预兆';
-        base.stats = [
-          {
-            label: '所在',
-            value: `${room?.props?.name ?? '未知'} · ${floorNames[String(room?.props?.floor ?? '')] ?? ''}`
-          },
-          { label: '物品 / 预兆', value: `${items} / ${omens}` },
-          // Movement gates moving and exploring; showing 0 explains a turn whose
-          // only remaining option is END_TURN.
-          { label: '移动力', value: String(Number(player.customProps.movesLeft ?? 0)) },
-          ...(player.customProps.controlled ? [{ label: '状态', value: '👁️ 被精神控制' }] : []),
-          ...(player.customProps.banished ? [{ label: '状态', value: '🛸 已被母舰接引' }] : []),
-          ...(player.alive ? [] : [{ label: '状态', value: '💀 已死亡' }])
-        ];
-        // Names, glyphs, colours and track length are the game's; this branch
-        // (still game-scoped until the player-fact rewrite) only lays them out.
-        const ladderKeys = Object.keys(traits).length > 0 ? Object.keys(traits) : Object.keys(start);
-        base.pips = ladderKeys.map(key => {
-          const meta = presentation?.describeTrait?.(key);
-          return {
-            color: meta?.color ?? '#8b93a1',
-            label: `${meta?.label ?? key}（初始 ${Number(start[key] ?? traits[key] ?? 0)}）`,
-            short: meta?.short,
-            key,
-            value: String(traits[key] ?? '-'),
-            max: meta?.max ?? 8,
-            start: Number(start[key] ?? 0),
-            modifier: Number(bonuses[key] ?? 0)
-          };
-        });
-      } else if (state.gameId === 'dune_mahjong') {
-        const openWindow = state.pendingDecisions.find(w => w.status === 'OPEN');
-        const submitted = openWindow
-          ? openWindow.submissions[pid] !== undefined
-          : !!state.globalVars.committedDials?.[pid];
-        base.pips = [
-          { color: '#e0922f', label: '香料', short: '香料', value: String(player.customProps.spice ?? 0) },
-          { color: '#8b93a1', label: '军团', short: '军团', value: String(player.customProps.troops ?? 0) }
-        ];
-        base.stats = [
-          { label: player.customProps.leader ?? '将领', value: submitted ? '🔒 已锁定转盘' : '⚪ 未提交' }
-        ];
-      } else if (state.gameId === 'poker') {
-        const hand = state.globalVars.hand as
-          | {
-              street?: string;
-              buttonSeat?: number;
-              sbSeat?: number;
-              bbSeat?: number;
-              streetBets?: Record<string, number>;
-              folded?: string[];
-              allIn?: string[];
-            }
-          | undefined;
-        const chips = Number(player.customProps.chips ?? 0);
-        const seat = Number(player.customProps.seat ?? -1);
-        const streetBet = Number(hand?.streetBets?.[pid] ?? 0);
-        const folded = hand?.folded?.includes(pid) ?? false;
-        const allIn = hand?.allIn?.includes(pid) ?? false;
-        const marks: string[] = [];
-        if (hand?.buttonSeat === seat) marks.push('D 庄家');
-        if (hand?.sbSeat === seat) marks.push('SB');
-        if (hand?.bbSeat === seat) marks.push('BB');
-
-        base.score = chips;
-        base.scoreLabel = '筹码';
-        base.pips = [
-          { color: player.color, label: '筹码', short: '筹码', value: String(chips) },
-          ...(streetBet > 0
-            ? [{ color: '#e3b341', label: '本街已下注', short: '注', value: String(streetBet) }]
-            : [])
-        ];
-        base.stats = [
-          { label: '位置', value: marks.length > 0 ? marks.join(' · ') : '—' },
-          {
-            label: '状态',
-            value: folded
-              ? '🏳️ 已弃牌'
-              : allIn
-                ? '💥 全押'
-                : chips <= 0
-                  ? '💀 已出局'
-                  : hand?.street === 'COMPLETE'
-                    ? '等待下一手'
-                    : '在手牌中'
-          }
-        ];
+      const hint = presentation?.playerView?.(player, state, {
+        viewer: state.viewerId,
+        handCount,
+        equipCount,
+        isFocus: base.isFocus,
+        modifiers: statModifiers?.(pid) ?? {}
+      });
+      if (hint) {
+        if (hint.score !== undefined) base.score = hint.score;
+        if (hint.scoreLabel !== undefined) base.scoreLabel = hint.scoreLabel;
+        if (hint.hp !== undefined) base.hp = hint.hp;
+        if (hint.stats !== undefined) base.stats = hint.stats;
+        if (hint.pips !== undefined) base.pips = hint.pips;
+        if (hint.effects?.length) base.effects = [...(base.effects ?? []), ...hint.effects];
       }
-
       return base;
     });
   }
@@ -1939,7 +1676,7 @@ export function buildActionsView(
       const reserveKey = `${action.entityId ?? ''}|${String(action.payload?.fromTier ?? '')}`;
       const dedupeKey = `${action.actorId ?? action.playerId}:${
         action.type === 'PLAY_STRIKE'
-          ? `${action.type}:${action.targetPlayerId}`
+          ? `${action.type}:${action.targetPlayerId}:${JSON.stringify(action.payload ?? {})}`
           : action.type === 'RESERVE_CARD'
           ? `${action.type}:${reserveKey}`
           : `${action.type}:${action.entityId ?? ''}:${action.targetPlayerId ?? ''}:${action.targetNodeId ?? ''}:${action.targetEdgeId ?? ''}:${JSON.stringify(action.payload ?? {})}`

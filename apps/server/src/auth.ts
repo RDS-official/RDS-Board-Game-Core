@@ -168,6 +168,9 @@ export function isAdminUser(user: { sub: string; name: string; role?: string } |
 // ---- 阶段一：用户资料（昵称/头像） ----
 export interface UserProfile {
   id: string; name: string; displayName: string; role?: 'admin' | 'user'; disabled?: boolean; avatarUrl?: string;
+  /** 三国杀积分与生涯场次（服务端权威结算）。 */
+  sanguoshaPoints?: number;
+  sanguoshaCareer?: { games: number; wins: number };
 }
 
 export function profileOf(id: string): UserProfile | null {
@@ -180,6 +183,8 @@ export function profileOf(id: string): UserProfile | null {
     role: u.role === 'admin' ? 'admin' : 'user',
     disabled: !!u.disabled,
     avatarUrl: u.avatarExt ? '/avatars/' + u.id + '.' + u.avatarExt + '?v=' + (u.avatarRev ?? 1) : undefined,
+    sanguoshaPoints: Number(u.sanguoshaPoints ?? 0),
+    sanguoshaCareer: u.sanguoshaCareer ?? { games: 0, wins: 0 },
   };
 }
 

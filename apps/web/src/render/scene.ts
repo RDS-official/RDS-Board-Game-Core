@@ -5093,9 +5093,14 @@ export class BoardGameScene {
 
   private renderGameDecor(state: ProjectedGameState): void {
     if (state.gameId === 'sanguosha') {
-      this.addTableMat(9.6, 7.4, 0, -0.2);
+      // Fit the felt to the actual seat ring: 4 seats need much less cloth than
+      // 8, and a fixed 9.6×7.4 mat would leave the outer seats floating.
+      const seats = Object.values(state.mapGraph.nodes).filter(node => node.type === 'SEAT');
+      const halfX = Math.max(4.8, ...seats.map(node => Math.abs(node.position[0]))) + 1.8;
+      const halfZ = Math.max(3.7, ...seats.map(node => Math.abs(node.position[2]))) + 1.8;
+      this.addTableMat(halfX * 2, halfZ * 2, 0, -0.2);
       const title = this.createLabelSprite('SANGUOSHA · 三国杀', '#c9b57a', 40);
-      title.position.set(0, 0.5, 2.4);
+      title.position.set(0, 0.5, halfZ * 0.35);
       title.scale.set(4.4, 0.72, 1);
       this.boardObjectsGroup.add(title);
     }

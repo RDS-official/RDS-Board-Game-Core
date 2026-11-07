@@ -1,207 +1,317 @@
 import { ECSManager } from '@rds/kernel/ecs';
+import { GameSetupOptions } from '@rds/kernel/module';
+import { DeterministicPRNG } from '@rds/kernel/prng';
 import { Entity, GameState, Player } from '@rds/kernel/types';
+import { MILITARY_DECK, STANDARD_DECK, isStrikeCode } from './cards';
+import { CLASSIC_HERO_IDS, GENDER_LABEL, KINGDOM_COLOR, KINGDOM_LABEL, SANGUOSHA_HEROES, SgsHero, heroById } from './heroes';
+import { DECK_ZONE, DISCARD_ZONE, EQUIP_ZONE, HAND_ZONE, JUDGE_ZONE, createCardEntity, syncEquipmentHooks } from './helpers';
+import type { SanguoshaMode, SgsRole, SgsSeatAssignment, SgsCardSeed } from './types';
 
-export function setupSanguosha(seed: number = 42): GameState {
-  let prngSeed = seed;
+export type SanguoshaVariant = 'classic' | 'warlords' | 'military' | 'military_warlords';
 
-  // 1. Players & Roles
-  // Lord (p1), Loyalist (p2), Rebel (p3), Spy (p4)
-  const players: Record<string, Player> = {
-    p1: {
-      id: 'p1',
-      name: 'Liu Bei (Lord)',
-      color: '#e53935',
-      avatar: '👑',
-      score: 4, // Max HP
-      alive: true,
-      role: 'LORD',
-      secretRole: 'LORD',
-      handZoneId: 'zone_hand_p1',
-      customProps: { hp: 4, maxHp: 4, hero: 'Liu Bei', characterSkill: 'Rende (Benevolence)' }
-    },
-    p2: {
-      id: 'p2',
-      name: 'Guan Yu (Loyalist)',
-      color: '#43a047',
-      avatar: '⚔️',
-      score: 4,
-      alive: true,
-      role: 'LOYALIST',
-      secretRole: 'LOYALIST',
-      handZoneId: 'zone_hand_p2',
-      customProps: { hp: 4, maxHp: 4, hero: 'Guan Yu', characterSkill: 'Wusheng (Martial Sage)' }
-    },
-    p3: {
-      id: 'p3',
-      name: 'Cao Cao (Rebel)',
-      color: '#1e88e5',
-      avatar: '🗡️',
-      score: 4,
-      alive: true,
-      role: 'REBEL',
-      secretRole: 'REBEL',
-      handZoneId: 'zone_hand_p3',
-      customProps: { hp: 4, maxHp: 4, hero: 'Cao Cao', characterSkill: 'Jianxiong' }
-    },
-    p4: {
-      id: 'p4',
-      name: 'Lu Bu (Spy)',
-      color: '#8e24aa',
-      avatar: '🏹',
-      score: 4,
-      alive: true,
-      role: 'SPY',
-      secretRole: 'SPY',
-      handZoneId: 'zone_hand_p4',
-      customProps: { hp: 4, maxHp: 4, hero: 'Lu Bu', characterSkill: 'Wushuang (Matchless)' }
+export interface SanguoshaSetupOptions extends GameSetupOptions {
+  variant?: SanguoshaVariant;
+  mode?: SanguoshaMode;
+}
+
+/** How many seats each table rule supports. */
+export const SANGUOSHA_SEAT_LIMITS: Record<SanguoshaMode, { min: number; max: number; default: number }> = {
+  identity: { min: 4, max: 8, default: 4 },
+  team: { min: 4, max: 4, default: 4 },
+  kill_next: { min: 2, max: 8, default: 4 }
+};
+
+const AI_TIERS: SgsSeatAssignment['aiTier'][] = ['beginner', 'intermediate', 'advanced'];
+
+function resolveSeats(mode: SanguoshaMode, requested: number | undefined): number {
+  const limits = SANGUOSHA_SEAT_LIMITS[mode];
+  const value = Math.floor(Number(requested ?? limits.default));
+  if (!Number.isFinite(value) || value < limits.min || value > limits.max) {
+    throw new Error(`${mode} 模式不支持 ${String(requested)} 人（可用 ${limits.min}–${limits.max} 人）`);
+  }
+  return value;
+}
+
+/** Official identity composition for 4–8 seats; smaller/non-standard tables still
+ * get a deterministic, playable role split so local experiments never crash. */
+function assignRoles(mode: SanguoshaMode, count: number): SgsRole[] {
+  if (mode === 'team') return Array.from({ length: count }, (_, index) => (index % 2 === 0 ? 'TEAM_A' : 'TEAM_B'));
+  if (mode === 'kill_next') return Array.from({ length: count }, () => 'KILL_NEXT');
+
+  const spy = count >= 3 ? 1 : 0;
+  const loyalists = count >= 7 ? 2 : count >= 4 ? 1 : 0;
+  const rebels = Math.max(0, count - 1 - spy - loyalists);
+  return [
+    'LORD',
+    ...Array.from({ length: loyalists }, () => 'LOYALIST' as const),
+    ...Array.from({ length: rebels }, () => 'REBEL' as const),
+    ...(spy ? ['SPY' as const] : [])
+  ];
+}
+
+function assignHeroes(variant: SanguoshaVariant, seed: number, count: number): { heroes: SgsHero[]; nextSeed: number } {
+  const classicDeck = variant === 'classic' || variant === 'military';
+  if (classicDeck && count === CLASSIC_HERO_IDS.length) {
+    return {
+      heroes: CLASSIC_HERO_IDS.map(id => heroById(id) ?? SANGUOSHA_HEROES[0]),
+      nextSeed: seed
+    };
+  }
+  const pool = [...SANGUOSHA_HEROES];
+  const { result, nextSeed } = DeterministicPRNG.shuffle(seed, pool);
+  return { heroes: result.slice(0, count), nextSeed };
+}
+
+function makePlayer(
+  pid: string,
+  hero: SgsHero,
+  role: SgsRole,
+  seatIndex: number,
+  isAi: boolean,
+  aiTier?: SgsSeatAssignment['aiTier']
+): Player {
+  const maxHp = hero.maxHp + (role === 'LORD' ? 1 : 0);
+  return {
+    id: pid,
+    name: hero.name,
+    color: KINGDOM_COLOR[hero.kingdom],
+    avatar: hero.avatar,
+    score: maxHp,
+    alive: true,
+    isAI: isAi,
+    role,
+    secretRole: role,
+    handZoneId: HAND_ZONE(pid),
+    customProps: {
+      hp: maxHp,
+      maxHp,
+      points: 0,
+      heroId: hero.id,
+      heroName: hero.name,
+      kingdom: hero.kingdom,
+      kingdomLabel: KINGDOM_LABEL[hero.kingdom],
+      gender: hero.gender,
+      genderLabel: GENDER_LABEL[hero.gender],
+      skills: hero.skills.map(skill => skill.id),
+      skillNames: hero.skills.map(skill => `${skill.name}（${skill.kind === 'LORD' ? '主公技' : skill.kind === 'PASSIVE' ? '锁定技' : skill.kind === 'TRIGGERED' ? '触发技' : '主动技'}）`),
+      lordSkills: hero.skills.filter(skill => skill.kind === 'LORD').map(skill => skill.id),
+      strikesUsed: 0,
+      chained: false,
+      skipPlay: false,
+      skipDraw: false,
+      wineBonus: 0,
+      wineUsed: false,
+      seatIndex,
+      isAi,
+      ...(aiTier ? { aiTier } : {})
     }
   };
+}
 
-  const playerOrder = ['p1', 'p2', 'p3', 'p4'];
+function seatPosition(index: number, seats: number): [number, number, number] {
+  const rx = seats <= 4 ? 8.9 : seats <= 6 ? 10.4 : 11.6;
+  const rz = seats <= 4 ? 5.6 : seats <= 6 ? 6.4 : 7.0;
+  const angle = Math.PI / 2 + (index * Math.PI * 2) / seats;
+  return [Math.cos(angle) * rx, 0.1, Math.sin(angle) * rz];
+}
 
-  // Map graph for circular seating distance: high-dimensional [seatIndex].
-  const mapGraph = {
-    nodes: {
-      seat_p1: { id: 'seat_p1', type: 'SEAT' as const, position: [0], positionSpace: 'ring' as const, neighbors: ['seat_p2', 'seat_p4'], props: { playerId: 'p1', seatIndex: 0 } },
-      seat_p2: { id: 'seat_p2', type: 'SEAT' as const, position: [1], positionSpace: 'ring' as const, neighbors: ['seat_p1', 'seat_p3'], props: { playerId: 'p2', seatIndex: 1 } },
-      seat_p3: { id: 'seat_p3', type: 'SEAT' as const, position: [2], positionSpace: 'ring' as const, neighbors: ['seat_p2', 'seat_p4'], props: { playerId: 'p3', seatIndex: 2 } },
-      seat_p4: { id: 'seat_p4', type: 'SEAT' as const, position: [3], positionSpace: 'ring' as const, neighbors: ['seat_p3', 'seat_p1'], props: { playerId: 'p4', seatIndex: 3 } }
-    },
+function seatGraph(playerOrder: string[], seats: number) {
+  const nodes = Object.fromEntries(
+    playerOrder.map((pid, index) => {
+      const previous = playerOrder[(index - 1 + playerOrder.length) % playerOrder.length];
+      const next = playerOrder[(index + 1) % playerOrder.length];
+      return [
+        `seat_${pid}`,
+        {
+          id: `seat_${pid}`,
+          type: 'SEAT' as const,
+          position: seatPosition(index, seats),
+          positionSpace: 'world' as const,
+          neighbors: [...new Set([previous, next].map(id => `seat_${id}`))],
+          props: { playerId: pid, seatIndex: index }
+        }
+      ];
+    })
+  );
+  return {
+    nodes,
     edges: {},
     topology: {
       kind: 'ring' as const,
       adjacency: 'neighbors' as const,
       geometry: 'ring' as const,
-      geometrySpec: { radiusX: 8.9, radiusZ: 5.6, origin: [0, 0.1, 0] as [number, number, number] }
+      geometrySpec: {
+        radiusX: seats <= 4 ? 8.9 : seats <= 6 ? 10.4 : 11.6,
+        radiusZ: seats <= 4 ? 5.6 : seats <= 6 ? 6.4 : 7.0,
+        origin: [0, 0.1, 0] as [number, number, number]
+      }
     }
   };
+}
+
+/**
+ * Deal a table for any supported mode and seat count.
+ *
+ * `humans` / `aiSeats` use the same kernel contract as Poker:
+ * seat order is always humans first, then AI fillers. Hosted rooms pass both;
+ * tests and local hot-seat tables omit them and get all-human seats.
+ */
+export function setupSanguosha(seed = 42, options: SanguoshaSetupOptions = {}): GameState {
+  const variant = options.variant ?? 'classic';
+  // Tables below four seats cannot satisfy an identity split. The lobby may
+  // create such a room without an explicit variant (the default "标准" option);
+  // in that case the only supported 2–3 seat rule is the kill-next village rule.
+  const requestedMode = options.mode;
+  const requestedSeats = Number(options.seats);
+  const mode: SanguoshaMode =
+    requestedMode ??
+    (Number.isFinite(requestedSeats) && requestedSeats >= 2 && requestedSeats < 4 ? 'kill_next' : 'identity');
+  const limits = SANGUOSHA_SEAT_LIMITS[mode];
+  if (!limits) throw new Error(`Unknown Sanguosha mode: ${String(mode)}`);
+  const seats = resolveSeats(mode, options.seats);
+  if (mode === 'team' && seats !== 4) throw new Error('4人对抗固定需要 4 个座位');
+
+  const humanCount = Math.max(1, Math.min(seats, Math.floor(Number(options.humans ?? seats))));
+  const aiCount = Math.max(
+    0,
+    Math.min(seats - humanCount, Math.floor(Number(options.aiSeats ?? seats - humanCount)))
+  );
+  // Humans occupy the first seats, AI fillers the next `aiCount`. A caller that
+  // passes only `seats` therefore gets an all-human table; a room passes both
+  // counts and gets exactly the split the host configured.
+  const playerOrder = Array.from({ length: seats }, (_, index) => `p${index + 1}`);
+
+  const military = variant === 'military' || variant === 'military_warlords';
+  const heroAssignment = assignHeroes(variant, seed, seats);
+  let prngState = heroAssignment.nextSeed;
+
+  const roleOrder = assignRoles(mode, seats);
+  const players: Record<string, Player> = {};
+  const seatAssignments: SgsSeatAssignment[] = [];
+  playerOrder.forEach((pid, index) => {
+    const isAi = index >= humanCount && index < humanCount + aiCount;
+    const aiTier = isAi ? AI_TIERS[(index - humanCount) % AI_TIERS.length] : undefined;
+    players[pid] = makePlayer(
+      pid,
+      heroAssignment.heroes[index] ?? SANGUOSHA_HEROES[index % SANGUOSHA_HEROES.length],
+      roleOrder[index] ?? 'KILL_NEXT',
+      index,
+      isAi,
+      aiTier
+    );
+    seatAssignments.push({ playerId: pid, isAi, ...(aiTier ? { aiTier } : {}) });
+  });
 
   let state: GameState = {
     gameId: 'sanguosha',
-    seed: prngSeed,
+    seed,
     seq: 0,
     clock: 0,
     round: 1,
     turn: 1,
     activePlayerId: 'p1',
-    phase: 'ACTION_PHASE',
+    phase: 'PLAY',
     players,
     playerOrder,
     entities: {},
     zones: {},
-    mapGraph,
+    mapGraph: seatGraph(playerOrder, seats),
     globalVars: {
-      drawDeckCount: 40,
-      hasPlayedStrikeThisTurn: false
+      drawDeckCount: 0,
+      hasPlayedStrikeThisTurn: false,
+      wuxieCount: 0,
+      turnOwner: 'p1',
+      mode,
+      variant,
+      playerCount: seats,
+      seats: seatAssignments
     },
     interruptStack: [],
     pendingDecisions: [],
     activeHooks: [],
-    prngState: prngSeed,
+    prngState,
     actionLog: [],
     winner: null,
     gameOver: false
   };
 
-  // Create Zones
-  state = ECSManager.createZone(state, 'zone_deck', 'Draw Pile', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-7.4, 0.06, -5.2]);
-  state = ECSManager.createZone(state, 'zone_discard', 'Discard Pile', 'DISCARD', { type: 'PUBLIC' }, undefined, 'STACK', [-5.5, 0.06, -5.2]);
+  state = ECSManager.createZone(state, DECK_ZONE, '牌堆', 'DECK', { type: 'HIDDEN' }, undefined, 'STACK', [-7.4, 0.06, -5.2]);
+  state = ECSManager.createZone(state, DISCARD_ZONE, '弃牌堆', 'DISCARD', { type: 'PUBLIC' }, undefined, 'STACK', [-5.5, 0.06, -5.2]);
+  state = ECSManager.createZone(state, 'zone_judge_public', '判定展示区', 'JUDGE', { type: 'PUBLIC' }, undefined, 'ROW', [0, 0.06, -6.2]);
 
-  playerOrder.forEach((pId, idx) => {
-    state = ECSManager.createZone(state, `zone_hand_${pId}`, `${players[pId].name} Hand`, 'HAND', {
-      type: 'OWNER_ONLY',
-      ownerId: pId
-    }, pId, 'FAN');
-
-    state = ECSManager.createZone(state, `zone_equip_${pId}`, `${players[pId].name} Equipment`, 'EQUIP', {
-      type: 'PUBLIC'
-    }, pId, 'ROW');
-
-    state = ECSManager.createZone(state, `zone_judge_${pId}`, `${players[pId].name} Judgement`, 'JUDGE', {
-      type: 'PUBLIC'
-    }, pId, 'ROW');
+  playerOrder.forEach(pid => {
+    state = ECSManager.createZone(state, HAND_ZONE(pid), `${players[pid].name} 手牌`, 'HAND', { type: 'OWNER_ONLY', ownerId: pid }, pid, 'FAN');
+    state = ECSManager.createZone(state, EQUIP_ZONE(pid), `${players[pid].name} 装备`, 'EQUIP', { type: 'PUBLIC' }, pid, 'ROW');
+    state = ECSManager.createZone(state, JUDGE_ZONE(pid), `${players[pid].name} 判定区`, 'JUDGE', { type: 'PUBLIC' }, pid, 'ROW');
   });
 
-  // Pre-generate deck of cards
-  const cardBlueprints = [
-    { title: 'Strike (杀)', type: 'BASIC', suit: '♠', rank: '7', color: '#212121', desc: 'Attack a target in range. Deal 1 damage unless dodged.' },
-    { title: 'Strike (杀)', type: 'BASIC', suit: '♥', rank: '8', color: '#d32f2f', desc: 'Attack a target in range. Deal 1 damage unless dodged.' },
-    { title: 'Strike (杀)', type: 'BASIC', suit: '♣', rank: '9', color: '#212121', desc: 'Attack a target in range. Deal 1 damage unless dodged.' },
-    { title: 'Strike (杀)', type: 'BASIC', suit: '♦', rank: '10', color: '#d32f2f', desc: 'Attack a target in range. Deal 1 damage unless dodged.' },
-    { title: 'Dodge (闪)', type: 'BASIC', suit: '♦', rank: '2', color: '#d32f2f', desc: 'Negate an incoming Strike.' },
-    { title: 'Dodge (闪)', type: 'BASIC', suit: '♥', rank: 'K', color: '#d32f2f', desc: 'Negate an incoming Strike.' },
-    { title: 'Peach (桃)', type: 'BASIC', suit: '♥', rank: '3', color: '#d32f2f', desc: 'Recover 1 HP or rescue a dying player.' },
-    { title: 'Peach (桃)', type: 'BASIC', suit: '♦', rank: '12', color: '#d32f2f', desc: 'Recover 1 HP or rescue a dying player.' },
-    { title: 'Wu Xie Ke Ji (无懈可击)', type: 'TRICK', suit: '♣', rank: 'Q', color: '#212121', desc: 'Interrupt & cancel any trick card or another Wu Xie Ke Ji on the stack!' },
-    { title: 'Wu Xie Ke Ji (无懈可击)', type: 'TRICK', suit: '♥', rank: 'J', color: '#d32f2f', desc: 'Interrupt & cancel any trick card or another Wu Xie Ke Ji on the stack!' },
-    { title: 'Dismantle (过河拆桥)', type: 'TRICK', suit: '♠', rank: '3', color: '#212121', desc: 'Discard 1 card from any player.' },
-    { title: 'Snatch (顺手牵羊)', type: 'TRICK', suit: '♦', rank: '3', color: '#d32f2f', desc: 'Steal 1 card from an adjacent player.' },
-    { title: 'Barbarian Invasion (南蛮入侵)', type: 'TRICK', suit: '♠', rank: '7', color: '#212121', desc: 'All other players must play a Strike or take 1 damage.' },
-    { title: 'Eight Trigrams (八卦阵)', type: 'ARMOR', suit: '♠', rank: '2', color: '#212121', desc: 'When you need to Dodge, judge top deck card: if Red, count as Dodge!' },
-    { title: 'Green Dragon Crescent Blade (青龙偃月刀)', type: 'WEAPON', suit: '♠', rank: '5', color: '#212121', desc: 'Range 3. When your Strike is dodged, you may play another Strike.' }
-  ];
+  const deckSeeds = [...STANDARD_DECK, ...(military ? MILITARY_DECK : [])];
+  const shuffled = DeterministicPRNG.shuffle(prngState, deckSeeds);
+  prngState = shuffled.nextSeed;
+  const pool = [...shuffled.result];
 
-  // Deal 4 initial cards to each player's hand
+  const takeBy = (predicate: (card: SgsCardSeed) => boolean): SgsCardSeed | null => {
+    const index = pool.findIndex(predicate);
+    if (index < 0) return null;
+    return pool.splice(index, 1)[0] ?? null;
+  };
+
+  // Demo-friendly opening: seat 1 gets one Strike and one Bagua so the first
+  // screen always has a legal attack and an armour reaction. This is a fixture
+  // deal, not a claim about random distribution; documented in SANGUOSHA.md.
+  const baguaSeed = takeBy(card => card.code === 'bagua');
+  const guaranteedStrike = takeBy(card => isStrikeCode(card.code));
+
+  const hands: Record<string, SgsCardSeed[]> = {};
+  for (const pid of playerOrder) {
+    // Seat one keeps the demo card (Strike + Bagua), so it draws three random
+    // cards and then receives the guaranteed Strike; every other seat draws four.
+    hands[pid] = pool.splice(0, pid === 'p1' ? 3 : 4);
+  }
+  if (guaranteedStrike) hands.p1.unshift(guaranteedStrike);
+
   let cardCounter = 0;
-  playerOrder.forEach(pId => {
-    for (let c = 0; c < 4; c++) {
-      const bp = cardBlueprints[cardCounter % cardBlueprints.length];
-      const cardEntity: Entity = {
-        id: `card_${cardCounter}`,
-        type: 'CARD',
-        zoneId: `zone_hand_${pId}`,
-        ownerId: pId,
-        visibility: { type: 'OWNER_ONLY', ownerId: pId },
-        components: {
-          cardFace: { ...bp }
-        }
-      };
-      state = ECSManager.addEntity(state, cardEntity);
-      cardCounter++;
-    }
-  });
+  const nextId = (): string => `sgs_card_${String(cardCounter++).padStart(3, '0')}`;
 
-  // Put remainder into draw deck
-  for (let c = cardCounter; c < 30; c++) {
-    const bp = cardBlueprints[c % cardBlueprints.length];
-    const cardEntity: Entity = {
-      id: `card_${c}`,
-      type: 'CARD',
-      zoneId: 'zone_deck',
-      visibility: { type: 'HIDDEN' },
-      components: {
-        cardFace: { ...bp }
-      }
-    };
-    state = ECSManager.addEntity(state, cardEntity);
+  if (baguaSeed) {
+    const bagua: Entity = createCardEntity(nextId(), baguaSeed, EQUIP_ZONE('p1'), 'p1');
+    state = ECSManager.addEntity(state, bagua);
   }
 
-  // Pre-equip Guan Yu with Green Dragon Blade and Liu Bei with Eight Trigrams
-  const baGuaCard: Entity = {
-    id: 'equip_bagua_p1',
-    type: 'CARD',
-    zoneId: 'zone_equip_p1',
-    ownerId: 'p1',
-    visibility: { type: 'PUBLIC' },
-    components: {
-      cardFace: { title: 'Eight Trigrams (八卦阵)', type: 'ARMOR', suit: '♠', rank: '2', color: '#212121', desc: 'Judge red for Dodge' }
+  playerOrder.forEach(pid => {
+    for (const seedCard of hands[pid]) {
+      const entity = createCardEntity(nextId(), seedCard, HAND_ZONE(pid), pid);
+      state = ECSManager.addEntity(state, entity);
     }
-  };
-  state = ECSManager.addEntity(state, baGuaCard);
+  });
 
-  // Register AOP rule hook instance (implementation lives in hooks.ts)
+  for (const seedCard of pool) {
+    const entity = createCardEntity(nextId(), seedCard, DECK_ZONE);
+    state = ECSManager.addEntity(state, entity);
+  }
+
   state = {
     ...state,
-    activeHooks: [
-      {
-        instanceId: 'bagua_p1',
-        hookId: 'bagua_armor',
-        ownerId: 'p1',
-        visibility: { type: 'PUBLIC' },
-        params: {}
-      }
-    ]
+    globalVars: {
+      ...state.globalVars,
+      drawDeckCount: state.zones[DECK_ZONE]?.orderedEntities.length ?? 0
+    },
+    prngState
   };
-
+  state = syncEquipmentHooks(state);
   return state;
+}
+
+export function sanguoshaScenario(
+  variant: SanguoshaVariant,
+  mode: SanguoshaMode = 'identity',
+  fixedSeats?: number
+) {
+  return (seed: number, options?: GameSetupOptions): GameState =>
+    setupSanguosha(seed, {
+      ...(options ?? {}),
+      variant,
+      mode,
+      ...(fixedSeats === undefined ? {} : { seats: fixedSeats })
+    });
 }

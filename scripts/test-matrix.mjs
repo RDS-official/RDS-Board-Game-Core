@@ -29,6 +29,17 @@ const MODULE_FILTER = process.env.MATRIX_MODULES
   ? new Set(process.env.MATRIX_MODULES.split(',').map(entry => entry.trim()))
   : null;
 
+/**
+ * A scenario is a *start position*, not another random-play fuzz target: one
+ * seed is enough to prove it initialises and replays. Sanguosha now ships nine
+ * scenarios (5/8 identity, team, village, military, AI demo); running every one
+ * at the full 100-step budget consumed most of the matrix gate without finding
+ * anything the base seeds do not already cover. Keep its scenario pass short;
+ * full randomized play still runs on all three base seeds.
+ */
+const SCENARIO_SEED_CAP = { sanguosha: 1 };
+const SCENARIO_STEP_CAP = { sanguosha: 60 };
+
 const server = await createServer({
   server: { middlewareMode: true },
   appType: 'custom',
@@ -106,9 +117,11 @@ for (const module of modules) {
   }
   for (const [scenario] of Object.entries(module.scenarios ?? {})) {
     scenarios++;
-    for (const seed of SCENARIO_SEEDS) {
+    const seedLimit = SCENARIO_SEED_CAP[id] ?? SCENARIO_SEEDS.length;
+    const maxSteps = SCENARIO_STEP_CAP[id] ?? 100;
+    for (const seed of SCENARIO_SEEDS.slice(0, seedLimit)) {
       seeds++;
-      run(`${id}:${scenario}:seed-${seed}`, module, seed, scenario, 100);
+      run(`${id}:${scenario}:seed-${seed}`, module, seed, scenario, maxSteps);
     }
   }
 }

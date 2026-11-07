@@ -2,9 +2,11 @@ import type {
   MomentPresentationHints,
   MomentPresentationState,
   NodePresentationHints,
+  PlayerViewContext,
+  PlayerViewHints,
   TraitPresentationHints
 } from '@rds/kernel/module';
-import type { MapGraphNode } from '@rds/kernel/types';
+import type { MapGraphNode, Player, ProjectedGameState } from '@rds/kernel/types';
 
 /** Title of the map overview panel: this game is a house on the hill. */
 export const BETRAYAL_MAP_TITLE = '洋馆总览';
@@ -79,30 +81,30 @@ export function betrayalCardFacts(custom: Record<string, unknown>): { label: str
   if (custom.stealable === false) facts.push({ label: '夺取', value: '不可被抢' });
   return facts;
 }
-
-/**
- * Category band, plate tone and seal glyph for 山屋's own card taxonomy.
- *
- * The HUD only understands opaque tone tokens (danger / treasure / event /
- * place …); the mapping from OMEN / ITEM / EVENT / ROOM to those tokens — and the
- * Chinese band text — is the mansion's vocabulary, so it lives here.
- */
-const CARD_STYLES: Record<string, { badge: string; tone: string; seal: string }> = {
-  OMEN: { badge: '预兆 · OMEN', tone: 'danger', seal: '👁' },
-  ITEM: { badge: '遗物 · ITEM', tone: 'treasure', seal: '◆' },
-  EVENT: { badge: '事件 · EVENT', tone: 'event', seal: '✦' },
-  ROOM: { badge: '房间 · ROOM', tone: 'place', seal: '⌂' }
-};
-
-/** Presentation for one card's `custom` bag; unclassified cards keep the neutral plate. */
-export function betrayalCardStyle(custom: Record<string, unknown>): {
-  badge?: string;
-  tone?: string;
-  seal?: string;
-} {
-  const key = String(custom.cardType ?? '');
-  return CARD_STYLES[key] ?? {};
-}
+
+/**
+ * Category band, plate tone and seal glyph for 山屋's own card taxonomy.
+ *
+ * The HUD only understands opaque tone tokens (danger / treasure / event /
+ * place …); the mapping from OMEN / ITEM / EVENT / ROOM to those tokens — and the
+ * Chinese band text — is the mansion's vocabulary, so it lives here.
+ */
+const CARD_STYLES: Record<string, { badge: string; tone: string; seal: string }> = {
+  OMEN: { badge: '预兆 · OMEN', tone: 'danger', seal: '👁' },
+  ITEM: { badge: '遗物 · ITEM', tone: 'treasure', seal: '◆' },
+  EVENT: { badge: '事件 · EVENT', tone: 'event', seal: '✦' },
+  ROOM: { badge: '房间 · ROOM', tone: 'place', seal: '⌂' }
+};
+
+/** Presentation for one card's `custom` bag; unclassified cards keep the neutral plate. */
+export function betrayalCardStyle(custom: Record<string, unknown>): {
+  badge?: string;
+  tone?: string;
+  seal?: string;
+} {
+  const key = String(custom.cardType ?? '');
+  return CARD_STYLES[key] ?? {};
+}
 
 /* -------------------------------------------------------------------------- */
 /* Map nodes: the mansion rooms                                                  */
@@ -168,6 +170,74 @@ export function betrayalRoleLabel(role: string): string | null {
   if (role === 'HERO') return '英雄';
   if (role === 'EXPLORER') return '探索者';
   return null;
+}
+
+export function betrayalPhaseLabel(state: ProjectedGameState): string {
+  const haunt = state.globalVars.haunt as
+    | { number?: number; title?: string; progress?: number; eyesDestroyed?: number; bonesFound?: boolean }
+    | null
+    | undefined;
+  if (!haunt) return `EXPLORATION · 探索阶段 · 预兆 ${Number(state.globalVars.omensRevealed ?? 0)}`;
+  const bits = [`HAUNT #${haunt.number} · ${haunt.title}`];
+  if (haunt.title?.includes('木乃伊')) bits.push(`封印 ${haunt.progress ?? 0}/2`);
+  if (haunt.title?.includes('幽灵')) bits.push(`安魂 ${haunt.progress ?? 0}/3`);
+  if (haunt.title?.includes('巨眼')) bits.push(`巨眼 ${haunt.eyesDestroyed ?? 0}/2`);
+  return bits.join(' · ');
+}
+
+export function betrayalMissionLine(state: ProjectedGameState): string {
+  const objectives = state.globalVars.hauntObjectives as { hero?: string; traitor?: string } | undefined;
+  if (!objectives) {
+    return `探索阶段 · 已揭示预兆 ${Number(state.globalVars.omensRevealed ?? 0)} 张 · 抽到预兆后结束回合触发作祟检定`;
+  }
+  if (state.viewerId === 'GOD') {
+    return `英雄：${objectives.hero ?? '—'} ｜ 叛徒：${objectives.traitor ?? '—'}`;
+  }
+  const role = state.players[state.viewerId]?.role;
+  return role === 'TRAITOR' ? `叛徒目标：${objectives.traitor ?? '—'}` : `英雄目标：${objectives.hero ?? '—'}`;
+}
+
+export function betrayalPlayerView(
+  player: Player,
+  state: ProjectedGameState,
+  context: PlayerViewContext
+): PlayerViewHints {
+  const room = state.mapGraph.nodes[String(player.customProps.currentRoomId ?? '')];
+  const traits = (player.customProps.traits ?? {}) as Record<string, number>;
+  const hand = state.zones[`zone_hand_${player.id}`]?.orderedEntities ?? [];
+  const omens = hand.filter(id => state.entities[id]?.components?.custom?.cardType === 'OMEN').length;
+  const items = hand.length - omens;
+  const floorNames: Record<string, string> = { BASEMENT: '地下室', GROUND: '一楼', UPPER: '二楼' };
+  const start = (player.customProps.startIndex ?? {}) as Record<string, number>;
+  const ladderKeys = Object.keys(traits).length > 0 ? Object.keys(traits) : Object.keys(start);
+  return {
+    score: omens,
+    scoreLabel: '预兆',
+    stats: [
+      {
+        label: '所在',
+        value: `${room?.props?.name ?? '未知'} · ${floorNames[String(room?.props?.floor ?? '')] ?? ''}`
+      },
+      { label: '物品 / 预兆', value: `${items} / ${omens}` },
+      { label: '移动力', value: String(Number(player.customProps.movesLeft ?? 0)) },
+      ...(player.customProps.controlled ? [{ label: '状态', value: '👁️ 被精神控制' }] : []),
+      ...(player.customProps.banished ? [{ label: '状态', value: '🛸 已被母舰接引' }] : []),
+      ...(player.alive ? [] : [{ label: '状态', value: '💀 已死亡' }])
+    ],
+    pips: ladderKeys.map(key => {
+      const meta = betrayalDescribeTrait(key);
+      return {
+        color: meta?.color ?? '#8b93a1',
+        label: `${meta?.label ?? key}（初始 ${Number(start[key] ?? traits[key] ?? 0)}）`,
+        short: meta?.short,
+        key,
+        value: String(traits[key] ?? '-'),
+        max: meta?.max ?? 8,
+        start: Number(start[key] ?? 0),
+        modifier: Number(context.modifiers[key] ?? 0)
+      };
+    })
+  };
 }
 
 interface BetrayalHauntState {

@@ -10,7 +10,16 @@
  * 可以选择亮牌，所以「这一行能看到什么牌」由传入的 `seats[].cards` 决定——那是
  * 投影过滤后的结果，看不到的牌只会以 `hidden` 张数出现。
  */
-import type { MomentLedgerRow, MomentPresentationHints, MomentPresentationState } from '@rds/kernel/module';
+import type {
+  MomentLedgerRow,
+  MomentPresentationHints,
+  MomentPresentationState,
+  PlayerViewHints,
+  RankedPlayerViewHint
+} from '@rds/kernel/module';
+import type { Player, ProjectedGameState } from '@rds/kernel/types';
+
+const TIER_LABEL: Record<string, string> = { beginner: '初级', intermediate: '中级', advanced: '高级' };
 
 interface SettlementHand {
   handNo?: number;
@@ -145,4 +154,120 @@ export function pokerDefaultViewer(state: MomentPresentationState): string | nul
   if (!seat) return null;
   // 已进观察席（输光、离桌）的人不再是主角：投影里没有他，绑过去只会空镜。
   return state.players[seat] ? seat : null;
+}
+
+interface PokerHandView {
+  street?: string;
+  pot?: number;
+  streetBets?: Record<string, number>;
+  currentBet?: number;
+  buttonSeat?: number;
+  handNo?: number;
+  sbSeat?: number;
+  bbSeat?: number;
+  folded?: string[];
+  allIn?: string[];
+}
+
+export function pokerPhaseLabel(state: ProjectedGameState): string {
+  const hand = state.globalVars.hand as PokerHandView | undefined;
+  if (!hand) return 'HAND OVER · 等待发牌';
+  const street = hand.street ?? 'COMPLETE';
+  if (street === 'COMPLETE') return `HAND OVER · 第 ${Number(hand.handNo ?? 0) + 1} 手待发`;
+  const streetLabels: Record<string, string> = {
+    PREFLOP: 'PRE-FLOP · 翻前',
+    FLOP: 'FLOP · 翻牌圈',
+    TURN: 'TURN · 转牌圈',
+    RIVER: 'RIVER · 河牌圈'
+  };
+  const streetChips = Object.values(hand.streetBets ?? {}).reduce((sum, amount) => sum + Number(amount ?? 0), 0);
+  const pot = Number(hand.pot ?? 0) + streetChips;
+  const mine = Number(hand.streetBets?.[state.viewerId] ?? 0);
+  const owed = Math.max(0, Number(hand.currentBet ?? 0) - (Number.isFinite(mine) ? mine : 0));
+  return `${streetLabels[street] ?? street} · 底池 ${pot} · 需跟 ${owed}`;
+}
+
+export function pokerMissionLine(state: ProjectedGameState): string {
+  const hand = state.globalVars.hand as { handNo?: number; buttonSeat?: number } | undefined;
+  const config = state.globalVars.config as
+    | { startingStack?: number; smallBlind?: number; bigBlind?: number }
+    | undefined;
+  const last = state.globalVars.lastHand as
+    | { pots?: { amount: number; winners: string[] }[]; endedBy?: string }
+    | null
+    | undefined;
+  const buttonId = state.playerOrder[Number(hand?.buttonSeat ?? 0)];
+  const bits = [
+    `盲注 ${Number(config?.smallBlind ?? 5)} / ${Number(config?.bigBlind ?? 10)}`,
+    `初始 ${Number(config?.startingStack ?? 1000)}`,
+    `第 ${Number(hand?.handNo ?? 0)} 手`,
+    buttonId ? `庄家 ${state.players[buttonId]?.name ?? buttonId}` : null
+  ].filter(Boolean) as string[];
+  const pots = last?.pots ?? [];
+  if (pots.length > 0) {
+    const winners = [...new Set(pots.flatMap(pot => pot.winners.map(pid => state.players[pid]?.name ?? pid)))];
+    const total = pots.reduce((sum, pot) => sum + Number(pot.amount ?? 0), 0);
+    bits.push(`上一手：${winners.join(' / ')} 赢得 ${total}`);
+  }
+  return bits.join(' · ');
+}
+
+export function pokerPlayerView(player: Player, state: ProjectedGameState): PlayerViewHints {
+  const hand = state.globalVars.hand as PokerHandView | undefined;
+  const chips = Number(player.customProps.chips ?? 0);
+  const seat = Number(player.customProps.seat ?? -1);
+  const streetBet = Number(hand?.streetBets?.[player.id] ?? 0);
+  const folded = hand?.folded?.includes(player.id) ?? false;
+  const allIn = hand?.allIn?.includes(player.id) ?? false;
+  const marks: string[] = [];
+  if (hand?.buttonSeat === seat) marks.push('D 庄家');
+  if (hand?.sbSeat === seat) marks.push('SB');
+  if (hand?.bbSeat === seat) marks.push('BB');
+  return {
+    score: chips,
+    scoreLabel: '筹码',
+    pips: [
+      { color: player.color, label: '筹码', short: '筹码', value: String(chips) },
+      ...(streetBet > 0
+        ? [{ color: '#e3b341', label: '本街已下注', short: '注', value: String(streetBet) }]
+        : [])
+    ],
+    stats: [
+      { label: '位置', value: marks.length > 0 ? marks.join(' · ') : '—' },
+      {
+        label: '状态',
+        value: folded
+          ? '🏳️ 已弃牌'
+          : allIn
+            ? '💥 全押'
+            : chips <= 0
+              ? '💀 已出局'
+              : hand?.street === 'COMPLETE'
+                ? '等待下一手'
+                : '在手牌中'
+      }
+    ]
+  };
+}
+
+export function pokerRankedPlayers(state: ProjectedGameState): RankedPlayerViewHint[] {
+  const seats = state.globalVars.seats as { playerId: string; isAi: boolean; aiTier?: string }[] | undefined;
+  const seatOf = new Map((seats ?? []).map(seat => [seat.playerId, seat]));
+  const rows = state.playerOrder.map(playerId => {
+    const player = state.players[playerId];
+    const chips = Number(player?.customProps?.chips ?? 0);
+    const seat = seatOf.get(playerId);
+    const tier = seat?.aiTier;
+    return {
+      playerId,
+      name: player?.name ?? playerId,
+      value: chips,
+      share: 0,
+      isAi: !!seat?.isAi,
+      tierLabel: tier ? TIER_LABEL[tier] ?? tier : undefined
+    };
+  });
+  const total = rows.reduce((sum, row) => sum + row.value, 0);
+  for (const row of rows) row.share = total > 0 ? row.value / total : 0;
+  return rows.sort((a, b) => b.value - a.value);
 }
