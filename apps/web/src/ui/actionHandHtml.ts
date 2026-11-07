@@ -19,6 +19,18 @@ function num(value: number, digits = 1): string {
   return Number(value.toFixed(digits)).toString();
 }
 
+/**
+ * Presenter icons are either a glyph (emoji/text) or a complete inline `<svg>`
+ * (poker's action icons are SVG). Only a well-formed `<svg>…</svg>` is inserted
+ * as markup; every other string is escaped, so a stray attribute fragment can
+ * never become a tag.
+ */
+function iconHtml(icon: string): string {
+  const trimmed = icon.trim();
+  if (/^<svg[\s>][\s\S]*<\/svg>$/i.test(trimmed)) return trimmed;
+  return escapeHtml(icon);
+}
+
 /** One card's face. `kind` picks the visual family; `badge` flags its intake. */
 export function actionCardFaceHtml(card: ActionCard, view: ActionHandCardView): string {
   const label = escapeHtml(card.label);
@@ -41,7 +53,7 @@ export function actionCardFaceHtml(card: ActionCard, view: ActionHandCardView): 
     ` data-target-mode="${escapeHtml(card.targetMode)}"` +
     ` style="${style}" aria-label="${aria}" title="${aria}">` +
     `<span class="ah-face ah-${escapeHtml(card.kind)}">` +
-    `<span class="ah-ico" aria-hidden="true">${escapeHtml(card.icon)}</span>` +
+    `<span class="ah-ico" aria-hidden="true">${iconHtml(card.icon)}</span>` +
     `<span class="ah-label">${label}</span>` +
     badge +
     cool +

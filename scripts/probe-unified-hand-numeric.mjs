@@ -77,6 +77,9 @@ try {
       String(reached.numericCards),
     );
 
+    const svgIcons = await page.evaluate(() => document.querySelectorAll('#action-hand .ah-ico svg').length);
+    record('numeric: svg icons render as elements', svgIcons > 0, String(svgIcons));
+
     const card = page.locator(`#action-hand .ah-card[data-action-id="${reached.numericId}"]`).first();
     const revBefore = reached.revision;
 
