@@ -242,6 +242,11 @@ try {
     record('drag: one sector + one avatar pin per candidate', opened.sectors === opened.pins && opened.sectors >= 2, opened.sectors + '/' + opened.pins);
     record('drag: pins carry an avatar or an initial', opened.avatars >= opened.pins, String(opened.avatars));
     record('drag: wheel covers more than half the short edge', opened.width >= opened.viewport * 0.6, opened.width + '/' + opened.viewport);
+    record(
+      'drag: the wheel is pinned to the viewport centre (not following the pointer)',
+      Math.abs(opened.cx - 1440 / 2) <= 1,
+      opened.cx.toFixed(1) + ' vs 720'
+    );
 
     // 目视检查的自动化版：用浏览器真实的命中测试回答三个问题——
     // ① 每个分区沿自己的引线真的被画出来了；② 头像落在**自己的**分区里；
@@ -339,6 +344,21 @@ try {
         }, selection.id)) || 0;
 
       const overSector = await cardHeight();
+      // 侦测"放大时强制重新栅格"：缩小后再放大必须丢掉旧位图，否则会发虚。
+      await page.evaluate(() => {
+        window.__rasterSeen = 0;
+        const observer = new MutationObserver(records => {
+          for (const record of records) {
+            const el = record.target;
+            if (el instanceof HTMLElement && el.dataset.rasterising === '1') window.__rasterSeen += 1;
+          }
+        });
+        observer.observe(document.querySelector('#action-hand') ?? document.body, {
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['data-rasterising']
+        });
+      });
       // 移到中心圆：应该放大回"屏幕 1/3"那档，方便看清自己打出去的牌
       await page.mouse.move(over.cx, over.cy, { steps: 4 });
       await page.waitForTimeout(320);
@@ -352,6 +372,11 @@ try {
         'hover: the card shrinks over a sector',
         overSector > 0 && overSector < opened.viewport * 0.2,
         overSector.toFixed(0) + ' of ' + opened.viewport
+      );
+      record(
+        'hover: growing again drops the stale raster (no blur)',
+        (await page.evaluate(() => window.__rasterSeen ?? 0)) > 0,
+        String(await page.evaluate(() => window.__rasterSeen ?? 0))
       );
       record(
         'hover: the card zooms back over the centre circle (~1/3 screen)',

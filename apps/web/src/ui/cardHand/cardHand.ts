@@ -110,6 +110,8 @@ interface CardView {
   appearTarget: number;
   tilt: number;
   lastZ: number;
+  /** 上一帧的拖拽缩放：用来判断"正在变大"，据此强制重新栅格。 */
+  lastDragScale: number;
   gone: boolean;
   fly?: { start: number; fromX: number; fromY: number; fromScale: number; toX: number; toY: number };
 }
@@ -282,6 +284,7 @@ export class CardHand {
           appearTarget: 1,
           tilt: 0,
           lastZ: 0,
+          lastDragScale: 1,
           gone: false
         };
         this.root.appendChild(el);
@@ -463,6 +466,12 @@ export class CardHand {
     const dragScale = dragged ? (this.drag?.bigScale ?? 1) * (this.drag?.scaleMul ?? 1) : 1;
     const baseScale = view.scale.value * hoverScale * (dragged ? dragScale : 1);
 
+    // 浏览器把"带 will-change 的图层"栅格化一次后缩放复用：牌先缩小（悬在分区上）
+    // 再放大时，合成器手里还是那张小位图，于是发虚。变大瞬间撤掉 will-change，
+    // 图层被丢弃 → 下一帧按新尺寸重新栅格，字与卡面恢复清晰。
+    if (dragged && dragScale > view.lastDragScale * 1.05) this.forceRaster(view.el);
+    view.lastDragScale = dragged ? dragScale : 1;
+
     let x = view.x.value + (dragged ? (this.drag?.dx ?? 0) : 0);
     let y = view.y.value + lift + (dragged ? (this.drag?.dy ?? 0) : 0);
     let scale = baseScale;
@@ -491,6 +500,17 @@ export class CardHand {
       view.lastZ = z;
       view.el.style.zIndex = String(z);
     }
+  }
+
+  /** 丢掉合成图层、强制按当前尺寸重新栅格（只撤一帧 will-change）。 */
+  private forceRaster(el: HTMLElement): void {
+    if (el.dataset.rasterising === '1') return;
+    el.dataset.rasterising = '1';
+    el.style.willChange = 'auto';
+    requestAnimationFrame(() => {
+      el.style.willChange = '';
+      delete el.dataset.rasterising;
+    });
   }
 
   private setState(next: CardHandState): void {

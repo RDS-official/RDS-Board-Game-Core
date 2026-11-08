@@ -3844,18 +3844,20 @@ export class BoardGameHUD {
     if (candidates.length === 0) return;
 
     const players = this.latest?.players ?? [];
-    // 轮盘**不能盖住手牌区**：松手回到手牌＝放回并关闭轮盘，所以它必须留在桌面上。
+    // 轮盘**固定在视图正中**（不跟手）：位置与形状每次一致，方便盲操作。
+    // 上留桌面、下不越手牌条（松手回到手牌＝放回并关闭轮盘）。
+    void at;
     const hand = this.container.querySelector('#action-hand') as HTMLElement | null;
     const handTop = hand?.getBoundingClientRect().top ?? window.innerHeight;
     const boardTop = 12;
     const boardBottom = Math.max(boardTop + 240, handTop - 10);
-    const available = Math.min(window.innerWidth - 24, boardBottom - boardTop);
-    const radius = Math.max(150, Math.min(560, available / 2, Math.min(window.innerWidth, window.innerHeight) * 0.41));
-    const margin = 12;
-    const anchor = {
-      x: Math.min(Math.max(at.x, radius + margin), window.innerWidth - radius - margin),
-      y: Math.min(Math.max(at.y, boardTop + radius), boardBottom - radius)
-    };
+    const availableHeight = boardBottom - boardTop;
+    const availableWidth = window.innerWidth - 24;
+    const radius = Math.max(
+      150,
+      Math.min(560, availableHeight / 2, availableWidth / 2, Math.min(window.innerWidth, window.innerHeight) * 0.41)
+    );
+    const anchor = { x: window.innerWidth / 2, y: boardTop + availableHeight / 2 };
 
     this.radialPicker ??= new RadialPickerOverlay();
     this.radialPicker.open({
