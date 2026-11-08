@@ -160,6 +160,8 @@ if (selected.lint) add('hygiene', 'HTML hygiene', process.execPath, ['node_modul
 if (selected.lint) add('keymap', 'probe:keymap', process.execPath, ['scripts/probe-keymap.mjs']);
 if (selected.types) add('types', 'tsc + build', process.execPath, ['scripts/verify-types.mjs']);
 if (selected.docs) add('docs', 'docs:check', process.execPath, ['scripts/check-doc-paths.mjs']);
+// 随机源守卫只扫源码文本，很便宜，动到代码就跑。
+if (selected.lint) add('rng', 'rng guard', process.execPath, ['scripts/check-rng.mjs']);
 
 if (gates.length === 0) {
   console.log('verify: nothing to run for this diff.');
