@@ -43,6 +43,32 @@ for (let n = 1; n <= 8; n += 1) {
   }
 }
 
+/* ---- 1b. pure: n<=3 is a circle, n>=4 is a polygon ------------------ */
+{
+  for (const n of [1, 2, 3]) {
+    const wheel = buildWheel(
+      Array.from({ length: n }, (_, i) => ({ id: 'p' + i, label: 'P' + i })),
+      { radius: 300, seed: 'circle-' + n }
+    );
+    const radii = wheel.outline.map(([x, y]) => Math.hypot(x, y));
+    const spread = Math.max(...radii) - Math.min(...radii);
+    record('n=' + n + ': the outline is a circle (no polygon corners)', spread < 0.01, spread.toFixed(4));
+  }
+  for (const n of [4, 6]) {
+    const wheel = buildWheel(
+      Array.from({ length: n }, (_, i) => ({ id: 'p' + i, label: 'P' + i })),
+      { radius: 300, seed: 'poly-' + n }
+    );
+    record('n=' + n + ': the outline is a polygon', wheel.outline.length === n, String(wheel.outline.length));
+    const radii = wheel.outline.map(([x, y]) => Math.hypot(x, y));
+    record(
+      'n=' + n + ': polygon vertices sit near the radius',
+      radii.every(r => Math.abs(r - 300) <= 300 * 0.06),
+      radii.map(r => r.toFixed(0)).join(',')
+    );
+  }
+}
+
 /* ---- 2. pure: determinism + hit parity ------------------------------- */
 {
   const candidates = [
@@ -151,6 +177,20 @@ try {
     await page.waitForTimeout(260);
     const opened = await wheelState(page);
     record('drag: the wheel appears while dragging', opened.open && opened.mode === 'drag', JSON.stringify(opened));
+    const stacking = await page.evaluate(() => {
+      const shell = document.querySelector('.ui-layer.app-shell');
+      const layer = document.querySelector('.rp-layer');
+      return {
+        shell: shell ? Number(getComputedStyle(shell).zIndex || 0) : -1,
+        shellDragging: shell?.getAttribute('data-dragging') ?? '',
+        wheel: layer ? Number(getComputedStyle(layer).zIndex || 0) : -1
+      };
+    });
+    record(
+      'drag: the dragged card is painted above the wheel',
+      stacking.shellDragging === '1' && stacking.shell > stacking.wheel,
+      JSON.stringify(stacking)
+    );
     record('drag: the frost layer exists and is clipped to the wheel', opened.frost && opened.frostClip.startsWith('path('), opened.frostClip);
     record('drag: no full-screen frosting outside the wheel', opened.scrim === false, String(opened.scrim));
     record(

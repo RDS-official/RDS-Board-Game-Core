@@ -157,9 +157,10 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
   const boundaryAt = (index: number): number => startAngle + index * step + (rawJitter[index % n] - mean);
 
   // 半径抖动只负责"轮廓不呆板"，幅度比角度更小，避免出现尖刺。
-  // n ≤ 2 时顶点几乎对称，多边形会退化成"过圆心的直线"，扇区面积趋近 0 且头像
-  // 会落在形状外面。这种情况下外边界改用圆弧（环形扇区），视觉与命中都成立。
-  const arcOuter = n <= 2;
+  // n ≤ 3 时顶点太少：2 个顶点会让多边形退化成"过圆心的直线"（面积→0），3 个顶点
+  // 的三角形又把扇区压得很窄、轮盘看着像几根棍子。所以 n≤3 统一用圆弧外边界
+  // （环形扇区 = 圆形轮盘），只有 n≥4 才用多边形轮廓。
+  const arcOuter = n <= 3;
   const radii: number[] = [];
   for (let i = 0; i < n; i += 1) {
     const rJitter = arcOuter ? 0 : jitterAt(seed, i + 7) * jitterR * radius;

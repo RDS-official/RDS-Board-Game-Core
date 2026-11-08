@@ -165,6 +165,8 @@ export class CardHand {
     scaleMulTarget: number;
   } | null = null;
   private hovered: CardView | null = null;
+  /** 拖拽期间被抬高的外壳（卡片所在的 .app-shell）：Wheel 浮层在 body 上，只抬手牌条没意义。 */
+  private raisedShell: HTMLElement | null = null;
   private inZone = false;
   private suppressClick = false;
   private rafId = 0;
@@ -542,8 +544,14 @@ export class CardHand {
       scaleMulTarget: 1
     };
     this.setState('armed');
-    // 拖拽期间整条手牌抬高到轮盘之上：被拖的牌必须在最上层（否则会被轮盘盖住）。
+    // 拖拽期间把**整个 HUD 外壳**抬到轮盘之上：卡片在 .ui-layer(z=10) 里，只抬手牌条
+    // 不会改变它和 body 上浮层（z=74）的先后，牌还是会被轮盘盖住。
     this.root.dataset.dragging = '1';
+    const shell = this.root.closest('.app-shell') as HTMLElement | null;
+    if (shell) {
+      shell.dataset.dragging = '1';
+      this.raisedShell = shell;
+    }
     this.setHover(null);
     this.start();
   };
@@ -605,7 +613,7 @@ export class CardHand {
     drag.view.el.dataset.active = '0';
     drag.view.el.dataset.drag = '0';
     drag.view.tilt = 0;
-    delete this.root.dataset.dragging;
+    this.clearRaisedShell();
     this.releaseNeighbours();
     this.clearZone();
 
@@ -639,7 +647,7 @@ export class CardHand {
     drag.view.el.dataset.active = '0';
     drag.view.el.dataset.drag = '0';
     drag.view.tilt = 0;
-    delete this.root.dataset.dragging;
+    this.clearRaisedShell();
     this.releaseNeighbours();
     this.clearZone();
     this.config.onDragEnd?.({ x: 0, y: 0 });
@@ -712,6 +720,15 @@ export class CardHand {
       other.pushTarget = other.slot.x < view.slot.x ? -influence : influence;
     }
     this.start();
+  }
+
+  /** 拖拽收尾：把外壳降回原来的层级。 */
+  private clearRaisedShell(): void {
+    delete this.root.dataset.dragging;
+    if (this.raisedShell) {
+      delete this.raisedShell.dataset.dragging;
+      this.raisedShell = null;
+    }
   }
 
   private releaseNeighbours(): void {

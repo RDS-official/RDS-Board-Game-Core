@@ -2215,7 +2215,12 @@
   z-index: 74;
 }
 
-/* 正在拖牌时手牌条抬到轮盘之上：被拖的牌永远看得见、也永远在最上层。 */
+/* 正在拖牌时必须把**整个外壳**抬到轮盘之上（.ui-layer 默认 z=10，卡片被它困在
+   同一个层叠上下文里，只抬手牌条是抬不过 body 上的 .rp-layer 的）。 */
+.ui-layer.app-shell[data-dragging='1'] {
+  z-index: 78;
+}
+
 .app-shell > .action-hand[data-enabled='1'][data-dragging='1'] {
   z-index: 80;
 }
