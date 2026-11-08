@@ -85,6 +85,30 @@ for (const game of GAMES) {
     await page.evaluate(() => document.querySelector('#card-sheet-layer .cs-close')?.click());
     await page.waitForTimeout(60);
 
+    // 2b) hover art must stay a thumbnail, never a full-screen card.
+    await page.evaluate(() => {
+      window.__boardGameApp.hud.showHoverHint({
+        key: 'probe:hover-art',
+        title: '探针悬停',
+        desc: 'hover',
+        art: '/pokemon/cards/s1_01.webp',
+        sections: [],
+        actions: []
+      });
+    });
+    await page.waitForTimeout(120);
+    const hoverArt = await page.evaluate(() => {
+      const img = document.querySelector('#hover-hint .hh-art');
+      const rect = img?.getBoundingClientRect();
+      return { height: rect?.height ?? 0, width: rect?.width ?? 0, hint: Boolean(document.querySelector('#hover-hint.on')) };
+    });
+    if (hoverArt.hint && hoverArt.height > 0 && hoverArt.height <= 220 && hoverArt.width <= 260) {
+      ok(game, `hover art is bounded (${Math.round(hoverArt.width)}x${Math.round(hoverArt.height)})`);
+    } else {
+      bad(game, `hover art overflowed: ${JSON.stringify(hoverArt)}`);
+    }
+    await page.evaluate(() => window.__boardGameApp.hud.showHoverHint(null));
+
     // 3) close, reopen, close: the layer must be fully emptied each time.
     for (let cycle = 0; cycle < 3; cycle++) {
       await page.evaluate(view => window.__boardGameApp.hud.showCardSheet(view), VIEW);

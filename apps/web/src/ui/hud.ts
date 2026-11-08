@@ -844,6 +844,14 @@ export class BoardGameHUD {
     el.classList.toggle('with-art', !!hint.art);
     setHtml(el, raw((hint.art ? `<img class="hh-art" src="${escapeAttr(hint.art)}" alt="${escapeAttr(hint.title)}" />` : '') +
       `<span class="hh-body"><b>${escHtml(hint.title)}</b>${hint.desc ? `<span>${escHtml(hint.desc)}</span>` : ''}</span>`));
+    // 防御：即使样式表被旧缓存/第三方 CSS 覆盖，hover 预览也不能把牌面按原始尺寸铺满屏幕。
+    const thumb = el.querySelector<HTMLImageElement>('img.hh-art');
+    if (thumb) {
+      thumb.style.setProperty('height', 'min(20vh, 180px)', 'important');
+      thumb.style.setProperty('max-height', '180px', 'important');
+      thumb.style.setProperty('width', 'auto', 'important');
+      thumb.style.setProperty('max-width', 'min(46vw, 240px)', 'important');
+    }
     el.classList.add('on');
   }
 

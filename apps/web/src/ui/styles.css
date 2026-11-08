@@ -4910,6 +4910,9 @@ select.pf-control {
    -------------------------------------------------------------------------- */
 .hover-hint.with-art {
   flex-direction: column;
+  max-width: min(260px, 36vw);
+  max-height: 30vh;
+  overflow: hidden;
   align-items: stretch;
   gap: 6px;
   padding: 8px;
