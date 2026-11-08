@@ -5,7 +5,7 @@
  * widths sum to exactly 2π (no gaps/overlaps), the geometry is deterministic per
  * seed, and the hit-test agrees with the drawn boundaries.
  *
- * Browser half (sanguosha, `?unified-hand`): dragging a target-needing card pops the
+ * Browser half (sanguosha, `?zones`): dragging a target-needing card pops the
  * big frosted wheel, hovering a sector highlights exactly one pin, the dragged card
  * shrinks over a sector, releasing on a sector dispatches that target, releasing on
  * the centre opens the payload form, and releasing outside cancels.
@@ -204,7 +204,7 @@ const wheelState = page =>
 
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  await page.goto(dev.url + '?game=sanguosha&unified-hand', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(dev.url + '?game=sanguosha&zones', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await boot(page);
 
   const selection = (await handBoxes(page)).find(card => card.mode === 'selection');

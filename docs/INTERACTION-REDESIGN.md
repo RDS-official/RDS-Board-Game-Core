@@ -3,6 +3,7 @@
 > 本文是**技术方案（不含实现）**，用于评审与拆分 PR。
 > 上一轮审查见 [INTERACTION-AUDIT.md](INTERACTION-AUDIT.md)；本方案针对其中 G1/G3/G5/G6 的核心症结给出结构性解法。
 > 决策来源：用户 2026-11-07 的明确拍板（见 §0）。
+> 后续更新：`?unified-hand` 已删除；`?zones` 成为默认操作台，菜单可切传统。实现状态见 [HAND-OPERATION-DESIGN.md](HAND-OPERATION-DESIGN.md)。
 
 ---
 
