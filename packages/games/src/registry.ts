@@ -241,7 +241,8 @@ export const sanguoshaModule: GameModule = defineGame({
   // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
   checkInvariants: state => checkSanguoshaInvariants(state),
   // C-7：伤害、回复、击杀反贼的收益都经 ctx.reward() 留下理由。
-  charter: { requiresRewardLedger: true },
+  // C-5：AI 决策收口到投影状态（preferAiAction() 先投影，chooseSanguoshaAiAction 只收投影）。
+  charter: { requiresRewardLedger: true, requiresProjection: true },
   // 身份 token（主公/忠臣/反贼/内奸）、牌面分类与终局幕布都是本包词汇。
   presentation: definePresentation({
     roleLabel: sanguoshaRoleLabel,

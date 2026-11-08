@@ -1,5 +1,5 @@
 import { DeterministicPRNG } from '@rds/kernel/prng';
-import { Action, Entity, EntityId, GameState, PlayerId, ZoneId } from '@rds/kernel/types';
+import { Action, Entity, EntityId, GameState, PlayerId, ProjectedGameState, ZoneId } from '@rds/kernel/types';
 import { CARD_LIBRARY, cardCustom, cardTitle, isStrikeCode, isStrikeSubtype, rankText, suitColor, suitIsRed } from './cards';
 import { SgsDuelContext, SgsMassTrickContext, SgsPlayerProps, SgsStrikeContext } from './types';
 
@@ -9,7 +9,7 @@ export const HAND_ZONE = (pid: PlayerId): ZoneId => `zone_hand_${pid}`;
 export const EQUIP_ZONE = (pid: PlayerId): ZoneId => `zone_equip_${pid}`;
 export const JUDGE_ZONE = (pid: PlayerId): ZoneId => `zone_judge_${pid}`;
 
-export function propsOf(state: GameState, pid: PlayerId): SgsPlayerProps {
+export function propsOf(state: GameState | ProjectedGameState, pid: PlayerId): SgsPlayerProps {
   return (state.players[pid]?.customProps ?? {}) as SgsPlayerProps;
 }
 
@@ -142,7 +142,7 @@ export function canUseStrike(state: GameState, pid: PlayerId): boolean {
   return Number(propsOf(state, pid).strikesUsed ?? 0) < 1;
 }
 
-export function nextAlivePlayer(state: GameState, from: PlayerId): PlayerId | null {
+export function nextAlivePlayer(state: GameState | ProjectedGameState, from: PlayerId): PlayerId | null {
   const order = state.playerOrder;
   const start = order.indexOf(from);
   if (start < 0) return null;
