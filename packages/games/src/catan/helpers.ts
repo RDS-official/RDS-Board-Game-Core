@@ -219,31 +219,91 @@ export function playersAdjacentToHex(state: GameState, hexId: string): PlayerId[
   return [...owners];
 }
 
-/** Deterministic "discard half, largest stacks first" used by the 7-roll window. */
-export function discardHalf(state: GameState, pid: PlayerId): ResourceBag {
-  const player = state.players[pid];
-  const bag = resourcesOf(player);
-  const total = totalResources(player);
-  let remaining = Math.floor(total / 2);
-  const discarded = emptyBag();
+/** How many cards a player must discard after rolling a seven. */
+export function discardCount(bag: Partial<ResourceBag>): number {
+  return Math.floor(CATAN_RESOURCES.reduce((sum, res) => sum + Number(bag[res] ?? 0), 0) / 2);
+}
 
+/**
+ * A deterministic legal split used only as the discard form's initial values.
+ *
+ * The player is free to change both the resource types and the amounts; this
+ * default keeps bots, tests and a one-click confirmation valid without ever
+ * taking the choice away from a human.
+ */
+export function defaultDiscardChoice(bag: ResourceBag): ResourceBag {
+  const choice = emptyBag();
+  let remaining = discardCount(bag);
   while (remaining > 0) {
     let best: CatanResource | null = null;
     for (const res of CATAN_RESOURCES) {
-      if (bag[res] <= 0) continue;
-      if (!best || bag[res] > bag[best]) best = res;
+      if (bag[res] - choice[res] <= 0) continue;
+      if (!best || bag[res] - choice[res] > bag[best] - choice[best]) best = res;
     }
     if (!best) break;
-    bag[best] -= 1;
-    discarded[best] += 1;
+    choice[best] += 1;
     remaining -= 1;
   }
+  return choice;
+}
 
+/**
+ * Read the five per-resource numbers from an action payload.
+ *
+ * Missing keys mean zero, so a caller may submit only the resources it wants to
+ * discard. Structural integer/range checks still run in the action schema; this
+ * keeps the semantic cross-field check (the total must equal half the hand) in
+ * one place shared by validation and settlement.
+ */
+export function parseDiscardChoice(payload: Record<string, unknown> | undefined): {
+  choice: ResourceBag;
+  errors: string[];
+} {
+  const choice = emptyBag();
+  const errors: string[] = [];
+  for (const res of CATAN_RESOURCES) {
+    const value = payload?.[res] ?? 0;
+    const amount = Number(value);
+    if (!Number.isInteger(amount) || amount < 0) {
+      errors.push(`${res} must be a non-negative integer`);
+      continue;
+    }
+    choice[res] = amount;
+  }
+  return { choice, errors };
+}
+
+/** Semantic validation shared by `validatePayload` and the reducer. */
+export function discardChoiceErrors(state: GameState, pid: PlayerId, choice: ResourceBag): string[] {
+  const player = state.players[pid];
+  if (!player) return [`unknown player ${pid}`];
+  const bag = resourcesOf(player);
+  const required = discardCount(bag);
+  if (required <= 0) return ['this player has nothing to discard'];
+
+  const errors: string[] = [];
+  const selected = CATAN_RESOURCES.reduce((sum, res) => sum + choice[res], 0);
+  if (selected !== required) {
+    errors.push(`必须恰好弃置 ${required} 张资源（当前选择 ${selected} 张）`);
+  }
+  for (const res of CATAN_RESOURCES) {
+    if (choice[res] > bag[res]) errors.push(`${res} 只有 ${bag[res]} 张`);
+  }
+  return errors;
+}
+
+/** Remove an explicitly chosen discard from the hand and return it to the bank. */
+export function discardChosen(state: GameState, pid: PlayerId, choice: ResourceBag): ResourceBag | null {
+  if (discardChoiceErrors(state, pid, choice).length > 0) return null;
+  const player = state.players[pid];
+  const bag = resourcesOf(player);
+  for (const res of CATAN_RESOURCES) bag[res] -= choice[res];
   player.customProps = { ...player.customProps, resources: bag };
+
   const bank = bankOf(state);
-  for (const res of CATAN_RESOURCES) bank[res] += discarded[res];
+  for (const res of CATAN_RESOURCES) bank[res] += choice[res];
   setBank(state, bank);
-  return discarded;
+  return { ...choice };
 }
 
 /**

@@ -1,7 +1,7 @@
 import { openDecision } from '@rds/kernel/decisions';
 import { ReduceContext } from '@rds/kernel/module';
 import { DeterministicPRNG } from '@rds/kernel/prng';
-import { Action, DecisionWindow, GameState, PlayerId } from '@rds/kernel/types';
+import { Action, ActionFieldSpec, DecisionWindow, GameState, PlayerId } from '@rds/kernel/types';
 import { CATAN_RESOURCES, CatanResource } from './setup';
 import {
   COSTS,
@@ -10,12 +10,15 @@ import {
   buildingsOf,
   buildingAtVertex,
   canAfford,
+  defaultDiscardChoice,
+  discardChoiceErrors,
+  discardChosen,
   discardDevCard,
-  discardHalf,
   distanceRuleOk,
   edgeConnectsToPlayer,
   grantResources,
   normalize,
+  parseDiscardChoice,
   payCost,
   placeBuilding,
   placeRoad,
@@ -54,7 +57,9 @@ export class CatanRules {
     const window = state.pendingDecisions.find(w => w.status === 'OPEN');
     if (window) {
       if (!window.participants.includes(playerId) || window.submissions[playerId] !== undefined) return [];
-      if (window.payload?.kind === 'discard') return [{ type: 'DISCARD_HALF', playerId }];
+      if (window.payload?.kind === 'discard') {
+        return [{ type: 'DISCARD_HALF', playerId, fields: this.discardFields(state, playerId) }];
+      }
       if (window.payload?.kind === 'trade') {
         const offer = state.globalVars.tradeOffer as {
           from: PlayerId;
@@ -269,6 +274,48 @@ export class CatanRules {
     ];
   }
 
+  /** Five number inputs prefilled with a legal split; the player may change either types or counts. */
+  private static discardFields(state: GameState, playerId: PlayerId): ActionFieldSpec[] {
+    const bag = resourcesOf(state.players[playerId]);
+    const defaults = defaultDiscardChoice(bag);
+    return CATAN_RESOURCES.map(resource => ({
+      key: resource,
+      label: `${RESOURCE_LABELS[resource]}（持有 ${bag[resource]}）`,
+      kind: 'number' as const,
+      min: 0,
+      max: bag[resource],
+      step: 1,
+      default: defaults[resource]
+    }));
+  }
+
+  /**
+   * Cross-field validation for the chosen discard.
+   *
+   * The form gives every resource its own count, so "pick exactly half" is a
+   * semantic constraint the static action schema cannot express. The engine
+   * calls this before accepting a decision submission, which keeps both the UI
+   * and the network path from settling an invalid discard.
+   */
+  public static validatePayload(
+    state: GameState,
+    action: Action,
+    payload: Record<string, unknown>
+  ): string[] {
+    if (action.type !== 'DISCARD_HALF') return [];
+    const pid = action.actorId ?? action.playerId;
+    const window = state.pendingDecisions.find(
+      candidate => candidate.status === 'OPEN' && candidate.payload?.kind === 'discard'
+    );
+    if (!window) return ['没有待结算的弃牌窗口'];
+    if (!window.participants.includes(pid)) return ['该玩家不在弃牌窗口内'];
+    if (window.submissions[pid] !== undefined) return ['该玩家已经提交过弃牌'];
+
+    const parsed = parseDiscardChoice(payload);
+    if (parsed.errors.length > 0) return parsed.errors;
+    return discardChoiceErrors(state, pid, parsed.choice);
+  }
+
   /**
    * 宪章 C-3：掷出 7 后的"各弃一半"多重集结算。
    *
@@ -289,7 +336,10 @@ export class CatanRules {
       if (entry.action.type !== 'DISCARD_HALF') continue;
       const pid = entry.actorId;
       if (!next.players[pid]) continue;
-      const discarded = discardHalf(next, pid);
+      const parsed = parseDiscardChoice(entry.action.payload as Record<string, unknown> | undefined);
+      if (parsed.errors.length > 0) continue;
+      const discarded = discardChosen(next, pid, parsed.choice);
+      if (!discarded) continue;
       const summary = Object.entries(discarded)
         .filter(([, amount]) => amount > 0)
         .map(([res, amount]) => `${amount} ${res}`)
@@ -394,7 +444,10 @@ export class CatanRules {
       }
 
       case 'DISCARD_HALF': {
-        const discarded = discardHalf(s, pid);
+        const parsed = parseDiscardChoice(action.payload as Record<string, unknown> | undefined);
+        if (parsed.errors.length > 0) break;
+        const discarded = discardChosen(s, pid, parsed.choice);
+        if (!discarded) break;
         const summary = Object.entries(discarded)
           .filter(([, amount]) => amount > 0)
           .map(([res, amount]) => `${amount} ${res}`)

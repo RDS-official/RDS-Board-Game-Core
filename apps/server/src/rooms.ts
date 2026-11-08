@@ -176,8 +176,8 @@ export function setRoomStatus(hostId: string, roomId: string, status: 'open' | '
   if (r.hostId !== hostId) return { error: '只有房主可以操作' };
   if (status === 'playing') {
     // 开局前核对人数：桌面座位 = 真人 + 房主添加的 AI 补位。支持可变人数的玩法
-    // （德州扑克 2–10 人）按当前人数发牌；固定阵容的玩法（卡坦岛 3 人、
-    // 璀璨宝石 2 人、山屋 3 人）则必须凑齐，否则会出现"空座位永远等不到人"的死局。
+    // （德州扑克 2–10 人、卡坦岛 3–4 人）按当前人数发牌；固定阵容的玩法
+    // （璀璨宝石 2 人、山屋 3 人）则必须凑齐，否则会出现"空座位永远等不到人"的死局。
     const totalSeats = r.players.length + (r.aiSeats ?? 0);
     const support = seatsSupport(r.gameId, r.scenarioId, totalSeats);
     if (!support.ok) {

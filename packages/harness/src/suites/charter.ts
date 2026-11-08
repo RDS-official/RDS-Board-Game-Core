@@ -513,10 +513,14 @@ test('charter C-3: catan multi-player discard is declared simultaneous and order
 
     let state = opened.state;
     const ctx = { id: (k: string) => `${k}_t`, trace: () => {}, seq: 0, roll: () => ({ result: { spec: { sides: 6, count: 1 }, rolls: [1], total: 1 }, nextSeed: 0 }) };
+    const choices: Record<string, Record<string, number>> = {
+      p1: { wood: 4, brick: 1, sheep: 0, wheat: 0, ore: 0 },
+      p2: { wood: 0, brick: 0, sheep: 3, wheat: 1, ore: 0 }
+    };
     for (const pid of order) {
       state = module.applySimultaneous!(
         state,
-        [{ actorId: pid, action: { type: 'DISCARD_HALF', playerId: pid } }],
+        [{ actorId: pid, action: { type: 'DISCARD_HALF', playerId: pid, payload: choices[pid] } }],
         ctx as never
       );
     }

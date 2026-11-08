@@ -703,8 +703,8 @@ test('poker: the engine honours the requested seat count', () => {
   assertEqual(ring.getRawState().playerOrder.length, 10, 'a ten-player request deals ten seats');
 
   // Fixed-roster fixtures ignore the request; the server refuses the mismatch.
-  const catan = new UniversalGameEngine(GAME_REGISTRY.catan, 11, { seats: 2 });
-  assertEqual(catan.getRawState().playerOrder.length, 3, 'catan keeps its three seats');
+  const fixed = new UniversalGameEngine(GAME_REGISTRY.betrayal, 11, { seats: 2 });
+  assertEqual(fixed.getRawState().playerOrder.length, 3, 'betrayal keeps its three seats');
 });
 
 test('poker: the seat count is part of the log and replays exactly', () => {
