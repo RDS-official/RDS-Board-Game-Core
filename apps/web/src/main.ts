@@ -376,6 +376,10 @@ class BoardGameSimulatorApp {
           actorName?: string;
           focusActors?: string[];
           actions?: { actionType?: string; id?: string; label?: string }[];
+          hand?: { title?: string }[];
+          equip?: { title?: string }[];
+          commands?: { label?: string }[];
+          prompt?: { title?: string };
           lastRoll?: { label?: string; total?: number; stamp?: string };
         }
       | undefined;
@@ -397,6 +401,15 @@ class BoardGameSimulatorApp {
         type: action.actionType ?? null,
         label: action.label ?? null
       })),
+      // 自己的手牌不属于隐藏信息，必须出现在诊断里：联机手牌区消失时，
+      // 「客户端到底收到没收到 hand」是第一个要回答的问题。
+      seat: {
+        handCount: snapshot.hand?.length ?? 0,
+        handTitles: (snapshot.hand ?? []).map(card => card.title ?? '?'),
+        equipCount: snapshot.equip?.length ?? 0,
+        commandCount: snapshot.commands?.length ?? 0,
+        promptTitle: snapshot.prompt?.title ?? null
+      },
       lastRoll: snapshot.lastRoll
         ? { label: snapshot.lastRoll.label, total: snapshot.lastRoll.total }
         : null,
