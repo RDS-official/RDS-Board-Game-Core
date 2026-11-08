@@ -56,7 +56,7 @@ export function radialPickerSvg(wheel: RadialWheel, opts: RadialSvgOptions = {})
             const y = f(seg.label[1]);
             const avatarY = f(seg.label[1] - 20);
             const ring = 23;
-            const initial = (candidate.label ?? '?').trim().slice(0, 1).toUpperCase();
+            const initial = (candidate.icon ?? candidate.label ?? '?').trim().slice(0, 2).toUpperCase();
             const face = candidate.avatar
               ? `<image class="rp-avatar" href="${escapeHtml(candidate.avatar)}" x="${f(seg.label[0] - ring)}"` +
                 ` y="${f(seg.label[1] - 20 - ring)}" width="${ring * 2}" height="${ring * 2}"` +

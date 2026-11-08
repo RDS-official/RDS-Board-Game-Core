@@ -174,6 +174,11 @@ class BoardGameSimulatorApp {
         return;
       }
       this.hud.showSeatPeek(null);
+      // 3D 手牌行已经自己放大/上浮；同一张牌不再叠一个 DOM hover 预览。
+      if (data.type === 'ENTITY' && this.scene.isHoveringOwnHand()) {
+        this.hud.showHoverHint(null);
+        return;
+      }
       if (data.type === 'ZONE') {
         this.hud.showHoverHint(
           peekView({ key: fixedDetailKey(data.id), title: String(meta.label ?? '牌堆'), desc: '按住拖动，可摆到桌面任意位置' })

@@ -991,6 +991,21 @@ export class BoardGameScene {
     this.onInteractiveClickCallback = cb;
   }
 
+  /**
+   * 指针是否正停在“自己的手牌行”上。
+   *
+   * 手牌行本身已经用 3D 放大/上浮表达 hover；HUD 不要再叠一张 DOM 卡面预览。
+   * 这是能力判断，不是游戏身份判断：只问当前 hover 的实体是否属于相机挂载的手牌行。
+   */
+  public isHoveringOwnHand(): boolean {
+    const id = this.hoveredEntityId;
+    if (!id) return false;
+    for (const row of this.handRows.values()) {
+      if (row.cameraAttached && row.ids.includes(id)) return true;
+    }
+    return false;
+  }
+
   /** Hover updates the card-title label without rebuilding the board. */
   public onInteractiveHover(cb: (data: InteractiveObjectData | null) => void): void {
     this.raycaster.onHover(data => {

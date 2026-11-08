@@ -1471,7 +1471,7 @@ export class BoardGameHUD {
     const selection = action.selection
       ? `
         <div class="pf-row">
-          <span class="pf-label">选择目标（${action.selection.spec.min}–${action.selection.spec.max}）</span>
+          <span class="pf-label">${action.selectionLabel ?? '选择目标'}（${action.selection.spec.min}–${action.selection.spec.max}）</span>
           <div class="pf-targets" data-selection-min="${action.selection.spec.min}" data-selection-max="${action.selection.spec.max}">
             ${
               action.selection.candidates.length > 0
@@ -1723,6 +1723,8 @@ export class BoardGameHUD {
    * fixture gets the same sheet without teaching the HUD its vocabulary.
    */
   public showCardSheet(view: UiDetailView, options: { reveal?: boolean; footer?: string } = {}): void {
+    // 大卡是“ deliberate open ”：先把 hover 小卡关掉，避免同一张牌两个画面。
+    this.showHoverHint(null);
     this.overlays.open({
       owner: 'hud.sheet',
       mode: options.reveal ? 'modal' : 'pinned',
@@ -4147,7 +4149,8 @@ export class BoardGameHUD {
   private openRadialPicker(action: UiAction, anchor: Point): void {
     const candidates = (action.selection?.candidates ?? []).map(candidate => ({
       id: candidate.id,
-      label: candidate.label
+      label: candidate.label,
+      icon: candidate.icon
     }));
     if (candidates.length === 0) {
       this.openPayloadForm(action);

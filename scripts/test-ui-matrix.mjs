@@ -311,7 +311,7 @@ async function runRotationFlow(browser) {
   const failures = [];
   collectErrors(page, errors);
   try {
-    await openScreen(page, `${BASE}?game=betrayal&scenario=exploration`);
+    await openScreen(page, `${BASE}?game=betrayal&scenario=exploration&legacy`);
     const before = await page.evaluate(() => ({
       rooms: Object.keys(window.__boardGameApp.session.getSnapshot().board.mapGraph.nodes).length,
       camera: window.__boardGameApp.scene.camera.position.toArray()
@@ -405,7 +405,7 @@ async function runDragSettle(browser) {
   const failures = [];
   collectErrors(page, errors);
   try {
-    await openScreen(page, `${BASE}?game=betrayal&scenario=exploration`);
+    await openScreen(page, `${BASE}?game=betrayal&scenario=exploration&legacy`);
 
     const start = await page.evaluate(() => {
       const app = window.__boardGameApp;
@@ -497,7 +497,7 @@ async function runDiscardSettle(browser) {
   const failures = [];
   collectErrors(page, errors);
   try {
-    await openScreen(page, `${BASE}?game=betrayal&scenario=exploration`);
+    await openScreen(page, `${BASE}?game=betrayal&scenario=exploration&legacy`);
     const cameraBefore = await page.evaluate(() => window.__boardGameApp.scene.camera.position.toArray());
     const drop = page.locator('.dock-actions .act[data-fan-label*="丢下"]').first();
     if (!(await drop.count())) throw new Error('discard action missing');

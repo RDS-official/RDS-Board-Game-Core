@@ -153,23 +153,32 @@ async function openGame(page, game) {
   await page.close();
 }
 
-/* ---- 3. Splendor: command overflow is not a truncated list ---- */
+/* ---- 3. Splendor: token choices are one family, not N actions ---- */
 {
   const { page, errors } = await openPage();
   await openGame(page, 'splendor');
-  const state = await page.evaluate(() => ({
-    visible: document.querySelectorAll('#op-commands [data-op-action]').length,
-    hasMore: !!document.querySelector('#op-commands [data-op-more]')
+  const commands = await page.locator('#op-commands [data-op-action]').allTextContents();
+  record('splendor: token take is one action family', commands.filter(label => label.includes('拿取精灵球')).length === 1, commands.join('|'));
+  record('splendor: double take is one action family', commands.filter(label => label.includes('双取同色')).length === 1, commands.join('|'));
+  record('splendor: color combinations are not enumerated', !commands.some(label => label.includes('拿走 2 个')), commands.join('|'));
+
+  const take = page.locator('#op-commands [data-op-action]', { hasText: '拿取精灵球' }).first();
+  await take.click({ force: true });
+  await page.waitForTimeout(250);
+  const picker = await page.evaluate(() => ({
+    title: document.querySelector('.pf-title')?.textContent ?? '',
+    label: document.querySelector('.pf-label')?.textContent ?? '',
+    colors: [...document.querySelectorAll('#payload-layer .pf-target')].map(el => el.textContent?.trim())
   }));
-  record('splendor: command rail caps the first row', state.visible <= 4, String(state.visible));
-  record('splendor: overflow exposes a more menu', state.hasMore, JSON.stringify(state));
-  if (state.hasMore) {
-    await page.locator('#op-commands [data-op-more]').click({ force: true });
-    await page.waitForTimeout(100);
-    const menu = await page.locator('.hand-verb-menu button').count();
-    record('splendor: more menu keeps the remaining options', menu >= 10, String(menu));
-    await page.keyboard.press('Escape');
-  }
+  record('splendor: token picker opens with color choices', picker.title.includes('拿取精灵球') && picker.colors.length >= 5, JSON.stringify(picker));
+  record('splendor: token picker asks for colors', picker.label.includes('选择颜色'), picker.label);
+
+  const boxes = page.locator('#payload-layer [data-target]');
+  for (let i = 0; i < 3; i++) await boxes.nth(i).check({ force: true });
+  await page.locator('#payload-layer button[type="submit"]').click({ force: true });
+  await page.waitForTimeout(900);
+  const toast = await page.evaluate(() => [...document.querySelectorAll('.toast')].map(el => el.textContent ?? '').join(' | '));
+  record('splendor: choosing three colors dispatches once', toast.includes('收服 3 颗精灵球'), toast);
   record('splendor: no page errors', errors.length === 0, errors.join('; '));
   await page.close();
 }

@@ -21,6 +21,8 @@ export interface RadialCandidate {
   color?: string;
   /** 头像 URL；缺省时渲染首字圆牌（同一个 color）。 */
   avatar?: string;
+  /** 头像缺省时的图标字形（例如资源颜色）。 */
+  icon?: string;
   /** 一行规则提示："距离 1 · 手牌 3"。由 presenter 提供，缺失就不占位。 */
   hint?: string;
   /** 预留：引擎判定为不可选的目标可以置灰（当前不产出）。 */
