@@ -2215,6 +2215,11 @@
   z-index: 74;
 }
 
+/* 正在拖牌时手牌条抬到轮盘之上：被拖的牌永远看得见、也永远在最上层。 */
+.app-shell > .action-hand[data-enabled='1'][data-dragging='1'] {
+  z-index: 80;
+}
+
 /* 磨砂只做在轮盘本体上（clip-path 由 overlay 按外轮廓写进内联样式）：
    手牌区、桌面其余部分保持清晰——拖回手牌＝放回并关闭轮盘，视觉上必须看得出来。 */
 .rp-frost {

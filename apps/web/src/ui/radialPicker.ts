@@ -133,10 +133,10 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
   const radius = Math.max(0, opts.radius);
   const innerRatio = clamp(opts.innerRatio ?? 0.26, 0.05, 0.9);
   const innerRadius = radius * innerRatio;
-  const jitterR = clamp(opts.jitterRadius ?? 0.08, 0, 0.4);
-  // 0.075 = 相邻两条边界各抖 ±7.5%，所以每块角宽偏差 ≤ ±15%：
-  // 看起来仍是"随机多边形"，量起来仍近似等分（面积差 < 15%）。
-  const jitterA = clamp(opts.jitterAngle ?? 0.075, 0, 0.45);
+  const jitterR = clamp(opts.jitterRadius ?? 0.04, 0, 0.4);
+  // 0.0375 = 相邻两条边界各抖 ±3.75%，每块角宽偏差 ≤ ±7.5%：
+  // 既保留"不规则多边形"的手感，又不至于让某一块明显小得难点（区间再缩一倍）。
+  const jitterA = clamp(opts.jitterAngle ?? 0.0375, 0, 0.45);
   const startAngle = opts.startAngle ?? -Math.PI / 2;
 
   if (n === 0) {
@@ -231,6 +231,19 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
   return { count: n, radius, innerRadius, startAngle, segments, outline };
 }
 
+/** 点是否落在轮盘外轮廓（多边形/近似圆）内部。 */
+export function outlineContains(wheel: RadialWheel, dx: number, dy: number): boolean {
+  const points = wheel.outline;
+  if (points.length < 3) return true;
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const [xi, yi] = points[i];
+    const [xj, yj] = points[j];
+    if (yi > dy !== yj > dy && dx < ((xj - xi) * (dy - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 /**
  * Hit-test a pointer offset from the wheel centre.
  *
@@ -243,6 +256,9 @@ export function hitTestWheel(wheel: RadialWheel, dx: number, dy: number): Radial
   if (wheel.count === 0) return { zone: 'empty' };
   const r = Math.hypot(dx, dy);
   if (r < wheel.innerRadius) return { zone: 'center' };
+  // 出了轮廓就是"轮盘外"：外轮廓是多边形，四角是空白区，不能按半径算成扇区，
+  // 否则光标明明在轮盘外面，里面还亮着一块（也是"卡片乱缩小"的来源）。
+  if (!outlineContains(wheel, dx, dy) && r > wheel.innerRadius) return { zone: 'empty' };
 
   if (wheel.count === 1) {
     return { zone: 'segment', index: 0, candidate: wheel.segments[0].candidate };

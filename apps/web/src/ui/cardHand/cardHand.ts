@@ -542,6 +542,8 @@ export class CardHand {
       scaleMulTarget: 1
     };
     this.setState('armed');
+    // 拖拽期间整条手牌抬高到轮盘之上：被拖的牌必须在最上层（否则会被轮盘盖住）。
+    this.root.dataset.dragging = '1';
     this.setHover(null);
     this.start();
   };
@@ -603,6 +605,7 @@ export class CardHand {
     drag.view.el.dataset.active = '0';
     drag.view.el.dataset.drag = '0';
     drag.view.tilt = 0;
+    delete this.root.dataset.dragging;
     this.releaseNeighbours();
     this.clearZone();
 
@@ -636,6 +639,7 @@ export class CardHand {
     drag.view.el.dataset.active = '0';
     drag.view.el.dataset.drag = '0';
     drag.view.tilt = 0;
+    delete this.root.dataset.dragging;
     this.releaseNeighbours();
     this.clearZone();
     this.config.onDragEnd?.({ x: 0, y: 0 });

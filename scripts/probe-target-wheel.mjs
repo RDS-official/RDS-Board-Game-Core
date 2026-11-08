@@ -247,7 +247,7 @@ try {
       await page.mouse.move(pinPoint.x, pinPoint.y, { steps: 4 });
       await page.waitForTimeout(300);
       const over = await wheelState(page);
-      record('hover: the sector under the pin is active', over.active >= 0, String(over.active));
+      record('hover: the sector under the pin is active', over.active >= 0, JSON.stringify(over));
       const cardHeight = async () =>
         (await page.evaluate(id => {
           const el = document.querySelector('#action-hand .ah-card[data-action-id="' + id + '"]');

@@ -1,6 +1,6 @@
 import { escapeHtml } from '../htmlEscape';
 import { raw, setHtml } from './dom/html';
-import { buildWheel, type RadialCandidate, type RadialWheel } from './radialPicker';
+import { buildWheel, hitTestWheel, type RadialCandidate, type RadialWheel } from './radialPicker';
 import { radialPickerListHtml, radialPickerSvg } from './radialPickerHtml';
 import {
   activeSegmentIndex,
@@ -218,10 +218,12 @@ export class RadialPickerOverlay {
     if (!local) return 'outside';
     const { wheel } = this;
     if (!wheel) return 'outside';
-    const r = Math.hypot(local.dx, local.dy);
-    if (r > wheel.radius * 1.12) return 'outside';
-    if (r < wheel.innerRadius) return 'center';
-    return 'sector';
+    // 与命中测试同源：中心圆 → center；外轮廓之外 → outside（连四角的空白也算外面）；
+    // 只有在多边形内部、中心圆之外才算"指着某个分区"。
+    const hit = hitTestWheel(wheel, local.dx, local.dy);
+    if (hit.zone === 'center') return 'center';
+    if (hit.zone === 'segment') return 'sector';
+    return 'outside';
   }
 
   /** 拖拽途中更新高亮（由手牌条转发指针坐标）。 */
