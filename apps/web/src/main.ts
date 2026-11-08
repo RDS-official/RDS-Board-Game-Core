@@ -62,6 +62,7 @@ class BoardGameSimulatorApp {
   private pendingSnapshot?: GameSnapshot;
 
   constructor() {
+    this.installViewportHeight();
     const canvasContainer = document.getElementById('canvas-container')!;
     const hudContainer = document.getElementById('hud-container')!;
     const inspectorContainer = document.getElementById('inspector-container')!;
@@ -509,6 +510,21 @@ class BoardGameSimulatorApp {
   }
 
   /** 把「离开牌桌」交给会话：结算幕布的按钮据此回调到 `leaveTable`。 */
+  /**
+   * 手机浏览器地址栏/软键盘会改变 visualViewport 高度，而 100vh 仍是布局视口。
+   * 把真正可视高度写进 --app-height，底部手牌/动作才不会落到屏幕外。
+   */
+  private installViewportHeight(): void {
+    const sync = (): void => {
+      const height = Math.round(window.visualViewport?.height ?? window.innerHeight);
+      document.documentElement.style.setProperty('--app-height', height + 'px');
+    };
+    sync();
+    window.addEventListener('resize', sync, { passive: true });
+    window.visualViewport?.addEventListener('resize', sync, { passive: true });
+    window.visualViewport?.addEventListener('scroll', sync, { passive: true });
+  }
+
   private bindLeaveTable(): void {
     (this.session as { setLeaveTableHandler?: (handler: () => void) => void }).setLeaveTableHandler?.(() => {
       void this.leaveTable();

@@ -301,6 +301,34 @@ async function openGame(page, game) {
   await page.close();
 }
 
+/* ---- 5b. Mobile: hand and deck dock to the visual viewport ---- */
+{
+  const { page, errors } = await openPage({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  await openGame(page, 'sanguosha');
+  const state = await page.evaluate(() => {
+    const rect = selector => {
+      const el = document.querySelector(selector);
+      return el ? el.getBoundingClientRect().toJSON() : null;
+    };
+    const cards = [...document.querySelectorAll('#action-hand .ah-card')].map(el => el.getBoundingClientRect().toJSON());
+    return {
+      appHeight: getComputedStyle(document.querySelector('#app')).height,
+      hand: rect('#action-hand'),
+      deck: rect('#operation-deck'),
+      cards,
+      overflowX: document.documentElement.scrollWidth > innerWidth,
+      overflowY: document.documentElement.scrollHeight > innerHeight + 1
+    };
+  });
+  record('mobile: app height follows the visual viewport', state.appHeight === '844px', state.appHeight);
+  record('mobile: hand is docked inside the viewport', !!state.hand && state.hand.bottom <= 844 && state.hand.y >= 0, JSON.stringify(state.hand));
+  record('mobile: operation deck sits above the hand', !!state.deck && state.deck.bottom <= (state.hand?.y ?? 844) + 1, JSON.stringify(state.deck));
+  record('mobile: hand cards are visible and opaque', state.cards.length > 0 && state.cards.every(c => c.y >= 0 && c.bottom <= 844 && c.width > 0), JSON.stringify(state.cards.map(c => ({ y: Math.round(c.y), h: Math.round(c.height) }))));
+  record('mobile: no page overflow', !state.overflowX && !state.overflowY, JSON.stringify({ x: state.overflowX, y: state.overflowY }));
+  record('mobile: no page errors', errors.length === 0, errors.join('; '));
+  await page.close();
+}
+
 /* ---- 6. 390px: no horizontal overflow ---- */
 {
   const { page, errors } = await openPage({ width: 390, height: 844 });
