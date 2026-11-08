@@ -2923,9 +2923,40 @@ body {
   color: var(--text-secondary, #8b98ab);
 }
 
+/* Live total for forms made entirely of number fields (e.g. choosing a discard). */
+.pf-total {
+  margin-top: -2px;
+  text-align: right;
+  font-size: var(--type-xs);
+  color: var(--accent-bright, #e3c06a);
+  font-variant-numeric: tabular-nums;
+}
+
 .pf-body {
   display: grid;
   gap: 10px;
+}
+
+/* 手机上参数面板要能整屏滚动：硬高度 + 内部滚动，避免确认按钮被键盘顶出去。 */
+@media (max-width: 599px), (max-height: 480px) {
+  .payload-layer,
+  #payload-layer {
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 12px;
+  }
+
+  .payload-card {
+    margin: auto 0;
+    max-height: calc(var(--app-height, 100vh) - 24px);
+    overflow-y: auto;
+  }
+
+  .pf-targets {
+    max-height: 40vh;
+    overflow-y: auto;
+  }
 }
 /* 手机上参数面板要能整屏滚动：硬高度 + 内部滚动，避免确认按钮被键盘顶出去。 */
 @media (max-width: 599px), (max-height: 480px) {

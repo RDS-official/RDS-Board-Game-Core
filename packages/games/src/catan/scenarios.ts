@@ -10,6 +10,8 @@ import {
 
 export interface CatanScenario {
   description?: string;
+  /** These fixture positions deal a fixed three-seat table. */
+  seats?: number;
   setup: (seed: number) => GameState;
 }
 
@@ -75,6 +77,7 @@ function setResources(state: GameState, pid: PlayerId, next: Record<string, numb
 export const CATAN_SCENARIOS: Record<string, CatanScenario> = {
   rich_action: {
     description: 'Setup complete, p1 has resources and a playable Year of Plenty',
+    seats: 3,
     setup: (seed: number): GameState => {
       const state = completeSetup(setupCatan(seed));
       setResources(state, 'p1', { wood: 8, brick: 8, sheep: 8, wheat: 8, ore: 8 });
@@ -96,6 +99,7 @@ export const CATAN_SCENARIOS: Record<string, CatanScenario> = {
 
   trade_ready: {
     description: 'Setup complete, p1 has wood and p2 has brick',
+    seats: 3,
     setup: (seed: number): GameState => {
       const state = completeSetup(setupCatan(seed));
       setResources(state, 'p1', { wood: 5, brick: 0, sheep: 0, wheat: 0, ore: 0 });

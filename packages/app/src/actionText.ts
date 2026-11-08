@@ -484,13 +484,18 @@ function describeActionZh(
       // catan 的交易成交复用同一 case，重复 case 是死代码（JS 只取第一个）。
       case 'SKIP_ROAD_BUILDING':
         return { icon: '⏭️', label: '不再放置道路', hint: '结束修路卡结算', tone: 'normal' };
-      case 'DISCARD_HALF':
+      case 'DISCARD_HALF': {
+        const required = (action.fields ?? []).reduce(
+          (sum, field) => sum + Number(field.default ?? 0),
+          0
+        );
         return {
           icon: '🗑️',
-          label: `弃置一半 · ${name(action.playerId)}`,
-          hint: '超过 7 张时强制弃牌',
+          label: required > 0 ? `弃置 ${required} 张资源 · ${name(action.playerId)}` : `弃置一半 · ${name(action.playerId)}`,
+          hint: '数量与资源类型由你选择',
           tone: 'danger'
         };
+      }
       /* ---- 德州扑克 (Texas Hold'em) ------------------------------------- */
       case 'TAKE_SEAT':
         return { icon: '🪑', label: '入座', hint: '在本桌坐下 · 坐下后可以点准备', tone: 'primary' };

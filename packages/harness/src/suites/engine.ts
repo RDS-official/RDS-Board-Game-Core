@@ -316,7 +316,10 @@ test('seating: declared seat ranges match what every fixture actually deals', as
   assert(!seatsAccepted(poker, undefined, 1).ok && !seatsAccepted(poker, undefined, 11).ok, 'poker rejects outside 2..10');
   assert(seatsAccepted(poker, 'short_stack', 4).ok, 'short_stack accepts its 4 seats');
   assert(!seatsAccepted(poker, 'short_stack', 6).ok, 'short_stack rejects 6 seats');
-  assert(!seatsAccepted(GAME_REGISTRY.catan, undefined, 4).ok, 'catan is fixed at 3');
+  assert(seatsAccepted(GAME_REGISTRY.catan, undefined, 3).ok, 'catan accepts 3');
+  assert(seatsAccepted(GAME_REGISTRY.catan, undefined, 4).ok, 'catan accepts 4');
+  assert(!seatsAccepted(GAME_REGISTRY.catan, undefined, 2).ok, 'catan rejects 2');
+  assert(!seatsAccepted(GAME_REGISTRY.catan, undefined, 5).ok, 'catan rejects 5');
 
   // 没声明 seatRange 的存量模组走遗留探测。
   const legacy = { ...GAME_REGISTRY.catan, meta: { ...GAME_REGISTRY.catan.meta, seatRange: undefined } };

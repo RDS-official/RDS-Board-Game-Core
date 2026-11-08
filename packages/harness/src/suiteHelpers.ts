@@ -653,7 +653,8 @@ export function placePendingRoom(engine: UniversalGameEngine): boolean {
 
 /* playCatanSetup */
 export function playCatanSetup(engine: UniversalGameEngine): void {
-  for (let step = 0; step < 6; step++) {
+  const rounds = (engine.getRawState().globalVars.setupOrder as string[] | undefined)?.length ?? 6;
+  for (let step = 0; step < rounds; step++) {
     const settler = engine.getRawState().activePlayerId;
     const settlement = engine.getLegalActions(settler).find(a => a.type === 'SETUP_SETTLEMENT');
     assert(!!settlement, `setup settlement ${step} available`);

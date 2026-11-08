@@ -35,6 +35,31 @@ test('fixture catan: snake setup, distance rule and phase gating', () => {
   assert(engine.verifyReplay().ok, 'setup replay is bit-exact');
 });
 
+test('fixture catan: a four-player table uses the same island and an eight-step snake draft', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.catan, 7, { seats: 4 });
+  const initial = engine.getRawState();
+
+  assertEqual(initial.playerOrder.join(','), 'p1,p2,p3,p4', 'four seats are dealt');
+  assertEqual(
+    (initial.globalVars.setupOrder as string[]).join(','),
+    'p1,p2,p3,p4,p4,p3,p2,p1',
+    'four-player setup snakes forwards and backwards'
+  );
+
+  playCatanSetup(engine);
+  const state = engine.getRawState();
+  assertEqual(state.phase, 'ROLL', 'four-player setup ends in roll phase');
+  for (const pid of state.playerOrder) {
+    const own = Object.values(state.entities).filter(e => e.ownerId === pid && e.components.building);
+    assertEqual(own.filter(e => e.components.building!.type === 'SETTLEMENT').length, 2, `${pid} has 2 settlements`);
+    assertEqual(own.filter(e => e.components.building!.type === 'ROAD').length, 2, `${pid} has 2 roads`);
+  }
+  assert(engine.verifyReplay().ok, 'four-player setup replay is bit-exact');
+
+  const clamped = new UniversalGameEngine(GAME_REGISTRY.catan, 7, { seats: 9 }).getRawState();
+  assertEqual(clamped.playerOrder.length, 4, 'out-of-range requests are clamped to the supported table');
+});
+
 test('fixture catan: rolling 7 opens robber flow and replay stays exact', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.catan, 3);
   playCatanSetup(engine);
@@ -61,7 +86,9 @@ test('fixture catan: rolling 7 opens robber flow and replay stays exact', () => 
     const window = state.pendingDecisions.find(w => w.status === 'OPEN');
     assert(!!window, 'discard window opened');
     for (const pid of window!.participants) {
-      const result = engine.dispatch({ type: 'DISCARD_HALF', playerId: pid });
+      const discard = engine.getLegalActions(pid).find(a => a.type === 'DISCARD_HALF');
+      assert(!!discard, `discard action available for ${pid}`);
+      const result = engine.dispatch(withDefaultPayload(discard!));
       assert(result.ok, `discard accepted for ${pid}`);
     }
     state = engine.getRawState();
@@ -332,11 +359,11 @@ test('fixture catan: forced seven discards half and resolves through the window'
 
   const before = total();
   const oldBag = { ...state.players.p1.customProps.resources };
+  const mixedBag = { wood: 4, brick: 3, sheep: 2, wheat: 0, ore: 0 };
   for (const res of ['wood', 'brick', 'sheep', 'wheat', 'ore'] as const) {
-    state.globalVars.bank[res] += Number(oldBag[res] ?? 0);
+    state.globalVars.bank[res] += Number(oldBag[res] ?? 0) - mixedBag[res];
   }
-  state.players.p1.customProps.resources = { wood: 9, brick: 0, sheep: 0, wheat: 0, ore: 0 };
-  state.globalVars.bank.wood -= 9;
+  state.players.p1.customProps.resources = mixedBag;
   assertEqual(total(), before, 'resource injection is conservative');
 
   assert(engine.dispatch({ type: 'ROLL_DICE', playerId: 'p1' }).ok, 'seven rolled');
@@ -344,11 +371,36 @@ test('fixture catan: forced seven discards half and resolves through the window'
 
   const discard = engine.getLegalActions('p1').find(a => a.type === 'DISCARD_HALF');
   assert(!!discard, 'discard action available');
-  assert(engine.dispatch(discard!).ok, 'discard accepted');
+  assertEqual(discard!.fields?.length, 5, 'the discard form exposes one count per resource');
+  assertEqual(
+    (discard!.fields ?? []).reduce((sum, field) => sum + Number(field.default ?? 0), 0),
+    4,
+    'the default form values already total the required four cards'
+  );
+
+  const wrong = engine.dispatch({
+    ...discard!,
+    payload: { wood: 1, brick: 1, sheep: 1, wheat: 0, ore: 0 }
+  });
+  assert(!wrong.ok, 'a discard that does not total exactly half is rejected');
+
+  assert(
+    engine.dispatch({
+      ...discard!,
+      payload: { wood: 2, brick: 1, sheep: 1, wheat: 0, ore: 0 }
+    }).ok,
+    'the player can choose which resource types to discard'
+  );
 
   const after = engine.getRawState();
   assertEqual(after.phase, 'MOVE_ROBBER', 'robber phase after discard');
-  assertEqual(after.players.p1.customProps.resources.wood, 5, 'half of 9 rounded down discarded');
+  assertEqual(JSON.stringify(after.players.p1.customProps.resources), JSON.stringify({
+    wood: 2,
+    brick: 2,
+    sheep: 1,
+    wheat: 0,
+    ore: 0
+  }), 'the chosen quantities and types leave the hand');
   assertEqual(total(), before, 'discard returns cards to the bank');
 });
 

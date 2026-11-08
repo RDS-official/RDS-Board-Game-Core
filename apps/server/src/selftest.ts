@@ -321,7 +321,27 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
   ok(['p1', 'p2'].includes(duoActor), 'the first actor is a real seat');
   matches.close('r_duo_poker');
 
-  // 固定阵容的玩法无法为 2 人发牌 → 开局失败并给出可读原因，而不是摆空座位。
+  const catanMatchFour = matches.ensure({
+    roomId: 'r_catan_four',
+    gameId: 'catan',
+    players: [
+      { userId: 'catan_seat_1', name: '卡坦1' },
+      { userId: 'catan_seat_2', name: '卡坦2' },
+      { userId: 'catan_seat_3', name: '卡坦3' },
+      { userId: 'catan_seat_4', name: '卡坦4' }
+    ],
+    seats: 4,
+    seed: 8
+  });
+  const catanMatchFourState = catanMatchFour.snapshotFor('catan_seat_1') as any;
+  ok(
+    catanMatchFour.seatList().length === 4 && catanMatchFourState.state.playerOrder.length === 4,
+    'a four-player catan match is dealt exactly four seats'
+  );
+  ok(!!catanMatchFourState.state.players.p4, 'the fourth catan seat exists');
+  matches.close('r_catan_four');
+
+  // 座位区间外的请求无法发牌 → 开局失败并给出可读原因，而不是摆空座位。
   let fixedRosterRejected = false;
   try {
     matches.ensure({
@@ -343,6 +363,21 @@ ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
   const catanRoom: any = createRoom(reg.user.id, '卡坦两人房', 'catan');
   const badStart: any = setRoomStatus(reg.user.id, catanRoom.id, 'playing');
   ok(typeof badStart.error === 'string' && /3 人/.test(badStart.error), 'lobby rejects starting catan with 2 players');
+
+  const catanFour: any = createRoom(reg.user.id, '卡坦四人房', 'catan');
+  ok(catanFour.maxPlayers === 4, 'catan rooms expose four seats');
+  const catanGuests = [1, 2, 3].map(index =>
+    createUser(`cg${index}_${Date.now().toString(36)}`, 'secret123')
+  );
+  for (const guest of catanGuests) {
+    if ('user' in guest) joinRoom(guest.user.id, catanFour.id);
+  }
+  const catanFourStart: any = setRoomStatus(reg.user.id, catanFour.id, 'playing');
+  ok(
+    catanFourStart.status === 'playing',
+    `lobby starts a four-player catan room${catanFourStart.error ? ` (${catanFourStart.error})` : ''}`
+  );
+
   const pokerRoom: any = createRoom(reg.user.id, '扑克两人房', 'poker');
   joinRoom(other.user.id, pokerRoom.id);
   const pokerStart: any = setRoomStatus(reg.user.id, pokerRoom.id, 'playing');

@@ -92,8 +92,8 @@ export const catanModule: GameModule = defineGame({
     name: '卡坦岛 (Catan)',
     description: '六边形对偶平面图、港口经济、发展卡与 10 分胜利',
     version: '1.0.0',
-    // 座位数契约（issue #214）：与 setup 的 playerOrder 保持一致，由回归用例守着。
-    seatRange: { min: 3, max: 3 },
+    // 座位数契约（issue #214）：卡坦岛标准局支持 3–4 人，默认仍按 3 人发牌。
+    seatRange: { min: 3, max: 4, default: 3, variable: true },
     capabilities: {
       simultaneousMoves: true,
       hiddenInformation: true,
@@ -166,12 +166,21 @@ export const catanModule: GameModule = defineGame({
         want: { kind: 'string', required: true, enum: ['wood', 'brick', 'sheep', 'wheat', 'ore'] }
       }
     },
-    DISCARD_HALF: { type: 'DISCARD_HALF', allowPayload: false },
+    DISCARD_HALF: {
+      type: 'DISCARD_HALF',
+      payload: {
+        wood: { kind: 'integer', min: 0 },
+        brick: { kind: 'integer', min: 0 },
+        sheep: { kind: 'integer', min: 0 },
+        wheat: { kind: 'integer', min: 0 },
+        ore: { kind: 'integer', min: 0 }
+      }
+    },
     ACCEPT_TRADE: { type: 'ACCEPT_TRADE', allowPayload: false },
     REJECT_TRADE: { type: 'REJECT_TRADE', allowPayload: false },
     END_TURN: { type: 'END_TURN', allowPayload: false }
   },
-  setup: seed => setupCatan(seed),
+  setup: (seed, options) => setupCatan(seed, options),
   scenarios: CATAN_SCENARIOS,
   project: {
     player: (player, viewer, state) => {
@@ -185,6 +194,7 @@ export const catanModule: GameModule = defineGame({
       return hiddenVp > 0 ? { ...player, score: Math.max(0, player.score - hiddenVp) } : player;
     }
   },
+  validatePayload: (state, action, payload) => CatanRules.validatePayload(state, action, payload),
   legalActions: (state, playerId) => CatanRules.getLegalActions(state, playerId),
   reduce: (state, action, ctx) => CatanRules.applyAction(state, action, ctx),
   // 宪章 C-3：掷 7 的"各弃一半"多方同时结算。

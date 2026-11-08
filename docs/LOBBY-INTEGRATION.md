@@ -51,8 +51,8 @@
 桌面只摆真实存在的座位：`MatchBroker` 把 `room.players.length` 作为 `seats` 透传给
 `GameRoom` → `UniversalGameEngine` → `module.setup(seed, { seats })`。
 
-- 可变人数夹具（德州扑克 2–10、璀璨宝石 2–4）据此发牌；
-- 固定阵容夹具（卡坦岛 3、山屋 3）忽略该参数，`MatchManager` 发现实际座位数与请求不符时
+- 可变人数夹具（德州扑克 2–10、卡坦岛 3–4、璀璨宝石 2–4）据此发牌；
+- 固定阵容夹具（山屋 3 人）忽略该参数，`MatchManager` 发现实际座位数与请求不符时
   **拒绝开局**并回 `{ t: 'error' }`（"该玩法需要 3 人"）；大厅 `setRoomStatus` 也会在
   点"开始"时先拦一次，避免出现「回合永远停在无人控制的 p4」这类死局。
 

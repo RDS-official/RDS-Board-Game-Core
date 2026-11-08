@@ -1,5 +1,6 @@
 import { ECSManager } from '@rds/kernel/ecs';
 import { MapGraphManager } from '@rds/kernel/graph';
+import type { GameSetupOptions } from '@rds/kernel/module';
 import { DeterministicPRNG } from '@rds/kernel/prng';
 import { Entity, GameState, Player } from '@rds/kernel/types';
 
@@ -26,52 +27,46 @@ export interface CatanPort {
   position: [number, number, number];
 }
 
-export function setupCatan(seed: number = 42): GameState {
+export function setupCatan(seed: number = 42, options?: GameSetupOptions): GameState {
   let prngSeed = seed;
 
-  const players: Record<string, Player> = {
-    p1: {
-      id: 'p1',
-      name: 'Player 1 (Red)',
-      color: '#e53935',
-      avatar: '🔴',
+  // Base Catan seats three or four players. Fixed-roster callers that ask for
+  // anything outside that range are clamped here; `seatsAccepted()` is what
+  // refuses the room before setup ever runs.
+  const requestedSeats = Number(options?.seats ?? 3);
+  const seats = Number.isFinite(requestedSeats)
+    ? Math.max(3, Math.min(4, Math.floor(requestedSeats)))
+    : 3;
+  const requestedHumans = Number(options?.humans ?? seats);
+  const humans = Number.isFinite(requestedHumans)
+    ? Math.max(1, Math.min(seats, Math.floor(requestedHumans)))
+    : seats;
+
+  const seatBlueprints = [
+    { id: 'p1', name: 'Player 1 (Red)', color: '#e53935', avatar: '🔴' },
+    { id: 'p2', name: 'Player 2 (Blue)', color: '#1e88e5', avatar: '🔵' },
+    { id: 'p3', name: 'Player 3 (Orange)', color: '#fb8c00', avatar: '🟠' },
+    { id: 'p4', name: 'Player 4 (Green)', color: '#43a047', avatar: '🟢' }
+  ];
+  const playerOrder = seatBlueprints.slice(0, seats).map(entry => entry.id);
+  const players: Record<string, Player> = {};
+  playerOrder.forEach((pid, index) => {
+    const seated = seatBlueprints[index];
+    players[pid] = {
+      id: pid,
+      name: seated.name,
+      color: seated.color,
+      avatar: seated.avatar,
       score: 0,
       alive: true,
-      handZoneId: 'zone_dev_p1',
+      ...(index >= humans ? { isAI: true } : {}),
+      handZoneId: `zone_dev_${pid}`,
       customProps: {
         resources: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 },
         knightsPlayed: 0
       }
-    },
-    p2: {
-      id: 'p2',
-      name: 'Player 2 (Blue)',
-      color: '#1e88e5',
-      avatar: '🔵',
-      score: 0,
-      alive: true,
-      handZoneId: 'zone_dev_p2',
-      customProps: {
-        resources: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 },
-        knightsPlayed: 0
-      }
-    },
-    p3: {
-      id: 'p3',
-      name: 'Player 3 (Orange)',
-      color: '#fb8c00',
-      avatar: '🟠',
-      score: 0,
-      alive: true,
-      isAI: true,
-      handZoneId: 'zone_dev_p3',
-      customProps: {
-        resources: { wood: 0, brick: 0, sheep: 0, wheat: 0, ore: 0 },
-        knightsPlayed: 0
-      }
-    }
-  };
-  const playerOrder = ['p1', 'p2', 'p3'];
+    };
+  });
 
   const mapGraph = MapGraphManager.generateCatanHexDualGraph(2.15);
   mapGraph.topology = {

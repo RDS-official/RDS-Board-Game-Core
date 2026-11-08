@@ -1476,6 +1476,15 @@ export class BoardGameHUD {
       })
       .join('');
 
+    const numericFields = (action.fields ?? []).filter(field => field.kind === 'number');
+    const runningTotal =
+      numericFields.length > 1 && numericFields.length === (action.fields?.length ?? 0)
+        ? `<div class="pf-total" data-field-total>当前合计 ${numericFields.reduce(
+            (sum, field) => sum + Number(field.default ?? field.min ?? 0),
+            0
+          )}</div>`
+        : '';
+
     const selection = action.selection
       ? `
         <div class="pf-row">
@@ -1508,7 +1517,7 @@ export class BoardGameHUD {
             <div class="pf-hint">${raw(action.hint)}</div>
           </div>
         </header>
-        <div class="pf-body">${raw(selection)}${raw(fields)}</div>
+        <div class="pf-body">${raw(selection)}${raw(fields)}${raw(runningTotal)}</div>
         <footer class="pf-foot">
           <button type="button" class="pf-btn" id="pf-cancel">取消</button>
           <button type="submit" class="pf-btn primary">确认</button>
@@ -1556,11 +1565,21 @@ export class BoardGameHUD {
         row.style.display = visible ? '' : 'none';
       }
     };
+    const updateFieldTotal = (): void => {
+      const total = form.querySelector('[data-field-total]') as HTMLElement | null;
+      if (!total) return;
+      const sum = (action.fields ?? [])
+        .filter(field => field.kind === 'number')
+        .reduce((acc, field) => acc + (Number(fieldValue(field.key)) || 0), 0);
+      total.textContent = `当前合计 ${sum}`;
+    };
     form.querySelectorAll('[data-field]').forEach(control => {
       control.addEventListener('change', applyFieldVisibility);
       control.addEventListener('input', applyFieldVisibility);
+      control.addEventListener('input', updateFieldTotal);
     });
     applyFieldVisibility();
+    updateFieldTotal();
 
     // Slider widget: keep the drag control and the exact-entry number box in
     // lockstep, and let the game-declared quick stops jump straight to a value.

@@ -40,8 +40,7 @@ export const GAMES: HubGameInfo[] = [
   {
     id: 'catan',
     name: '卡坦岛',
-    minPlayers: 3,
-    maxPlayers: 3,
+    ...seatRangeOfGame('catan'),
     clientUrl: '/games/rds-board-core/',
     protocol: 'rds-room/1',
     durationMin: 60,
