@@ -1197,7 +1197,8 @@ export class NetSession implements GamePresenter {
       this.viewer,
       focus,
       state.activeActorId,
-      state.activePlayerId
+      state.activePlayerId,
+      this.module.presentation
     );
     const isSettlement =
       state.phase === 'HAND_OVER' ||

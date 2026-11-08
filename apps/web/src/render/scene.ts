@@ -233,6 +233,26 @@ const FOLD_ANIMATION_MS = 320;
 const FOLD_STAGGER_MS = 35;
 /** How long each face (avatar / current-street bet) stays on a seat beacon. */
 const BEACON_FACE_MS = 2000;
+/** 头像贴片离相机近到这个距离会撑满整屏，近距一律不画，也不给它出贴边泡泡。 */
+const BEACON_HIDE_DISTANCE = 3;
+
+/**
+ * 一个座位立柱在屏幕上的落点。HUD 只拿像素，不碰 Three.js：
+ * 落在可视区外（或相机背后）时 `edge` 给出它该贴哪条边。
+ */
+export interface SeatScreenPoint {
+  seatId: string;
+  x: number;
+  y: number;
+  /** 立柱在当前视野内，3D 头像贴片自己在画，泡泡不用出现。 */
+  onScreen: boolean;
+  /** 视野外时贴边的方向；视野内为 null。 */
+  edge: 'left' | 'right' | 'top' | 'bottom' | null;
+  /** 本街已投入的数量。只有声明了下注面的座位（德州）才有意义。 */
+  streetBet: number;
+  /** 这一拍该显示下注面而不是头像（与立柱上的交替节奏共用同一时钟）。 */
+  showBet: boolean;
+}
 /** Native hand-card mesh; the layout width below is its displayed size. */
 const HAND_CARD_MESH_WIDTH = 1.12 * CARD_SIZE_MULTIPLIER;
 /** World width of a hand card at layout scale 1. */
@@ -602,6 +622,8 @@ export class BoardGameScene {
   private static readonly _scratchPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.2);
   private static readonly _scratchRayOrigin = new THREE.Vector3();
   private static readonly _scratchRayDir = new THREE.Vector3(0, -1, 0);
+  /** 立柱投影复用的临时向量，避免每帧给每座各 new 一个。 */
+  private static readonly _scratchBeacon = new THREE.Vector3();
   /** One soft radial shadow texture shared by every own-hand card. */
   private static ownHandShadowTexture?: THREE.CanvasTexture;
 
@@ -825,6 +847,10 @@ export class BoardGameScene {
   private viewportInsets: ViewportInsets = { left: 0, right: 0, bottom: 0, top: 0 };
 
   private onInteractiveClickCallback?: (data: InteractiveObjectData) => void;
+  /** 立柱屏幕落点的订阅者。HUD 用它把视野外的头像收成贴边泡泡。 */
+  private seatScreenCallback?: (points: SeatScreenPoint[]) => void;
+  /** 上一帧发出的落点签名：相机没动时不重复通知。 */
+  private seatScreenSignature = '';
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -989,6 +1015,20 @@ export class BoardGameScene {
 
   public onInteractiveClick(cb: (data: InteractiveObjectData) => void): void {
     this.onInteractiveClickCallback = cb;
+  }
+
+  /**
+   * 订阅每帧的座位立柱屏幕落点。
+   *
+   * 只在落点真的变了（相机移动、座位重建、下注额变化）时回调，所以订阅者
+   * 不用自己做节流。返回取消订阅的函数。
+   */
+  public onSeatScreenPoints(cb: (points: SeatScreenPoint[]) => void): () => void {
+    this.seatScreenCallback = cb;
+    this.seatScreenSignature = '';
+    return () => {
+      if (this.seatScreenCallback === cb) this.seatScreenCallback = undefined;
+    };
   }
 
   /**
@@ -6916,7 +6956,7 @@ export class BoardGameScene {
       // 仍是 GOD），头像贴片会撑满整屏，所以近距一律不画。
       const isOther = seatId !== viewerId;
       const nearCamera =
-        Math.hypot(cam.x - beacon.group.position.x, cam.z - beacon.group.position.z) < 3;
+        Math.hypot(cam.x - beacon.group.position.x, cam.z - beacon.group.position.z) < BEACON_HIDE_DISTANCE;
       const streetBet = Number(hand?.streetBets?.[seatId] ?? 0);
       this.updateBeaconBetSprite(beacon.betSprite, streetBet);
       const showBet = isOther && !nearCamera && showBetFace && streetBet > 0;
@@ -6955,6 +6995,64 @@ export class BoardGameScene {
       beacon.arrow.scale.setScalar(arrowScale);
       beacon.arrow.position.x = ringRadius * 0.93;
     }
+    this.publishSeatScreenPoints(showBetFace);
+  }
+
+  /**
+   * 把每支立柱投影到屏幕，交给 HUD 决定要不要收成贴边泡泡。
+   *
+   * 相机背后的点会从视口中心翻到对面，否则贴边方向会反。落点没变就不通知，
+   * 免得 HUD 每帧重排 DOM。
+   */
+  private publishSeatScreenPoints(showBetFace: boolean): void {
+    if (!this.seatScreenCallback) return;
+    const width = this.container.clientWidth;
+    const height = this.container.clientHeight;
+    if (width <= 0 || height <= 0) return;
+
+    const points: SeatScreenPoint[] = [];
+    const cam = this.camera.position;
+    for (const beacon of this.seatBeacons) {
+      const sprite = beacon.avatarSprite;
+      const world = sprite.getWorldPosition(BoardGameScene._scratchBeacon);
+      const nearCamera = Math.hypot(cam.x - beacon.group.position.x, cam.z - beacon.group.position.z) < BEACON_HIDE_DISTANCE;
+      // 贴到脸前的立柱是故意不画的，不是「在视野外」，不要给它补一个贴边泡泡。
+      if (nearCamera) continue;
+      const projected = world.project(this.camera);
+      const behind = projected.z > 1;
+      // 相机背后的投影会镜像到对面，沿中心翻转才是它真正所在的方向。
+      const nx = behind ? -projected.x : projected.x;
+      const ny = behind ? -projected.y : projected.y;
+      const x = (nx * 0.5 + 0.5) * width;
+      const y = (-ny * 0.5 + 0.5) * height;
+      const onScreen = !behind && projected.x >= -1 && projected.x <= 1 && projected.y >= -1 && projected.y <= 1;
+      points.push({
+        seatId: beacon.seatId,
+        x,
+        y,
+        onScreen,
+        edge: onScreen ? null : this.screenEdge(x, y, width, height),
+        streetBet: Number(beacon.betSprite.userData.betAmount ?? 0),
+        showBet: showBetFace
+      });
+    }
+
+    const signature = points
+      .map(point => `${point.seatId}:${Math.round(point.x)}:${Math.round(point.y)}:${point.onScreen ? 1 : 0}:${point.edge ?? ''}:${point.streetBet}:${point.showBet ? 1 : 0}`)
+      .join('|');
+    if (signature === this.seatScreenSignature) return;
+    this.seatScreenSignature = signature;
+    this.seatScreenCallback(points);
+  }
+
+  /** 视野外的落点该贴哪条边：取超出视口最多的那个方向。 */
+  private screenEdge(x: number, y: number, width: number, height: number): 'left' | 'right' | 'top' | 'bottom' {
+    const over = { left: -x, right: x - width, top: -y, bottom: y - height };
+    let edge: 'left' | 'right' | 'top' | 'bottom' = 'left';
+    for (const candidate of ['right', 'top', 'bottom'] as const) {
+      if (over[candidate] > over[edge]) edge = candidate;
+    }
+    return edge;
   }
   private renderLoop(): void {
     if (this.isDestroyed) return;

@@ -1215,7 +1215,8 @@ export class UniversalSession implements GamePresenter {
       this.engine.getViewer(),
       focus,
       this.engine.getActiveActorId(),
-      state.activePlayerId
+      state.activePlayerId,
+      module.presentation
     );
 
     this.snapshot = {
@@ -1863,11 +1864,44 @@ function entityTitle(state: ProjectedGameState, entityId: string): string {
   );
 }
 
+type HandStyleHints = {
+  cardStyle?: (custom: Record<string, unknown>) => {
+    badge?: string;
+    tone?: string;
+    seal?: string;
+  };
+};
+
+/** 手牌条上用来认牌的短名：游戏自己的牌名优先，并去掉区分副本的印刷序号。 */
+function shortCaption(custom: Record<string, unknown>, faceTitle: string): string {
+  const named = [custom.zh, custom.name].find(
+    (value): value is string => typeof value === 'string' && value.trim().length > 0
+  );
+  const raw = named ?? faceTitle;
+  return raw.replace(/\s*·\s*[0-9A-Za-z]{2,4}$/, '').trim() || raw;
+}
+
+/**
+ * 角标只接受「一个花色符号 + 一个短点数」。类别词（OMEN / ITEM）偶尔被塞进
+ * suit，那种不能当成扑克角标，否则牌面会被一串英文盖住。
+ */
+function cornerPip(
+  face: { suit?: string; rank?: string | number } | undefined,
+  styled: boolean
+): UiHandCard['pip'] {
+  if (!styled || !face?.suit || face.rank === undefined || face.rank === null) return undefined;
+  const suit = String(face.suit);
+  const rank = String(face.rank);
+  if (suit.length === 0 || suit.length > 2 || rank.length === 0 || rank.length > 3) return undefined;
+  return { rank, suit, hot: suit === '♥' || suit === '♦' };
+}
+
 function cardOf(
   state: ProjectedGameState,
   bound: readonly BoundAction[],
   entityId: string,
-  zone: UiHandCard['zone']
+  zone: UiHandCard['zone'],
+  hints?: HandStyleHints
 ): UiHandCard {
   const verbs = bound
     .filter(entry => entry.ui.entityId === entityId)
@@ -1881,10 +1915,19 @@ function cardOf(
         entry.ui.surface === 'prompt'
     )
     .map(entry => entry.ui);
+  const entity = state.entities[entityId];
+  const face = entity?.components?.cardFace;
+  const custom = (entity?.components?.custom ?? {}) as Record<string, unknown>;
+  const style = hints?.cardStyle?.(custom) ?? {};
+  const styled = !!(style.badge || style.tone || style.seal);
   return {
     entityId,
     zone,
     title: entityTitle(state, entityId),
+    subtitle: shortCaption(custom, face?.title ?? ''),
+    badge: style.badge,
+    tone: style.tone,
+    pip: cornerPip(face, styled),
     playable: verbs.length > 0,
     readOnly: verbs.length === 0,
     reason: undefined,
@@ -1896,30 +1939,32 @@ function cardsInZone(
   state: ProjectedGameState,
   bound: readonly BoundAction[],
   zoneId: string | undefined,
-  zone: UiHandCard['zone']
+  zone: UiHandCard['zone'],
+  hints?: HandStyleHints
 ): UiHandCard[] {
   if (!zoneId) return [];
   const ids = state.zones[zoneId]?.orderedEntities ?? [];
   return ids
     .filter(id => !!state.entities[id] && !state.entities[id]?.isMasked)
-    .map(id => cardOf(state, bound, id, zone));
+    .map(id => cardOf(state, bound, id, zone, hints));
 }
 
 /** 实体手牌/装备/展示卡：只从实体区域取，不从动作表取。 */
 export function buildHandView(
   state: ProjectedGameState,
   bound: readonly BoundAction[],
-  owner: string | undefined
+  owner: string | undefined,
+  hints?: HandStyleHints
 ): { hand: UiHandCard[]; equip: UiHandCard[]; reveal: UiHandCard[] } {
   if (!owner) return { hand: [], equip: [], reveal: [] };
   return {
-    hand: cardsInZone(state, bound, `zone_hand_${owner}`, 'HAND'),
+    hand: cardsInZone(state, bound, `zone_hand_${owner}`, 'HAND', hints),
     equip: [
-      ...cardsInZone(state, bound, `zone_equip_${owner}`, 'EQUIP'),
-      ...cardsInZone(state, bound, `zone_tableau_${owner}`, 'TABLEAU'),
-      ...cardsInZone(state, bound, `zone_judge_${owner}`, 'JUDGE')
+      ...cardsInZone(state, bound, `zone_equip_${owner}`, 'EQUIP', hints),
+      ...cardsInZone(state, bound, `zone_tableau_${owner}`, 'TABLEAU', hints),
+      ...cardsInZone(state, bound, `zone_judge_${owner}`, 'JUDGE', hints)
     ],
-    reveal: cardsInZone(state, bound, `zone_reveal_${owner}`, 'REVEAL')
+    reveal: cardsInZone(state, bound, `zone_reveal_${owner}`, 'REVEAL', hints)
   };
 }
 
@@ -1935,7 +1980,8 @@ export function buildSeatViews(
   viewer: string,
   focus: readonly string[],
   activeActorId: string | undefined,
-  activePlayerId: string | undefined
+  activePlayerId: string | undefined,
+  hints?: HandStyleHints
 ): {
   handOwner: string | undefined;
   hand: UiHandCard[];
@@ -1945,7 +1991,7 @@ export function buildSeatViews(
   prompt: UiPrompt | undefined;
 } {
   const handOwner = viewer === 'GOD' ? (focus[0] ?? activeActorId ?? activePlayerId) : viewer;
-  const cards = buildHandView(state, bound, handOwner);
+  const cards = buildHandView(state, bound, handOwner, hints);
   return {
     handOwner,
     hand: cards.hand,

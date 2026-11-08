@@ -121,6 +121,8 @@ class BoardGameSimulatorApp {
       // four plain edges. Keeping this wiring here preserves ui → contracts.
       onViewportInsets: insets => this.scene.setViewportInsets(insets)
     });
+    // 视野外的立柱头像收成贴边泡泡。场景只给像素落点，画在哪由 HUD 决定。
+    this.scene.onSeatScreenPoints(points => this.hud.renderSeatBubbles(points));
 
     this.inspector = new MathematicalInspectorUI(inspectorContainer, this.session, {
       onClose: () => this.hud.setInspectorActive(false)
