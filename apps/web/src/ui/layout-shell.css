@@ -2109,7 +2109,8 @@
   transform: translateX(-50%);
   width: min(900px, 92vw);
   height: 190px;
-  z-index: 27;
+  /* 高于 player-rail / side-column（45），任何外壳面板都不许盖住手牌。 */
+  z-index: 46;
   pointer-events: auto;
   touch-action: none;
   user-select: none;
@@ -2664,7 +2665,7 @@
   left: 50%;
   bottom: calc(var(--shell-edge, 16px) + 200px);
   transform: translateX(-50%);
-  z-index: 28;
+  z-index: 47;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -2833,6 +2834,7 @@
   bottom: calc(var(--shell-edge, 16px) + 300px);
 }
 
+
 @media (max-width: 1199px) {
   .operation-deck[data-enabled='1'] {
     bottom: calc(env(safe-area-inset-bottom, 0px) + 10px + 156px + 6px);
@@ -2857,6 +2859,32 @@
 
   .app-shell[data-hand='zones'] > .hand-pager {
     bottom: calc(env(safe-area-inset-bottom, 0px) + 10px + 150px);
+  }
+}
+
+/* 极矮屏（横屏手机）与窄屏的紧凑手牌：卡片缩小、手牌区压扁，保证桌面仍露出。 */
+@media (max-width: 1199px) and (max-height: 480px), (max-width: 359px) {
+  .app-shell[data-hand='zones'] > #action-hand[data-enabled='1'] {
+    height: 118px;
+  }
+
+  .app-shell[data-hand='zones'] > #action-hand .ah-card {
+    width: 66px;
+    height: 100px;
+  }
+
+  .app-shell[data-hand='zones'] > .hand-pager {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 10px + 112px);
+  }
+
+  .operation-deck[data-enabled='1'] {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 10px + 118px + 4px);
+  }
+
+  .operation-deck .op-btn {
+    min-height: 34px;
+    font-size: 11px;
+    padding: 4px 8px;
   }
 }
 

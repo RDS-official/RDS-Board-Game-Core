@@ -516,13 +516,22 @@ class BoardGameSimulatorApp {
    */
   private installViewportHeight(): void {
     const sync = (): void => {
-      const height = Math.round(window.visualViewport?.height ?? window.innerHeight);
+      // Some in-app browsers report a visualViewport TALLER than the layout
+      // viewport; the smaller of the two is what the user can actually see.
+      const visual = Math.round(window.visualViewport?.height ?? window.innerHeight);
+      const height = Math.min(visual, window.innerHeight);
       document.documentElement.style.setProperty('--app-height', height + 'px');
     };
     sync();
     window.addEventListener('resize', sync, { passive: true });
+    window.addEventListener('orientationchange', sync, { passive: true });
+    document.addEventListener('visibilitychange', sync, { passive: true });
     window.visualViewport?.addEventListener('resize', sync, { passive: true });
     window.visualViewport?.addEventListener('scroll', sync, { passive: true });
+    // First layout pass may run before the browser settles the toolbar; re-sync
+    // once on the next frame and again after fonts/first paint settle.
+    requestAnimationFrame(sync);
+    window.setTimeout(sync, 300);
   }
 
   private bindLeaveTable(): void {
