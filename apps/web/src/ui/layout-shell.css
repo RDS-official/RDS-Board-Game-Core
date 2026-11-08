@@ -2218,6 +2218,60 @@
   text-align: center;
   text-shadow: 0 1px 2px #000;
 }
+/* 分区手牌的认牌层：角标 + 短牌名。传统扇形不带 data-tone / .ah-pip，不受影响。 */
+.action-hand .ah-pip {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 3px 4px 4px;
+  border-radius: 7px;
+  background: rgba(248, 244, 234, 0.95);
+  color: #1a1c22;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.action-hand .ah-pip b {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 16px;
+  font-weight: 700;
+}
+.action-hand .ah-pip i {
+  font-style: normal;
+  font-size: 13px;
+}
+.action-hand .ah-pip.hot {
+  color: #c8102e;
+}
+.action-hand .ah-card.ah-hand[data-tone] .ah-action-label {
+  max-height: none;
+  padding: 16px 6px 6px;
+  overflow: hidden;
+  background: linear-gradient(transparent, rgba(6, 5, 4, 0.55) 30%, rgba(6, 5, 4, 0.96) 62%);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.action-hand .ah-card.ah-hand[data-tone='danger'] .ah-face {
+  box-shadow: inset 3px 0 0 #c9455f, 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+.action-hand .ah-card.ah-hand[data-tone='treasure'] .ah-face {
+  box-shadow: inset 3px 0 0 #d9a45b, 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+.action-hand .ah-card.ah-hand[data-tone='event'] .ah-face {
+  box-shadow: inset 3px 0 0 #8fa4bd, 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+.action-hand .ah-card.ah-hand[data-tone='place'] .ah-face {
+  box-shadow: inset 3px 0 0 #a8865a, 0 6px 16px rgba(0, 0, 0, 0.5);
+}
 .action-hand .ah-with-art .ah-badge,
 .action-hand .ah-with-art .ah-cool {
   padding: 1px 3px;
@@ -2682,11 +2736,26 @@
 
 .operation-deck .op-row-label {
   display: block;
-  margin: 0 0 3px 2px;
-  color: var(--text-tertiary, #8d94a1);
+  margin: 0 0 4px 2px;
+  color: #cbb98a;
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
+}
+.operation-deck .op-commands,
+.operation-deck .op-context,
+.operation-deck .op-equip,
+.operation-deck .op-prompt {
+  padding: 7px 8px;
+  border: 1px solid rgba(217, 180, 91, 0.22);
+  border-radius: 14px;
+  background: rgba(10, 12, 16, 0.78);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.operation-deck .op-prompt {
+  border-color: rgba(255, 138, 101, 0.45);
+  border-left: 3px solid #ff8a65;
+  background: rgba(28, 20, 18, 0.94);
 }
 
 .operation-deck .op-row {
@@ -2720,6 +2789,16 @@
 .operation-deck .op-btn:disabled {
   opacity: 0.45;
   cursor: default;
+}
+.operation-deck .op-btn[data-tone='primary'] {
+  border-color: rgba(217, 180, 91, 0.9);
+  background: linear-gradient(180deg, rgba(92, 72, 32, 0.96), rgba(42, 32, 14, 0.96));
+  color: #ffe7a8;
+  font-weight: 700;
+}
+.operation-deck .op-btn[data-tone='danger'] {
+  border-color: rgba(224, 96, 78, 0.75);
+  background: rgba(62, 24, 22, 0.94);
 }
 
 .operation-deck .op-ico {
@@ -2756,11 +2835,6 @@
 
 .operation-deck .op-prompt {
   padding: 8px 10px;
-  border: 1px solid rgba(255, 138, 101, 0.45);
-  border-left: 3px solid #ff8a65;
-  border-radius: 10px;
-  background: rgba(28, 20, 18, 0.94);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 .operation-deck .op-prompt-head {
@@ -2817,11 +2891,81 @@
   cursor: pointer;
 }
 
-.operation-deck .op-status {
-  color: var(--text-tertiary, #8d94a1);
-  font-size: 10px;
+.operation-deck .op-status:not(:empty) {
+  align-self: flex-end;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(8, 10, 14, 0.72);
+  color: #d9c7a2;
+  font-size: 11px;
+  letter-spacing: 0.02em;
   text-align: right;
-  min-height: 12px;
+  min-height: 16px;
+}
+/* 视野外的玩家头像泡泡。桌面不显示：立柱的 3D 头像贴片自己在画。 */
+.seat-bubbles {
+  display: none;
+}
+@media (max-width: 1199px), (max-height: 480px) and (min-width: 600px) {
+  .app-shell > .seat-bubbles {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    pointer-events: none;
+  }
+  .seat-bubble {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    margin: -22px 0 0 -22px;
+    left: var(--sb-x);
+    top: var(--sb-y);
+    padding: 0;
+    border: 2px solid var(--seat, #d9b45b);
+    border-radius: 50%;
+    background: rgba(12, 15, 20, 0.92);
+    color: #f8fafc;
+    font-size: 20px;
+    line-height: 1;
+    pointer-events: auto;
+    touch-action: none;
+    cursor: pointer;
+  }
+  .seat-bubble img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    object-fit: cover;
+  }
+  .seat-bubble.turn {
+    box-shadow: 0 0 0 3px rgba(217, 180, 91, 0.85);
+  }
+  .seat-bubble.dead {
+    opacity: 0.45;
+  }
+  .seat-bubble.bet {
+    background: #0b1117;
+    color: #f8fafc;
+    font-size: 12px;
+  }
+  .seat-bubble .sb-bet {
+    font-weight: 700;
+  }
+  /* 小三角指向玩家真正所在的方向，免得贴边之后分不清谁在哪。 */
+  .seat-bubble::after {
+    content: '';
+    position: absolute;
+    width: 0;
+    height: 0;
+    border: 5px solid transparent;
+  }
+  .seat-bubble[data-edge='left']::after { left: -8px; border-right-color: var(--seat, #d9b45b); }
+  .seat-bubble[data-edge='right']::after { right: -8px; border-left-color: var(--seat, #d9b45b); }
+  .seat-bubble[data-edge='top']::after { top: -8px; border-bottom-color: var(--seat, #d9b45b); }
+  .seat-bubble[data-edge='bottom']::after { bottom: -8px; border-top-color: var(--seat, #d9b45b); }
 }
 
 /* 新模式下旧 dock 的动作扇/手持位让位；放置模式仍保留 dock 的旋转/确认面板。 */

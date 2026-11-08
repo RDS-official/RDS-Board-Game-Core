@@ -26,7 +26,7 @@ import { CANVAS_FONT_STACK, CANVAS_SERIF_STACK } from '../fonts';
  */
 
 /** Bumped whenever the painter changes: part of the texture cache key. */
-const FACE_STYLE_VERSION = 'occult-dark-v1';
+const FACE_STYLE_VERSION = 'occult-dark-v2';
 
 /**
  * Poker uses a second painter (see "Playing cards" below): a real deck face
@@ -187,6 +187,9 @@ export class CardMeshBuilder {
     if (type === 'ARMOR') return '#4a5b6a';
     if (type === 'WEAPON') return '#7a3c22';
     if (type === 'TRICK') return '#5b3f86';
+    if (type === 'BASIC') return '#d64545';
+    if (type === 'DELAYED') return '#7d6bb5';
+    if (type === 'EQUIP') return '#6f8fa8';
     if (type === 'OMEN') return '#6e1a38';
     if (type === 'ITEM') return '#7d5c2e';
     if (type === 'EVENT') return '#2d3742';
@@ -205,7 +208,7 @@ export class CardMeshBuilder {
       return {
         ground: ['#221d15', '#141109', '#060504'],
         line: '#d8c9a4',
-        accent: face.color ?? this.tierColor(face.type),
+        accent: this.accentOrTier(face.color, face.type),
         wash: 'rgba(216,201,164,0.15)',
         band: 'rgba(20,16,11,0.94)',
         ink: '#f7efdd',
@@ -213,6 +216,21 @@ export class CardMeshBuilder {
       };
     }
     return STYLES[kind];
+  }
+
+  /**
+   * A near-black suit ink (`#212121`) disappears on the lacquer. Keep a colour
+   * only when it is light enough to read as a category stripe; otherwise the
+   * type's own tier colour stands in.
+   */
+  private static accentOrTier(color: string | undefined, type?: string): string {
+    const fallback = this.tierColor(type);
+    if (!color || !/^#[0-9a-fA-F]{6}$/.test(color)) return fallback;
+    const r = parseInt(color.slice(1, 3), 16);
+    const g = parseInt(color.slice(3, 5), 16);
+    const b = parseInt(color.slice(5, 7), 16);
+    const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    return lum < 0.22 ? fallback : color;
   }
 
   private static fnv1a(input: string): number {
@@ -748,19 +766,21 @@ export class CardMeshBuilder {
     ctx.stroke();
     ctx.globalAlpha = 1;
 
-    // Title: engraved cream on near-black, shrunk to fit.
+    // Title: engraved cream on near-black, shrunk to fit. A trailing print
+    // serial (` ·001`) tells two copies apart in audits; it is noise on the face.
+    const title = face.title.replace(/\s*·\s*[0-9A-Za-z]{2,4}$/, '');
     let titleSize = 36;
     ctx.font = `700 ${titleSize}px ${CANVAS_SERIF_STACK}`;
-    while (ctx.measureText(face.title).width > 420 && titleSize > 18) {
+    while (ctx.measureText(title).width > 420 && titleSize > 18) {
       titleSize -= 2;
       ctx.font = `700 ${titleSize}px ${CANVAS_SERIF_STACK}`;
     }
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = 'rgba(0,0,0,0.75)';
-    ctx.fillText(face.title, 256, 74);
+    ctx.fillText(title, 256, 74);
     ctx.fillStyle = style.ink;
-    ctx.fillText(face.title, 256, 72);
+    ctx.fillText(title, 256, 72);
 
     // Hairline under the title keeps the band from reading as empty.
     if (kind === 'OMEN' || kind === 'ITEM' || kind === 'EVENT' || kind === 'ROOM') {
@@ -1302,23 +1322,26 @@ export class CardMeshBuilder {
     }
   }
 
-  private static paintSuitMarks(ctx: CanvasRenderingContext2D, face: CardFace, style: PlateStyle): void {
-    if (!face.suit || !face.rank) return;
-    const isRed = face.suit === '\u2665' || face.suit === '\u2666';
-    const ink = isRed ? '#e0604e' : style.ink;
+  private static paintSuitMarks(ctx: CanvasRenderingContext2D, face: CardFace, _style: PlateStyle): void {
+    if (!face.suit || face.rank === undefined || face.rank === null || face.rank === '') return;
+    const suit = String(face.suit);
+    const rank = String(face.rank);
+    // Category tokens sometimes ride in `suit`. Only a real index gets a chip.
+    if (suit.length === 0 || suit.length > 2 || rank.length === 0 || rank.length > 3) return;
+    const hot = suit === '\u2665' || suit === '\u2666';
+    const ink = hot ? '#c8102e' : '#1a1c22';
     ctx.save();
+    ctx.fillStyle = 'rgba(248,244,234,0.94)';
+    ctx.beginPath();
+    ctx.roundRect(28, 140, 84, 112, 14);
+    ctx.fill();
     ctx.fillStyle = ink;
+    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.textAlign = 'left';
-    ctx.font = `700 34px ${CANVAS_FONT_STACK}`;
-    ctx.fillText(`${face.rank}`, 42, 186);
-    ctx.font = '28px "Segoe UI Symbol", sans-serif';
-    ctx.fillText(face.suit, 42, 220);
-    ctx.textAlign = 'right';
-    ctx.font = `700 34px ${CANVAS_FONT_STACK}`;
-    ctx.fillText(`${face.rank}`, 470, 186);
-    ctx.font = '28px "Segoe UI Symbol", sans-serif';
-    ctx.fillText(face.suit, 470, 220);
+    ctx.font = `700 46px ${CANVAS_SERIF_STACK}`;
+    ctx.fillText(rank, 70, 180);
+    ctx.font = `40px ${CANVAS_FONT_STACK}`;
+    ctx.fillText(suit, 70, 224);
     ctx.restore();
   }
 
@@ -1481,6 +1504,52 @@ export class CardMeshBuilder {
       ctx.fill();
       ctx.fillStyle = '#f0d38a';
       ctx.fillRect(-64, 36, 128, 12);
+    } else if (type === 'DELAYED') {
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+      ctx.lineWidth = 8;
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-46, -72);
+      ctx.lineTo(46, -72);
+      ctx.lineTo(6, 0);
+      ctx.lineTo(46, 72);
+      ctx.lineTo(-46, 72);
+      ctx.lineTo(-6, 0);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.globalAlpha = 0.35;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#f0d38a';
+      ctx.beginPath();
+      ctx.moveTo(-26, -58);
+      ctx.lineTo(26, -58);
+      ctx.lineTo(0, -6);
+      ctx.closePath();
+      ctx.fill();
+    } else if (type === 'EQUIP') {
+      ctx.fillStyle = '#e8e0d2';
+      ctx.beginPath();
+      ctx.moveTo(18, -78);
+      ctx.lineTo(34, -68);
+      ctx.lineTo(16, 28);
+      ctx.lineTo(2, 28);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = color;
+      ctx.fillRect(-18, 28, 62, 12);
+      ctx.fillRect(8, 40, 18, 24);
+      ctx.beginPath();
+      ctx.moveTo(-52, -24);
+      ctx.lineTo(-16, -24);
+      ctx.lineTo(-16, 22);
+      ctx.quadraticCurveTo(-34, 46, -52, 22);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#e6c976';
+      ctx.lineWidth = 4;
+      ctx.stroke();
     } else {
       this.drawGem(ctx, 0, 0, 76, color);
     }

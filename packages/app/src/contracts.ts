@@ -190,6 +190,11 @@ export interface UiHandCard {
   art?: string;
   badge?: string;
   tone?: string;
+  /**
+   * 角标点数与花色。只在牌面自己不是一套可读索引时填写（扑克的牌面已经印着
+   * A♠，再叠一层会打架）。`hot` 表示红色花色。
+   */
+  pip?: { rank: string; suit: string; hot: boolean };
   playable: boolean;
   /** 只读展示牌（底牌/身份等）：可查看，但没有可执行动词。 */
   readOnly?: boolean;

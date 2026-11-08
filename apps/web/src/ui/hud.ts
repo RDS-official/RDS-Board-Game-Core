@@ -2256,6 +2256,8 @@ export class BoardGameHUD {
         </div>
       </header>
 
+      <div class="seat-bubbles" id="seat-bubbles" aria-label="视野外的玩家"></div>
+
       <aside class="player-rail" id="player-rail" aria-label="角色栏">
         <div class="drawer-head" data-drawer-head="rail">
           <span class="drawer-title" id="drawer-rail-title">角色栏</span>
@@ -2484,6 +2486,8 @@ export class BoardGameHUD {
     this.container.querySelector('#btn-inspector')?.addEventListener('click', () => {
       this.ports.toggleInspector();
     });
+
+    this.bindSeatBubbles();
 
     this.container.querySelector('#operation-deck')?.addEventListener('click', event => {
       const target = event.target as HTMLElement | null;
@@ -3425,6 +3429,189 @@ export class BoardGameHUD {
     this.layoutPlayerRail(rail);
   }
 
+  /** 长按多久算「看简略信息」而不是「打开角色卡」。 */
+  private static readonly SEAT_BUBBLE_HOLD_MS = 420;
+
+  /**
+   * 贴边泡泡的手势：点一下打开角色卡，按住超过阈值弹出简略信息。
+   *
+   * 监听挂在容器上而不是每个泡泡上——泡泡每帧都可能重建，单独挂监听会泄漏。
+   */
+  private bindSeatBubbles(): void {
+    const layer = this.container.querySelector('#seat-bubbles') as HTMLElement | null;
+    if (!layer) return;
+    let hold: { timer: number; id: string; opened: boolean } | null = null;
+    let suppressClick = false;
+
+    const bubbleOf = (event: Event): HTMLElement | null =>
+      (event.target as HTMLElement | null)?.closest<HTMLElement>('.seat-bubble') ?? null;
+
+    const endHold = (): void => {
+      if (!hold) return;
+      window.clearTimeout(hold.timer);
+      if (hold.opened) {
+        suppressClick = true;
+        this.showSeatPeek(null);
+      }
+      hold = null;
+    };
+
+    layer.addEventListener('pointerdown', event => {
+      const bubble = bubbleOf(event);
+      if (!bubble?.dataset.seat) return;
+      const id = bubble.dataset.seat;
+      endHold();
+      hold = {
+        id,
+        opened: false,
+        timer: window.setTimeout(() => {
+          if (!hold || hold.id !== id) return;
+          hold.opened = true;
+          this.pointerAt = { x: event.clientX, y: event.clientY };
+          this.showSeatPeek(this.seatBubblePeek(id));
+        }, BoardGameHUD.SEAT_BUBBLE_HOLD_MS)
+      };
+    });
+    layer.addEventListener('pointerup', endHold);
+    layer.addEventListener('pointercancel', endHold);
+    layer.addEventListener('pointerleave', endHold);
+    // 长按会触发浏览器的选中/菜单，泡泡只认自己的两种手势。
+    layer.addEventListener('contextmenu', event => event.preventDefault());
+    layer.addEventListener('click', event => {
+      if (suppressClick) {
+        suppressClick = false;
+        return;
+      }
+      const bubble = bubbleOf(event);
+      if (!bubble?.dataset.seat) return;
+      const player = this.lastSnapshot?.players.find(entry => entry.id === bubble.dataset.seat);
+      if (player) this.openPlayerSheet(player);
+    });
+  }
+
+  /**
+   * 视野外的玩家头像泡泡。
+   *
+   * 窄屏上立柱顶端的 3D 头像贴片经常整个出屏，玩家名册就断了。场景层每帧把
+   * 每座的屏幕落点交过来，落在可视区外的收成贴边泡泡：默认是头像，声明了下注
+   * 面的游戏（德州）按立柱同一节奏交替显示下注额。点开角色卡，长按出简略信息。
+   */
+  public renderSeatBubbles(
+    points: { seatId: string; x: number; y: number; onScreen: boolean; edge: 'left' | 'right' | 'top' | 'bottom' | null; streetBet: number; showBet: boolean }[]
+  ): void {
+    const layer = this.container.querySelector('#seat-bubbles') as HTMLElement | null;
+    if (!layer) return;
+    const snapshot = this.lastSnapshot;
+    if (!snapshot || !this.isOverlayShell()) {
+      if (layer.childElementCount > 0) layer.replaceChildren();
+      return;
+    }
+
+    const offscreen = points.filter(point => !point.onScreen && point.edge);
+    const bounds = this.seatBubbleBounds();
+    const placed = offscreen
+      .map(point => {
+        const player = snapshot.players.find(entry => entry.id === point.seatId);
+        if (!player) return null;
+        return { point, player, ...this.clampSeatBubble(point, bounds) };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+    // 同一条边上挤在一起的泡泡拉开，免得两个人叠成一个。
+    for (const edge of ['left', 'right', 'top', 'bottom'] as const) {
+      const group = placed.filter(entry => entry.point.edge === edge);
+      group.sort((a, b) => (edge === 'top' || edge === 'bottom' ? a.x - b.x : a.y - b.y));
+      const span = edge === 'top' || edge === 'bottom' ? bounds.right - bounds.left : bounds.bottom - bounds.top;
+      const gap = Math.min(52, span / Math.max(1, group.length));
+      group.forEach((entry, index) => {
+        const along = bounds[edge === 'top' || edge === 'bottom' ? 'left' : 'top'] + gap * (index + 0.5);
+        if (edge === 'top' || edge === 'bottom') entry.x = along;
+        else entry.y = along;
+      });
+    }
+
+    const signature = placed
+      .map(entry => `${entry.player.id}:${Math.round(entry.x)}:${Math.round(entry.y)}:${entry.point.edge}:${entry.point.showBet ? 1 : 0}:${entry.point.streetBet}:${entry.player.isFocus ? 1 : 0}:${entry.player.alive ? 1 : 0}`)
+      .join('|');
+    if (layer.dataset.signature === signature) return;
+    layer.dataset.signature = signature;
+
+    setHtml(
+      layer,
+      html`${placed.map(entry => {
+        const { point, player } = entry;
+        const showBet = point.showBet && point.streetBet > 0;
+        const face = showBet
+          ? html`<b class="sb-bet">${String(point.streetBet)}</b>`
+          : player.avatarUrl
+            ? html`<img src="${player.avatarUrl}" alt="" />`
+            : html`<span>${player.avatar || '👤'}</span>`;
+        return html`<button type="button" class="seat-bubble ${player.isFocus ? 'turn' : ''} ${player.alive ? '' : 'dead'} ${showBet ? 'bet' : ''}" data-seat="${player.id}" data-edge="${point.edge}" style="${`--seat:${player.color};--sb-x:${Math.round(entry.x)}px;--sb-y:${Math.round(entry.y)}px`}" aria-label="${player.name}">
+          ${face}
+        </button>`;
+      })}`
+    );
+  }
+
+  /** 泡泡可以贴的区域：顶栏之下、操作台之上，避开安全区。 */
+  private seatBubbleBounds(): { left: number; right: number; top: number; bottom: number } {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const topbar = this.container.querySelector('.topbar')?.getBoundingClientRect();
+    const banner = this.container.querySelector('#announce')?.getBoundingClientRect();
+    const deck = this.container.querySelector('#operation-deck')?.getBoundingClientRect();
+    const hand = this.container.querySelector('#action-hand')?.getBoundingClientRect();
+    const dockTop = [deck, hand]
+      .filter((rect): rect is DOMRect => !!rect && rect.height > 0 && rect.top < height)
+      .reduce((min, rect) => Math.min(min, rect.top), height);
+    // 开局横幅是短暂浮层，贴边泡泡让开它，免得头像被提示盖住。
+    const bannerBottom = banner && banner.height > 0 && banner.bottom < height / 2 ? banner.bottom : 0;
+    return {
+      left: 28,
+      right: width - 28,
+      top: Math.max(28, (topbar?.bottom ?? 0) + 28, bannerBottom + 28),
+      bottom: Math.min(height - 28, dockTop - 28)
+    };
+  }
+
+  /** 把视野外的落点收到最近的一条边上，并留出泡泡半径。 */
+  private clampSeatBubble(
+    point: { x: number; y: number; edge: 'left' | 'right' | 'top' | 'bottom' | null },
+    bounds: { left: number; right: number; top: number; bottom: number }
+  ): { x: number; y: number } {
+    const x = Math.min(bounds.right, Math.max(bounds.left, point.x));
+    const y = Math.min(bounds.bottom, Math.max(bounds.top, point.y));
+    switch (point.edge) {
+      case 'left': return { x: bounds.left, y };
+      case 'right': return { x: bounds.right, y };
+      case 'top': return { x, y: bounds.top };
+      case 'bottom': return { x, y: bounds.bottom };
+      default: return { x, y };
+    }
+  }
+
+  /** 长按泡泡时的简略信息：名字、身份、分数，外加最多四条阶梯。 */
+  private seatBubblePeek(playerId: string): UiDetailView | null {
+    const player = this.lastSnapshot?.players.find(entry => entry.id === playerId);
+    if (!player) return null;
+    const traits = player.pips
+      .filter(pip => pip.short && pip.label !== player.scoreLabel)
+      .slice(0, 4)
+      .map(pip => ({ label: pip.label, value: String(pip.value) }));
+    const vitals = player.hp
+      ? [{ label: player.scoreLabel, value: `${player.hp.current}/${player.hp.max}` }]
+      : [];
+    return {
+      key: `seat-bubble:${player.id}`,
+      title: player.name,
+      subtitle: player.roleLabel,
+      badge: `${player.scoreLabel} ${player.score}`,
+      seal: player.avatar,
+      sections: [...vitals, ...traits],
+      actions: []
+    };
+  }
+
   /**
    * Player rail: a plain content-sized stack in drawers, an optional fisheye on
    * desktop.
@@ -4349,6 +4536,7 @@ export class BoardGameHUD {
     button.type = 'button';
     button.className = className;
     button.dataset.opAction = action.id;
+    button.dataset.tone = action.tone;
     const disabled = !!action.cooldownMs && action.cooldownMs > 0;
     button.disabled = disabled;
     const icon = document.createElement('span');
@@ -4399,6 +4587,9 @@ export class BoardGameHUD {
     const art = this.handArt.get(id) ?? '';
     return [
       card.title,
+      card.subtitle ?? '',
+      card.tone ?? '',
+      card.pip ? card.pip.rank + card.pip.suit : '',
       card.playable ? '1' : '0',
       card.reason ?? '',
       card.verbs.map(verb => verb.id + ':' + verb.label + ':' + (verb.verb ?? '')).join('|'),
@@ -4416,14 +4607,27 @@ export class BoardGameHUD {
     button.dataset.entityId = card.entityId;
     button.dataset.kind = 'hand';
     button.dataset.group = 'card';
+    if (card.tone) button.dataset.tone = card.tone;
     if (card.readOnly) button.dataset.readonly = '1';
     else button.dataset.playable = card.playable ? '1' : '0';
+    const caption = card.subtitle?.trim() || card.title;
     const stateLabel = card.readOnly ? '仅展示' : card.playable ? '可用' : card.reason ?? '当前不可用';
     button.setAttribute('aria-label', card.title + ' · ' + stateLabel);
-    button.title = card.title + ' · ' + stateLabel;
+    button.title = (card.badge ? card.badge + ' · ' : '') + card.title + ' · ' + stateLabel;
 
     const face = document.createElement('span');
     face.className = 'ah-face ah-hand-face';
+    if (card.pip) {
+      const pip = document.createElement('span');
+      pip.className = 'ah-pip' + (card.pip.hot ? ' hot' : '');
+      pip.setAttribute('aria-hidden', 'true');
+      const rank = document.createElement('b');
+      rank.textContent = card.pip.rank;
+      const suit = document.createElement('i');
+      suit.textContent = card.pip.suit;
+      pip.append(rank, suit);
+      face.appendChild(pip);
+    }
     if (art) {
       const img = document.createElement('img');
       img.className = 'ah-art';
@@ -4432,12 +4636,12 @@ export class BoardGameHUD {
       img.draggable = false;
       const label = document.createElement('span');
       label.className = 'ah-action-label';
-      label.textContent = card.title;
+      label.textContent = caption;
       face.append(img, label);
     } else {
       const label = document.createElement('span');
       label.className = 'ah-label';
-      label.textContent = card.title;
+      label.textContent = caption;
       face.appendChild(label);
     }
     const primary = card.verbs[0];
