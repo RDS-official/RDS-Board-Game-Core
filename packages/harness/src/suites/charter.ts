@@ -778,6 +778,42 @@ test('charter C-9: every module declares its globalVars keys and stays inside th
   }
 });
 
+test('charter C-7: dune_mahjong books every score gain through the reward ledger', () => {
+  const module = GAME_REGISTRY.dune_mahjong;
+  assert(module.charter?.requiresRewardLedger, 'dune_mahjong declares a reward ledger');
+
+  const engine = new UniversalGameEngine(module, 7, { strict: true });
+  // 三条麻将认领与一次战斗之轮，覆盖全部四处加分。
+  for (const action of [
+    { type: 'OPEN_BATTLE_WINDOW', playerId: 'p1' },
+    { type: 'COMMIT_BATTLE_DIAL', playerId: 'p1', payload: { troops: 3, leaderStr: 5, weapon: 'Crysknife' } },
+    { type: 'COMMIT_BATTLE_DIAL', playerId: 'p2', payload: { troops: 3, leaderStr: 6, weapon: 'Crysknife' } },
+    { type: 'SWITCH_TO_MAHJONG_DEMO', playerId: 'p1' },
+    { type: 'TRIGGER_MAHJONG_DISCARD', playerId: 'p1' },
+    { type: 'MAHJONG_CHI', playerId: 'p2', payload: { priority: 10 } },
+    { type: 'PASS', playerId: 'p3' },
+    { type: 'TRIGGER_MAHJONG_DISCARD', playerId: 'p1' },
+    { type: 'PASS', playerId: 'p2' },
+    { type: 'MAHJONG_PENG', playerId: 'p3', payload: { priority: 20 } },
+    { type: 'TRIGGER_MAHJONG_DISCARD', playerId: 'p1' },
+    { type: 'MAHJONG_HU', playerId: 'p2', payload: { priority: 30 } }
+  ]) {
+    const result = engine.dispatch(action as never);
+    assert(result.ok, `dune action ${action.type} must be legal, got: ${JSON.stringify(result)}`);
+  }
+
+  const state = engine.getRawState();
+  const rewards = state.rewards ?? [];
+  const amounts = rewards.map(entry => entry.amount).sort((a, b) => a - b);
+  assertEqual(amounts.join(','), '2,5,5,20', `expected the four score gains, got ${amounts.join(',')}`);
+  assert(
+    rewards.every(entry => entry.kind === 'score' && entry.reason.trim().length > 0),
+    'every dune reward is a score with a reason'
+  );
+  const booked = rewards.reduce((sum, entry) => sum + entry.amount, 0);
+  assertEqual(booked, 32, 'the ledger must account for every point awarded');
+});
+
 test('charter C-7: catan books resource gains through the reward ledger', () => {
   const module = GAME_REGISTRY.catan;
   assert(module.charter?.requiresRewardLedger, 'catan declares a reward ledger');

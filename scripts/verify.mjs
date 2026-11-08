@@ -162,6 +162,8 @@ if (selected.types) add('types', 'tsc + build', process.execPath, ['scripts/veri
 if (selected.docs) add('docs', 'docs:check', process.execPath, ['scripts/check-doc-paths.mjs']);
 // 随机源守卫只扫源码文本，很便宜，动到代码就跑。
 if (selected.lint) add('rng', 'rng guard', process.execPath, ['scripts/check-rng.mjs']);
+// 宪章覆盖只读模组声明，同样便宜，动到代码就跑。
+if (selected.lint) add('charter', 'charter coverage', process.execPath, ['scripts/charter-coverage.mjs']);
 
 if (gates.length === 0) {
   console.log('verify: nothing to run for this diff.');
