@@ -41,15 +41,45 @@ function genCode(): string {
   return s;
 }
 
+/**
+ * 账号 → 座位号（0 起，**全局唯一**）。
+ *
+ * `seatIndex` 是持久化的权威表。旧房间没有这张表（或只有部分成员有），这里按
+ * 当前 `players` 顺序补齐缺项；已离开但保留座位的账号也算作已占用。
+ *
+ * 唯一性是硬约束：座位号一旦撞车，`seatedPlayers` 的排序就不再确定，重连的人
+ * 会被排到别人后面 —— 表现就是「掉线重连被分到另一个位置」。
+ */
+function seatNumbers(r: RoomRec): Record<string, number> {
+  const map: Record<string, number> = { ...(r.seatIndex ?? {}) };
+  const used = new Set(Object.values(map));
+  r.players.forEach((pid, index) => {
+    if (map[pid] !== undefined) return;
+    // 旧房间按玩家顺序补齐，和数组顺序一致；撞号时往后顺延。
+    let seat = index;
+    while (used.has(seat)) seat += 1;
+    map[pid] = seat;
+    used.add(seat);
+  });
+  return map;
+}
+
 function toInfo(r: RoomRec, opts: { includeCode?: boolean } = {}): HubRoomInfo {
   const host = users.byId(r.hostId);
+  const seats = seatNumbers(r);
+  // 按座位号排好再编号：数组顺序是「加入顺序」，不是座位顺序；`seat` 下发的是
+  // 连续序号（0 起），也就是建局时真实的 p1..pN —— 大厅的 `?playerId=`、座位卡
+  // 与 `roster`/`owners` 全部认它，不能再拿数组下标去推。
+  const seated = [...r.players].sort((a, b) => (seats[a] ?? 0) - (seats[b] ?? 0));
   const info: HubRoomInfo = {
     id: r.id, name: r.name, gameId: r.gameId,
     hostId: r.hostId, hostName: host?.name ?? '?', status: r.status,
     maxPlayers: r.maxPlayers,
-    players: r.players.map(pid => {
+    players: seated.map((pid, index) => {
       const p = profileOf(pid);
-      return p ? { id: pid, name: p.name, displayName: p.displayName, avatarUrl: p.avatarUrl } : { id: pid, name: '?' };
+      return p
+        ? { id: pid, name: p.name, displayName: p.displayName, avatarUrl: p.avatarUrl, seat: index }
+        : { id: pid, name: '?', seat: index };
     }),
     createdAt: r.createdAt,
     readyPlayers: [...(r.readyPlayers ?? [])],
@@ -120,16 +150,10 @@ export function joinRoom(userId: string, roomId: string, code?: string): HubRoom
     if (r.players.length >= r.maxPlayers) return { error: '房间已满' };
     if (r.isPrivate && (!code || code.toUpperCase() !== r.code)) return { error: '房间码不正确' };
     r.players.push(userId);
-    // 座位号：之前坐过就复用，否则取最小空位。掉线重连因此回到原座，不会漂移。
-    const taken = new Set(Object.entries(r.seatIndex ?? {})
-      .filter(([uid]) => uid !== userId && r.players.includes(uid))
-      .map(([, index]) => index));
-    const remembered = r.seatIndex?.[userId];
-    let seat = remembered !== undefined && !taken.has(remembered) ? remembered : 0;
-    if (remembered === undefined || taken.has(remembered)) {
-      while (taken.has(seat)) seat += 1;
-    }
-    r.seatIndex = { ...(r.seatIndex ?? {}), [userId]: seat };
+    // 座位号：已经坐过的人原样复用（掉线重连回到原座）；新面孔按「加入位置」取
+    // 最小空闲号，且把**已离开玩家保留的号**也算作占用 —— 否则新人会拿到别人的
+    // 号，等对方回来就被挤到别的座位，所有人跟着错位。
+    r.seatIndex = seatNumbers(r);
     rooms.update(roomId, { players: r.players, readyPlayers: r.readyPlayers ?? [] });
   }
   return changed(r, { includeCode: userId === r.hostId });
@@ -255,8 +279,8 @@ export function transferHost(hostId: string, roomId: string, targetId: string) {
 export function seatedPlayers(roomId: string): string[] {
   const r = rooms.byId(roomId) as RoomRec | undefined;
   if (!r) return [];
-  const indexOf = (uid: string) => r.seatIndex?.[uid] ?? Number.MAX_SAFE_INTEGER;
-  return [...r.players].sort((a, b) => indexOf(a) - indexOf(b));
+  const seats = seatNumbers(r);
+  return [...r.players].sort((a, b) => (seats[a] ?? 0) - (seats[b] ?? 0));
 }
 
 export function setAiSeats(hostId: string, roomId: string, aiSeats: number) {

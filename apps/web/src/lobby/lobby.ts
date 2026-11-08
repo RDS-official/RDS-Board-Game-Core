@@ -264,7 +264,7 @@ function render(): void {
 /** 房间页渲染签名：签名字段变化才值得重建 DOM */
 function roomSig(r: HubRoomInfo): string {
   return [r.id, r.status, r.name, r.gameId, r.hostId, r.maxPlayers, r.isPrivate ? 1 : 0, r.code ?? '', r.scenarioId ?? '',
-    r.players.map(p => p.id + ':' + (p.displayName || p.name) + ':' + (p.avatarUrl ?? '')).join(','),
+    r.players.map(p => p.id + ':' + p.seat + ':' + (p.displayName || p.name) + ':' + (p.avatarUrl ?? '')).join(','),
     (r.readyPlayers ?? []).join(','), onlineIds.join(',')].join('|');
 }
 
@@ -671,8 +671,19 @@ function createModalHtml() {
 
 // ---------------- 房间页：座位 + 就绪 + 聊天 ----------------
 
+/**
+ * 我在房间里的座位号（0 起，取自服务端下发的 `seat`）。
+ *
+ * 不能用 `players` 数组下标：数组是「加入顺序」，掉线重连、退出再加入都会把人
+ * 追加到末尾，下标就不再是座位。服务端在 `players[].seat` 里给权威座位号。
+ */
 function seatOf(r: HubRoomInfo, userId: string): number {
-  return r.players.findIndex(p => p.id === userId);
+  return r.players.find(p => p.id === userId)?.seat ?? -1;
+}
+
+/** 按座位号排好的玩家列表（服务端已排序，这里兜底旧服务端）。 */
+function seatedPlayersOf(r: HubRoomInfo) {
+  return [...r.players].sort((a, b) => a.seat - b.seat);
 }
 
 function roomHtml() {
@@ -706,7 +717,7 @@ function roomHtml() {
         <span class="lob-muted">${r.players.length}/${r.maxPlayers} 人${variantLabel ? ' · ' + esc(variantLabel) : ''}${g?.durationMin ? ' · 约 ' + g.durationMin + ' 分钟' : ''}</span>
       </div>
       <div class="lob-seats">
-        ${r.players.map((p, i) => seatCard(r, p, i, isHost)).join('')}
+        ${seatedPlayersOf(r).map(p => seatCard(r, p, isHost)).join('')}
         ${aiSeatCards(r.players.length, aiSeats)}
         ${Array.from({ length: Math.max(0, r.maxPlayers - totalSeats) }, (_, i) =>
           '<div class="lob-seat empty"><span class="lob-seat-avatar"></span><span class="lob-seat-name lob-muted">空位 p' + (totalSeats + i + 1) + '</span></div>').join('')}
@@ -763,7 +774,7 @@ function aiSeatCards(humanCount: number, aiSeats: number): string {
   }).join('');
 }
 
-function seatCard(r: HubRoomInfo, p: { id: string; name: string; displayName?: string; avatarUrl?: string }, i: number, isHost: boolean) {
+function seatCard(r: HubRoomInfo, p: { id: string; name: string; displayName?: string; avatarUrl?: string; seat: number }, isHost: boolean) {
   const ready = (r.readyPlayers ?? []).includes(p.id);
   const isRoomHost = p.id === r.hostId;
   const me = p.id === user!.sub;
@@ -776,7 +787,7 @@ function seatCard(r: HubRoomInfo, p: { id: string; name: string; displayName?: s
     <span class="lob-online-dot${online ? ' on' : ''}" title="${online ? '在线' : '离线'}"></span>
     <span class="lob-seat-avatar">${p.avatarUrl ? '<img src="' + esc(p.avatarUrl) + '" alt="" loading="lazy" />' : esc(displayNameOf(p).slice(0, 1).toUpperCase())}</span>
     <span class="lob-seat-name">${esc(displayNameOf(p))}${isRoomHost ? ' <span title="房主">👑</span>' : ''}${me ? '<span class="lob-muted">（你）</span>' : ''}</span>
-    <span class="lob-seat-sub">座位 p${i + 1}${r.status === 'open' ? (ready ? ' · <span class="lob-ready-tag">已就绪</span>' : ' · 未就绪') : ''}</span>
+    <span class="lob-seat-sub">座位 p${p.seat + 1}${r.status === 'open' ? (ready ? ' · <span class="lob-ready-tag">已就绪</span>' : ' · 未就绪') : ''}</span>
     ${hostCtl}
   </div>`;
 }
@@ -1145,16 +1156,17 @@ function gameQuery(r: HubRoomInfo, role: 'host' | 'guest'): string {
   if (NET_AUTHORITY === 'p2p' && role === 'guest') q.set('hostId', r.hostId);
   if (r.scenarioId) q.set('scenario', r.scenarioId);
   // 阶段一：座位 → 昵称/头像，房主开局时写进内核 Player 同步全员。
+  // 座位号取服务端下发的 `seat`，不能用数组下标（加入顺序 ≠ 座位顺序）。
   const roster: Record<string, { name: string; avatarUrl?: string }> = {};
-  r.players.forEach((p, i) => {
+  for (const p of seatedPlayersOf(r)) {
     const name = p.displayName || p.name;
     const avatarUrl = p.avatarUrl;
-    roster['p' + (i + 1)] = avatarUrl ? { name, avatarUrl } : { name };
-  });
+    roster['p' + (p.seat + 1)] = avatarUrl ? { name, avatarUrl } : { name };
+  }
   q.set('roster', JSON.stringify(roster));
   // 阶段二：座位 → hub userId，presence 反映射回玩家卡片在线点用。
   const owners: Record<string, string> = {};
-  r.players.forEach((pl, i) => { owners['p' + (i + 1)] = pl.id; });
+  for (const pl of seatedPlayersOf(r)) owners['p' + (pl.seat + 1)] = pl.id;
   q.set('owners', JSON.stringify(owners));
   return q.toString();
 }

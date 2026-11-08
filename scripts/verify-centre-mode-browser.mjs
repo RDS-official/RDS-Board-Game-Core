@@ -116,7 +116,9 @@ async function main() {
   const players = roomInfo.body.players ?? [];
   ok(players.length === 2, 'room reports two players');
 
-  const hostSeat = 'p' + (players.findIndex(p => p.id === roomInfo.body.hostId) + 1);
+  // 座位取服务端下发的 `seat`（`players` 已是按座位排序；下标只作旧服务端兜底）。
+  const hostInfo = players.find(p => p.id === roomInfo.body.hostId);
+  const hostSeat = 'p' + ((hostInfo?.seat ?? players.findIndex(p => p.id === roomInfo.body.hostId)) + 1);
   const guestSeat = hostSeat === 'p1' ? 'p2' : 'p1';
 
   const hub = `ws://127.0.0.1:${SERVER_PORT}/ws`;
