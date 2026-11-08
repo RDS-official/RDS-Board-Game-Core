@@ -412,6 +412,27 @@ test('fixture sanguosha: physical duplicate cards get distinct action labels wit
   assertEqual(new Set(labels).size, labels.length, 'no two card buttons share a printed label');
 });
 
+test('fixture sanguosha: the AI plays cards instead of discarding every turn', () => {
+  // 宪章 C-5 改动的回归：AI 只看投影之后，决策质量不能退化成"每回合只弃牌"。
+  // 多 seed 实跑，统计出牌与弃牌的比例。
+  let plays = 0;
+  let discards = 0;
+  for (const seed of [3, 11, 29, 41, 73]) {
+    const engine = new UniversalGameEngine(GAME_REGISTRY.sanguosha, seed, { scenario: 'ai_standard_4' });
+    for (let step = 0; step < 400 && !engine.getRawState().gameOver; step += 1) {
+      const actor = engine.getActiveActorId();
+      const legal = engine.getLegalActions(actor);
+      if (legal.length === 0) break;
+      const action = legal[0];
+      if (action.type === 'PLAY_CARD' || action.type === 'PLAY_STRIKE' || action.type === 'EQUIP_CARD') plays += 1;
+      if (action.type === 'DISCARD_CARD') discards += 1;
+      if (!engine.dispatch(action).ok) break;
+    }
+  }
+  assert(plays > 0, 'the AI plays at least one card across five seeds');
+  assert(plays > discards, `the AI plays more cards than it discards (played ${plays}, discarded ${discards})`);
+});
+
 test('fixture sanguosha: AI seats produce one concrete action and are marked for the driver', () => {
   const state = setupSanguosha(31, { seats: 4, humans: 1, aiSeats: 3 });
   assert(isAiSeat(state, 'p2'), 'p2 is an AI seat');

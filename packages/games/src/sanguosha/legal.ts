@@ -1,3 +1,4 @@
+import { CognitiveObserver } from '@rds/kernel/observer';
 import { Action, Entity, GameState, PlayerId } from '@rds/kernel/types';
 import { cardCode, cardIsRed, cardSubtype, isStrikeCard } from './helpers';
 import {
@@ -562,7 +563,10 @@ function responseActions(state: GameState, pid: PlayerId): Action[] {
 
 function preferAiAction(state: GameState, playerId: PlayerId, actions: Action[]): Action[] {
   if (!isAiSeat(state, playerId)) return actions;
-  const chosen = chooseSanguoshaAiAction(state, playerId, actions);
+  // 宪章 C-5：AI 只看自己的投影。与 poker 的 decisionView() 同一份投影，
+  // 牌堆顺序、对手手牌、prngState / seed 在类型层面就读不到。
+  const view = CognitiveObserver.projectState(state, playerId, undefined, undefined, undefined);
+  const chosen = chooseSanguoshaAiAction(view, playerId, actions);
   return chosen ? [chosen] : [];
 }
 
