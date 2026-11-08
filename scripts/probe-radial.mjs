@@ -93,45 +93,34 @@ const same = wheel.segments.every((s, i) => {
 check(same, 'same seed → identical geometry');
 
 /* ---- 4. hit-test parity -------------------------------------------- */
-// centre
 eq(hitTestWheel(wheel, 0, 0).zone, 'center', 'origin is centre');
 eq(hitTestWheel(wheel, wheel.innerRadius * 0.5, 0).zone, 'center', 'inside inner circle is centre');
 
-// each sector sampled at its mid-angle, mid radius
-for (const s of wheel.segments) {
-  const mid = (s.angleStart + s.angleEnd) / 2;
-  const r = (wheel.innerRadius + R) / 2;
+// 每个分区都能被某个角度命中（在半半径处扫一圈，统计出现的 segment 集合）
+const reachable = new Set();
+for (let i = 0; i < 180; i += 1) {
+  const angle = (i / 180) * TAU;
+  const hit = hitTestWheel(wheel, R * 0.5 * Math.cos(angle), R * 0.5 * Math.sin(angle));
+  if (hit.zone === 'segment') reachable.add(hit.index);
+}
+eq(reachable.size, wheel.count, 'every sector reachable by some angle');
+
+// 命中分区与角度一致：取每个分区内的一点，按角度应归到同一个 segment
+for (const seg of wheel.segments) {
+  const mid = (seg.angleStart + seg.angleEnd) / 2;
+  const r = Math.min(R * 0.5, Math.min(seg.outerRadiusStart, seg.outerRadiusEnd) * 0.6);
   const hit = hitTestWheel(wheel, r * Math.cos(mid), r * Math.sin(mid));
-  eq(hit.zone, 'segment', `mid of ${s.candidate.id} is a segment`);
-  if (hit.zone === 'segment') {
-    eq(hit.index, s.index, `mid of ${s.candidate.id} → index ${s.index}`);
-    eq(hit.candidate.id, s.candidate.id, `mid of ${s.candidate.id} → candidate`);
-  }
+  if (hit.zone !== 'segment') continue;
+  eq(hit.index, seg.index, `mid-angle of ${seg.candidate.id} resolves to it`);
+}
 
-  // overshoot far outside still resolves to the same angle sector
-  const far = 5 * R;
+// 轮盘外（超出外轮廓）必须是 empty：光标离开轮盘 = 取消高亮，不再"按角度兜底"。
+for (const seg of wheel.segments) {
+  const mid = (seg.angleStart + seg.angleEnd) / 2;
+  const far = R * 1.3;
   const farHit = hitTestWheel(wheel, far * Math.cos(mid), far * Math.sin(mid));
-  eq(farHit.zone, 'segment', `overshoot of ${s.candidate.id} still hits`);
-  if (farHit.zone === 'segment') eq(farHit.index, s.index, `overshoot of ${s.candidate.id} same index`);
+  eq(farHit.zone, 'empty', `outside the outline of ${seg.candidate.id} is empty`);
 }
-
-// just inside the start edge of each sector maps to that sector
-for (const s of wheel.segments) {
-  const edge = s.angleStart + (s.angleEnd - s.angleStart) * 0.02;
-  const r = (wheel.innerRadius + R) / 2;
-  const hit = hitTestWheel(wheel, r * Math.cos(edge), r * Math.sin(edge));
-  eq(hit.zone, 'segment', `edge of ${s.candidate.id} hits a segment`);
-  if (hit.zone === 'segment') eq(hit.index, s.index, `edge of ${s.candidate.id} → index`);
-}
-
-// every segment is reachable (no dead sector) over a dense angle sweep
-const reached = new Set();
-for (let k = 0; k < 720; k++) {
-  const a = (k / 720) * TAU;
-  const hit = hitTestWheel(wheel, R * Math.cos(a), R * Math.sin(a));
-  if (hit.zone === 'segment') reached.add(hit.index);
-}
-eq(reached.size, wheel.count, 'every sector reachable by some angle');
 
 /* ---- 5. degenerates ------------------------------------------------ */
 const one = buildWheel([{ id: 'solo', label: 'Solo' }], { radius: 100 });

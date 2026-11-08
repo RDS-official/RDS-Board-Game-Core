@@ -89,6 +89,14 @@ const badView = actionHandHtml(
 check(!badView.includes('<img'), 'non-svg markup is escaped');
 contains(badView, '&lt;img', 'non-svg markup escaped form');
 
+/* 7. real board artwork replaces the generic icon, not the action wording */
+const artOut = actionHandHtml(view, (card) => (card.id === 'hit' ? 'data:image/png;base64,AA==' : undefined));
+eq((artOut.match(/class="ah-art"/g) || []).length, 1, 'one card uses real artwork');
+eq((artOut.match(/ah-with-art/g) || []).length, 1, 'art card is styled separately');
+contains(artOut, 'src="data:image/png;base64,AA=="', 'artwork URL retained');
+contains(artOut, '<span class="ah-action-label">攻击</span>', 'action wording retained under artwork');
+eq((artOut.match(/class="ah-ico"/g) || []).length, ACTIONS.length - 1, 'other cards keep icon fallback');
+
 /* aria-label present on every button */
 eq((out.match(/aria-label="/g) || []).length, ACTIONS.length, 'aria-label per card');
 

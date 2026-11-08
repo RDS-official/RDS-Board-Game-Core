@@ -4,7 +4,7 @@
 >
 > 性质：**只做审查与调研，不改代码。**
 > 审查基线：`main`（2026-11），代码引用以 `文件:行号` 标注，行号可能随重构漂移，符号名为准。
-> 最近核对：2026-11-07。
+> 最近核对：2026-11-08（实现状态见 §9，收尾计划见 [INTERACTION-ROADMAP.md](INTERACTION-ROADMAP.md)）。
 
 ---
 
@@ -256,7 +256,103 @@
 
 ---
 
-## 9. 参考链接
+## 9. 实现状态（2026-11-08 核对）
+
+> 本节的每一条都对应代码与一条可复跑的探针；"部分"表示主路径已解、边界仍留着。
+
+| 差距 | 状态 | 交付物 | 怎么验 |
+| --- | --- | --- | --- |
+| G1 点击语义不统一 | **已解**：统一手牌三手势分工——单击=看详情/执行、拖出=打、Esc 取消 | `apps/web/src/ui/cardHand/cardHand.ts`、`hud.ts` 的 `activateHandCard` / `playHandCard` | `pnpm probe:unified-hand`、`pnpm probe:card-hand` |
+| G2 破坏性动作无确认 | **部分**：可直接执行的动作仍需拖出/单击才发；需要目标或数量的动作一律先进选择器或表单，不 dispatch | `cardHand.ts`、`hud.ts`（`playHandCard` 返回 false 即回弹） | `pnpm probe:unified-hand-numeric` |
+| G3 拖放不可取消 | **已解**：松手在区外、`pointercancel`、窗口失焦都走弹簧回弹，且把拖拽速度灌进弹簧 | `cardHand.ts`（`releaseBack`） | `pnpm probe:card-hand`（"non-playable card springs home"） |
+| G4 快捷键不可发现 | **已解**：`ui/keymap.ts` 单一键位表 → `?` 清单 + 首屏一次提示 + ☰ 菜单 ⌨ 入口 | `ui/keymap.ts`、`ui/shortcutHelp.ts`、`hud.ts#openShortcutHelp` | `pnpm probe:keymap`、`pnpm probe:shortcut-help` |
+| G5 一手势多义 | **已解**（统一手牌内）：手势按"看 / 打 / 取消"分离，不再靠时长猜意图 | `cardHand.ts` | `pnpm probe:card-hand`（拖拽跟手 1:1、回弹 2px 内归位） |
+| G6 目标选择偏隐式 | **已解**：目标塌缩成"一张卡 + 合法候选"，拖出即弹径向选择器（锚点=松手点），非法目标由引擎驳回；非法分区预置灰仍未做 | `session.ts#buildActionsView`、`radialPicker.ts` | `probe:unified-hand`、`probe:card-hand` |
+| G7 移动端缺位 | **部分**：<1200px 底部横滑带 + 触控手势（`touch-action:none`、大 slop/外扩容差）；底部抽屉仍未做 | `layout-shell.css`、`cardHand.ts` | `pnpm probe:unified-hand`（390 档） |
+| G8 手牌排序/分组 | **已解**：按 `UiAction.group` 排序 + 分区色标 + >9 张自动翻页 | `session.ts#groupOf`、`hud.ts`、`cardHand.ts` | `probe:card-hand`（分区序/翻页） |
+| G9 右键上下文菜单 | 未做（拖拽中右键只用于取消） | — | — |
+| G10 撤销语义单一 | 未做 | — | — |
+| G11 错误只在 toast | **部分**：出牌区三态高亮（valid/invalid）+ 回弹，失败仍靠 toast | `cardHand.ts`（`data-drop`）、`layout-shell.css` | `pnpm probe:card-hand` |
+| G12 键盘边界 | **已解**：`isEditableTarget` 覆盖 input/textarea/select/contenteditable，Esc 例外 | `ui/keymap.ts` | `pnpm probe:keymap`、`pnpm probe:shortcut-help` |
+| G13 首次引导 | **部分**：快捷键首屏提示一次（`rds.shortcuts.hinted`）；无分步 coach mark | `hud.ts#maybeHintShortcuts` | — |
+
+### 9.1 对应原路线（§7）
+
+| 原 PR | 状态 |
+| --- | --- |
+| PR-1 点击语义统一 | 已解（统一手牌 + `CardHand` 手势分离） |
+| PR-2 破坏性动作确认 | 部分（选择/表单前置；尚无"限时确认条"） |
+| PR-3 拖放可取消 | 已解 |
+| PR-4 快捷键帮助层 | 已解 |
+| PR-5 手持/手势再设计 | 部分（旧 `#hand-slot` 仍保留，统一模式下桌面隐藏） |
+| PR-6 目标选择引导 | 部分（径向选择器已上线；非法项预置灰未做） |
+| PR-7 可发现性与打磨 | 未做（G8/G9/G10/G13 的剩余部分） |
+
+### 9.2 持有牌与出牌回响（2026-11-08 补）
+
+**持有牌**（德州底牌、山屋道具）不是动作，但玩家必须看得见：统一手牌在动作卡右侧追加
+`data-kind="held"` 的卡位，来源是 `board.zones['zone_hand_<viewer>']`（上帝视角改看当前行动者
+`snapshot.focus[0]`，避免把所有玩家的手牌铺开）。它们用同一套真实卡面，**不可拖出**，点击走
+`presenter.pickTarget({ kind:'entity', intent:'inspect' })`——inspect-first，不改状态。
+
+**出牌回响**：动作卡（过牌/跟注/结束回合）在 3D 桌面上没有实体，只靠手牌消失看不出发生了什么。
+现在"谁打了什么"会以 `.hand-play-echo` 落在桌面中央并停留约 2s；它同时由**本地出牌**与
+**权威历史**（`snapshot.history` 的 `kind:'card'` 条目，按 id 幂等）驱动，所以联机时两端看到的是
+同一件事。飞场动画的落点也取同一个锚点（`tableAnchor()`），拖出去的那张牌正好落在回响出现的位置。
+
+### 9.3 目标塌缩与手牌分区（2026-11-08 补，回应"一张杀就是一张杀"）
+
+**问题**：合法动作是按"动作 × 目标"展开的，所以一张【杀】会裂成「杀曹操」「杀关羽」「杀吕布」三张卡——
+手牌被目标名撑爆，玩家看到的是"十张杀"而不是"三张杀"。
+
+**做法**（`packages/app/src/session.ts#buildActionsView`）：
+1. **合并键**：`actor | type | entityId | targetNodeId | targetEdgeId | payload`（剔除目标维度）。
+   只合并"目标维度单一"的动作——payload 里带 `extraTargetIds`（方天画戟）、`victimId`（借刀）、
+   `targetIds`（铁索）或自带 `selection` 的动作保持原样，否则会丢信息。
+2. **多目标 → 一张卡 + 候选**：`UiAction.selection = { spec:{source:'player',min:1,max:1}, candidates }`，
+   候选就是引擎认可的目标集合；点开走径向选择器（`probe:unified-hand` 33 项覆盖），
+   玩家拖到棋盘松手也走同一个选择器。
+3. **单目标 → 去掉目标名，仍然一键直达**：不逼玩家为"只有一个目标"多点一次。
+4. **派发**：`BoundAction.targetVariants`（候选 id → 那条具体合法动作），`perform()` 用玩家选中的
+   目标换回对应动作再 dispatch。**合法性仍由引擎判定**，UI 不自造规则；非法目标会被引擎驳回。
+5. **同名不同牌**：塌缩后两张「出【杀】」会长得一样，于是给撞名的卡补上牌面标题
+   （`出【杀】 · 杀 ♣J`）。
+
+**手牌分区**：`UiAction.group`（`card / equip / skill / command`）由 presenter 从动作形态推导
+（实体在手牌/装备区→牌；USE_SKILL→技能；EQUIP_CARD→装备；其余→命令），手牌按 牌→装备→技能→命令
+排序并加描边色标，卡面角标仍表示"要目标/要数量/要放置"。
+
+**翻页**：>1 页时出现「‹ n/N ›」翻页器（`#hand-pager`）。**不做横向滚动**——滚动手势与拖拽抢同一个
+轴，玩家想翻页会把牌拖走。每页容量按宽度自适应（4–9 张），只挂载当前页的卡片。
+
+**出牌回响带真实卡面**：`UiHistoryEntry.entityId` 让"谁打了什么"落一张真牌在桌面上（`.hpe-face`），
+别人出牌同样可见；本地出牌与权威历史共用同一渲染函数。
+
+### 9.4 目标轮盘（拖拽态）
+
+拖出一张"需要选目标"的卡即浮出全屏磨砂轮盘：多边形被切成 N 块（每块一张头像牌 + 规则提示），
+拖到分区＝对那个人打出，拖到中心圆＝二级菜单，拖到轮盘外＝回弹。卡片大小随落点切换
+（分区上缩到 0.4 让出提示位，中心/轮盘外放大到屏幕 1/3 好看清自己的牌）。
+实现见 [INTERACTION-TARGET-WHEEL.md](INTERACTION-TARGET-WHEEL.md)，验证 `pnpm probe:target-wheel`（149 项）。
+
+### 9.5 手感参数（`cardHand.ts` 的默认值，调参即调手感）
+
+| 参数 | 默认 | 说明 |
+| --- | --- | --- |
+| `hoverMs` | 170 | hover 过渡时长（150–200 最跟手） |
+| `hoverLift` / `hoverScale` | 16px / 1.1 | 上浮与放大 |
+| `neighbourPush` | 12px | 邻居让位幅度，改弹簧目标而非位置 |
+| `spring` | 240 / 26 | 阻尼比 ≈0.84：有回弹但不过冲 |
+| `returnSpring` | 210 / 23 | 回弹专用；松手速度灌进速度项 |
+| `slopPx` | 6 | 起拖阈值（触屏建议 8–10） |
+| `dragScaleFromViewport` / `dragMaxScale` | 开 / 2.8 | 拖起来的牌按"屏幕高度 1/3"放大，封顶 2.8 倍 |
+| hover 置顶 | 2000 | 放大后的牌必须压过邻居，否则会被右边那张切掉一半 |
+| 拖拽置顶 / 飞场置顶 | 2500 / 3000 | 层级：飞场 > 拖拽 > 悬停 > 布局序 |
+| `tiltPerPx` / `tiltMaxDeg` | 0.35 / 9 | 甩动倾斜 |
+| `zonePadding` / `zoneExitPadding` | 14 / 4 | 出牌区滞回，边界不闪 |
+| `flyMs` / `flyScale` | 260ms / 0.8 | 打出飞桌 |
+
+## 10. 参考链接
 
 - [BGA Studio Guidelines（UX/UI）](https://en.doc.boardgamearena.com/BGA_Studio_Guidelines)　官方 PDF：[Guidelines_UX.pdf](https://doc.studio.boardgamearena.com/assets/framework-documentation/guidelines/Guidelines_UX.pdf)
 - [Hand Overhaul · Dustin's Designer Den](https://dustinsdesignerden.com/news/hand-overhaul)（手牌拖拽/重排/缩放/隐私幽灵）

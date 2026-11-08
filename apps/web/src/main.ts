@@ -5,6 +5,7 @@ import { BoardGameAudio } from './render/audio';
 import { ensureCanvasFontsReady } from './render/fonts';
 import { checkWebGLSupport, renderWebGLErrorModal } from './render/webglSupport';
 import { hideGameLoading } from './gameLoading';
+import { isEscapeKey, isHelpKey, shouldHandleKey } from './ui/keymap';
 import { BoardGameHUD } from './ui/hud';
 import { peekView } from './ui/detailView';
 import { buildActorDetailView } from '@rds/app/inspect';
@@ -89,6 +90,8 @@ class BoardGameSimulatorApp {
       isSoundOn: () => BoardGameAudio.isSoundEnabled(),
       toggleInspector: () => this.toggleInspector(),
       highlightBoard: (ids: string[] | null) => this.scene.setHighlight(ids),
+      setOwnHandVisible: visible => this.scene.setOwnHandVisible(visible),
+      entityCardArt: entityId => this.scene.entityCardArt(entityId, this.session.getSnapshot().board),
       focusRoom: (nodeId: string) => {
         this.scene.focusNode(nodeId);
       },
@@ -328,6 +331,10 @@ class BoardGameSimulatorApp {
       // 每名玩家的默认机位：站在自己的立牌后面看牌桌。上帝视角保持等轴俯视。
       this.applyDefaultView();
       // 首帧桌面已可绘制：撤掉开局加载遮罩（若存在）
+      hideGameLoading();
+    }).catch(error => {
+      // 字体探测失败不该把玩家钉在加载遮罩上：桌面会用回退字形，先让人进得去。
+      console.error('[boot] canvas font probe failed', error);
       hideGameLoading();
     });
     // 兜底：字体探测异常卡死时也别把遮罩留成黑屏
@@ -955,18 +962,32 @@ class BoardGameSimulatorApp {
 
   private wireKeyboard(): void {
     window.addEventListener('keydown', event => {
-      // Escape must keep working while a form control has focus: the amount
-      // sheet opens with its slider focused, and the old blanket input guard
-      // swallowed the only way out of it.
-      if (event.target instanceof HTMLInputElement && event.key !== 'Escape') return;
+      // One guard for the whole keymap (ui/keymap.ts): Escape always wins — the
+      // amount sheet opens with its slider focused, and the old blanket input
+      // guard swallowed the only way out of it — while every other key yields
+      // to a focused text control. The old hand-rolled `instanceof
+      // HTMLInputElement` check (audit G12) missed <select> and contenteditable.
+      if (!shouldHandleKey(event)) return;
 
-      if (event.key === 'Escape') {
+      if (isEscapeKey(event.key)) {
         this.hud.closePayload();
         this.hud.closeAbout();
+        this.hud.closeShortcutHelp();
         this.session.cancelPlacement();
         this.scene.setHighlight(null);
         return;
       }
+
+      // `?` is the discoverability entry point (audit G4): it opens the keymap
+      // sheet built from the same table these handlers dispatch from.
+      if (isHelpKey(event.key) && !event.ctrlKey && !event.metaKey && !event.altKey) {
+        event.preventDefault();
+        this.hud.toggleShortcutHelp();
+        return;
+      }
+
+      // Leave browser/OS chords alone (Cmd+I, Ctrl+1, …) instead of shadowing them.
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
 
       if (event.key === 'i' || event.key === 'I') {
         this.toggleInspector();

@@ -28,7 +28,6 @@ function f(value: number): string {
 /** Render the wheel as one `<svg>`. Empty wheel → empty string. */
 export function radialPickerSvg(wheel: RadialWheel, opts: RadialSvgOptions = {}): string {
   if (wheel.count === 0) return '';
-  const R = f(wheel.radius);
   const cls = opts.className ? ` ${escapeHtml(opts.className)}` : '';
   const label = escapeHtml(opts.label ?? '选择目标');
 
@@ -37,22 +36,68 @@ export function radialPickerSvg(wheel: RadialWheel, opts: RadialSvgOptions = {})
       const style = seg.candidate.color ? ` style="--seg:${escapeHtml(seg.candidate.color)}"` : '';
       return (
         `<path class="rp-seg" data-seg-index="${seg.index}"` +
-        ` data-candidate-id="${escapeHtml(seg.candidate.id)}" d="${seg.path}"${style}/>`
+        ` data-candidate-id="${escapeHtml(seg.candidate.id)}" d="${seg.path}"` +
+        (seg.candidate.disabled ? ' data-disabled="1"' : '') +
+        `${style}/>`
       );
     })
     .join('');
 
+  // 每个分区上的"人"：头像圆牌 + 名字 + 一行规则提示（设计 v2 §1.3）。
+  // 头像/提示是**区分是谁**的主信息，颜色只做辅助（色盲安全：还有描边与字重）。
   const labels =
     opts.showLabels === false
       ? ''
       : wheel.segments
+          .map((seg) => {
+            const candidate = seg.candidate;
+            const color = escapeHtml(candidate.color ?? '#9fb0c6');
+            const x = f(seg.label[0]);
+            const y = f(seg.label[1]);
+            const avatarY = f(seg.label[1] - 20);
+            const ring = 23;
+            const initial = (candidate.label ?? '?').trim().slice(0, 1).toUpperCase();
+            const face = candidate.avatar
+              ? `<image class="rp-avatar" href="${escapeHtml(candidate.avatar)}" x="${f(seg.label[0] - ring)}"` +
+                ` y="${f(seg.label[1] - 20 - ring)}" width="${ring * 2}" height="${ring * 2}"` +
+                ` preserveAspectRatio="xMidYMid slice" clip-path="url(#rp-clip-${seg.index})"/>`
+              : `<text class="rp-initial" x="${x}" y="${f(seg.label[1] - 20)}" text-anchor="middle"` +
+                ` dominant-baseline="central">${escapeHtml(initial)}</text>`;
+            const hint = candidate.hint
+              ? `<text class="rp-hint" x="${x}" y="${f(seg.label[1] + 34)}" text-anchor="middle">${escapeHtml(candidate.hint)}</text>`
+              : '';
+            return (
+              `<g class="rp-pin" data-seg-index="${seg.index}" data-pin-x="${x}" data-pin-y="${y}">` +
+              `<circle class="rp-avatar-ring" cx="${x}" cy="${avatarY}" r="${ring}" stroke="${color}"/>` +
+              face +
+              `<text class="rp-label" data-seg-index="${seg.index}" x="${x}" y="${f(seg.label[1] + 16)}"` +
+              ` text-anchor="middle">${escapeHtml(candidate.label)}</text>` +
+              hint +
+              `</g>`
+            );
+          })
+          .join('');
+
+  // 圆形头像是 <image> + 每段一个 clipPath（Chromium 对 CSS circle() 支持不一致，
+  // 用 SVG 原生 clipPath 最稳）。
+  const clips =
+    opts.showLabels === false
+      ? ''
+      : `<defs>${wheel.segments
           .map(
             (seg) =>
-              `<text class="rp-label" data-seg-index="${seg.index}" x="${f(seg.label[0])}"` +
-              ` y="${f(seg.label[1])}" text-anchor="middle" dominant-baseline="middle">` +
-              `${escapeHtml(seg.candidate.label)}</text>`,
+              `<clipPath id="rp-clip-${seg.index}"><circle cx="${f(seg.label[0])}"` +
+              ` cy="${f(seg.label[1] - 20)}" r="23"/></clipPath>`,
           )
-          .join('');
+          .join('')}</defs>`;
+
+  // 外轮廓单独描一遍：让"整个多边形"读成一个形状，而不是散落的几个三角。
+  const outline =
+    wheel.outline.length > 1
+      ? `<path class="rp-outline" d="${wheel.outline
+          .map(([x, y], index) => `${index === 0 ? 'M' : 'L'} ${f(x)} ${f(y)}`)
+          .join(' ')} Z"/>`
+      : '';
 
   const center =
     `<circle class="rp-center" data-zone="center" cx="0" cy="0" r="${f(wheel.innerRadius)}"/>` +
@@ -62,6 +107,8 @@ export function radialPickerSvg(wheel: RadialWheel, opts: RadialSvgOptions = {})
   return (
     `<svg class="rp-wheel${cls}" viewBox="${-wheel.radius} ${-wheel.radius} ${wheel.radius * 2} ${wheel.radius * 2}"` +
     ` role="menu" aria-label="${label}">` +
+    clips +
+    outline +
     `<g class="rp-segments">${paths}</g>` +
     center +
     `<g class="rp-labels">${labels}</g>` +
