@@ -332,6 +332,10 @@ class BoardGameSimulatorApp {
       this.applyDefaultView();
       // 首帧桌面已可绘制：撤掉开局加载遮罩（若存在）
       hideGameLoading();
+    }).catch(error => {
+      // 字体探测失败不该把玩家钉在加载遮罩上：桌面会用回退字形，先让人进得去。
+      console.error('[boot] canvas font probe failed', error);
+      hideGameLoading();
     });
     // 兜底：字体探测异常卡死时也别把遮罩留成黑屏
     setTimeout(hideGameLoading, 15000);
