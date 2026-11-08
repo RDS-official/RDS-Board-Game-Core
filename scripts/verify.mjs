@@ -147,6 +147,8 @@ if (selected.ui) {
   } else {
     add('ui', 'UI matrix + card-overlay', 'pnpm', ['test:ui'], uiEnv);
   }
+  // 目标轮盘：几何 + 拖拽结算 + 磨砂裁切 + 不压手牌区，一次浏览器跑完。
+  add('wheel', 'probe:target-wheel', process.execPath, ['scripts/probe-target-wheel.mjs'], { SOLO_PORT: '5183' });
 }
 
 // 6. Lint, Structure, Types, Docs

@@ -177,12 +177,15 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
     const innerEnd = polar(innerRadius, angleEnd);
     const outerStart = polar(outerRadiusStart, angleStart);
     const outerEnd = polar(outerRadiusEnd, angleEnd);
-    // 标签点必须落在**多边形内部**：外边界是直线弦，靠外 62% 的圆上点对 n=3 会跑到
-    // 三角形外面去（旧截图里头像漂在轮盘外的根因）。这里取四条边的加权重心。
-    const label: Point = [
-      (innerStart[0] + innerEnd[0]) * 0.5 * 0.4 + (outerStart[0] + outerEnd[0]) * 0.5 * 0.6,
-      (innerStart[1] + innerEnd[1]) * 0.5 * 0.4 + (outerStart[1] + outerEnd[1]) * 0.5 * 0.6
-    ];
+    // 标签点：沿**分区角平分线**往内收，落在"中心圆之外、外边界之内"。
+    // 顶点加权重心在 n=2 时会塌到圆心（两条引线近乎反向），头像就叠在"更多"上——
+    // 这是"头像看起来不在分区里"的真正原因。角平分线 + 收进 55% 对任意 n 都成立。
+    const halfWidth = Math.max(1e-4, (angleEnd - angleStart) / 2);
+    const outerMid = (outerRadiusStart + outerRadiusEnd) / 2;
+    // 多边形模式下外边界是弦：沿角平分线到弦的距离 ≈ R·cos(半角)。
+    const reach = arcOuter ? outerMid : outerMid * Math.cos(Math.min(Math.PI / 2 - 0.02, halfWidth));
+    const labelRadius = innerRadius + Math.max(0, reach - innerRadius) * 0.55;
+    const label = polar(labelRadius, (angleStart + angleEnd) / 2);
     // 扇区轮廓用折线拼，不用 SVG 圆弧命令：`A` 的 sweep/large-arc 标志在
     // "内外两条弧 + 两条引线"的组合里极易画反（旧版就是因此画出一堆鼓包与细缝）。
     // 折线在 R ≤ 560 时肉眼看不出差别，而且 n=1/2/3… 全是同一套逻辑。

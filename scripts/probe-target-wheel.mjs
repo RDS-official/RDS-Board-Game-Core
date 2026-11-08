@@ -13,7 +13,8 @@
  * Run: node scripts/probe-target-wheel.mjs   (or `pnpm probe:target-wheel`)
  */
 
-import { buildWheel, hitTestWheel } from '../apps/web/src/ui/radialPicker.ts';
+import { buildWheel, hitTestWheel, outlineContains } from '../apps/web/src/ui/radialPicker.ts';
+import { radialPickerSvg } from '../apps/web/src/ui/radialPickerHtml.ts';
 import { launchChromium } from './lib/browser.mjs';
 import { ensureSoloServer } from './lib/soloserver.mjs';
 
@@ -63,6 +64,8 @@ for (let n = 1; n <= 8; n += 1) {
     const radius = a.innerRadius + 10 + (i % 7) * 20;
     const dx = Math.cos(angle) * radius;
     const dy = Math.sin(angle) * radius;
+    // 命中的是"多边形"，圆周四角属于轮盘外：只比较轮廓内的采样点。
+    if (!outlineContains(a, dx, dy)) continue;
     const hit = hitTestWheel(a, dx, dy);
     if (hit.zone === 'center') { centreHits += 1; continue; }
     const expected = a.segments.find(seg => {
@@ -334,6 +337,33 @@ try {
   }
 
   await page.screenshot({ path: 'shots/target-wheel.png' });
+
+  // 出图供目视复核：2/3/5/8 个目标各一张（同一个几何与配色）。
+  const shotPage = await browser.newPage({ viewport: { width: 700, height: 700 } });
+  for (const n of [2, 3, 5, 8]) {
+    const candidates = Array.from({ length: n }, (_, i) => ({
+      id: 'p' + i,
+      label: ['吕布', '关羽', '曹操', '张飞', '赵云', '黄忠', '马超', '太史慈'][i % 8],
+      hint: '距离 ' + (i + 1)
+    }));
+    const wheel = buildWheel(candidates, { radius: 300, seed: 'shot-' + n });
+    const svg = radialPickerSvg(wheel, { label: '目标' });
+    await shotPage.setContent(
+      '<html><body style="margin:0;background:#0b0f14;display:grid;place-items:center;height:100vh">' +
+        '<div style="width:600px;height:600px">' + svg + '</div></body></html>'
+    );
+    await shotPage.addStyleTag({
+      content:
+        '.rp-seg{fill:rgba(255,255,255,.06);stroke:rgba(255,255,255,.12);stroke-width:1}' +
+        '.rp-outline{fill:none;stroke:rgba(255,255,255,.18);stroke-width:1.5}' +
+        '.rp-center{fill:rgba(14,18,24,.72);stroke:rgba(217,180,91,.4)}' +
+        '.rp-center-label{fill:#e7cf92;font-size:13px}.rp-label{fill:#c9d3e0;font-size:14px}' +
+        '.rp-hint{fill:#8b98ab;font-size:12px}.rp-initial{fill:#e8eef6;font-size:18px}' +
+        '.rp-avatar-ring{fill:rgba(10,14,20,.55);stroke-width:2}'
+    });
+    await shotPage.screenshot({ path: 'shots/target-wheel-' + n + '.png' });
+  }
+  await shotPage.close();
   await page.close();
 } finally {
   await browser.close();
