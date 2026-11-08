@@ -317,6 +317,7 @@ export const sanguoshaModule: GameModule = defineGame({
     PASS: { type: 'PASS', allowPayload: false },
     END_TURN: { type: 'END_TURN', allowPayload: false },
     START_TURN: { type: 'START_TURN', allowPayload: false },
+    LUOSHEN_STEP: { type: 'LUOSHEN_STEP', allowPayload: false },
     RESOLVE_JUDGE: { type: 'RESOLVE_JUDGE', allowPayload: false },
     DRAW_PHASE: { type: 'DRAW_PHASE', allowPayload: false },
     FINISH_DISCARD: { type: 'FINISH_DISCARD', allowPayload: false },
