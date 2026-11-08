@@ -374,6 +374,15 @@ export const COLOR_LABELS: Record<string, string> = {
   purple: '大师球'
 };
 
+const TOKEN_ICONS: Record<string, string> = {
+  red: '🔴',
+  blue: '🔵',
+  black: '⚫',
+  pink: '🩷',
+  yellow: '🟡',
+  purple: '🟣'
+};
+
 function labelOf(color: string): string {
   return COLOR_LABELS[color] ?? color;
 }
@@ -903,16 +912,50 @@ export class SplendorRules {
         break;
       }
     }
+    const takeOptions = available.map(color => ({
+      id: color,
+      label: labelOf(color) + ' · ' + bank[color],
+      icon: TOKEN_ICONS[color] ?? '●'
+    }));
     for (const size of sizes) {
       for (const combo of combinations(available, size)) {
-        actions.push({ type: 'TAKE_3_DIFF_GEMS', playerId, payload: { gems: combo } });
+        actions.push({
+          type: 'TAKE_3_DIFF_GEMS',
+          playerId,
+          payload: { gems: combo },
+          family: {
+            id: 'TAKE_GEMS',
+            key: [...combo].sort().join('|'),
+            label: '拿取精灵球',
+            hint: '选择 ' + size + ' 种不同颜色（每种 1 颗）',
+            icon: '🔴',
+            min: size,
+            max: size,
+            options: takeOptions
+          }
+        });
       }
     }
 
-    for (const color of TOKEN_COLORS) {
-      if (bank[color] >= 4 && held + 2 <= MAX_TOKENS) {
-        actions.push({ type: 'TAKE_2_SAME_GEMS', playerId, payload: { gem: color } });
-      }
+    const doubleOptions = TOKEN_COLORS.filter(
+      color => bank[color] >= 4 && held + 2 <= MAX_TOKENS
+    ).map(color => ({ id: color, label: labelOf(color) + ' · ' + bank[color], icon: TOKEN_ICONS[color] ?? '●' }));
+    for (const color of doubleOptions.map(option => option.id)) {
+      actions.push({
+        type: 'TAKE_2_SAME_GEMS',
+        playerId,
+        payload: { gem: color },
+        family: {
+          id: 'TAKE_DOUBLE',
+          key: color,
+          label: '双取同色',
+          hint: '选择一种银行至少 4 颗的颜色，拿 2 颗',
+          icon: '🎒',
+          min: 1,
+          max: 1,
+          options: doubleOptions
+        }
+      });
     }
 
     /* 2 · catching cards ------------------------------------------------ */

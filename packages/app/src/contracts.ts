@@ -169,6 +169,8 @@ export interface UiAction {
   promptId?: string;
   /** Declarative target picker; the presenter sends the selected ids as `targets`. */
   selection?: UiActionSelection;
+  /** 选择器的标题；缺省为“选择目标”。 */
+  selectionLabel?: string;
   /** When present, the UI must collect these fields and send them as payload. */
   fields?: UiActionField[];
   /**

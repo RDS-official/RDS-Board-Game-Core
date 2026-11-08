@@ -99,6 +99,8 @@ export interface BoundAction {
    * 径向选择器里点谁，就派发哪一条——合法性仍由引擎判定，UI 不自造规则。
    */
   targetVariants?: Map<string, Action>;
+  /** 动作族塌缩：family key → 具体合法动作。 */
+  variantVariants?: Map<string, Action>;
 }
 
 /**
@@ -447,6 +449,15 @@ export class UniversalSession implements GamePresenter {
     const action: Action = { ...bound.action };
     if (payload && Object.keys(payload).length > 0) {
       action.payload = { ...(bound.action.payload ?? {}), ...payload };
+    }
+    if (targets && bound.variantVariants) {
+      const key = [...targets].sort().join('|');
+      const chosen = bound.variantVariants.get(key);
+      if (!chosen) return { ok: false, error: '无效的动作族选择' };
+      return this.dispatch({
+        ...chosen,
+        ...(payload ? { payload: { ...(chosen.payload ?? {}), ...payload } } : {})
+      });
     }
     if (targets && targets.length === 1 && bound.targetVariants?.has(targets[0])) {
       // 目标塌缩的卡片：用玩家选中的目标换回那条具体动作再派发。
@@ -1916,6 +1927,16 @@ export function buildActionsView(
 ): BoundAction[] {
     const bound: BoundAction[] = [];
     const groups = new Map<string, { action: Action; ids: string[] }>();
+    // 动作族：同一个 family.id 的具体动作（例如所有三色组合）只占一个 UI 槽位。
+    const familyBuckets = new Map<string, { first: Action; variants: Map<string, Action> }>();
+    for (const action of actions) {
+      const family = action.family;
+      if (!family) continue;
+      const bucketKey = `${action.actorId ?? action.playerId}|${family.id}`;
+      const bucket = familyBuckets.get(bucketKey) ?? { first: action, variants: new Map() };
+      if (!bucket.variants.has(family.key)) bucket.variants.set(family.key, action);
+      familyBuckets.set(bucketKey, bucket);
+    }
 
     const boardGroups: Record<
       string,
@@ -1998,6 +2019,38 @@ export function buildActionsView(
         idKey: config.idKey
       });
     }
+    for (const bucket of familyBuckets.values()) {
+      const family = bucket.first.family;
+      if (!family) continue;
+      const meta = classifyAction(state, bucket.first);
+      bound.push({
+        ui: {
+          id: `a${bound.length}`,
+          actionType: family.id,
+          group: 'command',
+          surface: meta.surface,
+          verb: meta.verb,
+          source: meta.source,
+          ...(meta.slot !== undefined ? { slot: meta.slot } : {}),
+          icon: family.icon ?? '🎯',
+          label: family.label,
+          hint: family.hint ?? '',
+          tone: 'primary',
+          selectionLabel: '选择颜色',
+          selection: {
+            spec: { source: 'player', min: family.min, max: family.max },
+            candidates: family.options.map(option => ({
+              id: option.id,
+              label: option.label,
+              icon: option.icon
+            }))
+          }
+        },
+        action: bucket.first,
+        variantVariants: bucket.variants
+      });
+    }
+
     const actorNameOf = (id: string): string =>
       state.players[id]?.name ??
       (state.npcs as Record<string, { name?: string } | undefined> | undefined)?.[id]?.name ??
@@ -2039,6 +2092,8 @@ export function buildActionsView(
     const mergeBuckets = new Map<string, { first: Action; targets: Map<string, Action> }>();
     const ordered: Action[] = [];
     for (const action of actions) {
+      // 动作族已在上方合并成一个选择器，不再逐条出按钮。
+      if (action.family) continue;
       // 被高亮组吸收的动作不再单独出按钮。唯一的例外是「有 idKey 但这条动作
       // 恰好没带该字段」——目前仅 splendor 的按阶盲抽 RESERVE_CARD（没有
       // entityId），它必须继续落到独立按钮分支。

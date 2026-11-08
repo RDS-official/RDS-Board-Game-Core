@@ -601,6 +601,25 @@ export interface ActionFieldSpec {
   dependsOn?: ActionFieldDependency;
 }
 
+/**
+ * Optional presenter-side action family.
+ *
+ * The engine still returns one concrete action per legal variant (AI, replay and
+ * the reducer keep working); the presenter may collapse the variants into one
+ * UI button. The family key identifies the concrete variant, options is the
+ * picker candidate list. Pure data, never interpreted by the reducer.
+ */
+export interface ActionFamilySpec {
+  id: string;
+  key: string;
+  label: string;
+  hint?: string;
+  icon?: string;
+  min: number;
+  max: number;
+  options: { id: string; label: string; icon?: string }[];
+}
+
 export interface Action {
   type: string;
   /** Legacy actor slot; PlayerId and ActorId are both strings. */
@@ -624,6 +643,8 @@ export interface Action {
    * the collected values as `payload`; serializable and replay-safe.
    */
   fields?: ActionFieldSpec[];
+  /** Presenter-side family; ignored by the reducer. */
+  family?: ActionFamilySpec;
 }
 
 /* -------------------------------------------------------------------------- */
