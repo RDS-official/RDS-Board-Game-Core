@@ -91,6 +91,35 @@ test('fixture sanguosha: 108-card standard deck, 52-card military deck and 17 he
   }
 });
 
+test('fixture sanguosha: 洛神每次只亮一张判定牌，每张都进对局日志', () => {
+  // 宪章 C-2：洛神不再在一次 reduce 里循环。种子 2 的 5 人身份局里 p2 是甄姬，
+  // 开局即带洛神。p1 结束回合后，引擎的 follow-up 泵逐步派发 LUOSHEN_STEP，
+  // 每张判定牌各成一条日志，且全部落在延时锦囊判定之前。
+  const engine = new UniversalGameEngine(GAME_REGISTRY.sanguosha, 2, { scenario: 'identity_5' });
+  assert(
+    (engine.getRawState().players.p2.customProps.skills as string[]).includes('luoshen'),
+    'p2 starts with luoshen under this seed'
+  );
+
+  const end = engine.getLegalActions('p1').find(action => action.type === 'END_TURN');
+  assert(!!end, 'the active player can end the play phase');
+  const result = engine.dispatch(end!);
+  assert(result.ok, `end turn failed: ${result.error}`);
+
+  const after = engine.getRawState();
+  const indexes = after.actionLog
+    .map((action, index) => (action.type === 'LUOSHEN_STEP' ? index : -1))
+    .filter(index => index >= 0);
+  assert(indexes.length >= 1, 'luoshen revealed at least one card as its own action');
+  const contiguous = indexes.every((index, position) => position === 0 || index === indexes[position - 1] + 1);
+  assert(contiguous, 'the luoshen steps run back to back, one card each');
+  assertEqual(after.globalVars.luoshenLeft, undefined, 'the chain settled before the judge phase');
+  assert(indexes.length <= 12, 'luoshen never reveals more than 12 cards in one preparation phase');
+  const judgeIndex = after.actionLog.findIndex(action => action.type === 'RESOLVE_JUDGE');
+  assert(indexes[indexes.length - 1] < judgeIndex, 'every luoshen step precedes the delayed-trick judgement');
+  assert(engine.verifyReplay().ok, 'the stepped chain replays exactly');
+});
+
 test('fixture sanguosha: six-phase turn advances through automatic follow-ups', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.sanguosha, 5);
   const end = engine.getLegalActions('p1').find(action => action.type === 'END_TURN');

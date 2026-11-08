@@ -24,7 +24,9 @@ export const SANGUOSHA_GLOBAL_VARS = [
   'finalWinner',
   'finalReason',
   'scoreDeltas',
-  'turnOwner'
+  'turnOwner',
+  // 宪章 C-2：洛神本准备阶段还能亮几张（上限 12），LUOSHEN_STEP 逐步消耗，结束即删除。
+  'luoshenLeft'
 ] as const;
 
 export const SANGUOSHA_CUSTOM_PROPS = [

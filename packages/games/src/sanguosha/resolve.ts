@@ -1515,22 +1515,33 @@ function startTurn(state: GameState, ctx: ReduceContext): GameState {
   const name = state.players[pid]?.name ?? pid;
   trace(ctx, 'ANNOUNCEMENT', `${name} 的回合开始`, 350);
 
+  // 宪章 C-2：洛神可能连抽多张判定牌。旧实现在一次 reduce 里循环最多 12 次，
+  // 每次都是一次逻辑跃迁。现在只记下剩余次数，由 LUOSHEN_STEP 经 follow-up
+  // 逐步派发，每次只亮一张；上限仍是 12 张，规则不变。
   if (hasSkill(next, pid, 'luoshen')) {
-    for (let guard = 0; guard < 12; guard += 1) {
-      const judged = drawJudgeCard(next, pid);
-      if (!judged.cardId) break;
-      next = judged.state;
-      trace(ctx, 'ANNOUNCEMENT', `【洛神】亮出 ${judged.suit}${judged.rank}`, 300);
-      if (!judged.red) {
-        next = moveCard(next, judged.cardId, HAND_ZONE(pid));
-      } else {
-        next = settleJudgeCard(next, judged.cardId);
-        break;
-      }
-    }
+    next = updateGlobal(next, { luoshenLeft: LUOSHEN_MAX_REVEALS });
   }
 
   return { ...next, phase: 'JUDGE' };
+}
+
+/** 与旧循环的 `guard < 12` 一致：一次准备阶段最多亮 12 张。 */
+const LUOSHEN_MAX_REVEALS = 12;
+
+/** 洛神的一步：亮一张判定牌。黑色收入手牌并继续，红色、牌堆耗尽或满 12 张则结束。 */
+function luoshenStep(state: GameState, ctx: ReduceContext): GameState {
+  const pid = state.activePlayerId;
+  const left = Number(state.globalVars.luoshenLeft ?? 0);
+  const judged = drawJudgeCard(state, pid);
+  let next = judged.state;
+  if (!judged.cardId) return clearGlobal(next, ['luoshenLeft']);
+  trace(ctx, 'ANNOUNCEMENT', `【洛神】亮出 ${judged.suit}${judged.rank}`, 300);
+  if (judged.red) {
+    next = settleJudgeCard(next, judged.cardId);
+    return clearGlobal(next, ['luoshenLeft']);
+  }
+  next = moveCard(next, judged.cardId, HAND_ZONE(pid));
+  return left - 1 > 0 ? updateGlobal(next, { luoshenLeft: left - 1 }) : clearGlobal(next, ['luoshenLeft']);
 }
 
 function resolveDelayedJudgment(state: GameState, ctx: ReduceContext, pid: PlayerId, cardId: EntityId): GameState {
@@ -1672,6 +1683,8 @@ function handleAutoAction(state: GameState, ctx: ReduceContext, action: Action):
   switch (action.type) {
     case 'START_TURN':
       return startTurn(state, ctx);
+    case 'LUOSHEN_STEP':
+      return luoshenStep(state, ctx);
     case 'RESOLVE_JUDGE':
       return resolveJudgePhase(state, ctx);
     case 'DRAW_PHASE':
@@ -1819,7 +1832,10 @@ export function resolveSanguoshaFollowUp(state: GameState, _ctx: ReduceContext):
     case 'TURN_START':
       return [{ type: 'START_TURN', playerId: state.activePlayerId }];
     case 'JUDGE':
-      return [{ type: 'RESOLVE_JUDGE', playerId: state.activePlayerId }];
+      // 洛神未判定完之前，判定阶段的延时锦囊先等着。
+      return Number(state.globalVars.luoshenLeft ?? 0) > 0
+        ? [{ type: 'LUOSHEN_STEP', playerId: state.activePlayerId }]
+        : [{ type: 'RESOLVE_JUDGE', playerId: state.activePlayerId }];
     case 'DRAW':
       return [{ type: 'DRAW_PHASE', playerId: state.activePlayerId }];
     case 'DISCARD':
