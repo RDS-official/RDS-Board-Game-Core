@@ -75,6 +75,7 @@ import {
   missionLineOf,
   phaseLabelOf,
   projectedHandOf,
+  resolveBoundAction,
   resolveMomentButtons,
   takeMomentButton
 } from './session';
@@ -184,6 +185,9 @@ export class NetSession implements GamePresenter {
   private armedPlacement?: { entityId: string };
   private placementRotation?: number;
   private readonly bootstrapDependencyErrors: string[] = [];
+
+  /** 上一次因「动作被服务器拒绝」而拉全量快照的时刻（节流用）。 */
+  private lastRejectResync = 0;
 
   // --- centre-mode (server-authoritative) transport ---
   private serverTransport?: ServerMatchTransport;
@@ -301,6 +305,14 @@ export class NetSession implements GamePresenter {
           detail: message,
           durationMs: 4200
         });
+        // 被拒之后立刻要一份完整快照：本地投影若因为「已点出去」而先行变化
+        // （例如手里那张牌被视觉上消耗掉），下一次快照必须马上把它还回来，
+        // 而不是等玩家再打一张牌或结束回合才回显。节流避免刷屏时反复拉全量。
+        const now = Date.now();
+        if (now - this.lastRejectResync >= 800) {
+          this.lastRejectResync = now;
+          this.serverTransport?.requestSnapshot();
+        }
       },
       onClosed: () => this.onRoomClosed?.(),
       onReconnecting: attempt => this.onGuestReconnecting?.(attempt),
@@ -717,14 +729,12 @@ export class NetSession implements GamePresenter {
       return { ok: true };
     }
     this.activeBoardGroup = undefined;
-    if (!bound.action) return { ok: false, error: 'action has no dispatch payload' };
 
-    const action: Action = { ...bound.action };
-    if (payload && Object.keys(payload).length > 0) {
-      action.payload = { ...(bound.action.payload ?? {}), ...payload };
-    }
-    if (targets && targets.length > 0) action.targets = targets;
-    return this.submitAction(action);
+    // 与单机共用同一条翻译路径（见 resolveBoundAction）：目标塌缩的卡片必须换回
+    // 玩家真正选中的那条具体动作，否则权威会按 canonical 绑定判非法。
+    const resolved = resolveBoundAction(bound, payload, targets);
+    if (!resolved.action) return { ok: false, error: resolved.error ?? '动作无法派发' };
+    return this.submitAction(resolved.action);
   }
 
   public armPlacement(actionId: string): { ok: boolean; error?: string } {
