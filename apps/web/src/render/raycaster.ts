@@ -48,6 +48,10 @@ export class BoardRaycaster {
     this.domElement.addEventListener('pointerdown', this.onPointerDown.bind(this));
     this.domElement.addEventListener('pointerup', this.onPointerUp.bind(this));
     this.domElement.addEventListener('pointercancel', this.onPointerCancel.bind(this));
+    // Hover is recomputed on `pointermove` only, so a pointer that leaves the
+    // canvas (or the window) used to keep the last hovered object tinted and its
+    // preview window on screen until the pointer came back and moved again.
+    this.domElement.addEventListener('pointerleave', this.onPointerLeave.bind(this));
   }
 
   public registerInteractive(object: THREE.Object3D, data: InteractiveObjectData): void {
@@ -285,6 +289,20 @@ export class BoardRaycaster {
       }
       mat.emissive.setHex(0x445588);
     }
+  }
+
+  /**
+   * The pointer left the canvas: nothing is hovered any more.
+   *
+   * Without this the hover state outlived the pointer — a seat plaque or a card
+   * chip stayed on screen while the pointer was over a panel or a payload
+   * window, and only the next `pointermove` over the board could close it.
+   */
+  private onPointerLeave(): void {
+    if (!this.hoveredObject) return;
+    this.resetHover();
+    this.domElement.style.cursor = 'default';
+    if (this.onHoverCallback) this.onHoverCallback(null);
   }
 
   private resetHover(): void {

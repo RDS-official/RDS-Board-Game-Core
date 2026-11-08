@@ -652,6 +652,26 @@ export class BoardGameHUD {
     this.overlays.open({ owner: 'hud.hover', mode: 'peek', view });
   }
 
+  /**
+   * Drop the hover-only surfaces: the seat plaque and the one-line chip.
+   *
+   * Hover is cleared by the raycaster's `pointermove`, and that event stops
+   * arriving as soon as a payload window covers the canvas. A seat plaque that
+   * was opened by clicking the seat is worse: the pointer never leaves the
+   * canvas at all, so the plaque used to stay on screen behind (and after) the
+   * window it opened, until the same seat was hovered again.
+   */
+  public clearHoverSurfaces(): void {
+    this.showSeatPeek(null);
+    this.showHoverHint(null);
+  }
+
+  /** Show a payload window, dropping the hover surfaces underneath it first. */
+  private showPayloadLayer(layer: HTMLElement): void {
+    this.clearHoverSurfaces();
+    layer.style.display = 'flex';
+  }
+
   /** Paint both overlay surfaces from the one authoritative state. */
   private paintOverlays(state: OverlayState): void {
     this.paintHover(state.peek);
@@ -932,7 +952,7 @@ export class BoardGameHUD {
     this.menuRoot = root;
     this.menuOpener = opener;
     this.menuOpen = true;
-    layer.style.display = 'flex';
+    this.showPayloadLayer(layer);
     opener.setAttribute('aria-expanded', 'true');
 
     layer.querySelector('.payload-backdrop')?.addEventListener('click', () => this.closeMenu(true));
@@ -1344,7 +1364,7 @@ export class BoardGameHUD {
         </footer>
       </form>
     `);
-    layer.style.display = 'flex';
+    this.showPayloadLayer(layer);
 
     const close = () => {
       layer.style.display = 'none';
@@ -2948,7 +2968,7 @@ export class BoardGameHUD {
         <div class="rc-occupants">${raw(chips || '<span class="rc-empty">空无一人</span>')}</div>
       </div>
     `);
-    layer.style.display = 'flex';
+    this.showPayloadLayer(layer);
 
     const close = () => {
       layer.style.display = 'none';
@@ -4348,7 +4368,7 @@ export class BoardGameHUD {
         </div>
       </div>
     `);
-    layer.style.display = 'flex';
+    this.showPayloadLayer(layer);
 
     const close = (): void => {
       layer.style.display = 'none';
@@ -4382,7 +4402,7 @@ export class BoardGameHUD {
         <ul class="fx-list">${raw(rows || '<li class="fx-row neutral"><span class="fx-name">无</span></li>')}</ul>
       </div>
     `);
-    layer.style.display = 'flex';
+    this.showPayloadLayer(layer);
 
     const close = () => {
       layer.style.display = 'none';
@@ -4569,7 +4589,7 @@ export class BoardGameHUD {
         </footer>
       </div>
     `);
-    layer.style.display = 'flex';
+    this.showPayloadLayer(layer);
 
     const close = () => {
       layer.style.display = 'none';
