@@ -257,7 +257,7 @@ handler: () => ({
 
 ## 4. 分阶段落地
 
-> **2026-11 实际进度**：C-1 ~ C-9 全部有可执行断言，且**已覆盖全部 6 个模组**。阶段 0 ~ 阶段 3 全部落地，包括 C-8 的物理分离（`𝒦_view` / `𝒦_driver` 不再混在同一个字段上）。
+> **2026-11 实际进度**：阶段 0 ~ 阶段 3 的机制都已落地（含 C-8 的物理分离，`𝒦_view` / `𝒦_driver` 不再混在同一个字段上），但**覆盖并不均匀**。C-1、C-2、C-6、C-9 六个模组都有断言；C-5 缺 splendor（无投影）；C-7 的收益账本只接了 poker / catan / sanguosha，splendor / betrayal / dune 既没有账本也没有「不适用」的登记。以覆盖报告脚本的输出为准，不要以本节的叙述为准。
 > 内核侧新增 `packages/kernel/src/charter.ts`（宪章执行器）与
 > `packages/harness/src/suites/charter.ts`（12 条可执行断言）。
 > 下面各阶段保留原计划，✅ 标记已完成项。
@@ -313,14 +313,15 @@ handler: () => ({
 | catan | 15 gv / 2 cp | 资源供给不超发（每种 ≤ 19） | ✅ `grantResources()` 总闸 |
 | splendor | 10 gv / 6 cp | 宝可球守恒（持有 + 银行 ≤ 供给） | ⏳ 分数是派生值，无累加收益 |
 | betrayal | 21 gv / 34 cp | 属性为整数；角色房间必须存在 | ⏳ 无筹码/分数型收益 |
-| sanguosha | 2 gv / 4 cp | 血量 ∈ [0, maxHp] 且为整数 | ⏳ 同上 |
+| sanguosha | 2 gv / 4 cp | 血量 ∈ [0, maxHp] 且为整数 | ✅ 伤害 / 回复 / 击杀反贼 |
 | dune_mahjong | 5 gv / 5 cp | 兵力非负；押注 ≤ 持有兵力 | ⏳ 同上 |
 | poker | 7 gv / 8 cp | 筹码整除性 / 底池一致 / 手号单调 | ✅ 三处派发 |
 
-**为什么 C-7 只铺了 2 个模组**：`state.rewards` 记的是"这次跃迁谁因为什么拿到多少"。
-splendor / betryal / sanguosha 的分数是从场上实体派生的（每次重算整表），
-没有"增量"，硬塞进流水账只会重复记录同一分。它们真正需要的是 C-6 的守恒断言，
-那已经落地了。catan 与 poker 有真实的筹码/资源流动，所以接了记账口。
+**为什么 C-7 还有 3 个模组没接**：`state.rewards` 记的是"这次跃迁谁因为什么拿到多少"。
+poker / catan / sanguosha 有真实的筹码、资源或血量流动，所以接了记账口。
+splendor / betrayal / dune 的分数是从场上实体派生的（每次重算整表），没有增量；
+但「不适用」目前只写在这里，没有落到 `module.charter.deviations` 里，
+所以覆盖报告把它们标成无覆盖。补上登记（或确认其实有增量收益）之前，不要把这一条算作已关闭。
 
 **C-9 的键集怎么来的**：多 seed 随机实跑（25 轮 × 260 步）取并集，再用源码静态扫描补漏。
 验证标准不是"测试通过"，而是**跑 5000+ 步不出现 `CHARTER_C9_UNDECLARED_GLOBAL_VAR`**。

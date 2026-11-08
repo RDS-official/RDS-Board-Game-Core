@@ -315,7 +315,8 @@
 | C-4 随机收口 | poker | ~~`ai.ts` 的 `noise()` 自实现 FNV 哈希作决策抖动~~ | 不想污染 `prngState`，保持 AI 决策与状态跃迁解耦 | ✅ **已部分关闭（2026-11）**：改名 `deriveNoise(view)`，入参为投影、不再读 `prngState`；仍未走 `ctx.roll()`（AR-46） |
 | C-5 信息约束 | poker | ~~AI 用 raw `GameState` 决策~~ | 历史实现，未区分投影通道 | ✅ **已关闭（2026-11）**：`choosePokerAction` 改收 `ProjectedGameState`，`rules.ts` 经 `decisionView()` 投影后调用（AR-2） |
 | C-7 收益独立 | poker | ~~收益直接改状态，未记账~~ | — | ✅ **已关闭（2026-11）**：`ctx.reward()` + `state.rewards` 落地；摊牌派池 / 弃牌取胜 / 观察者低保三处均已记账，`charter C-7` 覆盖（AR-47） |
-| C-7 收益独立 | catan / betrayal / dune / splendor | 建造与计分仍直接改状态 | 尚未接入记账口 | 照 poker 的写法逐步接入 `ctx.reward()`（AR-47） |
+| C-7 收益独立 | catan | ~~资源获取直接改状态，未记账~~ | — | ✅ **已关闭（2026-11）**：`grantResources()` 总闸接入 `ctx.reward()`，覆盖掷骰产出 / 港口兑换 / 强盗抢夺；`charter.requiresRewardLedger` 已声明（AR-47） |
+| C-7 收益独立 | betrayal / dune / splendor | 计分直接改状态，未接入记账口，也未登记「不适用」 | 分数多为从场上实体派生的重算值，是否存在增量收益尚未逐条确认 | 二选一：有增量收益的接入 `ctx.reward()`，确认没有的在 `module.charter.deviations` 登记偏离。在此之前覆盖报告把这三条标成无覆盖（AR-47） |
 | C-7 收益独立 | sanguosha | ~~伤害/回复直接改 hp~~ | — | ✅ **已关闭（2026-11）**：伤害、回复、失去体力与击杀反贼均经 `ctx.reward()`；`charter.requiresRewardLedger` 已声明 |
 | C-8 元规则分区 | sanguosha | ~~`bagua_armor` 钩子只发提示~~ | — | ✅ **已关闭（2026-11）**：钩子改拦 `JUDGE_BAGUA` 并产出 `MODIFY` 声明规则参数，reducer 降级为通用判定执行器（AR-49） |
 | C-8 元规则分区 | 全部 6 个模组 | ~~`𝒦_view` / `𝒦_driver` 混在 `presentation` 与模块顶层~~ | — | ✅ **已关闭（2026-11）**：驱动方语义全部收进 `GameModule.driver`（`defineDriver()` 加载时校验），`definePresentation()` 对驱动键直接抛错，`tsc` 强制所有调用方迁移（AR-49） |
