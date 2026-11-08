@@ -90,6 +90,7 @@ const boot = async page => {
   await page.waitForTimeout(1600);
 };
 
+
 const handBoxes = page =>
   page.evaluate(() =>
     Array.from(document.querySelectorAll('#action-hand .ah-card')).map(el => {
@@ -121,6 +122,10 @@ const wheelState = page =>
       avatars: document.querySelectorAll('.rp-avatar, .rp-initial').length,
       active: Array.from(document.querySelectorAll('.rp-seg')).findIndex(el => el.classList.contains('is-active')),
       width: rect?.width ?? 0,
+      bottom: rect ? rect.bottom : 0,
+      handTop: document.querySelector('#action-hand')?.getBoundingClientRect().top ?? 0,
+      frost: Boolean(document.querySelector('.rp-frost')),
+      frostClip: (document.querySelector('.rp-frost')?.style.clipPath ?? '').slice(0, 12),
       cx: rect ? rect.left + rect.width / 2 : 0,
       cy: rect ? rect.top + rect.height / 2 : 0,
       viewport: Math.min(window.innerWidth, window.innerHeight)
@@ -143,16 +148,98 @@ try {
     await page.waitForTimeout(260);
     const opened = await wheelState(page);
     record('drag: the wheel appears while dragging', opened.open && opened.mode === 'drag', JSON.stringify(opened));
-    record('drag: frosted scrim is present', opened.scrim);
+    record('drag: the frost layer exists and is clipped to the wheel', opened.frost && opened.frostClip.startsWith('path('), opened.frostClip);
+    record('drag: no full-screen frosting outside the wheel', opened.scrim === false, String(opened.scrim));
+    record(
+      'drag: the wheel never covers the hand strip',
+      opened.bottom > 0 && opened.handTop > 0 && opened.bottom <= opened.handTop + 1,
+      opened.bottom.toFixed(0) + ' vs hand ' + opened.handTop.toFixed(0)
+    );
     record('drag: one sector + one avatar pin per candidate', opened.sectors === opened.pins && opened.sectors >= 2, opened.sectors + '/' + opened.pins);
     record('drag: pins carry an avatar or an initial', opened.avatars >= opened.pins, String(opened.avatars));
     record('drag: wheel covers more than half the short edge', opened.width >= opened.viewport * 0.6, opened.width + '/' + opened.viewport);
 
+    // 目视检查的自动化版：用浏览器真实的命中测试回答三个问题——
+    // ① 每个分区沿自己的引线真的被画出来了；② 头像落在**自己的**分区里；
+    // ③ 轮盘外面什么也没画。
+    const shape = await page.evaluate(() => {
+      const dialog = document.querySelector('.rp-dialog');
+      const layer = document.querySelector('.rp-layer');
+      if (!dialog || !layer) return null;
+      const rect = dialog.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      layer.style.pointerEvents = 'auto';
+      dialog.style.pointerEvents = 'auto';
+      const segIndexAt = (x, y) => {
+        const stack = document.elementsFromPoint(x, y);
+        const hit = stack.find(el => el.classList && el.classList.contains('rp-seg'));
+        return hit ? Number(hit.dataset.segIndex) : -1;
+      };
+      let spokeHits = 0;
+      let spokeTotal = 0;
+      for (const seg of Array.from(document.querySelectorAll('.rp-seg'))) {
+        const m = (seg.getAttribute('d') ?? '').match(/^M\s*(-?[\d.]+)\s+(-?[\d.]+)\s+L\s*(-?[\d.]+)\s+(-?[\d.]+)/);
+        if (!m) continue;
+        const ix = Number(m[1]);
+        const iy = Number(m[2]);
+        const ox = Number(m[3]);
+        const oy = Number(m[4]);
+        for (const t of [0.4, 0.7]) {
+          spokeTotal += 1;
+          if (segIndexAt(cx + ix + (ox - ix) * t, cy + iy + (oy - iy) * t) === Number(seg.dataset.segIndex)) {
+            spokeHits += 1;
+          }
+        }
+      }
+      let pinHits = 0;
+      let pinTotal = 0;
+      for (const pin of Array.from(document.querySelectorAll('.rp-pin'))) {
+        // 用几何锚点采样，而不是「包围盒中心 + 猜测偏移」——后者会被文字宽度带偏。
+        const px = Number(pin.dataset.pinX);
+        const py = Number(pin.dataset.pinY);
+        pinTotal += 1;
+        if (segIndexAt(cx + px, cy + py) === Number(pin.dataset.segIndex)) pinHits += 1;
+      }
+      let outsideHits = 0;
+      let outsideTotal = 0;
+      for (let i = 0; i < 60; i += 1) {
+        const angle = (i / 60) * Math.PI * 2;
+        const x = cx + Math.cos(angle) * (rect.width / 2) * 1.18;
+        const y = cy + Math.sin(angle) * (rect.width / 2) * 1.18;
+        if (x < 1 || y < 1 || x > window.innerWidth - 1 || y > window.innerHeight - 1) continue;
+        outsideTotal += 1;
+        if (segIndexAt(x, y) >= 0) outsideHits += 1;
+      }
+      layer.style.pointerEvents = '';
+      dialog.style.pointerEvents = '';
+      return { spokeHits, spokeTotal, pinHits, pinTotal, outsideHits, outsideTotal };
+    });
+    record(
+      'shape: every sector is painted along its own spoke',
+      Boolean(shape) && shape.spokeTotal > 0 && shape.spokeHits === shape.spokeTotal,
+      JSON.stringify(shape)
+    );
+    record(
+      'shape: every avatar pin sits inside its own sector',
+      Boolean(shape) && shape.pinTotal === opened.sectors && shape.pinHits === shape.pinTotal,
+      shape ? shape.pinHits + '/' + shape.pinTotal : 'missing'
+    );
+    record(
+      'shape: nothing is painted outside the wheel (no arc bulge)',
+      Boolean(shape) && shape.outsideHits === 0,
+      shape ? shape.outsideHits + '/' + shape.outsideTotal : 'missing'
+    );
+
     // hover a sector: exactly one highlight + the card shrinks so the pin stays readable
     const pinPoint = await page.evaluate(() => {
       const pin = document.querySelector('.rp-pin');
-      const r = pin?.getBoundingClientRect();
-      return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null;
+      const dialog = document.querySelector('.rp-dialog')?.getBoundingClientRect();
+      if (!pin || !dialog) return null;
+      return {
+        x: dialog.left + dialog.width / 2 + Number(pin.dataset.pinX),
+        y: dialog.top + dialog.height / 2 + Number(pin.dataset.pinY)
+      };
     });
     record('browser: pins are hit-testable', Boolean(pinPoint));
     let shrank = false;

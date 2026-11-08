@@ -28,7 +28,6 @@ function f(value: number): string {
 /** Render the wheel as one `<svg>`. Empty wheel → empty string. */
 export function radialPickerSvg(wheel: RadialWheel, opts: RadialSvgOptions = {}): string {
   if (wheel.count === 0) return '';
-  const R = f(wheel.radius);
   const cls = opts.className ? ` ${escapeHtml(opts.className)}` : '';
   const label = escapeHtml(opts.label ?? '选择目标');
 
@@ -68,7 +67,7 @@ export function radialPickerSvg(wheel: RadialWheel, opts: RadialSvgOptions = {})
               ? `<text class="rp-hint" x="${x}" y="${f(seg.label[1] + 34)}" text-anchor="middle">${escapeHtml(candidate.hint)}</text>`
               : '';
             return (
-              `<g class="rp-pin" data-seg-index="${seg.index}">` +
+              `<g class="rp-pin" data-seg-index="${seg.index}" data-pin-x="${x}" data-pin-y="${y}">` +
               `<circle class="rp-avatar-ring" cx="${x}" cy="${avatarY}" r="${ring}" stroke="${color}"/>` +
               face +
               `<text class="rp-label" data-seg-index="${seg.index}" x="${x}" y="${f(seg.label[1] + 16)}"` +
@@ -92,6 +91,14 @@ export function radialPickerSvg(wheel: RadialWheel, opts: RadialSvgOptions = {})
           )
           .join('')}</defs>`;
 
+  // 外轮廓单独描一遍：让"整个多边形"读成一个形状，而不是散落的几个三角。
+  const outline =
+    wheel.outline.length > 1
+      ? `<path class="rp-outline" d="${wheel.outline
+          .map(([x, y], index) => `${index === 0 ? 'M' : 'L'} ${f(x)} ${f(y)}`)
+          .join(' ')} Z"/>`
+      : '';
+
   const center =
     `<circle class="rp-center" data-zone="center" cx="0" cy="0" r="${f(wheel.innerRadius)}"/>` +
     `<text class="rp-center-label" x="0" y="0" text-anchor="middle" dominant-baseline="middle"` +
@@ -101,6 +108,7 @@ export function radialPickerSvg(wheel: RadialWheel, opts: RadialSvgOptions = {})
     `<svg class="rp-wheel${cls}" viewBox="${-wheel.radius} ${-wheel.radius} ${wheel.radius * 2} ${wheel.radius * 2}"` +
     ` role="menu" aria-label="${label}">` +
     clips +
+    outline +
     `<g class="rp-segments">${paths}</g>` +
     center +
     `<g class="rp-labels">${labels}</g>` +

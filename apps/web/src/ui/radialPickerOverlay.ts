@@ -78,7 +78,7 @@ export class RadialPickerOverlay {
     if (!this.state || performance.now() - this.openedAt < INPUT_GRACE_MS) return;
     const target = event.target as HTMLElement | null;
     if (target?.closest('[data-rp-cancel]')) {
-      this.resolve('cancel');
+      this.resolve();
       return;
     }
     this.onPointerMove(event);
@@ -91,7 +91,7 @@ export class RadialPickerOverlay {
       case 'Escape':
         event.preventDefault();
         event.stopPropagation();
-        this.resolve('cancel');
+        this.resolve();
         return;
       case 'ArrowRight':
       case 'ArrowDown':
@@ -141,7 +141,7 @@ export class RadialPickerOverlay {
       root,
       raw(
         (mode === 'drag'
-          ? '<div class="rp-scrim"></div>'
+          ? '<div class="rp-frost" data-rp-frost></div>'
           : '<div class="rp-backdrop" data-rp-cancel></div>') +
           `<div class="rp-dialog" role="dialog" aria-modal="true" tabindex="-1"` +
           ` aria-label="${escapeHtml(title)}">` +
@@ -158,6 +158,20 @@ export class RadialPickerOverlay {
     dialog.style.width = `${wheel.radius * 2}px`;
     dialog.style.height = `${wheel.radius * 2}px`;
     document.body.appendChild(root);
+
+    // 磨砂只覆盖轮盘本体（按外轮廓 clip-path 裁切），手牌区与桌面其余部分保持原样。
+    // 这样"拖回手牌 = 放回并关闭轮盘"在视觉上也是成立的。
+    const frost = root.querySelector('.rp-frost') as HTMLElement | null;
+    if (frost && mode === 'drag' && wheel.outline.length > 0) {
+      const d =
+        wheel.outline
+          .map(([vx, vy], index) =>
+            `${index === 0 ? 'M' : 'L'} ${(options.anchor.x + vx).toFixed(1)} ${(options.anchor.y + vy).toFixed(1)}`
+          )
+          .join(' ') + ' Z';
+      frost.style.clipPath = `path("${d}")`;
+      frost.style.setProperty('-webkit-clip-path', `path("${d}")`);
+    }
 
     this.root = root;
     this.dialog = dialog;
@@ -309,10 +323,10 @@ export class RadialPickerOverlay {
       options?.onCenter();
       return;
     }
-    this.resolve('cancel');
+    this.resolve();
   }
 
-  private resolve(kind: 'cancel'): void {
+  private resolve(): void {
     const callback = this.options?.onCancel;
     this.close();
     callback?.();

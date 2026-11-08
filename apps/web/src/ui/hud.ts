@@ -3844,12 +3844,17 @@ export class BoardGameHUD {
     if (candidates.length === 0) return;
 
     const players = this.latest?.players ?? [];
-    const short = Math.min(window.innerWidth, window.innerHeight);
-    const radius = Math.max(220, Math.min(560, short * 0.41));
+    // 轮盘**不能盖住手牌区**：松手回到手牌＝放回并关闭轮盘，所以它必须留在桌面上。
+    const hand = this.container.querySelector('#action-hand') as HTMLElement | null;
+    const handTop = hand?.getBoundingClientRect().top ?? window.innerHeight;
+    const boardTop = 12;
+    const boardBottom = Math.max(boardTop + 240, handTop - 10);
+    const available = Math.min(window.innerWidth - 24, boardBottom - boardTop);
+    const radius = Math.max(150, Math.min(560, available / 2, Math.min(window.innerWidth, window.innerHeight) * 0.41));
     const margin = 12;
     const anchor = {
       x: Math.min(Math.max(at.x, radius + margin), window.innerWidth - radius - margin),
-      y: Math.min(Math.max(at.y, radius + margin), window.innerHeight - radius - margin)
+      y: Math.min(Math.max(at.y, boardTop + radius), boardBottom - radius)
     };
 
     this.radialPicker ??= new RadialPickerOverlay();

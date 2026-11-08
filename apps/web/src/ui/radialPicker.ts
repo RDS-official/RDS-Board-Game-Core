@@ -69,6 +69,8 @@ export interface RadialSegment {
 export interface RadialWheel {
   /** Number of candidates (segments). */
   count: number;
+  /** 外轮廓顶点（相对圆心，按角度顺序）。磨砂层用它做 clip-path：**只在轮盘内磨砂**。 */
+  outline: Point[];
   radius: number;
   innerRadius: number;
   startAngle: number;
@@ -138,7 +140,7 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
   const startAngle = opts.startAngle ?? -Math.PI / 2;
 
   if (n === 0) {
-    return { count: 0, radius, innerRadius, startAngle, segments: [] };
+    return { count: 0, radius, innerRadius, startAngle, segments: [], outline: [] };
   }
 
   const seedValue = opts.seed ?? candidates.map((c) => c.id).join('|');
@@ -155,9 +157,12 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
   const boundaryAt = (index: number): number => startAngle + index * step + (rawJitter[index % n] - mean);
 
   // 半径抖动只负责"轮廓不呆板"，幅度比角度更小，避免出现尖刺。
+  // n ≤ 2 时顶点几乎对称，多边形会退化成"过圆心的直线"，扇区面积趋近 0 且头像
+  // 会落在形状外面。这种情况下外边界改用圆弧（环形扇区），视觉与命中都成立。
+  const arcOuter = n <= 2;
   const radii: number[] = [];
   for (let i = 0; i < n; i += 1) {
-    const rJitter = jitterAt(seed, i + 7) * jitterR * radius;
+    const rJitter = arcOuter ? 0 : jitterAt(seed, i + 7) * jitterR * radius;
     radii.push(Math.max(innerRadius * 1.05, radius + rJitter));
   }
 
@@ -172,15 +177,34 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
     const innerEnd = polar(innerRadius, angleEnd);
     const outerStart = polar(outerRadiusStart, angleStart);
     const outerEnd = polar(outerRadiusEnd, angleEnd);
-    const midAngle = (angleStart + angleEnd) / 2;
-    const label = polar(innerRadius + (Math.max(outerRadiusStart, outerRadiusEnd) - innerRadius) * 0.62, midAngle);
-    const largeArc = angleEnd - angleStart > Math.PI ? 1 : 0;
+    // 标签点必须落在**多边形内部**：外边界是直线弦，靠外 62% 的圆上点对 n=3 会跑到
+    // 三角形外面去（旧截图里头像漂在轮盘外的根因）。这里取四条边的加权重心。
+    const label: Point = [
+      (innerStart[0] + innerEnd[0]) * 0.5 * 0.4 + (outerStart[0] + outerEnd[0]) * 0.5 * 0.6,
+      (innerStart[1] + innerEnd[1]) * 0.5 * 0.4 + (outerStart[1] + outerEnd[1]) * 0.5 * 0.6
+    ];
+    // 扇区轮廓用折线拼，不用 SVG 圆弧命令：`A` 的 sweep/large-arc 标志在
+    // "内外两条弧 + 两条引线"的组合里极易画反（旧版就是因此画出一堆鼓包与细缝）。
+    // 折线在 R ≤ 560 时肉眼看不出差别，而且 n=1/2/3… 全是同一套逻辑。
+    const ARC_STEPS = 10;
+    const innerPts: Point[] = [];
+    for (let k = 0; k <= ARC_STEPS; k += 1) {
+      const angle = angleStart + (angleEnd - angleStart) * (k / ARC_STEPS);
+      innerPts.push(polar(innerRadius, angle));
+    }
+    const outerPts: Point[] = arcOuter
+      ? Array.from({ length: ARC_STEPS + 1 }, (_, k) =>
+          polar(radius, angleStart + (angleEnd - angleStart) * (k / ARC_STEPS))
+        )
+      : [polar(outerRadiusStart, angleStart), polar(outerRadiusEnd, angleEnd)];
+    const pts = [...innerPts, ...outerPts.slice().reverse()];
     const path =
-      `M ${innerStart[0].toFixed(2)} ${innerStart[1].toFixed(2)} ` +
-      `L ${outerStart[0].toFixed(2)} ${outerStart[1].toFixed(2)} ` +
-      `L ${outerEnd[0].toFixed(2)} ${outerEnd[1].toFixed(2)} ` +
-      `A ${innerRadius.toFixed(2)} ${innerRadius.toFixed(2)} 0 ${largeArc} 0 ` +
-      `${innerEnd[0].toFixed(2)} ${innerEnd[1].toFixed(2)} Z`;
+      `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} ` +
+      pts
+        .slice(1)
+        .map(pt => `L ${pt[0].toFixed(2)} ${pt[1].toFixed(2)}`)
+        .join(' ') +
+      ' Z';
 
     segments.push({
       index: i,
@@ -199,7 +223,12 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
     });
   }
 
-  return { count: n, radius, innerRadius, startAngle, segments };
+  // 外轮廓：多边形用顶点，n≤2 用一圈圆（让描边与填充形状一致）
+  const outline: Point[] =
+    n <= 2
+      ? Array.from({ length: 24 }, (_, i) => polar(radius, startAngle + (i / 24) * TAU) as Point)
+      : segments.map(seg => seg.outerStart);
+  return { count: n, radius, innerRadius, startAngle, segments, outline };
 }
 
 /**
