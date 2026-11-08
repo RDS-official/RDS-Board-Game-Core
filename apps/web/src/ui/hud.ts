@@ -243,18 +243,15 @@ export class BoardGameHUD {
   /** Action currently held by the hand slot, mirrored on its fan card. */
   private heldActionId: string | null = null;
   private heldIndex = 0;
-  /** Shadow unified action hand (docs/INTERACTION-REDESIGN.md). Off by default;
-   *  flip with `?unified-hand` until P7 removes the legacy dock. */
-  private actionHandEnabled = false;
-  /** 新操作台：手牌只放实体，指令/情境/应答分面（?zones）。 */
-  private operationDeckEnabled = false;
+  /** 默认操作台：实体手牌 + 指令轨 + 应答托盘；传统动作栏是兼容模式。 */
+  private operationDeckEnabled = true;
   /** 当前手牌实体（key = hand:<entityId>）；不是动作卡。 */
   private readonly zoneHandCards = new Map<string, UiHandCard>();
   /** Radial target chooser, created lazily while the shadow hand is enabled. */
   private radialPicker: RadialPickerOverlay | null = null;
   /** 快捷键清单（`? `）：只提示一次，免得每局都弹。 */
   private shortcutHintShown = false;
-  /** 统一手牌的物理层（弧形 / 跟手拖拽 / 弹簧回弹）；仅在 `?unified-hand` 下创建。 */
+  /** 手牌物理层（弧形 / 跟手拖拽 / 弹簧回弹）；默认操作台使用。 */
   private actionHand?: CardHand;
   /** 本次渲染用到的卡面 data URL（签名比对与建节点共用，避免重复取纹理）。 */
   private readonly handArt = new Map<string, string>();
@@ -1053,6 +1050,19 @@ export class BoardGameHUD {
             <h3 class="menu-section-title" id="menu-games-title">游戏</h3>
             <div class="menu-slot" data-menu-slot="games"></div>
           </section>
+
+          <section class="menu-section" aria-labelledby="menu-hand-title">
+            <h3 class="menu-section-title" id="menu-hand-title">手牌操作方式</h3>
+            <div class="menu-hand-mode" role="radiogroup" aria-label="手牌操作方式">
+              <button class="menu-hand-btn" type="button" data-hand-mode="zones" aria-pressed="${this.operationDeckEnabled}">
+                <strong>分区操作台</strong><span>实体牌 / 指令轨 / 应答托盘 · 推荐</span>
+              </button>
+              <button class="menu-hand-btn" type="button" data-hand-mode="legacy" aria-pressed="${this.operationDeckEnabled ? 'false' : 'true'}">
+                <strong>传统动作栏</strong><span>旧动作扇形 + 手持出牌区</span>
+              </button>
+            </div>
+            <p class="menu-hand-hint">分区操作台让手牌只显示你持有的实体牌；结束回合、弃牌、跟注等动作不再伪装成手牌。</p>
+          </section>
           <section class="menu-section" aria-labelledby="menu-controls-title">
             <h3 class="menu-section-title" id="menu-controls-title">对局与视图</h3>
             <div class="menu-slot" data-menu-slot="controls"></div>
@@ -1073,6 +1083,14 @@ export class BoardGameHUD {
     this.menuMoved.add(actions);
     gamesSlot.append(games);
     controlsSlot.append(actions);
+
+    layer.querySelectorAll<HTMLElement>('[data-hand-mode]').forEach(button => {
+      button.addEventListener('click', () => {
+        const mode = button.dataset.handMode === 'legacy' ? 'legacy' : 'zones';
+        this.setHandMode(mode);
+        this.closeMenu(true);
+      });
+    });
 
     this.menuRoot = root;
     this.menuOpener = opener;
@@ -2114,15 +2132,58 @@ export class BoardGameHUD {
     if (this.latest) this.renderPlayers(this.latest);
   }
 
+  /** 手牌模式：分区操作台（默认）或传统动作栏。 */
+  private resolveHandMode(params: URLSearchParams): 'zones' | 'legacy' {
+    if (params.has('legacy') || params.get('hand') === 'legacy') return 'legacy';
+    if (params.has('zones') || params.has('operation-deck') || params.get('hand') === 'zones') {
+      return 'zones';
+    }
+    const saved = safeLocalStorage()?.getItem('rds.handMode');
+    return saved === 'legacy' ? 'legacy' : 'zones';
+  }
+
+  /** 菜单里的模式切换：不重载页面，保留当前牌局。 */
+  private setHandMode(mode: 'zones' | 'legacy'): void {
+    const enabled = mode === 'zones';
+    this.operationDeckEnabled = enabled;
+    this.container.dataset.hand = enabled ? 'zones' : 'legacy';
+    this.ports.setOwnHandVisible?.(!enabled);
+    try {
+      safeLocalStorage()?.setItem('rds.handMode', mode);
+    } catch {
+      // localStorage 被禁用时只影响下次打开，不影响本次切换。
+    }
+    this.actionHand?.destroy();
+    this.actionHand = undefined;
+    this.zoneHandCards.clear();
+    const hand = this.container.querySelector('#action-hand') as HTMLElement | null;
+    if (hand) {
+      hand.setAttribute('data-enabled', '0');
+      hand.setAttribute('aria-hidden', 'true');
+      hand.replaceChildren();
+    }
+    const deck = this.container.querySelector('#operation-deck') as HTMLElement | null;
+    if (deck) {
+      deck.dataset.enabled = enabled ? '1' : '0';
+      deck.setAttribute('aria-hidden', enabled ? 'false' : 'true');
+    }
+    if (this.latest) {
+      this.renderDock(this.latest);
+      this.renderHandSlot(this.latest);
+      this.renderActionHand(this.latest);
+      this.renderOperationDeck(this.latest);
+    }
+    this.pushToast(enabled ? '🃏' : '🗂', enabled ? '已切换：分区操作台' : '已切换：传统动作栏');
+  }
+
   private renderSkeleton(): void {
     this.container.classList.add('app-shell');
-    // 操作台分阶段切换：?zones 是新的「实体手牌 + 指令轨 + 应答托盘」；
-    // ?unified-hand 保留旧的统一动作卡手牌，便于对照与回退。
+    // 默认走「实体手牌 + 指令轨 + 应答托盘」；菜单可切到传统动作栏。
+    // ?legacy / ?hand=legacy 可强制传统；?zones / ?hand=zones 可强制分区。
     const params = new URLSearchParams(window.location.search);
-    this.operationDeckEnabled = params.has('zones') || params.has('operation-deck');
-    this.actionHandEnabled = !this.operationDeckEnabled && params.has('unified-hand');
-    this.container.dataset.hand = this.operationDeckEnabled ? 'zones' : this.actionHandEnabled ? 'unified' : 'legacy';
-    this.ports.setOwnHandVisible?.(!this.actionHandEnabled && !this.operationDeckEnabled);
+    this.operationDeckEnabled = this.resolveHandMode(params) === 'zones';
+    this.container.dataset.hand = this.operationDeckEnabled ? 'zones' : 'legacy';
+    this.ports.setOwnHandVisible?.(!this.operationDeckEnabled);
     setHtml(this.container, html`
       <header class="topbar">
         <button class="shell-toggle menu-btn" data-toggle="menu" aria-label="主菜单" aria-haspopup="dialog" aria-controls="menu-dialog" aria-expanded="false"><span class="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span></button>
@@ -2215,7 +2276,7 @@ export class BoardGameHUD {
         <div class="op-equip" id="op-equip" aria-label="装备与持久牌" hidden></div>
         <div class="op-status" id="op-status" aria-live="polite"></div>
       </div>
-      <!-- Unified action hand: shadow render, off unless ?unified-hand. -->
+      <!-- 实体手牌：分区操作台默认使用；传统模式隐藏。 -->
       <aside class="action-hand" id="action-hand" data-enabled="0" aria-hidden="true" aria-label="动作手牌"></aside>
       <!-- 翻页器：>1 页才出现。手牌不横向滚动，翻页与拖拽不抢同一个手势轴。 -->
       <div class="hand-pager" id="hand-pager" role="group" aria-label="手牌翻页" hidden>
@@ -3847,52 +3908,8 @@ export class BoardGameHUD {
    */
   private activateHandCard(id: string): void {
     const zoneCard = this.zoneHandCards.get(id);
-    if (zoneCard) {
-      this.activateZoneHandCard(id, zoneCard);
-      return;
-    }
-    const display = this.displayEntity(id);
-    if (display) {
-      // 持有牌没有动作可执行：点击=看档案（inspect-first，不改状态）。
-      this.presenter.pickTarget({ kind: 'entity', id: display.entityId, metadata: { intent: 'inspect' } });
-      return;
-    }
-    const action = this.latest?.actions.find(candidate => candidate.id === id);
-    if (!action) return;
-    if (action.cooldownMs && action.cooldownMs > 0) {
-      this.pushToast('⏳', `${action.label} · 还要 ${Math.ceil(action.cooldownMs / 1000)} 秒`);
-      return;
-    }
-    const card = deriveActionCard(action);
-    if (card.targetMode === 'selection' && action.selection) {
-      // 多目标仍留在 payload 表单里（径向选择器还没有多选环）。
-      if ((action.selection.spec.max ?? 1) > 1) {
-        this.openPayloadForm(action);
-        return;
-      }
-      const el = this.handCardElement(id);
-      const rect = el?.getBoundingClientRect();
-      this.openRadialPicker(action, {
-        x: (rect?.left ?? window.innerWidth / 2) + (rect?.width ?? 0) / 2,
-        y: (rect?.top ?? window.innerHeight / 2) + (rect?.height ?? 0) / 2
-      });
-      return;
-    }
-    if (card.targetMode === 'none' || card.targetMode === 'highlight') {
-      this.runAction(action);
-      return;
-    }
-    if (card.kind === 'numeric' && card.targetMode === 'fields') {
-      // P6：先把牌甩出去，再问数量；确认之前不 dispatch，取消就是干净的回弹。
-      const el = this.handCardElement(id);
-      el?.classList.add('is-playing');
-      window.setTimeout(() => {
-        el?.classList.remove('is-playing');
-        this.runAction(action);
-      }, 220);
-      return;
-    }
-    this.openActionDetail(action);
+    if (!zoneCard) return;
+    this.activateZoneHandCard(id, zoneCard);
   }
 
   /** 拖出实体手牌时，先把 hand:<entityId> 换成它的主动词，再弹轮盘。 */
@@ -3969,34 +3986,29 @@ export class BoardGameHUD {
    */
   private playHandCard(id: string, at: Point): boolean {
     const zoneCard = this.zoneHandCards.get(id);
-    if (zoneCard) {
-      const verb =
-        zoneCard.verbs.find(candidate => candidate.verb === 'play' || candidate.verb === 'use' || candidate.verb === 'equip' || candidate.verb === 'respond' || candidate.verb === 'discard' || candidate.verb === 'pass') ??
-        zoneCard.verbs[0];
-      if (!verb) return false;
-      const derived = deriveActionCard(verb);
-      if (derived.targetMode === 'selection') {
-        // 轮盘已在 onDragStart 打开；松手只结算落点，不能再次打开。
-        const intent = this.radialPicker?.resolveAt(at.x, at.y) ?? null;
-        if (!intent) return false;
-        if (intent.type === 'center') {
-          this.openPayloadForm(verb);
-          return false;
-        }
-        if (intent.type !== 'pick') return false;
-        const result = this.performAction(verb.id, undefined, [intent.candidate.id]);
-        if (!result.ok) {
-          this.pushToast('⚠️', result.error ?? '动作被拒绝');
-          return false;
-        }
-        this.showTableEcho(verb.label, '你', zoneCard.entityId);
-        return true;
-      }
-      if (derived.targetMode === 'fields' || derived.targetMode === 'placement') {
-        this.runAction(verb);
+    if (!zoneCard) return false;
+    const verb =
+      zoneCard.verbs.find(
+        candidate =>
+          candidate.verb === 'play' ||
+          candidate.verb === 'use' ||
+          candidate.verb === 'equip' ||
+          candidate.verb === 'respond' ||
+          candidate.verb === 'discard' ||
+          candidate.verb === 'pass'
+      ) ?? zoneCard.verbs[0];
+    if (!verb) return false;
+    const derived = deriveActionCard(verb);
+    if (derived.targetMode === 'selection') {
+      // 轮盘已在 onDragStart 打开；松手只结算落点，不能再次打开。
+      const intent = this.radialPicker?.resolveAt(at.x, at.y) ?? null;
+      if (!intent) return false;
+      if (intent.type === 'center') {
+        this.openPayloadForm(verb);
         return false;
       }
-      const result = this.performAction(verb.id);
+      if (intent.type !== 'pick') return false;
+      const result = this.performAction(verb.id, undefined, [intent.candidate.id]);
       if (!result.ok) {
         this.pushToast('⚠️', result.error ?? '动作被拒绝');
         return false;
@@ -4004,41 +4016,20 @@ export class BoardGameHUD {
       this.showTableEcho(verb.label, '你', zoneCard.entityId);
       return true;
     }
-    const action = this.latest?.actions.find(candidate => candidate.id === id);
-    if (!action) return false;
-    if (action.cooldownMs && action.cooldownMs > 0) {
-      this.pushToast('⏳', `${action.label} · 还要 ${Math.ceil(action.cooldownMs / 1000)} 秒`);
+    if (derived.targetMode === 'fields' || derived.targetMode === 'placement') {
+      this.runAction(verb);
       return false;
     }
-    const card = deriveActionCard(action);
-    if (card.targetMode === 'selection') {
-      // 拖拽路径：轮盘已经在 onDragStart 弹出，这里只结算落点。
-      // 分区 → 对那个人打出；中心圆 → 二级菜单；轮盘外 → null（回弹，什么都不发生）。
-      const intent = this.radialPicker?.resolveAt(at.x, at.y) ?? null;
-      if (!intent) return false;
-      if (intent.type === 'center') {
-        this.openPayloadForm(action);
-        return false;
-      }
-      if (intent.type !== 'pick') return false;
-      const result = this.performAction(action.id, undefined, [intent.candidate.id]);
-      if (!result.ok) {
-        this.pushToast('⚠️', result.error ?? '动作被拒绝');
-        return false;
-      }
-      this.showTableEcho(action.label, '你', action.entityId);
-      return true;
-    }
-    if (card.targetMode === 'fields' || card.targetMode === 'placement') {
-      this.runAction(action);
+    const result = this.performAction(verb.id);
+    if (!result.ok) {
+      this.pushToast('⚠️', result.error ?? '动作被拒绝');
       return false;
     }
-    this.runAction(action);
-    this.showTableEcho(action.label, '你', action.entityId);
+    this.showTableEcho(verb.label, '你', zoneCard.entityId);
     return true;
   }
 
-  /**
+/**
    * 出牌回响：一张牌"落到桌上"的可见结果。
    *
    * 为什么要它：动作卡（过牌/跟注/结束回合）在 3D 桌面上没有实体，只靠手牌消失来
@@ -4085,7 +4076,7 @@ export class BoardGameHUD {
     return { x: window.innerWidth / 2, y: Math.max(120, bottom - window.innerHeight * 0.26) };
   }
 
-  /** 手牌条的物理层（懒创建，只在 `?unified-hand` 下存在）。 */
+  /** 手牌条的物理层（懒创建；分区操作台使用）。 */
   private ensureActionHand(el: HTMLElement): CardHand {
     if (!this.actionHand) el.replaceChildren();
     this.actionHand ??= new CardHand(el, {
@@ -4141,125 +4132,13 @@ export class BoardGameHUD {
     );
   }
 
-  /**
-   * 一张动作卡的 DOM。结构只在"签名变了"时重建（见 `handCardSignature`），
-   * 之后位置全部由 `CardHand` 的 rAF 写 transform，这里不再参与布局。
-   */
-  /** `display:` 前缀 = 只展示、不出牌的持有牌（底牌/道具）。 */
-  private displayEntity(id: string): { entityId: string; title: string } | null {
-    if (!id.startsWith('display:')) return null;
-    const entityId = id.slice('display:'.length);
-    const entity = this.latest?.board.entities[entityId];
-    const title = String(entity?.components?.cardFace?.title ?? '');
-    return { entityId, title };
-  }
-
+    /** 手牌只画实体卡；不存在实体映射时返回 null。 */
   private buildHandCard(id: string): HTMLElement | null {
-    const zoneCard = this.zoneHandCards.get(id);
-    if (zoneCard) return this.buildZoneHandCard(id, zoneCard);
-    const display = this.displayEntity(id);
-    if (display) {
-      const art = this.handArt.get(id) ?? '';
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'ah-card ah-held';
-      button.dataset.actionId = id;
-      button.dataset.kind = 'held';
-      button.dataset.group = 'card';
-      button.dataset.targetMode = 'none';
-      button.setAttribute('aria-label', `${display.title || '手牌'} · 仅展示`);
-      button.title = `${display.title} · 点击查看`;
-      const face = document.createElement('span');
-      face.className = 'ah-face ah-held';
-      if (art) {
-        const img = document.createElement('img');
-        img.className = 'ah-art';
-        img.alt = '';
-        img.src = art;
-        img.draggable = false;
-        face.appendChild(img);
-      }
-      const badge = document.createElement('span');
-      badge.className = 'ah-badge';
-      badge.setAttribute('aria-hidden', 'true');
-      badge.textContent = '✋';
-      face.appendChild(badge);
-      button.appendChild(face);
-      return button;
-    }
-    const action = this.latest?.actions.find(candidate => candidate.id === id);
-    if (!action) return null;
-    const card = deriveActionCard(action);
-    const art = this.handArt.get(id);
-    const aria = action.hint ? `${action.label} · ${action.hint}` : action.label;
-
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `ah-card${art ? ' ah-with-art' : ''}`;
-    button.dataset.actionId = card.id;
-    button.dataset.kind = card.kind;
-    button.dataset.group = card.group;
-    button.dataset.targetMode = card.targetMode;
-    button.setAttribute('aria-label', aria);
-    button.title = aria;
-
-    const face = document.createElement('span');
-    face.className = `ah-face ah-${card.kind}`;
-    if (art) {
-      const img = document.createElement('img');
-      img.className = 'ah-art';
-      img.alt = '';
-      img.src = art;
-      img.draggable = false;
-      const label = document.createElement('span');
-      label.className = 'ah-action-label';
-      label.textContent = card.label;
-      face.append(img, label);
-    } else {
-      const icon = document.createElement('span');
-      icon.className = 'ah-ico';
-      icon.setAttribute('aria-hidden', 'true');
-      setHtml(icon, raw(iconHtml(card.icon)));
-      const label = document.createElement('span');
-      label.className = 'ah-label';
-      label.textContent = card.label;
-      face.append(icon, label);
-    }
-    const badge = badgeFor(card);
-    if (badge) {
-      const el = document.createElement('span');
-      el.className = 'ah-badge';
-      el.setAttribute('aria-hidden', 'true');
-      el.textContent = badge;
-      face.appendChild(el);
-    }
-    if (card.cooldownMs && card.cooldownMs > 0) {
-      const el = document.createElement('span');
-      el.className = 'ah-cool';
-      el.textContent = `${Math.ceil(card.cooldownMs / 1000)}s`;
-      face.appendChild(el);
-    }
-    button.appendChild(face);
-    return button;
+    const card = this.zoneHandCards.get(id);
+    return card ? this.buildZoneHandCard(id, card) : null;
   }
 
-  /** 外观签名：变了才重建节点，否则每帧快照都会把动画打断。 */
-  private handCardSignature(id: string, action: UiAction): string {
-    const card = deriveActionCard(action);
-    const art = this.handArt.get(id) ?? '';
-    return [
-      card.kind,
-      card.targetMode,
-      card.label,
-      card.hint ?? '',
-      action.icon ?? '',
-      String(card.cooldownMs ?? 0),
-      art ? String(art.length) : '',
-      art ? fnv1a(art) : ''
-    ].join('|');
-  }
-
-  /**
+/**
    * Open the radial target chooser anchored at a screen point.
    *
    * 锚点用点而不是元素：手牌的卡片会被物理层移动，点开详情/拖出松手都应该以
@@ -4532,7 +4411,9 @@ export class BoardGameHUD {
       face.appendChild(label);
     }
     const primary = card.verbs[0];
-    const badge = primary ? badgeFor(deriveActionCard(primary)) : '';
+    const primaryCard = primary ? deriveActionCard(primary) : null;
+    if (primaryCard) button.dataset.targetMode = primaryCard.targetMode;
+    const badge = primaryCard ? badgeFor(primaryCard) : '';
     if (badge) {
       const badgeEl = document.createElement('span');
       badgeEl.className = 'ah-badge';
@@ -4649,11 +4530,8 @@ export class BoardGameHUD {
   private renderActionHand(snapshot: GameSnapshot): void {
     const el = this.container.querySelector('#action-hand') as HTMLElement | null;
     if (!el) return;
-    if (this.operationDeckEnabled) {
-      this.renderZoneHand(snapshot, el);
-      return;
-    }
-    if (!this.actionHandEnabled) {
+    if (!this.operationDeckEnabled) {
+      // 传统动作栏：不用 DOM 手牌，3D 手持区 + dock 扇形接管。
       if (el.getAttribute('data-enabled') !== '0') {
         el.setAttribute('data-enabled', '0');
         el.setAttribute('aria-hidden', 'true');
@@ -4661,49 +4539,11 @@ export class BoardGameHUD {
       }
       this.actionHand?.destroy();
       this.actionHand = undefined;
+      this.zoneHandCards.clear();
+      this.syncHandPager(0, 0);
       return;
     }
-    // 先启用再量：`data-enabled="0"` 时整条是 display:none，clientWidth 为 0，
-    // 用兜底宽度会把牌摆到比实际更宽的一行里。
-    el.setAttribute('data-enabled', '1');
-    el.setAttribute('aria-hidden', 'false');
-
-    this.handArt.clear();
-    // 手牌分区：牌 → 装备 → 技能 → 命令。同一分区内保持引擎给的顺序（稳定排序）。
-    const GROUP_ORDER: Record<string, number> = { card: 0, equip: 1, skill: 2, command: 3 };
-    const ordered = [...snapshot.actions].sort(
-      (a, b) => (GROUP_ORDER[a.group ?? 'command'] ?? 3) - (GROUP_ORDER[b.group ?? 'command'] ?? 3)
-    );
-    const items: HandCardItem[] = ordered.map(action => {
-      const card = deriveActionCard(action);
-      const art = card.entityId ? this.ports.entityCardArt?.(card.entityId) : undefined;
-      if (art) this.handArt.set(card.id, art);
-      return { id: card.id, signature: this.handCardSignature(card.id, action) };
-    });
-
-    // 手里还有"不是动作"的牌：德州的两张底牌、山屋的道具卡……
-    // 它们没有对应 action，但玩家必须看得见，所以排在动作卡右侧一起持有。
-    const claimed = new Set(
-      snapshot.actions
-        .map(action => deriveActionCard(action).entityId)
-        .filter((entityId): entityId is string => Boolean(entityId))
-    );
-    // 上帝视角没有"自己的手牌"：改看当前行动者的手牌（否则会把所有玩家的手牌铺开）。
-    const handOwner = snapshot.viewer === 'GOD' ? (snapshot.focus[0] ?? '') : snapshot.viewer;
-    const handZone = handOwner ? snapshot.board.zones?.[`zone_hand_${handOwner}`] : undefined;
-    const handIds = (handZone?.orderedEntities ?? []).slice(0, 12);
-    for (const entityId of handIds) {
-      if (claimed.has(entityId)) continue;
-      const entity = snapshot.board.entities[entityId];
-      if (!entity || entity.isMasked) continue;
-      const id = `display:${entityId}`;
-      const art = this.ports.entityCardArt?.(entityId) ?? '';
-      this.handArt.set(id, art);
-      const title = String(entity.components?.cardFace?.title ?? '');
-      items.push({ id, signature: `display|${title}|${art ? fnv1a(art) : ''}` });
-    }
-
-    this.ensureActionHand(el).sync(items);
+    this.renderZoneHand(snapshot, el);
     this.renderTableEcho(snapshot);
   }
 

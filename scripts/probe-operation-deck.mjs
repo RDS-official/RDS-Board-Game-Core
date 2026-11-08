@@ -243,6 +243,55 @@ async function openGame(page, game) {
   await page.close();
 }
 
+/* ---- 6. Default zones + menu switch to traditional ---- */
+{
+  const { page, errors } = await openPage();
+  await page.goto(dev.url + '?game=sanguosha', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  if (await page.locator('#boot-enter').count()) await page.click('#boot-enter').catch(() => {});
+  await page.waitForSelector('#operation-deck[data-enabled="1"]', { timeout: 30000 });
+  await page.waitForTimeout(700);
+  const initial = await page.evaluate(() => ({
+    mode: document.querySelector('#hud-container')?.dataset.hand,
+    hand: document.querySelectorAll('#action-hand .ah-hand').length
+  }));
+  record('default: zones is the opening mode', initial.mode === 'zones' && initial.hand > 0, JSON.stringify(initial));
+
+  await page.locator('[data-toggle="menu"]').click({ force: true });
+  await page.waitForTimeout(200);
+  const menu = await page.evaluate(() => ({
+    open: !!document.querySelector('#menu-dialog'),
+    modes: [...document.querySelectorAll('[data-hand-mode]')].map(el => ({
+      mode: el.dataset.handMode,
+      pressed: el.getAttribute('aria-pressed')
+    }))
+  }));
+  record('menu: both hand modes are offered', menu.open && menu.modes.length === 2, JSON.stringify(menu));
+  record('menu: zones is pressed by default', menu.modes.find(item => item.mode === 'zones')?.pressed === 'true', JSON.stringify(menu.modes));
+
+  await page.locator('[data-hand-mode="legacy"]').click({ force: true });
+  await page.waitForTimeout(650);
+  const legacy = await page.evaluate(() => ({
+    mode: document.querySelector('#hud-container')?.dataset.hand,
+    deck: document.querySelector('#operation-deck')?.dataset.enabled,
+    hand: document.querySelectorAll('#action-hand .ah-hand').length,
+    dockHeight: document.querySelector('#action-dock')?.getBoundingClientRect().height ?? 0
+  }));
+  record('menu: traditional mode restores the dock', legacy.mode === 'legacy' && legacy.deck === '0' && legacy.dockHeight > 0, JSON.stringify(legacy));
+
+  await page.locator('[data-toggle="menu"]').click({ force: true });
+  await page.waitForTimeout(150);
+  await page.locator('[data-hand-mode="zones"]').click({ force: true });
+  await page.waitForTimeout(650);
+  const zones = await page.evaluate(() => ({
+    mode: document.querySelector('#hud-container')?.dataset.hand,
+    deck: document.querySelector('#operation-deck')?.dataset.enabled,
+    hand: document.querySelectorAll('#action-hand .ah-hand').length
+  }));
+  record('menu: switching back restores the operation deck', zones.mode === 'zones' && zones.deck === '1' && zones.hand > 0, JSON.stringify(zones));
+  record('menu: no page errors', errors.length === 0, errors.join('; '));
+  await page.close();
+}
+
 /* ---- 6. 390px: no horizontal overflow ---- */
 {
   const { page, errors } = await openPage({ width: 390, height: 844 });

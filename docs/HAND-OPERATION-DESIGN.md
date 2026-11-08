@@ -34,7 +34,7 @@
 | 文案 | `packages/app/src/actionText.ts` | `describeActionZh` 的游戏专用 switch |
 | UI 派生 | `apps/web/src/ui/actionCards.ts` | `ActionCardKind`、`targetMode`、`executionRoute` |
 | 手牌物理 | `apps/web/src/ui/cardHand/cardHand.ts` | 分页、弧形布局、拖拽/回弹 |
-| HUD | `apps/web/src/ui/hud.ts` | `renderActionHand`、`GROUP_ORDER`、held 卡、`?unified-hand` |
+| HUD | `apps/web/src/ui/hud.ts` | `renderActionHand`、操作台分面、菜单的手牌模式切换 |
 | 既有评审 | `docs/INTERACTION-AUDIT.md`、`INTERACTION-REDESIGN.md`、`INTERACTION-ROADMAP.md`、`UI-HAND-SLOT-NOTES.md`、`UI-ARCHITECTURE.md` | 已修/未修边界，避免重复造轮子 |
 
 ### 1.2 业界样本
@@ -176,7 +176,7 @@ DOM 手牌
 
 #### H12 · 多套入口仍在
 
-`?unified-hand` 是特性开关（`apps/web/src/ui/hud.ts:2095`），旧 dock 扇形、`#hand-slot`、3D 只读手牌仍然存在。多套入口意味着同一份 `snapshot.actions` 被多个组件以不同方式解释，分类逻辑无法收敛。设计落地时必须明确唯一入口与退役顺序。
+`?unified-hand` 是旧版特性开关，现已删除；当前默认 `?zones`，菜单可切传统。旧 dock 扇形、`#hand-slot`、3D 只读手牌只在传统模式保留。
 
 ### 2.4 量化：动作数如何变成手牌数
 
@@ -956,11 +956,11 @@ interface GameSnapshot {
 ### 8.7 兼容与灰度
 
 - 新字段全部 optional，旧客户端忽略；
-- 新 UI 用 ?zones 开关，默认关闭；迁移完成后默认开启；
+- 新 UI 用 ?zones 开关；当前版本已默认开启，菜单可切传统；
 - 网络协议 additive：snapshot 多几个字段，不改 wire format；
 - GameState 不变，回放哈希不变；
 - AI 继续使用 engine.legalActions，不受 UI 分类影响；
-- 旧 ?unified-hand 与新 ?zones 不叠加；迁移期只保留一个入口，避免三套 UI 同时渲染。
+- 旧 ?unified-hand 已删除；传统模式只保留 dock/hand-slot，不再维护动作卡手牌。
 
 ---
 
@@ -1150,7 +1150,7 @@ CSS Grid 建议：
 
 - pnpm verify:all 全绿；
 - pnpm test:ui 21 屏 + card-overlay；
-- pnpm probe:card-hand 现有手感断言不回归；
+- pnpm probe:operation-deck 手牌/拖拽/响应断言不回归；
 - 每款游戏至少三条快照：开局 / 行动中 / 响应窗口；
 - 重点回归：三国杀响应、山屋物品、卡坦建造/交易、德州下注、璀璨支付、麻将吃碰杠胡；
 - 网络房间：同一 revision 下 snapshot 投影一致；新字段不破坏旧客户端。
@@ -1280,7 +1280,7 @@ CSS Grid 建议：
 ## 15. 实现状态（2026-11-08，第一版）
 
 已落地的是 P0/P1 的主干与 P2/P5 的可见路径，全部由 `?zones` 开关启用；
-旧 `?unified-hand` 与无参数 legacy dock 行为不变，便于灰度与回退。
+旧 `?unified-hand` 已删除；`?zones` 现在是默认操作台，菜单可切到传统动作栏。
 
 | 能力 | 状态 | 落点 |
 | --- | --- | --- |
@@ -1306,8 +1306,8 @@ CSS Grid 建议：
 
 ~~~
 pnpm probe:operation-deck   # 28 项：手牌/指令/情境/应答/无手牌/390px
-pnpm probe:unified-hand     # 旧 ?unified-hand 路径不回归
-pnpm probe:card-hand        # 手牌物理层不回归
+pnpm probe:operation-deck   # 分区操作台与拖拽/响应/换局
+pnpm probe:target-wheel     # 目标轮盘不回归
 pnpm verify:changed         # 当前 9/9 闸门
 ~~~
 
