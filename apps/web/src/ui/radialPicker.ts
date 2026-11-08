@@ -66,9 +66,14 @@ export interface RadialSegment {
   path: string;
 }
 
+/** 轮盘形态：n≤3 画圆（判据=半径），n≥4 画多边形（判据=多边形）。 */
+export type WheelShape = 'circle' | 'polygon';
+
 export interface RadialWheel {
   /** Number of candidates (segments). */
   count: number;
+  /** 形态。**绘制与判定必须同时看它**，不允许"画圆却按多边形判"。 */
+  shape: WheelShape;
   /** 外轮廓顶点（相对圆心，按角度顺序）。磨砂层用它做 clip-path：**只在轮盘内磨砂**。 */
   outline: Point[];
   radius: number;
@@ -140,7 +145,7 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
   const startAngle = opts.startAngle ?? -Math.PI / 2;
 
   if (n === 0) {
-    return { count: 0, radius, innerRadius, startAngle, segments: [], outline: [] };
+    return { count: 0, shape: 'circle', radius, innerRadius, startAngle, segments: [], outline: [] };
   }
 
   const seedValue = opts.seed ?? candidates.map((c) => c.id).join('|');
@@ -160,7 +165,8 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
   // n ≤ 3 时顶点太少：2 个顶点会让多边形退化成"过圆心的直线"（面积→0），3 个顶点
   // 的三角形又把扇区压得很窄、轮盘看着像几根棍子。所以 n≤3 统一用圆弧外边界
   // （环形扇区 = 圆形轮盘），只有 n≥4 才用多边形轮廓。
-  const arcOuter = n <= 3;
+  const shape: WheelShape = n <= 3 ? 'circle' : 'polygon';
+  const arcOuter = shape === 'circle';
   const radii: number[] = [];
   for (let i = 0; i < n; i += 1) {
     const rJitter = arcOuter ? 0 : jitterAt(seed, i + 7) * jitterR * radius;
@@ -227,12 +233,14 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
     });
   }
 
-  // 外轮廓：多边形用顶点，n≤2 用一圈圆（让描边与填充形状一致）
+  // 外轮廓与形态一致：圆形给一圈采样点（描边用），多边形给顶点。
+  // 这里以前写的是 n<=2，而扇区绘制在 n<=3 就切成了圆弧 —— n=3 于是"画的是圆、
+  // 判的是三角形"，光标在圆内三角外还能亮。现在统一由 shape 决定。
   const outline: Point[] =
-    n <= 2
-      ? Array.from({ length: 24 }, (_, i) => polar(radius, startAngle + (i / 24) * TAU) as Point)
+    shape === 'circle'
+      ? Array.from({ length: 48 }, (_, i) => polar(radius, startAngle + (i / 48) * TAU) as Point)
       : segments.map(seg => seg.outerStart);
-  return { count: n, radius, innerRadius, startAngle, segments, outline };
+  return { count: n, shape, radius, innerRadius, startAngle, segments, outline };
 }
 
 /** 点是否落在轮盘外轮廓（多边形/近似圆）内部。 */
@@ -260,9 +268,14 @@ export function hitTestWheel(wheel: RadialWheel, dx: number, dy: number): Radial
   if (wheel.count === 0) return { zone: 'empty' };
   const r = Math.hypot(dx, dy);
   if (r < wheel.innerRadius) return { zone: 'center' };
-  // 出了轮廓就是"轮盘外"：外轮廓是多边形，四角是空白区，不能按半径算成扇区，
-  // 否则光标明明在轮盘外面，里面还亮着一块（也是"卡片乱缩小"的来源）。
-  if (!outlineContains(wheel, dx, dy) && r > wheel.innerRadius) return { zone: 'empty' };
+
+  if (wheel.shape === 'circle') {
+    // 圆形轮盘：判据就是半径——圈内就是某个扇区，出圈即"轮盘外"。
+    if (r > wheel.radius * 1.02) return { zone: 'empty' };
+  } else if (!outlineContains(wheel, dx, dy)) {
+    // 多边形轮盘：四角是空白区，必须真的落在多边形里才算命中。
+    return { zone: 'empty' };
+  }
 
   if (wheel.count === 1) {
     return { zone: 'segment', index: 0, candidate: wheel.segments[0].candidate };

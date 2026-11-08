@@ -43,6 +43,47 @@ for (let n = 1; n <= 8; n += 1) {
   }
 }
 
+/* ---- 1b. pure: shape decides BOTH drawing and hit-testing ----------- */
+{
+  const TAU2 = Math.PI * 2;
+  const ring = (wheel, r) => {
+    const zones = [];
+    for (let i = 0; i < 72; i += 1) {
+      const a = (i / 72) * TAU2;
+      zones.push(hitTestWheel(wheel, Math.cos(a) * r, Math.sin(a) * r).zone);
+    }
+    return zones;
+  };
+  for (const n of [1, 2, 3]) {
+    const wheel = buildWheel(
+      Array.from({ length: n }, (_, i) => ({ id: 'p' + i, label: 'P' + i })),
+      { radius: 300, seed: 'circle-' + n }
+    );
+    record('n=' + n + ': shape is circle', wheel.shape === 'circle', wheel.shape);
+    const inside = ring(wheel, 300 * 0.92);
+    record(
+      'n=' + n + ': a circle wheel judges by radius (whole ring is inside)',
+      inside.every(zone => zone !== 'empty'),
+      inside.filter(zone => zone === 'empty').length + '/72 empty'
+    );
+    const outside = ring(wheel, 300 * 1.05);
+    record('n=' + n + ': outside the circle is empty', outside.every(zone => zone === 'empty'), outside.join(','));
+  }
+  for (const n of [4, 6]) {
+    const wheel = buildWheel(
+      Array.from({ length: n }, (_, i) => ({ id: 'p' + i, label: 'P' + i })),
+      { radius: 300, seed: 'poly-' + n }
+    );
+    record('n=' + n + ': shape is polygon', wheel.shape === 'polygon', wheel.shape);
+    // 顶点之间的"角"（半径 0.95R、两个顶点方向的正中间）在圆里、但在多边形外
+    const mid = (wheel.segments[0].angleStart + wheel.segments[0].angleEnd) / 2;
+    const corner = hitTestWheel(wheel, Math.cos(mid) * 300 * 0.95, Math.sin(mid) * 300 * 0.95);
+    record('n=' + n + ': a polygon wheel judges by the polygon (corners are outside)', corner.zone === 'empty', corner.zone);
+    const inside = hitTestWheel(wheel, Math.cos(mid) * 300 * 0.5, Math.sin(mid) * 300 * 0.5);
+    record('n=' + n + ': inside the polygon still hits a sector', inside.zone === 'segment', inside.zone);
+  }
+}
+
 /* ---- 1b. pure: n<=3 is a circle, n>=4 is a polygon ------------------ */
 {
   for (const n of [1, 2, 3]) {
