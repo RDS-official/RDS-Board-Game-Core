@@ -104,6 +104,49 @@ export interface BoundAction {
 }
 
 /**
+ * 把「玩家点了哪个 UI 动作 + 附带什么 payload / 目标」翻译成要派发的内核动作。
+ *
+ * 单机（UniversalSession）与联机（NetSession）都必须走这一条路径。之前两边各写
+ * 一份，联机那份漏了塌缩处理：一张塌缩后的【杀】携带的是「第一个目标」的那条
+ * 动作，玩家在轮盘里选了别人，联机只是往这条动作上贴了一个 `targets` 数组，
+ * 于是既改了 canonical 绑定、又没换目标，权威一律判非法——表现就是「出杀永远
+ * 被服务器拒绝」。
+ *
+ * 目标塌缩（targetVariants）与动作族塌缩（variantVariants）都要换回原来那条
+ * 具体动作，绝不自己拼一个近似动作：合法性只由引擎判定。
+ */
+export function resolveBoundAction(
+  bound: BoundAction,
+  payload?: Record<string, unknown>,
+  targets?: string[]
+): { action?: Action; error?: string } {
+  const base = bound.action;
+  if (!base) return { error: 'action has no dispatch payload' };
+
+  const withPayload = (action: Action): Action =>
+    payload && Object.keys(payload).length > 0
+      ? { ...action, payload: { ...(action.payload ?? {}), ...payload } }
+      : { ...action };
+
+  if (targets && bound.variantVariants) {
+    const chosen = bound.variantVariants.get([...targets].sort().join('|'));
+    if (!chosen) return { error: '无效的动作族选择' };
+    return { action: withPayload(chosen) };
+  }
+  if (targets && targets.length === 1 && bound.targetVariants) {
+    const chosen = bound.targetVariants.get(targets[0]);
+    // 塌缩动作的目标集合是封闭的：范围外的目标绝不能退回「贴一个 targets」，
+    // 那等于自己造一条权威不认的动作。
+    if (!chosen) return { error: `目标 ${targets[0]} 不在当前可选范围内` };
+    return { action: withPayload(chosen) };
+  }
+
+  const action = withPayload(base);
+  if (targets && targets.length > 0) action.targets = targets;
+  return { action };
+}
+
+/**
  * 面板动作携带的自由元数据（由各游戏的呈现层写入）。
  *
  * 这里以前是 15 处 `(pick.metadata as any)`，等于放弃类型检查；现在集中成一个
@@ -446,27 +489,9 @@ export class UniversalSession implements GamePresenter {
 
     if (!bound.action) return { ok: false, error: 'action has no dispatch payload' };
 
-    const action: Action = { ...bound.action };
-    if (payload && Object.keys(payload).length > 0) {
-      action.payload = { ...(bound.action.payload ?? {}), ...payload };
-    }
-    if (targets && bound.variantVariants) {
-      const key = [...targets].sort().join('|');
-      const chosen = bound.variantVariants.get(key);
-      if (!chosen) return { ok: false, error: '无效的动作族选择' };
-      return this.dispatch({
-        ...chosen,
-        ...(payload ? { payload: { ...(chosen.payload ?? {}), ...payload } } : {})
-      });
-    }
-    if (targets && targets.length === 1 && bound.targetVariants?.has(targets[0])) {
-      // 目标塌缩的卡片：用玩家选中的目标换回那条具体动作再派发。
-      const chosen = bound.targetVariants.get(targets[0]) as Action;
-      return this.dispatch({ ...chosen, ...(payload ? { payload: { ...(chosen.payload ?? {}), ...payload } } : {}) });
-    }
-    if (targets && targets.length > 0) action.targets = targets;
-
-    return this.dispatch(action);
+    const resolved = resolveBoundAction(bound, payload, targets);
+    if (!resolved.action) return { ok: false, error: resolved.error ?? '动作无法派发' };
+    return this.dispatch(resolved.action);
   }
 
   public pickTarget(pick: BoardPick): { handled: boolean; message?: string } {

@@ -8,7 +8,10 @@ import { canonicalize } from '@rds/kernel/serialize'
 import { GAME_MODULES, GAME_REGISTRY } from '@rds/games/registry'
 import { RandomPolicy, runPolicies } from '../policy'
 import { GameRoom } from '@rds/net/room'
-import { UniversalSession, buildActionsView, buildSeatViews } from '@rds/app/session'
+import { UniversalSession, buildActionsView, buildSeatViews, resolveBoundAction } from '@rds/app/session'
+import type { BoundAction } from '@rds/app/session'
+import type { Action } from '@rds/kernel/types'
+import type { UiAction } from '@rds/app/contracts'
 import { NetSession } from '@rds/app/netSession'
 import { resolvePendingDamage } from '../suiteHelpers';
 import { test, assert, assertEqual } from '../testKit';
@@ -95,8 +98,39 @@ test('presenter: node click without a targeting action is inspection only', () =
   session.dispose();
 });
 
-test('projection: selection candidates use the viewer projection', () => {
-  const engine = new UniversalGameEngine(GAME_REGISTRY.sanguosha, 9);
+test('presenter: a collapsed card action resolves to the chosen target', () => {
+  // 一张【杀】在合法动作里是「每个目标一条」。手牌只显示一张，UI 把它塌缩成
+  // 一个按钮（targetVariants）。玩家在轮盘里选谁，就必须换回谁的那条具体动作：
+  // 曾经联机版把 `targets` 贴在「第一个目标」那条动作上，于是既改了 canonical
+  // 绑定又没换目标，权威一律判非法 —— 症状是「出杀永远被服务器拒绝」。
+  const toP2: Action = { type: 'PLAY_CARD', playerId: 'p1', entityId: 'card_sha', targetPlayerId: 'p2' };
+  const toP3: Action = { type: 'PLAY_CARD', playerId: 'p1', entityId: 'card_sha', targetPlayerId: 'p3' };
+  const bound: BoundAction = {
+    ui: { id: 'a0' } as UiAction,
+    action: toP2,
+    targetVariants: new Map([
+      ['p2', toP2],
+      ['p3', toP3]
+    ])
+  };
+
+  const picked = resolveBoundAction(bound, undefined, ['p3']);
+  assertEqual(picked.action?.targetPlayerId, 'p3', 'the chosen target replaces the collapsed first target');
+  assertEqual(picked.action?.targets, undefined, 'no synthetic targets array is attached');
+  assertEqual(canonicalize(picked.action), canonicalize(toP3), 'dispatches exactly a legal action');
+
+  const unknown = resolveBoundAction(bound, undefined, ['p9']);
+  assert(!!unknown.error, 'a target outside the collapsed set is refused locally');
+  assertEqual(unknown.action, undefined, 'nothing is dispatched for an invalid pick');
+
+  // 没有塌缩的动作照旧直接派发，payload 合并不能丢。
+  const plain: BoundAction = { ui: { id: 'a1' } as UiAction, action: { type: 'END_TURN', playerId: 'p1' } };
+  const merged = resolveBoundAction(plain, { note: 'x' });
+  assertEqual(merged.action?.type, 'END_TURN', 'plain actions still dispatch');
+  assertEqual(merged.action?.payload?.note, 'x', 'payload is merged in');
+});
+
+test('projection: selection candidates use the viewer projection', () => {  const engine = new UniversalGameEngine(GAME_REGISTRY.sanguosha, 9);
   engine.setViewer('p1');
   const own = engine.getSelectionCandidates('p1', { source: 'hand', min: 1, max: 1 });
   assert(own.length > 0, 'own hand candidates are visible');
