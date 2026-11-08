@@ -2103,7 +2103,10 @@
 }
 .app-shell > .action-hand[data-enabled='1'] {
   display: block;
-  position: absolute;
+  /* fixed 而不是 absolute：#app 的高度依赖浏览器自报的视口，第三方浏览器
+     （例如 Via）会把自身工具栏算进去，absolute 贴底就会被那条工具栏切掉。
+     fixed 直接锚定真实视口，不再吃视口 API 的亏。 */
+  position: fixed;
   left: 50%;
   bottom: calc(var(--shell-edge, 16px) + 10px);
   transform: translateX(-50%);
@@ -2559,7 +2562,7 @@
    手牌不横向滚动：滚动手势会与拖拽抢同一个轴。翻页只换"当前页"，卡片位置仍由
    弧形布局算出，拖动永远发生在页内。 */
 .hand-pager {
-  position: absolute;
+  position: fixed;
   left: 50%;
   bottom: calc(var(--shell-edge, 16px) + 178px);
   z-index: 3000;
@@ -2661,7 +2664,7 @@
 }
 
 .operation-deck[data-enabled='1'] {
-  position: absolute;
+  position: fixed;
   left: 50%;
   bottom: calc(var(--shell-edge, 16px) + 200px);
   transform: translateX(-50%);

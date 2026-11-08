@@ -44,7 +44,12 @@ body {
 #app {
   position: relative;
   width: 100vw;
-  height: 100vh;
+  /* 100vh 在移动端等于「大视口」：地址栏/工具栏收起时的高度，会把贴底 UI
+     顶到浏览器 UI 后面（手牌只露出上半截）。main.ts 把真实可视高度写进
+     --app-height；再叠一层 100dvh 兜住 JS 还没跑到的首帧。 */
+  height: var(--app-height, 100vh);
+  /* 不支持的浏览器会忽略这一行，height 仍是上面的变量值。 */
+  max-height: 100dvh;
   overflow: hidden;
   background: radial-gradient(120% 100% at 50% 0%, #131722 0%, #05070a 60%);
 }
@@ -2937,27 +2942,6 @@ body {
   gap: 10px;
 }
 
-/* 手机上参数面板要能整屏滚动：硬高度 + 内部滚动，避免确认按钮被键盘顶出去。 */
-@media (max-width: 599px), (max-height: 480px) {
-  .payload-layer,
-  #payload-layer {
-    align-items: flex-start;
-    justify-content: center;
-    overflow-y: auto;
-    padding: 12px;
-  }
-
-  .payload-card {
-    margin: auto 0;
-    max-height: calc(var(--app-height, 100vh) - 24px);
-    overflow-y: auto;
-  }
-
-  .pf-targets {
-    max-height: 40vh;
-    overflow-y: auto;
-  }
-}
 /* 手机上参数面板要能整屏滚动：硬高度 + 内部滚动，避免确认按钮被键盘顶出去。 */
 @media (max-width: 599px), (max-height: 480px) {
   #payload-layer {
