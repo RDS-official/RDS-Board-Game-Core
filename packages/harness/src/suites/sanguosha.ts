@@ -1,4 +1,5 @@
 import { describeActionView } from '@rds/app/actionText';
+import { buildActionsView, resolveBoundAction } from '@rds/app/session';
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { Action, GameState } from '@rds/kernel/types';
 import { GAME_REGISTRY } from '@rds/games/registry';
@@ -220,6 +221,50 @@ test('fixture sanguosha: Fangtian Halberd chains one Strike into multiple target
   const hp = (pid: string) => Number(after.players[pid].customProps.hp);
   assert(hp('p2') < 4 || hp('p3') < 4, 'at least one of the chained targets took damage');
   assertEqual(after.globalVars.strikeQueue, undefined, 'the multi-target queue drains');
+});
+
+test('fixture sanguosha: a collapsed Strike dispatches the target the player picked', () => {
+  // 端到端复现「出杀被服务器拒绝」：一张【杀】在合法动作里是每个目标一条，UI 把
+  // 它们塌缩成一个按钮。玩家在轮盘里选的目标必须能真的派发出去——联机版曾经只把
+  // targets 贴在首个目标那条动作上，权威一律判非法。
+  const engine = new UniversalGameEngine(GAME_REGISTRY.sanguosha, 29);
+  const state = engine.getRawState();
+  state.phase = 'PLAY';
+  state.activePlayerId = 'p1';
+  // 保证手里有【杀】，且攻击范围内不止一个目标（4 人环里 p1 的邻座就是两个）。
+  moveDeckCardTo(state, 'sha', 'zone_hand_p1', 'p1');
+  const strikes = engine.getLegalActions('p1').filter(action => action.type === 'PLAY_STRIKE');
+  const byCard = new Map<string, Action[]>();
+  for (const action of strikes) {
+    const key = String(action.entityId ?? '');
+    byCard.set(key, [...(byCard.get(key) ?? []), action]);
+  }
+  const multi = [...byCard.values()].find(group => group.length >= 2);
+  assert(!!multi, 'a Strike with more than one legal target exists');
+
+  const projection = engine.getProjectedStateFor('p1');
+  const bound = buildActionsView(projection, strikes, (actorId, spec) =>
+    engine.getSelectionCandidates(actorId, spec)
+  );
+  const collapsed = bound.find(entry => (entry.targetVariants?.size ?? 0) >= 2);
+  assert(!!collapsed, 'the multi-target Strike is collapsed into one card');
+  assertEqual(collapsed!.ui.selection?.candidates.length, collapsed!.targetVariants!.size, 'every legal target is offered');
+
+  // 选一个「不是首个目标」的目标，否则测不出换回逻辑。
+  const firstTarget = String(collapsed!.action?.targetPlayerId ?? '');
+  const chosen = [...collapsed!.targetVariants!.keys()].find(id => id !== firstTarget);
+  assert(!!chosen, 'a non-first target exists');
+
+  const resolved = resolveBoundAction(collapsed!, undefined, [chosen!]);
+  assert(!!resolved.action, 'the picked target resolves to a concrete action');
+  assertEqual(resolved.action!.targetPlayerId, chosen, 'it is the action for the picked target');
+  assert(engine.dispatch(resolved.action!).ok, 'the authority accepts the picked target');
+
+  // 反向断言：旧联机版的形状（首个目标的动作 + 贴一个 targets）必须被判非法，
+  // 否则这条回归用例保护不了那段逻辑。
+  const buggy = { ...collapsed!.action!, targets: [chosen!] } as Action;
+  const rejected = engine.dispatch(buggy);
+  assert(!rejected.ok, 'the old "attach targets to the first action" shape is rejected');
 });
 
 test('fixture sanguosha: Rende gives a card and heals on the second gift', () => {
