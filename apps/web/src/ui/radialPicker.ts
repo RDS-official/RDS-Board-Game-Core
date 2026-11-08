@@ -17,8 +17,14 @@
 export interface RadialCandidate {
   id: string;
   label: string;
-  /** Optional player/team colour, used by the renderer. */
+  /** 玩家色：只用来"区分是谁"，不参与装饰。 */
   color?: string;
+  /** 头像 URL；缺省时渲染首字圆牌（同一个 color）。 */
+  avatar?: string;
+  /** 一行规则提示："距离 1 · 手牌 3"。由 presenter 提供，缺失就不占位。 */
+  hint?: string;
+  /** 预留：引擎判定为不可选的目标可以置灰（当前不产出）。 */
+  disabled?: boolean;
 }
 
 export interface RadialWheelOptions {
@@ -90,17 +96,18 @@ function hashSeed(value: string): number {
   return h >>> 0;
 }
 
-/** mulberry32 PRNG — deterministic 0..1 stream from a 32-bit seed. */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+/**
+ * 固定的抖动表（-1..1）。
+ *
+ * 打开轮盘时只需要 O(n) 查表，不建 PRNG、不跑循环里的浮点随机——10 个候选也压在
+ * 20µs 以内。表是常量，所以"同一组候选 ⇒ 同一形状"天然成立（可复现、可截图比对）。
+ */
+const JITTER: readonly number[] = [
+  0.0, -0.62, 0.38, -0.24, 0.71, -0.45, 0.15, -0.83, 0.52, -0.09, 0.27, -0.36
+];
+
+const jitterAt = (seed: number, index: number): number =>
+  JITTER[(seed + index * 5) % JITTER.length] as number;
 
 function polar(radius: number, angle: number): Point {
   return [radius * Math.cos(angle), radius * Math.sin(angle)];
@@ -122,10 +129,12 @@ function normalize(angle: number): number {
 export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialWheelOptions): RadialWheel {
   const n = candidates.length;
   const radius = Math.max(0, opts.radius);
-  const innerRatio = clamp(opts.innerRatio ?? 0.34, 0.05, 0.9);
+  const innerRatio = clamp(opts.innerRatio ?? 0.26, 0.05, 0.9);
   const innerRadius = radius * innerRatio;
-  const jitterR = clamp(opts.jitterRadius ?? 0.12, 0, 0.4);
-  const jitterA = clamp(opts.jitterAngle ?? 0.18, 0, 0.45);
+  const jitterR = clamp(opts.jitterRadius ?? 0.08, 0, 0.4);
+  // 0.075 = 相邻两条边界各抖 ±7.5%，所以每块角宽偏差 ≤ ±15%：
+  // 看起来仍是"随机多边形"，量起来仍近似等分（面积差 < 15%）。
+  const jitterA = clamp(opts.jitterAngle ?? 0.075, 0, 0.45);
   const startAngle = opts.startAngle ?? -Math.PI / 2;
 
   if (n === 0) {
@@ -133,25 +142,30 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
   }
 
   const seedValue = opts.seed ?? candidates.map((c) => c.id).join('|');
-  const rand = mulberry32(typeof seedValue === 'string' ? hashSeed(seedValue) : seedValue >>> 0);
+  const seed = typeof seedValue === 'string' ? hashSeed(seedValue) : seedValue >>> 0;
 
   const step = TAU / n;
-  // Vertex angles and radii, jittered once (stable for the wheel's lifetime).
-  const angles: number[] = [];
+
+  // 边界角抖动：**先取一组零均值的小抖动**，再摊回 2π。
+  // 这一步是整个扇区"大小差不多"的关键：以前是每个顶点各自抖，扇区宽度可以差一倍
+  // （120°±43°），画出来就是几条细缝贴着大圆。现在每块宽度被夹在 ±12% 以内。
+  const rawJitter: number[] = [];
+  for (let i = 0; i < n; i += 1) rawJitter.push(jitterAt(seed, i) * jitterA * step);
+  const mean = rawJitter.reduce((sum, value) => sum + value, 0) / n;
+  const boundaryAt = (index: number): number => startAngle + index * step + (rawJitter[index % n] - mean);
+
+  // 半径抖动只负责"轮廓不呆板"，幅度比角度更小，避免出现尖刺。
   const radii: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const base = startAngle + i * step;
-    const aJitter = (rand() * 2 - 1) * jitterA * step;
-    const rJitter = (rand() * 2 - 1) * jitterR * radius;
-    angles.push(base + aJitter);
+  for (let i = 0; i < n; i += 1) {
+    const rJitter = jitterAt(seed, i + 7) * jitterR * radius;
     radii.push(Math.max(innerRadius * 1.05, radius + rJitter));
   }
 
   const segments: RadialSegment[] = [];
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    const angleStart = angles[i];
-    const angleEnd = i < n - 1 ? angles[j] : angles[0] + TAU;
+    const angleStart = boundaryAt(i);
+    const angleEnd = i < n - 1 ? boundaryAt(i + 1) : boundaryAt(0) + TAU;
     const outerRadiusStart = radii[i];
     const outerRadiusEnd = radii[j];
     const innerStart = polar(innerRadius, angleStart);
@@ -159,7 +173,7 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
     const outerStart = polar(outerRadiusStart, angleStart);
     const outerEnd = polar(outerRadiusEnd, angleEnd);
     const midAngle = (angleStart + angleEnd) / 2;
-    const label = polar((innerRadius + radius) / 2, midAngle);
+    const label = polar(innerRadius + (Math.max(outerRadiusStart, outerRadiusEnd) - innerRadius) * 0.62, midAngle);
     const largeArc = angleEnd - angleStart > Math.PI ? 1 : 0;
     const path =
       `M ${innerStart[0].toFixed(2)} ${innerStart[1].toFixed(2)} ` +

@@ -62,6 +62,17 @@ export interface CardHandConfig {
   dragScaleFromViewport?: boolean;
   /** 视口缩放的封顶：避免 4K 屏上一张牌占满屏。 */
   dragMaxScale?: number;
+  /**
+   * 拖拽期间的相对缩放倍率：1 = "屏幕 1/3" 的大牌。
+   * 返回 <1 时缩小——用来在指针悬到目标轮盘的分区上时让出位置，露出头像与提示。
+   */
+  dragScaleAt?: (at: Point) => number;
+  /** 越过起拖阈值后触发一次（调用方在这里弹目标轮盘）。 */
+  onDragStart?: (id: string, at: Point) => void;
+  /** 拖拽过程中每次指针移动（驱动轮盘高亮）。 */
+  onDragMove?: (at: Point) => void;
+  /** 松手前的收尾（关闭轮盘、清掉高亮）。 */
+  onDragEnd?: (at: Point) => void;
   /** 飞场落点（视口坐标）；未提供时退化为出牌区质心。 */
   flyTarget?: () => Point | null;
   /** 飞场时长（ms）。 */
@@ -147,8 +158,11 @@ export class CardHand {
     lastTime: number;
     velX: number;
     moved: boolean;
-    /** 本次拖拽的放大倍数（视口 1/3 高度，起拖时测一次）。 */
-    scaleFactor: number;
+    /** "屏幕 1/3 高度"那档放大（起拖时测一次）。 */
+    bigScale: number;
+    /** 相对倍率：1 = 上面那档；悬在轮盘分区上时会收到 ~0.4。 */
+    scaleMul: number;
+    scaleMulTarget: number;
   } | null = null;
   private hovered: CardView | null = null;
   private inZone = false;
@@ -397,6 +411,15 @@ export class CardHand {
         busy = true;
       }
 
+      // 悬停目标切换（放大 ↔ 缩小）走 120ms 过渡，过界来回时不会跳。
+      const drag = this.drag;
+      if (drag && Math.abs(drag.scaleMul - drag.scaleMulTarget) > 0.002) {
+        const easeStep = this.reduced ? 1 : dt / 0.12;
+        drag.scaleMul += (drag.scaleMulTarget - drag.scaleMul) * Math.min(1, easeStep);
+        if (Math.abs(drag.scaleMul - drag.scaleMulTarget) <= 0.002) drag.scaleMul = drag.scaleMulTarget;
+        busy = true;
+      }
+
       const dragged = this.drag?.view === view;
       if (!view.fly) {
         const config = dragged || this.state !== 'returning' ? this.springs.follow : this.springs.back;
@@ -435,7 +458,8 @@ export class CardHand {
     const hoverScale = 1 + ((this.config.hoverScale ?? DEFAULTS.hoverScale) - 1) * hover;
     const tilt = dragged ? view.tilt : 0;
     const rotation = view.rot.value * (1 - hover) + tilt;
-    const baseScale = view.scale.value * hoverScale * (dragged ? (this.drag?.scaleFactor ?? 1) : 1);
+    const dragScale = dragged ? (this.drag?.bigScale ?? 1) * (this.drag?.scaleMul ?? 1) : 1;
+    const baseScale = view.scale.value * hoverScale * (dragged ? dragScale : 1);
 
     let x = view.x.value + (dragged ? (this.drag?.dx ?? 0) : 0);
     let y = view.y.value + lift + (dragged ? (this.drag?.dy ?? 0) : 0);
@@ -513,7 +537,9 @@ export class CardHand {
       velX: 0,
       moved: false,
       // 一次布局读取，换整段拖拽的"看得清"：牌高约占屏幕 1/3。
-      scaleFactor: this.dragScaleFor(view)
+      bigScale: this.dragScaleFor(view),
+      scaleMul: 1,
+      scaleMulTarget: 1
     };
     this.setState('armed');
     this.setHover(null);
@@ -553,12 +579,18 @@ export class CardHand {
       drag.moved = true;
       this.setState('dragging');
       drag.view.el.dataset.drag = '1';
+      this.config.onDragStart?.(drag.view.id, { x: event.clientX, y: event.clientY });
     }
     if (drag.moved) {
       const maxTilt = this.config.tiltMaxDeg ?? DEFAULTS.tiltMaxDeg;
       drag.view.tilt = Math.max(-maxTilt, Math.min(maxTilt, drag.velX * (this.config.tiltPerPx ?? DEFAULTS.tiltPerPx)));
       this.applyNeighbourYield(drag.view, event.clientX);
       this.updateZone(event.clientX, event.clientY);
+      const at = { x: event.clientX, y: event.clientY };
+      this.config.onDragMove?.(at);
+      // 落点决定它有多大：中心/轮盘外放大，悬在分区上缩小（让出提示位）。
+      const mul = this.config.dragScaleAt?.(at);
+      drag.scaleMulTarget = typeof mul === 'number' && Number.isFinite(mul) ? Math.max(0.2, Math.min(1.4, mul)) : 1;
     }
     this.start();
   };
@@ -588,6 +620,8 @@ export class CardHand {
     const at: Point = { x: event.clientX, y: event.clientY };
     const inside = this.hitZone(at.x, at.y, this.config.zonePadding ?? DEFAULTS.zonePadding);
     if (!inside) {
+      // 落在出牌区外＝取消：收尾钩子负责关掉目标轮盘，否则它会留在屏幕上。
+      this.config.onDragEnd?.(at);
       this.releaseBack(drag.view, drag.velX);
       return;
     }
@@ -604,6 +638,7 @@ export class CardHand {
     drag.view.tilt = 0;
     this.releaseNeighbours();
     this.clearZone();
+    this.config.onDragEnd?.({ x: 0, y: 0 });
     this.releaseBack(drag.view, 0);
   };
 

@@ -2200,19 +2200,37 @@
   }
 }
 
-/* ---- Radial target picker (P5) ---------------------------------------- */
+/* ---- 目标轮盘（点击小轮盘 / 拖拽大轮盘） -----------------------------
+   材质＝深色磨砂玻璃：桌面透出来但被抹糊，不跟卡牌抢注意力。
+   配色＝中性玻璃 + 玩家色（只表示"是谁"）+ 金色（只表示"更多/确认"）。
+   高亮同时用填充 + 描边 + 字重（颜色不是唯一编码，色盲安全）。 */
 .rp-layer {
   position: fixed;
   inset: 0;
   z-index: 70;
   pointer-events: none;
 }
+
+.rp-layer[data-mode='drag'] {
+  z-index: 74;
+}
+
+.rp-scrim {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 90% at 50% 45%, rgba(24, 30, 40, 0.55), rgba(8, 11, 15, 0.74));
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  animation: rp-fade 140ms ease-out both;
+}
+
 .rp-backdrop {
   position: absolute;
   inset: 0;
   pointer-events: auto;
   background: rgba(8, 6, 4, 0.3);
 }
+
 .rp-dialog {
   position: fixed;
   width: 320px;
@@ -2220,44 +2238,139 @@
   transform: translate(-50%, -50%);
   pointer-events: auto;
   outline: none;
-  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.55));
+  filter: drop-shadow(0 24px 70px rgba(0, 0, 0, 0.55));
 }
+
+/* 拖拽模式：轮盘不接指针（capture 在手牌条上），只做展示与命中计算。 */
+.rp-layer[data-mode='drag'] .rp-dialog {
+  pointer-events: none;
+  animation: rp-pop 140ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 .rp-wheel {
   display: block;
   width: 100%;
   height: 100%;
 }
+
 .rp-seg {
-  fill: rgba(30, 26, 20, 0.92);
-  stroke: rgba(217, 180, 91, 0.55);
-  stroke-width: 1.5;
+  fill: rgba(255, 255, 255, 0.055);
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 1;
   cursor: pointer;
-  transition: fill 90ms ease-out;
+  transition: fill 90ms ease-out, stroke 90ms ease-out, opacity 90ms ease-out;
 }
+
 .rp-seg.is-active {
-  fill: rgba(217, 180, 91, 0.32);
-  stroke: #f0cd7a;
-}
-.rp-center {
-  fill: rgba(16, 13, 10, 0.96);
-  stroke: rgba(217, 180, 91, 0.7);
+  fill: color-mix(in oklab, var(--seg, #9fb0c6) 26%, transparent);
+  stroke: color-mix(in oklab, var(--seg, #9fb0c6) 70%, transparent);
   stroke-width: 1.5;
+}
+
+.rp-seg[data-disabled='1'] {
+  opacity: 0.45;
+}
+
+/* 高亮时其余分区让位（压暗），视线只落在当前目标上。 */
+.rp-wheel.has-active .rp-seg:not(.is-active) {
+  opacity: 0.5;
+}
+
+.rp-center {
+  fill: rgba(14, 18, 24, 0.72);
+  stroke: rgba(217, 180, 91, 0.35);
+  stroke-width: 1.2;
   cursor: pointer;
-  transition: fill 90ms ease-out;
+  transition: fill 120ms ease-out, stroke 120ms ease-out;
 }
+
 .rp-center.is-active {
-  fill: rgba(217, 180, 91, 0.42);
+  fill: rgba(217, 180, 91, 0.26);
+  stroke: rgba(217, 180, 91, 0.8);
 }
-.rp-label {
-  fill: #f3e6c8;
-  font-size: 13px;
-  pointer-events: none;
-}
+
 .rp-center-label {
-  fill: #d9b45b;
+  fill: #e7cf92;
   font-size: 13px;
+  letter-spacing: 0.08em;
   pointer-events: none;
 }
+
+/* 分区上的"人"：头像 + 名字 + 一行提示 */
+.rp-pin {
+  pointer-events: none;
+}
+
+.rp-avatar-ring {
+  fill: rgba(10, 14, 20, 0.55);
+  stroke-width: 2;
+  transition: stroke-width 110ms ease-out;
+}
+
+.rp-avatar {
+  pointer-events: none;
+}
+
+.rp-initial {
+  fill: #e8eef6;
+  font-size: 18px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.rp-label {
+  fill: #c9d3e0;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.rp-hint {
+  fill: #8b98ab;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.rp-pin.is-active .rp-avatar-ring {
+  stroke-width: 3;
+}
+
+.rp-pin.is-active .rp-label {
+  fill: #f7fafc;
+  font-weight: 700;
+}
+
+@keyframes rp-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rp-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rp-scrim,
+  .rp-layer[data-mode='drag'] .rp-dialog {
+    animation: none;
+  }
+  .rp-seg,
+  .rp-center,
+  .rp-avatar-ring {
+    transition: none;
+  }
+}
+
 /* ---- Unified hand physics (ui/cardHand) ------------------------------
    transform / opacity / z-index 只由 rAF 写（单写者）。这里只保留 paint-only 的
    阴影/描边过渡——一旦给 transform 加 transition，它会和 rAF 抢同一属性，悬停就

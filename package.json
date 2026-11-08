@@ -38,6 +38,7 @@
     "probe:keymap": "node scripts/probe-keymap.mjs",
     "probe:shortcut-help": "node scripts/probe-shortcut-help.mjs",
     "probe:radial": "node scripts/probe-radial.mjs",
+    "probe:target-wheel": "node scripts/probe-target-wheel.mjs",
     "probe:radial-html": "node scripts/probe-radial-html.mjs",
     "probe:radial-model": "node scripts/probe-radial-model.mjs",
     "probe:unified-hand": "node scripts/probe-unified-hand.mjs",

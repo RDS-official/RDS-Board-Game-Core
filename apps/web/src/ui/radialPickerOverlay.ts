@@ -31,9 +31,17 @@ export interface RadialPickerAnchor {
   y: number;
 }
 
+export type RadialPickerMode = 'click' | 'drag';
+
 export interface RadialPickerOpenOptions {
   candidates: readonly RadialCandidate[];
   anchor: RadialPickerAnchor;
+  /**
+   * `click`：点击卡片后弹小轮盘，自己接指针（触屏/键盘回退路径）。
+   * `drag`：拖拽途中浮现的大轮盘，指针事件仍由手牌条持有，调用方用
+   * `setPointer()` / `resolveAt()` 驱动——两边不会抢同一个 pointer capture。
+   */
+  mode?: RadialPickerMode;
   /** Outer radius in CSS px. Defaults to 150. */
   radius?: number;
   /** Deterministic jitter seed. */
@@ -55,6 +63,7 @@ export class RadialPickerOverlay {
   private state: PickerState | null = null;
   private options: RadialPickerOpenOptions | null = null;
   private openedAt = 0;
+  private mode: RadialPickerMode = 'click';
 
   private readonly onPointerMove = (event: PointerEvent): void => {
     if (!this.state || !this.dialog) return;
@@ -123,12 +132,17 @@ export class RadialPickerOverlay {
     this.openedAt = performance.now();
 
     const title = options.title ?? '选择目标';
+    const mode: RadialPickerMode = options.mode ?? 'click';
+    this.mode = mode;
     const root = document.createElement('div');
     root.className = 'rp-layer';
+    root.dataset.mode = mode;
     setHtml(
       root,
       raw(
-        `<div class="rp-backdrop" data-rp-cancel></div>` +
+        (mode === 'drag'
+          ? '<div class="rp-scrim"></div>'
+          : '<div class="rp-backdrop" data-rp-cancel></div>') +
           `<div class="rp-dialog" role="dialog" aria-modal="true" tabindex="-1"` +
           ` aria-label="${escapeHtml(title)}">` +
           radialPickerSvg(wheel, { label: title }) +
@@ -147,8 +161,11 @@ export class RadialPickerOverlay {
 
     this.root = root;
     this.dialog = dialog;
-    root.addEventListener('pointermove', this.onPointerMove);
-    root.addEventListener('pointerup', this.onPointerUp);
+    // 拖拽模式：指针归手牌条（它持有 capture），这里只被动更新高亮。
+    if (mode === 'click') {
+      root.addEventListener('pointermove', this.onPointerMove);
+      root.addEventListener('pointerup', this.onPointerUp);
+    }
     window.addEventListener('keydown', this.onKeyDown, true);
     // Accessible list is also clickable for mouse/assistive tech.
     root.addEventListener('click', this.onListClick);
@@ -172,6 +189,60 @@ export class RadialPickerOverlay {
     if (!Number.isInteger(index)) return;
     this.pickIndex(index);
   };
+
+  /** 这个轮盘当前是什么模式（拖拽途中 vs 点击弹出）。 */
+  public getMode(): RadialPickerMode {
+    return this.mode;
+  }
+
+  /**
+   * 指针在轮盘上的落点分类，供拖拽层决定"卡片放多大"：
+   * 分区上要缩小（露出头像与提示），中心/轮盘外放大（看清自己打出去的牌）。
+   */
+  public zoneAt(x: number, y: number): 'center' | 'sector' | 'outside' {
+    const local = this.localPoint(x, y);
+    if (!local) return 'outside';
+    const { wheel } = this;
+    if (!wheel) return 'outside';
+    const r = Math.hypot(local.dx, local.dy);
+    if (r > wheel.radius * 1.12) return 'outside';
+    if (r < wheel.innerRadius) return 'center';
+    return 'sector';
+  }
+
+  /** 拖拽途中更新高亮（由手牌条转发指针坐标）。 */
+  public setPointer(x: number, y: number): void {
+    const local = this.localPoint(x, y);
+    if (!local || !this.state) return;
+    this.state = pointAt(this.state, local.dx, local.dy);
+    this.paint();
+  }
+
+  /**
+   * 松手结算：命中分区 → `{ type:'pick' }`；中心圆 → `{ type:'center' }`；
+   * 轮盘外/无焦点 → `null`（调用方据此回弹卡片）。
+   */
+  public resolveAt(x: number, y: number): PickerIntent | null {
+    const local = this.localPoint(x, y);
+    if (!local || !this.state) {
+      this.close();
+      return null;
+    }
+    if (!this.wheel || Math.hypot(local.dx, local.dy) > this.wheel.radius * 1.12) {
+      this.close();
+      return null;
+    }
+    const intent = confirmFocus(pointAt(this.state, local.dx, local.dy));
+    this.close();
+    return intent;
+  }
+
+  /** 视口坐标 → 轮盘中心相对坐标；轮盘未打开时返回 null。 */
+  private localPoint(x: number, y: number): { dx: number; dy: number } | null {
+    if (!this.dialog || !this.wheel) return null;
+    const rect = this.dialog.getBoundingClientRect();
+    return { dx: x - (rect.left + rect.width / 2), dy: y - (rect.top + rect.height / 2) };
+  }
 
   public close(): void {
     if (!this.root) return;
@@ -197,6 +268,13 @@ export class RadialPickerOverlay {
       path.classList.toggle('is-active', active === index);
     }
     this.root.querySelector('.rp-center')?.classList.toggle('is-active', centreActive);
+    // 分区上的头像组跟着高亮：描边加粗 + 名字加亮（颜色之外的第二重编码）。
+    for (const pin of this.root.querySelectorAll<SVGElement>('.rp-pin')) {
+      pin.classList.toggle('is-active', active === Number(pin.dataset.segIndex));
+    }
+    this.root
+      .querySelector('.rp-wheel')
+      ?.classList.toggle('has-active', active !== null || centreActive);
     for (const option of this.root.querySelectorAll<HTMLElement>('.rp-list [role="option"]')) {
       const isCentre = option.dataset.zone === 'center';
       option.setAttribute(

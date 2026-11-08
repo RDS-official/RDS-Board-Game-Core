@@ -3830,6 +3830,52 @@ export class BoardGameHUD {
   }
 
   /**
+   * 拖出即浮现的目标轮盘（大号、磨砂、每区一张头像牌）。
+   *
+   * 半径取屏幕短边的 0.41 倍（直径约 0.82 屏，占画面一大半），圆心跟着落点但夹紧
+   * 在视口内。候选只来自 `action.selection.candidates`——那就是引擎认可的合法目标，
+   * 所以"选错人"在 UI 层根本选不出来，真送进去也会被引擎驳回。
+   */
+  private beginTargetWheel(id: string, at: Point): void {
+    const action = this.latest?.actions.find(candidate => candidate.id === id);
+    if (!action) return;
+    if (deriveActionCard(action).targetMode !== 'selection') return;
+    const candidates = action.selection?.candidates ?? [];
+    if (candidates.length === 0) return;
+
+    const players = this.latest?.players ?? [];
+    const short = Math.min(window.innerWidth, window.innerHeight);
+    const radius = Math.max(220, Math.min(560, short * 0.41));
+    const margin = 12;
+    const anchor = {
+      x: Math.min(Math.max(at.x, radius + margin), window.innerWidth - radius - margin),
+      y: Math.min(Math.max(at.y, radius + margin), window.innerHeight - radius - margin)
+    };
+
+    this.radialPicker ??= new RadialPickerOverlay();
+    this.radialPicker.open({
+      mode: 'drag',
+      candidates: candidates.map(candidate => {
+        const player = players.find(entry => entry.id === candidate.id);
+        return {
+          id: candidate.id,
+          label: candidate.label,
+          color: player?.color,
+          avatar: player?.avatar,
+          icon: candidate.icon
+        };
+      }),
+      anchor,
+      radius,
+      seed: `${action.id}:${candidates.map(candidate => candidate.id).join(',')}`,
+      title: action.label,
+      onPick: () => {},
+      onCenter: () => {},
+      onCancel: () => {}
+    });
+  }
+
+  /**
    * 拖出牌条并松手在桌面区域（`CardHand.onDrop`）。
    *
    * 返回 true 才让卡片飞出去——即"这张牌现在真的生效了"。需要目标/参数的动作用
@@ -3844,8 +3890,22 @@ export class BoardGameHUD {
     }
     const card = deriveActionCard(action);
     if (card.targetMode === 'selection') {
-      this.openRadialPicker(action, at);
-      return false;
+      // 拖拽路径：轮盘已经在 onDragStart 弹出，这里只结算落点。
+      // 分区 → 对那个人打出；中心圆 → 二级菜单；轮盘外 → null（回弹，什么都不发生）。
+      const intent = this.radialPicker?.resolveAt(at.x, at.y) ?? null;
+      if (!intent) return false;
+      if (intent.type === 'center') {
+        this.openPayloadForm(action);
+        return false;
+      }
+      if (intent.type !== 'pick') return false;
+      const result = this.performAction(action.id, undefined, [intent.candidate.id]);
+      if (!result.ok) {
+        this.pushToast('⚠️', result.error ?? '动作被拒绝');
+        return false;
+      }
+      this.showTableEcho(action.label, '你', action.entityId);
+      return true;
     }
     if (card.targetMode === 'fields' || card.targetMode === 'placement') {
       this.runAction(action);
@@ -3911,7 +3971,13 @@ export class BoardGameHUD {
       onActivate: id => this.activateHandCard(id),
       onDrop: (id, at) => this.playHandCard(id, at),
       flyTarget: () => this.tableAnchor(),
-      onPageChange: (page, pageCount) => this.syncHandPager(page, pageCount)
+      onPageChange: (page, pageCount) => this.syncHandPager(page, pageCount),
+      // 拖出来就弹目标轮盘（只有"需要选目标"的卡才弹）。
+      onDragStart: (id, at) => this.beginTargetWheel(id, at),
+      onDragMove: at => this.radialPicker?.setPointer(at.x, at.y),
+      onDragEnd: () => this.radialPicker?.close(),
+      // 悬在轮盘分区上就缩小，好让玩家看清分区头像与提示；中心/轮盘外恢复大牌。
+      dragScaleAt: at => (this.radialPicker?.zoneAt(at.x, at.y) === 'sector' ? 0.4 : 1)
     });
     return this.actionHand;
   }

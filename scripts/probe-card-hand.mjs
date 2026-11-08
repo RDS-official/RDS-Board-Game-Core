@@ -207,14 +207,16 @@ try {
   );
 
   /* ---- drag: tracking, viewport scale, top layer, drop highlight ---- */
-  const selection = rest.find(c => c.mode === 'selection');
-  record('browser: a selection card exists', Boolean(selection));
-  if (selection) {
-    const grab = (await settleOn(selection.id)) ?? selection;
+  // 用"不需要目标"的卡测手感：需要目标的卡现在会在拖拽中弹目标轮盘（见 probe:target-wheel），
+  // 卡片大小会随指针落在分区/中心而变化，不适合做纯几何断言。
+  const draggable = rest.find(c => c.mode === 'none') ?? rest.find(c => c.mode === 'highlight');
+  record('browser: a directly playable card exists', Boolean(draggable));
+  if (draggable) {
+    const grab = (await settleOn(draggable.id)) ?? draggable;
     await page.mouse.move(grab.cx, grab.cy);
     await page.waitForTimeout(120);
     await page.mouse.down();
-    await page.mouse.move(grab.cx + 12, grab.cy - 12, { steps: 2 }); // 越过 slop，进入 dragging
+    await page.mouse.move(grab.cx + 12, grab.cy - 12, { steps: 2 }); // 越过 slop
     await page.waitForTimeout(120);
     const started = await draggedGeometry();
     await page.mouse.move(grab.cx + 60, grab.cy - 150, { steps: 6 });
@@ -222,11 +224,13 @@ try {
     const moved = await draggedGeometry();
     const state = await page.evaluate(() => ({
       state: document.querySelector('#action-hand')?.dataset.state,
-      drop: document.querySelector('#action-hand')?.dataset.drop
+      drop: document.querySelector('#action-hand')?.dataset.drop,
+      wheel: document.querySelectorAll('.rp-layer').length
     }));
 
     record('drag: state machine enters dragging', state.state === 'dragging', JSON.stringify(state));
     record('drag: board hit sets data-drop=valid', state.drop === 'valid', String(state.drop));
+    record('drag: no target wheel for a direct card', state.wheel === 0, String(state.wheel));
     record(
       'drag: card tracks the pointer 1:1',
       Boolean(started && moved) &&
@@ -242,35 +246,8 @@ try {
     );
     record('drag: dragged card is on top', Boolean(moved) && moved.z >= 2500, String(moved?.z));
 
+    // 松手在桌面 → 打出（飞场 + 落桌回响）
     await page.mouse.up();
-    await page.waitForTimeout(950);
-    const back = (await boxes()).find(c => c.id === selection.id);
-    record(
-      'drop: non-playable card springs home',
-      Boolean(back) &&
-        Math.abs(back.bx - selection.bx) <= 3 &&
-        Math.abs(back.by - selection.by) <= 3,
-      back ? (back.bx - selection.bx).toFixed(1) + ',' + (back.by - selection.by).toFixed(1) : 'missing'
-    );
-    record('drop: the target picker opened instead', (await page.locator('.rp-dialog').count()) === 1);
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(200);
-  }
-
-  /* ---- drag a directly playable card: it leaves the hand + echoes ---- */
-  await page.waitForTimeout(250);
-  const playable = (await boxes()).find(c => c.mode === 'none' || c.mode === 'highlight');
-  record('browser: a directly playable card exists', Boolean(playable));
-  if (playable) {
-    const grab = (await settleOn(playable.id)) ?? playable;
-    await page.mouse.move(grab.cx, grab.cy);
-    await page.waitForTimeout(120);
-    await page.mouse.down();
-    await page.mouse.move(grab.cx, grab.cy - 180, { steps: 6 });
-    await page.waitForTimeout(120);
-    await page.mouse.up();
-    // 出牌成功的直接证据是"飞场"：状态机进入 flying，卡片朝桌面落点缩小淡出。
-    // （不能只看 DOM 是否还在——同一个动作 id 打完可能立刻又被投影出来。）
     let flew = false;
     for (let i = 0; i < 20; i += 1) {
       flew = await page.evaluate(() => document.querySelector('#action-hand')?.dataset.state === 'flying');
@@ -278,7 +255,6 @@ try {
       await page.waitForTimeout(60);
     }
     record('drop: the played card flies onto the table', flew, 'state=flying');
-    await page.waitForTimeout(500);
     const echo = await page.evaluate(() => {
       const el = document.querySelector('.hand-play-echo');
       return el
@@ -293,10 +269,59 @@ try {
         return (snapshot?.board?.actionLog?.length ?? 0) > 0 || (snapshot?.actions?.length ?? 0) > 0;
       })
     );
+    await page.waitForTimeout(400);
   }
 
-  await page.screenshot({ path: 'shots/card-hand-physics.png' });
-  await page.close();
+  /* ---- cancel: a target card released outside the wheel springs home ---- */
+  await page.waitForTimeout(250);
+  const targetCard = (await boxes()).find(c => c.mode === 'selection');
+  record('browser: a target-needing card exists', Boolean(targetCard));
+  if (targetCard) {
+    // 先把手/指针挪开量一次"静止位"：hover 会抬起卡片、还会推让邻居，拿悬停时的
+    // 坐标去比"归位"必然差十几像素。
+    await page.mouse.move(40, 560);
+    await page.waitForTimeout(420);
+    const rested = (await boxes()).find(c => c.id === targetCard.id) ?? targetCard;
+    const grab = (await settleOn(targetCard.id)) ?? targetCard;
+    await page.mouse.move(grab.cx, grab.cy);
+    await page.waitForTimeout(120);
+    await page.mouse.down();
+    await page.mouse.move(grab.cx + 30, grab.cy - 60, { steps: 4 });
+    await page.waitForTimeout(240);
+    const wheel = await page.evaluate(() => {
+      const rect = document.querySelector('.rp-dialog')?.getBoundingClientRect();
+      return rect ? { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, w: rect.width } : null;
+    });
+    record('drag: a target card opens the wheel', Boolean(wheel));
+    // 往轮盘外（但仍在桌面区域）松手 → 取消，卡片回位
+    const outside = wheel
+      ? { x: Math.max(12, wheel.cx - wheel.w * 0.85), y: Math.min(grab.cy + 40, wheel.cy + wheel.w * 0.85) }
+      : { x: 40, y: 120 };
+    const revisionBefore = await page.evaluate(() => window.__boardGameApp?.session?.getSnapshot?.()?.revision ?? -1);
+    await page.mouse.move(outside.x, outside.y, { steps: 5 });
+    await page.waitForTimeout(160);
+    await page.mouse.up();
+    // 回弹把松手速度灌进了弹簧，收敛要 ~1s；再把指针挪离手牌条，清掉残留的
+    // hover 上浮与邻居让位，然后才量"归位"。
+    await page.mouse.move(40, 560);
+    await page.waitForTimeout(1600);
+    const revisionAfter = await page.evaluate(() => window.__boardGameApp?.session?.getSnapshot?.()?.revision ?? -1);
+    const back = (await boxes()).find(c => c.id === targetCard.id);
+    record(
+      'drop outside the wheel: nothing is dispatched',
+      revisionAfter === revisionBefore,
+      revisionBefore + ' → ' + revisionAfter
+    );
+    record(
+      'drop outside the wheel: the card springs home',
+      // 允许一格邻居让位的残量（~12px）：关键是"回到弧线上、没留在光标下面"。
+      Boolean(back && rested) &&
+        Math.abs(back.bx - rested.bx) <= 14 &&
+        Math.abs(back.by - rested.by) <= 4,
+      back && rested ? (back.bx - rested.bx).toFixed(1) + ',' + (back.by - rested.by).toFixed(1) : 'missing'
+    );
+    record('drop outside the wheel: the wheel closes', (await page.locator('.rp-layer').count()) === 0);
+  }
 
   /* ---- sanguosha: collapsed targets, zoning and paging ---------------- */
   const sgs = await browser.newPage({ viewport: { width: 1440, height: 900 } });
