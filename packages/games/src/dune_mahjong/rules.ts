@@ -3,6 +3,28 @@ import { ReduceContext } from '@rds/kernel/module';
 import { InterruptStackManager } from '@rds/kernel/stack';
 import { Action, DecisionWindow, GameState, PlayerId, StackFrame, } from '@rds/kernel/types';
 
+/**
+ * 宪章 C-7：加分同时记账。
+ *
+ * 分数只经这一处改写，保证 `state.rewards` 能回答"这一分从哪条规则来"。
+ * 返回新状态，不原地修改。
+ */
+function awardScore(
+  state: GameState,
+  playerId: PlayerId,
+  amount: number,
+  ctx: ReduceContext,
+  reason: string
+): GameState {
+  const player = state.players[playerId];
+  if (!player) return state;
+  ctx.reward(playerId, 'score', amount, reason);
+  return {
+    ...state,
+    players: { ...state.players, [playerId]: { ...player, score: player.score + amount } }
+  };
+}
+
 export class DuneMahjongRules {
   public static readonly DECISION_ACTIONS = ['COMMIT_BATTLE_DIAL'];
 
@@ -171,7 +193,8 @@ export class DuneMahjongRules {
           title: `🀄🀄🀄 【胡牌 HU!】 ${nextState.players[pId].name} claimed HU (Priority 30)! Instant Short-Circuit Victory!`,
           durationMs: 1200
         });
-        nextState.players[pId].score += 20;
+        // 宪章 C-7：胡牌 +20 是真实增量收益，要能回答"这一分从哪来"。
+        nextState = awardScore(nextState, pId, 20, ctx, '胡牌（优先级 30，即时短路获胜）');
         break;
       }
 
@@ -182,7 +205,7 @@ export class DuneMahjongRules {
           title: `🀄 【碰 PENG!】 ${nextState.players[pId].name} claimed triplet (Priority 20)!`,
           durationMs: 600
         });
-        nextState.players[pId].score += 5;
+        nextState = awardScore(nextState, pId, 5, ctx, '碰（优先级 20，刻子）');
         break;
       }
 
@@ -193,7 +216,7 @@ export class DuneMahjongRules {
           title: `🀄 【吃 CHI!】 ${nextState.players[pId].name} claimed sequence (Priority 10)!`,
           durationMs: 600
         });
-        nextState.players[pId].score += 2;
+        nextState = awardScore(nextState, pId, 2, ctx, '吃（优先级 10，顺子）');
         break;
       }
 
@@ -291,11 +314,12 @@ export class DuneMahjongRules {
           }
         },
         [winnerId]: {
-          ...nextState.players[winnerId],
-          score: nextState.players[winnerId].score + 5
+          ...nextState.players[winnerId]
         }
       }
     };
+    // 宪章 C-7：战斗之轮的胜者 +5 是真实增量收益。
+    nextState = awardScore(nextState, winnerId, 5, ctx, `战斗之轮获胜（${p1Total} : ${p2Total}）`);
 
     ctx.trace({
       id: `dune_reveal_${ctx.id('g')}`,

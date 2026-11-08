@@ -311,17 +311,17 @@ handler: () => ({
 | 模组 | C-9 声明 | C-6 语义不变量 | C-7 收益记账 |
 | --- | --- | --- | --- |
 | catan | 15 gv / 2 cp | 资源供给不超发（每种 ≤ 19） | ✅ `grantResources()` 总闸 |
-| splendor | 10 gv / 6 cp | 宝可球守恒（持有 + 银行 ≤ 供给） | ⏳ 分数是派生值，无累加收益 |
-| betrayal | 21 gv / 34 cp | 属性为整数；角色房间必须存在 | ⏳ 无筹码/分数型收益 |
+| splendor | 10 gv / 6 cp | 宝可球守恒（持有 + 银行 ≤ 供给） | 登记偏离：分数由场面派生重算 |
+| betrayal | 21 gv / 34 cp | 属性为整数；角色房间必须存在 | 登记偏离：无筹码/分数型收益 |
 | sanguosha | 2 gv / 4 cp | 血量 ∈ [0, maxHp] 且为整数 | ✅ 伤害 / 回复 / 击杀反贼 |
-| dune_mahjong | 5 gv / 5 cp | 兵力非负；押注 ≤ 持有兵力 | ⏳ 同上 |
+| dune_mahjong | 5 gv / 5 cp | 兵力非负；押注 ≤ 持有兵力 | ✅ 胡 / 碰 / 吃 / 战斗之轮 |
 | poker | 7 gv / 8 cp | 筹码整除性 / 底池一致 / 手号单调 | ✅ 三处派发 |
 
-**为什么 C-7 还有 3 个模组没接**：`state.rewards` 记的是"这次跃迁谁因为什么拿到多少"。
-poker / catan / sanguosha 有真实的筹码、资源或血量流动，所以接了记账口。
-splendor / betrayal / dune 的分数是从场上实体派生的（每次重算整表），没有增量；
-但「不适用」目前只写在这里，没有落到 `module.charter.deviations` 里，
-所以覆盖报告把它们标成无覆盖。补上登记（或确认其实有增量收益）之前，不要把这一条算作已关闭。
+**C-7 的覆盖判据是"有没有真实增量"**：`state.rewards` 记的是"这次跃迁谁因为什么拿到多少"。
+catan、poker、sanguosha、dune_mahjong 都有真实的资源 / 筹码 / 血量 / 分数流动，所以接了
+`ctx.reward()` 并声明 `requiresRewardLedger`。splendor 的分数由 `settleTableau()` 从场面整表
+重算，betrayal 根本没有分数型收益，硬塞进流水只会重复记录同一分或记录一笔不存在的收益，
+因此两者在 `charter.deviations` 里登记 C-7 偏离，而不是接入。
 
 **C-9 的键集怎么来的**：多 seed 随机实跑（25 轮 × 260 步）取并集，再用源码静态扫描补漏。
 验证标准不是"测试通过"，而是**跑 5000+ 步不出现 `CHARTER_C9_UNDECLARED_GLOBAL_VAR`**。

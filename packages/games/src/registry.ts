@@ -427,6 +427,17 @@ export const splendorModule: GameModule = defineGame({
   },
   // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
   checkInvariants: state => checkSplendorInvariants(state),
+  // C-7：分数由 settleTableau() 从场面整表重算，不是累加收益，账本记的是增量，
+  // 硬塞只会把同一分反复记一遍。到期日是复核日，不是承诺接入的日期。
+  charter: {
+    deviations: [
+      {
+        clause: 'C-7',
+        reason: '分数由场面派生重算（settleTableau 整表求和），没有可记账的增量收益',
+        expires: '2027-05-08'
+      }
+    ]
+  },
   // The market row already previews faces on hover; a click must not open a
   // second card view for the same card.
   presentation: definePresentation({
@@ -557,6 +568,16 @@ export const betrayalModule: GameModule = defineGame({
   },
   // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
   checkInvariants: state => checkBetrayalInvariants(state),
+  // C-7：本作没有筹码或分数型收益，胜负由剧本目标判定；player.score 恒为 0。
+  charter: {
+    deviations: [
+      {
+        clause: 'C-7',
+        reason: '无筹码或分数型收益，胜负由剧本目标判定，不存在可记账的增量',
+        expires: '2027-05-08'
+      }
+    ]
+  },
   // 山屋的卡牌词汇（武器/护甲/预兆…）、派生的详情行、新房间档案、四条数值阶梯、
   // 身份名与作祟序曲都由本包声明；通用层只负责摆放。
   presentation: definePresentation({
@@ -760,6 +781,8 @@ export const duneMahjongModule: GameModule = defineGame({
   },
   // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
   checkInvariants: state => checkDuneInvariants(state),
+  // C-7：胡 / 碰 / 吃与战斗之轮的胜者加分都经 ctx.reward() 记账。
+  charter: { requiresRewardLedger: true },
   presentation: definePresentation({
     phaseLabel: dunePhaseLabel,
     playerView: dunePlayerView
