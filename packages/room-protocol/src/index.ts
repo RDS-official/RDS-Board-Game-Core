@@ -71,7 +71,16 @@ export interface HubGameInfo {
 export interface HubRoomInfo {
   id: string; name: string; gameId: string; hostId: string; hostName: string;
   status: 'open' | 'playing' | 'closed'; maxPlayers: number;
-  players: { id: string; name: string; displayName?: string; avatarUrl?: string }[]; createdAt: number;
+  /**
+   * 玩家列表，按**座位序号**升序；`seat` 是连续序号（0 起），也就是建局时的
+   * p1..pN（`seat === 0` → `p1`）。
+   *
+   * 不能拿数组下标当座位：数组是「加入顺序」，掉线重连、退出再加入都会把人追加
+   * 到末尾。座位号由服务端维护（离开者的号会被保留），大厅展示、`?playerId=`
+   * 深链、座位 → 账号映射都只认 `seat`。
+   */
+  players: { id: string; name: string; displayName?: string; avatarUrl?: string; seat: number }[];
+  createdAt: number;
   /** Phase B：准备制。已按「就绪」的玩家 id 集合。 */
   readyPlayers?: string[];
   /** 私密房：列表可见但加入需房间码（code 仅回传给房主）。 */

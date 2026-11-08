@@ -165,6 +165,69 @@ ok(pokerSix.maxPlayers === 6, 'poker 6-seat variant widens the room cap');
 const pokerTwo: any = createRoom(reg.user.id, '扑克单挑房', 'poker', { scenarioId: 'seats_2', maxPlayers: 9 });
 ok(pokerTwo.maxPlayers === 2, 'poker heads-up variant clamps the cap to 2');
 
+// ---- 座位号是唯一权威：掉线重连 / 离开再加入都必须回到原座 ----
+// 以前座位按 `players` 数组下标推导，而数组是「加入顺序」；离开者的座位号又被
+// 新来的人重复占用，`seatedPlayers` 排序因此不确定 —— 重连的人被排到别人后面。
+{
+  const { rooms: roomStore } = await import('./storage.ts');
+  const seatRoom: any = createRoom(reg.user.id, '座位房', 'poker', { maxPlayers: 10 });
+  const guests = ['c', 'd', 'e'].map(suffix => (createUser(name + suffix, 'secret123') as any).user.id);
+  const [u2, u3, u4] = guests;
+  for (const uid of guests) joinRoom(uid, seatRoom.id);
+
+  const seatOfUser = (uid: string) => seatedPlayers(seatRoom.id).indexOf(uid);
+  ok(
+    seatedPlayers(seatRoom.id).join(',') === [reg.user.id, u2, u3, u4].join(','),
+    'seats start in join order'
+  );
+  ok(
+    (getRoomInfo(seatRoom.id) as any).players.map((p: any) => p.seat).join(',') === '0,1,2,3',
+    'room info exposes the authoritative seat numbers'
+  );
+  // 大厅拿 `seat + 1` 拼 `?playerId=pN` 与 `roster`/`owners`，必须是连续的 0..n-1，
+  // 否则会出现 p6 这种建局时根本不存在的座位号。
+  ok(
+    (getRoomInfo(seatRoom.id) as any).players.every((p: any, i: number) => p.seat === i),
+    'seat numbers are contiguous so pN always exists'
+  );
+
+  // 重连（仍在房间内）是幂等的，不会改座位。
+  const remembered = seatOfUser(u2);
+  joinRoom(u2, seatRoom.id);
+  ok(seatOfUser(u2) === remembered, 'rejoining an existing member keeps the seat');
+
+  // 有人离开后，新来的人不能拿走他保留的座位号。
+  leaveRoom(u3, seatRoom.id);
+  const newcomer = (createUser(name + 'f', 'secret123') as any).user.id;
+  joinRoom(newcomer, seatRoom.id);
+  ok(seatOfUser(newcomer) === 3, 'a newcomer takes the free seat, not the departed player\u2019s number');
+  // 座位表本身不能出现重号：一旦重号，`seatedPlayers` 的排序就只能靠数组顺序
+  // 兜底，重连的人就可能在别人前后浮动。
+  const rawSeats = Object.values((roomStore.byId(seatRoom.id) as any).seatIndex ?? {}) as number[];
+  ok(new Set(rawSeats).size === rawSeats.length, 'the seat table never stores the same number twice');
+
+  // 原玩家回来必须回到原座，其他人不跟着挪。
+  joinRoom(u3, seatRoom.id);
+  ok(seatOfUser(u3) === 2, 'a returning player gets the original seat back');
+  ok(seatOfUser(reg.user.id) === 0 && seatOfUser(u2) === 1, 'the other seats do not shift when someone returns');
+  const seats = (getRoomInfo(seatRoom.id) as any).players.map((p: any) => p.seat);
+  ok(new Set(seats).size === seats.length, 'no two players share a seat number');
+  ok(
+    (getRoomInfo(seatRoom.id) as any).players.map((p: any) => p.id).join(',') === seatedPlayers(seatRoom.id).join(','),
+    'room info order matches the seats the match will deal'
+  );
+
+  // #286 之前建的房间没有 seatIndex：按玩家顺序补齐，后来的人不能跳到 p1。
+  const legacy: any = createRoom(reg.user.id, '旧座位房', 'poker', { maxPlayers: 10 });
+  const legacyRec: any = roomStore.byId(legacy.id);
+  delete legacyRec.seatIndex;
+  joinRoom(u2, legacy.id);
+  ok(
+    seatedPlayers(legacy.id).join(',') === [reg.user.id, u2].join(','),
+    'a legacy room backfills seats in player order'
+  );
+}
+
 // 大厅清单与模组注册表必须一一对应：少一个 = 能跑但开不了房，多一个 = 开房即崩（issue #236）。
 {
   const listed = GAMES.map(game => game.id).sort();
