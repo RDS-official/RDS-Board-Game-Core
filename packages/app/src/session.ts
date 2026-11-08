@@ -1209,11 +1209,14 @@ export class UniversalSession implements GamePresenter {
         ? `${turnActors.length} 个行动者待提交`
         : this.engine.getActorName(turnActors[0] ?? actor);
 
-    const handOwner =
-      this.engine.getViewer() === 'GOD' ? focus[0] ?? this.engine.getActiveActorId() : this.engine.getViewer();
-    const handCards = buildHandView(state, this.bound, handOwner);
-    const commandView = buildCommandView(this.bound, handOwner);
-    const promptView = buildPromptView(this.bound, state);
+    const seat = buildSeatViews(
+      state,
+      this.bound,
+      this.engine.getViewer(),
+      focus,
+      this.engine.getActiveActorId(),
+      state.activePlayerId
+    );
 
     this.snapshot = {
       revision: this.revision,
@@ -1262,11 +1265,11 @@ export class UniversalSession implements GamePresenter {
       ),
       actions: this.bound.map(entry => entry.ui),
       legalCount: legal.length,
-      hand: handCards.hand,
-      equip: handCards.equip,
-      reveal: handCards.reveal,
-      commands: commandView,
-      prompt: promptView,
+      hand: seat.hand,
+      equip: seat.equip,
+      reveal: seat.reveal,
+      commands: seat.commands,
+      prompt: seat.prompt,
 
       stackDepth: state.interruptStack.length,
       stack: buildStackView(state, id => this.engine.getActorName(id)),
@@ -1917,6 +1920,39 @@ export function buildHandView(
       ...cardsInZone(state, bound, `zone_judge_${owner}`, 'JUDGE')
     ],
     reveal: cardsInZone(state, bound, `zone_reveal_${owner}`, 'REVEAL')
+  };
+}
+
+/**
+ * 一个座位能看到的四层视图：实体手牌 / 装备展示 / 回合指令轨 / 应答托盘。
+ *
+ * 单机（UniversalSession）与联机（NetSession）必须走同一个函数：以前联机自己
+ * 拼 snapshot，漏掉了 hand / commands / prompt，于是开房间里手牌区直接隐藏。
+ */
+export function buildSeatViews(
+  state: ProjectedGameState,
+  bound: readonly BoundAction[],
+  viewer: string,
+  focus: readonly string[],
+  activeActorId: string | undefined,
+  activePlayerId: string | undefined
+): {
+  handOwner: string | undefined;
+  hand: UiHandCard[];
+  equip: UiHandCard[];
+  reveal: UiHandCard[];
+  commands: UiAction[];
+  prompt: UiPrompt | undefined;
+} {
+  const handOwner = viewer === 'GOD' ? (focus[0] ?? activeActorId ?? activePlayerId) : viewer;
+  const cards = buildHandView(state, bound, handOwner);
+  return {
+    handOwner,
+    hand: cards.hand,
+    equip: cards.equip,
+    reveal: cards.reveal,
+    commands: buildCommandView(bound, handOwner),
+    prompt: buildPromptView(bound, state)
   };
 }
 

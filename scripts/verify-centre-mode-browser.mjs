@@ -14,7 +14,6 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { launchChromium } from './lib/browser.mjs';
-import { clickAction } from './lib/actions.mjs';
 
 const SERVER_PORT = 8798;
 const BASE = `http://127.0.0.1:${SERVER_PORT}`;
@@ -96,7 +95,7 @@ async function main() {
   const room = await api('/api/rooms', {
     method: 'POST',
     headers: { Authorization: `Bearer ${tokenHost}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: '中心模式浏览器验证', gameId: 'splendor' })
+    body: JSON.stringify({ name: '中心模式浏览器验证', gameId: 'sanguosha' })
   });
   const roomId = room.body.id;
   ok(!!roomId, 'room created via the unchanged REST API');
@@ -121,9 +120,9 @@ async function main() {
   const guestSeat = hostSeat === 'p1' ? 'p2' : 'p1';
 
   const hub = `ws://127.0.0.1:${SERVER_PORT}/ws`;
-  const buildQuery = (role, seat) => {
+  const buildQuery = (game, role, seat) => {
     const q = new URLSearchParams({
-      game: 'splendor',
+      game,
       hub,
       roomId,
       token: role === 'host' ? tokenHost : tokenGuest,
@@ -159,8 +158,8 @@ async function main() {
   guestPage.on('console', m => { if (m.type() === 'error') guestErrors.push(m.text()); });
 
   // The built client is served by the hub itself at /*.
-  await hostPage.goto(`${BASE}/?${buildQuery('host', hostSeat)}`, { waitUntil: 'domcontentloaded' });
-  await guestPage.goto(`${BASE}/?${buildQuery('guest', guestSeat)}`, { waitUntil: 'domcontentloaded' });
+  await hostPage.goto(`${BASE}/?${buildQuery('sanguosha', 'host', hostSeat)}`, { waitUntil: 'domcontentloaded' });
+  await guestPage.goto(`${BASE}/?${buildQuery('sanguosha', 'guest', guestSeat)}`, { waitUntil: 'domcontentloaded' });
 
   // Both tabs must reach a rendered table (the HUD action dock exists).
   await hostPage.waitForSelector('#hud-container', { timeout: 30000 });
@@ -202,18 +201,14 @@ async function main() {
   ok(hostViewer === null || hostViewer === hostSeat, 'host tab renders the host seat, not a shared raw state');
 
   // 房主标签页执行一个动作，服务器 revision 必须前进，且客机标签页同步刷新。
-  // Execute the first real action card from the action dock (same path a player
-  // uses); the dock is the canonical entry point for legal actions.
-  // Pick a self-contained action (no field form / target selection) so the
-  // click path is exactly "card → detail panel → 执行".
-  const labels = await hostPage.evaluate(() =>
-    [...document.querySelectorAll('.dock-actions .act')].map(el => el.getAttribute('data-fan-label') ?? '')
+  // 走默认（zones）UI 的指令轨：这是玩家实际使用的入口，也覆盖联机下的新操作台。
+  const deckLabels = await hostPage.evaluate(() =>
+    [...document.querySelectorAll('#operation-deck button')].map(el => (el.textContent ?? '').trim())
   );
-  const selfContained = labels.findIndex(label => /拿走 2 个|结束回合/.test(label));
-  ok(labels.length > 0, 'host tab exposes an actionable dock card');
-  const card = hostPage.locator('.dock-actions .act').nth(selfContained >= 0 ? selfContained : 0);
-  await clickAction(hostPage, card);
-
+  ok(deckLabels.length > 0, 'host tab exposes an actionable deck button');
+  const endTurnBtn = hostPage.locator('#operation-deck button', { hasText: '结束回合' }).first();
+  ok((await endTurnBtn.count()) > 0, 'host tab exposes the command rail action');
+  await endTurnBtn.click({ timeout: 15000 }).catch(() => {});
   await new Promise(r => setTimeout(r, 3000));
   const after = (await api(`/api/rooms/${roomId}/match`, {
     headers: { Authorization: `Bearer ${tokenHost}` }
@@ -233,6 +228,40 @@ async function main() {
   const guestAfterHostClose = await guestText();
   ok(guestAfterHostClose.length > 0, 'closing the host tab does not break the guest (no browser authority)');
 
+  /* ---- 联机手牌回归（手机视口） ---------------------------------------
+     中心模式下 NetSession 以前只投影 actions，snapshot.hand 永远是 undefined，
+     手牌区 data-enabled=0 被隐藏；手机上（窄视口）尤其明显。
+     这里把客机标签页缩到 369x821 复现手机，并断言座位投影带实体手牌。 */
+  await guestPage.setViewportSize({ width: 369, height: 821 });
+  let guestHandVisible = true;
+  try {
+    await guestPage.waitForFunction(
+      () => document.querySelectorAll('#action-hand .ah-card').length > 0,
+      { timeout: 20000 }
+    );
+  } catch {
+    guestHandVisible = false;
+  }
+  ok(guestHandVisible, 'centre-mode phone viewport shows the seat hand strip');
+  const handState = await guestPage.evaluate(() => {
+    const panel = document.querySelector('#action-hand');
+    const rect = panel?.getBoundingClientRect();
+    const cards = [...document.querySelectorAll('#action-hand .ah-card')].map(el =>
+      el.getBoundingClientRect().toJSON()
+    );
+    const summary = window.__rdsStateSummary?.();
+    return {
+      enabled: panel?.getAttribute('data-enabled') ?? null,
+      cards: cards.length,
+      seatHand: summary?.seat?.handCount ?? -1,
+      inside: !!rect && rect.bottom <= innerHeight + 2 && rect.top >= -2,
+      cardInside: cards.every(card => card.top >= -2 && card.bottom <= innerHeight + 2)
+    };
+  });
+  ok(handState.enabled === '1', 'seat hand panel is enabled by the server projection');
+  ok(handState.seatHand >= 4, `server projection carries the seat hand (${handState.seatHand})`);
+  ok(handState.cards >= 4, `seat hand renders its physical cards (${handState.cards})`);
+  ok(handState.inside && handState.cardInside, 'seat hand stays inside the phone viewport');
   const stillThere = await api(`/api/rooms/${roomId}/match`, { headers: { Authorization: `Bearer ${tokenHost}` } });
   ok(stillThere.status === 200, 'the server match survives the host tab closing');
 
@@ -241,11 +270,6 @@ async function main() {
 
   await browser.close();
 
-  await api(`/api/rooms/${roomId}/status`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${tokenHost}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: 'closed' })
-  });
 }
 
 main()

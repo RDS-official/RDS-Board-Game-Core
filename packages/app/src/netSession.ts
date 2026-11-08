@@ -69,6 +69,7 @@ import {
   buildNpcsView,
   buildPlacementView,
   buildPlayersView,
+  buildSeatViews,
   buildStackView,
   focusActorsOf,
   missionLineOf,
@@ -1187,6 +1188,17 @@ export class NetSession implements GamePresenter {
       Date.now()
     );
 
+    // 联机座位视角也要和单机一样区分「实体手牌 / 指令轨 / 应答托盘」。
+    // 以前 rebuild 只投影了 actions，hand / commands / prompt 永远是 undefined，
+    // 于是联机房里手牌区 data-enabled=0 直接隐藏（手机上尤其明显）。
+    const seat = buildSeatViews(
+      state,
+      this.bound,
+      this.viewer,
+      focus,
+      state.activeActorId,
+      state.activePlayerId
+    );
     const isSettlement =
       state.phase === 'HAND_OVER' ||
       (state.globalVars?.hand as { street?: string } | undefined)?.street === 'COMPLETE';
@@ -1238,6 +1250,11 @@ export class NetSession implements GamePresenter {
       npcs: buildNpcsView(state, focusActors, actorName),
       actions: this.bound.map(entry => entry.ui),
       legalCount: this.legal.length,
+      hand: seat.hand,
+      equip: seat.equip,
+      reveal: seat.reveal,
+      commands: seat.commands,
+      prompt: seat.prompt,
 
       stackDepth: state.interruptStack.length,
       stack: buildStackView(state, actorName),

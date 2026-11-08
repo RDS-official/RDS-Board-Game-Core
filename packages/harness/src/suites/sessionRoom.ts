@@ -8,7 +8,8 @@ import { canonicalize } from '@rds/kernel/serialize'
 import { GAME_MODULES, GAME_REGISTRY } from '@rds/games/registry'
 import { RandomPolicy, runPolicies } from '../policy'
 import { GameRoom } from '@rds/net/room'
-import { UniversalSession } from '@rds/app/session'
+import { UniversalSession, buildActionsView, buildSeatViews } from '@rds/app/session'
+import { NetSession } from '@rds/app/netSession'
 import { resolvePendingDamage } from '../suiteHelpers';
 import { test, assert, assertEqual } from '../testKit';
 
@@ -145,3 +146,72 @@ test('projection: fixtures do not leak hidden ids after random play', () => {
 
 
 /* -------------------------------------------------------------------------- */
+
+test('presenter: a net seat snapshot carries the same hand as a local seat', () => {
+  // 回归：NetSession.rebuild 曾经只投影 actions，hand / commands / prompt 永远是
+  // undefined，于是联机房里手牌区 data-enabled=0 被隐藏（手机上尤其明显）。
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 777);
+  const seating = engine.getRawState().globalVars.seating as
+    | { started: boolean; aiSeats: string[] }
+    | undefined;
+  if (seating && !seating.started) {
+    const aiSeats = new Set(seating.aiSeats);
+    for (const pid of engine.getRawState().playerOrder) {
+      if (aiSeats.has(pid)) continue;
+      engine.dispatch({ type: 'TAKE_SEAT', playerId: pid });
+      engine.dispatch({ type: 'READY_UP', playerId: pid });
+    }
+  }
+  // 全员就绪只让 START_HAND 合法，真正发牌要再走一步。
+  const starter = engine.getActiveActorId() ?? engine.getRawState().playerOrder[0];
+  const dealt = engine.dispatch({ type: 'START_HAND', playerId: starter });
+  assert(dealt.ok, `START_HAND accepted: ${dealt.error ?? ''}`);
+  assertEqual(
+    engine.getRawState().zones.zone_hand_p1.orderedEntities.length,
+    2,
+    'the seat was dealt two hole cards'
+  );
+
+  const projected = engine.getProjectedStateFor('p1');
+  const legal = engine.getLegalActions('p1');
+  const bound = buildActionsView(projected, legal, (actorId, spec) =>
+    engine.getSelectionCandidates(actorId, spec)
+  );
+  const seat = buildSeatViews(
+    projected,
+    bound,
+    'p1',
+    ['p1'],
+    projected.activeActorId,
+    projected.activePlayerId
+  );
+  assertEqual(seat.hand.length, 2, 'own hole cards are visible in the seat view');
+
+  // 同一份投影走联机的 rebuild：快照里必须带手牌与指令轨。
+  const net = new NetSession(GAME_REGISTRY.poker, {
+    hub: 'ws://127.0.0.1:1/ws',
+    roomId: 'room_test',
+    token: 'token_test',
+    role: 'host',
+    authority: 'server',
+    playerId: 'p1'
+  });
+  (net as unknown as { applyUpdate(update: unknown): void }).applyUpdate({
+    full: true,
+    viewer: 'p1',
+    revision: 1,
+    state: projected
+  });
+  const snapshot = net.getSnapshot();
+  assertEqual(snapshot.hand?.length ?? 0, 2, 'net snapshot carries the physical hand');
+  assert(
+    (snapshot.commands?.length ?? 0) > 0,
+    'net snapshot carries the command rail'
+  );
+  assertEqual(
+    (snapshot.hand ?? []).map(card => card.title).join('|'),
+    seat.hand.map(card => card.title).join('|'),
+    'net and local seat views agree'
+  );
+  net.dispose();
+});
