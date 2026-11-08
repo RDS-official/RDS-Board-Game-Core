@@ -329,6 +329,62 @@ async function openGame(page, game) {
   await page.close();
 }
 
+/* ---- 5c. Bottom UI must not depend on a truthful viewport ---- */
+{
+  // 第三方浏览器（Via 等）会把自家工具栏算进 innerHeight / visualViewport，
+  // absolute 贴底的 UI 就被切掉半截。手牌与操作台必须锚定真实视口。
+  const { page, errors } = await openPage({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  await openGame(page, 'sanguosha');
+  const anchored = await page.evaluate(() => ({
+    hand: getComputedStyle(document.querySelector('#action-hand')).position,
+    deck: getComputedStyle(document.querySelector('#operation-deck')).position
+  }));
+  record(
+    'mobile: hand and deck are viewport-anchored',
+    anchored.hand === 'fixed' && anchored.deck === 'fixed',
+    JSON.stringify(anchored)
+  );
+  record('mobile: anchored layout has no page errors', errors.length === 0, errors.join('; '));
+  await page.close();
+}
+
+{
+  // 真实可视高度 740，但 JS 自报 821（复现 Via）：贴底手牌仍须完整可见。
+  const ctx = await browser.newContext({
+    viewport: { width: 369, height: 740 },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 2
+  });
+  await ctx.addInitScript(() => {
+    Object.defineProperty(window, 'innerHeight', { configurable: true, get: () => 821 });
+    const vv = window.visualViewport;
+    if (vv) Object.defineProperty(vv, 'height', { configurable: true, get: () => 821 });
+  });
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push(String(e)));
+  await openGame(page, 'sanguosha');
+  const lying = await page.evaluate(() => {
+    const realH = document.documentElement.clientHeight;
+    const cards = [...document.querySelectorAll('#action-hand .ah-card')].map(el =>
+      el.getBoundingClientRect().toJSON()
+    );
+    return {
+      realH,
+      reported: window.innerHeight,
+      cards: cards.length,
+      fullyVisible: cards.length > 0 && cards.every(card => card.top >= -2 && card.bottom <= realH + 2)
+    };
+  });
+  record(
+    'mobile: hand survives a browser that over-reports the viewport',
+    lying.reported === 821 && lying.realH === 740 && lying.fullyVisible,
+    JSON.stringify(lying)
+  );
+  record('mobile: lying-viewport layout has no page errors', errors.length === 0, errors.join('; '));
+  await ctx.close();
+}
 /* ---- 6. 390px: no horizontal overflow ---- */
 {
   const { page, errors } = await openPage({ width: 390, height: 844 });

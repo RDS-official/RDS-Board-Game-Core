@@ -403,6 +403,26 @@ class BoardGameSimulatorApp {
       })),
       // 自己的手牌不属于隐藏信息，必须出现在诊断里：联机手牌区消失时，
       // 「客户端到底收到没收到 hand」是第一个要回答的问题。
+      // 视口自报值：第三方浏览器（Via 等）常把自身工具栏算进 innerHeight，
+      // 贴底的 UI 就会被工具栏切掉。把三个来源都记下来才能定位。
+      viewport: {
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        visualHeight: Math.round(window.visualViewport?.height ?? 0),
+        clientHeight: document.documentElement.clientHeight,
+        appHeightVar: getComputedStyle(document.documentElement).getPropertyValue('--app-height').trim(),
+        dpr: window.devicePixelRatio,
+        handPosition: (() => {
+          const panel = document.querySelector('#action-hand');
+          if (!panel) return null;
+          const rect = panel.getBoundingClientRect();
+          return {
+            position: getComputedStyle(panel).position,
+            bottom: Math.round(rect.bottom),
+            visible: rect.bottom <= window.innerHeight + 2 && rect.top >= -2
+          };
+        })()
+      },
       seat: {
         handCount: snapshot.hand?.length ?? 0,
         handTitles: (snapshot.hand ?? []).map(card => card.title ?? '?'),
