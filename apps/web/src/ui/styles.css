@@ -3268,6 +3268,90 @@ select.pf-control {
   border-bottom-color: #f6dc9c;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Shortcut sheet（快捷键清单 · 由 keymap.ts 渲染）                             */
+/* -------------------------------------------------------------------------- */
+
+.shortcut-layer {
+  z-index: 96;
+}
+
+.shortcut-card {
+  width: min(520px, calc(100vw - 48px));
+}
+
+.shortcut-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 6px 0 14px;
+}
+
+.sc-group-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  margin: 0 0 4px;
+  font-size: var(--type-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary, #8b98ab);
+}
+
+.sc-group-hint {
+  font-size: var(--type-xs);
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--text-muted, #66707f);
+}
+
+.sc-rows {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sc-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 7px 2px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.07);
+  font-size: var(--type-sm, var(--type-xs));
+}
+
+.sc-row:last-child {
+  border-bottom: none;
+}
+
+.sc-row dt {
+  flex: none;
+  width: 108px;
+  margin: 0;
+}
+
+.sc-row dd {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--text-primary, #e8edf5);
+}
+
+/* 键帽：颜色之外还有描边与等宽字体，不靠颜色单独传递信息（色盲安全）。 */
+.sc-key {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(201, 181, 122, 0.3);
+  background: rgba(201, 181, 122, 0.1);
+  color: #f6dc9c;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--type-xs);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
 /* Screen-space labels; anchors come from renderer, layout is collision-free. */
 .label-overlay {
   position: absolute;

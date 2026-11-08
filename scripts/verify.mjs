@@ -147,12 +147,17 @@ if (selected.ui) {
   } else {
     add('ui', 'UI matrix + card-overlay', 'pnpm', ['test:ui'], uiEnv);
   }
+  // 目标轮盘：几何 + 拖拽结算 + 磨砂裁切 + 不压手牌区，一次浏览器跑完。
+  add('wheel', 'probe:target-wheel', process.execPath, ['scripts/probe-target-wheel.mjs'], { SOLO_PORT: '5183' });
 }
 
 // 6. Lint, Structure, Types, Docs
 if (selected.lint) add('lint', 'biome lint', 'pnpm', ['lint']);
 if (selected.lint) add('structure', 'structure budget', process.execPath, ['scripts/check-structure.mjs']);
 if (selected.lint) add('hygiene', 'HTML hygiene', process.execPath, ['node_modules/tsx/dist/cli.mjs', 'scripts/check-html-hygiene.ts']);
+// 键位表是纯数据 + 纯函数，跑一次不到一秒，所以每次动到代码都验：清单与实际键位失配
+// 时不必等到浏览器矩阵才发现。
+if (selected.lint) add('keymap', 'probe:keymap', process.execPath, ['scripts/probe-keymap.mjs']);
 if (selected.types) add('types', 'tsc + build', process.execPath, ['scripts/verify-types.mjs']);
 if (selected.docs) add('docs', 'docs:check', process.execPath, ['scripts/check-doc-paths.mjs']);
 

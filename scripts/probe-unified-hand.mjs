@@ -73,6 +73,7 @@ try {
       enabled: document.querySelector('#action-hand')?.getAttribute('data-enabled'),
       actionIds: actions.map((a) => a.id),
       cardIds: cards.map((card) => card.dataset.actionId),
+      cardGroups: cards.map((card) => card.dataset.group ?? ''),
       targetModes: cards.map((card) => card.dataset.targetMode),
       badges: cards.map((card) => card.querySelector('.ah-badge')?.textContent ?? ''),
       rects,
@@ -87,11 +88,21 @@ try {
     hand.cardIds.length === hand.actionIds.length,
     `${hand.cardIds.length} cards vs ${hand.actionIds.length} actions`,
   );
+  // 手牌按分区排序（牌 → 装备 → 技能 → 命令），所以只要求"同一批动作、一个不多一个不少"。
   record(
-    'flagged: card order matches actions',
-    hand.cardIds.join(',') === hand.actionIds.join(','),
+    'flagged: every action has exactly one card',
+    [...hand.cardIds].sort().join(',') === [...hand.actionIds].sort().join(','),
     hand.cardIds.join(','),
   );
+  {
+    const order = { card: 0, equip: 1, skill: 2, command: 3 };
+    const sequence = hand.cardGroups.map((group) => order[group] ?? 3);
+    record(
+      'flagged: cards are grouped by zone',
+      sequence.every((value, index) => index === 0 || sequence[index - 1] <= value),
+      hand.cardGroups.join(','),
+    );
+  }
   record(
     'flagged: selection card has ◎ badge',
     hand.targetModes.includes('selection') && hand.badges[hand.targetModes.indexOf('selection')] === '◎',

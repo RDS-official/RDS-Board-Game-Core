@@ -75,10 +75,71 @@ export interface UiActionSelection {
   candidates: UiSelectionCandidate[];
 }
 
+/**
+ * 手牌分区（capability，不是游戏词汇）：
+ * - card    手里那类实体牌（杀/闪/桃、道具卡……出牌时消耗实体）
+ * - skill   技能（USE_SKILL），不绑定手牌实体
+ * - equip   装备（把牌放进装备位）
+ * - command 无实体的命令（结束回合、掷骰、过牌……）
+ *
+ * 这是旧版手牌排序用的兼容字段。新操作面使用 UiSurface：
+ * 同一张实体牌可以同时有多个动词，但只属于一个操作面。
+ */
+export type UiActionGroup = 'card' | 'skill' | 'equip' | 'command';
+
+/**
+ * 操作面：动作应该出现在 UI 的哪一层。
+ *
+ * - hand     私有手牌里的实体动词（打出/装备/使用/弃置）
+ * - equip    装备、持久牌、判定牌的动词
+ * - tableau  已购/保留/展示牌
+ * - reveal   只读底牌/秘密
+ * - command  回合指令轨（结束回合、掷骰、准备）
+ * - context  绑定当前选中对象/棋盘位置的动词
+ * - prompt   游戏发起的响应/决策
+ * - amount   需要金额/支付的独立动作
+ */
+export type UiSurface =
+  | 'hand'
+  | 'equip'
+  | 'tableau'
+  | 'reveal'
+  | 'command'
+  | 'context'
+  | 'prompt'
+  | 'amount';
+
+/** 动词：UI 只按它决定动词条的措辞/图标，不据此改规则。 */
+export type UiVerb =
+  | 'play'
+  | 'equip'
+  | 'use'
+  | 'discard'
+  | 'trade'
+  | 'give'
+  | 'build'
+  | 'move'
+  | 'attack'
+  | 'explore'
+  | 'pick'
+  | 'respond'
+  | 'pass'
+  | 'end-turn'
+  | 'roll'
+  | 'draw'
+  | 'ready'
+  | 'choose'
+  | 'confirm';
+
+/** 破坏性分级：用于确认条与教练模式提示。 */
+export type UiRisk = 'safe' | 'costly' | 'irreversible';
+
 export interface UiAction {
   id: string;
   /** Underlying kernel action type (also present for board-group shortcuts). */
   actionType?: string;
+  /** 手牌分区：由 presenter 从动作形态推导，UI 只按它排序与上色。 */
+  group?: UiActionGroup;
   icon: string;
   label: string;
   hint: string;
@@ -89,6 +150,23 @@ export interface UiAction {
   placementEntityId?: string;
   /** Entity this action directly operates on (card sheet shortcuts). */
   entityId?: string;
+  /** 新操作面：presenter 推导；旧 UI 可忽略。 */
+  surface?: UiSurface;
+  /** 动词：打出/装备/使用/弃置/响应/结束回合…… */
+  verb?: UiVerb;
+  /** 动作来源：实体、棋盘、全局、应答。 */
+  source?: {
+    kind: 'entity' | 'board' | 'global' | 'prompt';
+    id?: string;
+  };
+  /** 回合指令轨固定槽位（0 左 … 4 右）；只在 surface === 'command' 时有效。 */
+  slot?: number;
+  /** 破坏性分级。 */
+  risk?: UiRisk;
+  /** 确认策略：普通、限时确认、模态确认。 */
+  confirm?: 'none' | 'timed' | 'modal';
+  /** surface === 'prompt' 时指向所属 UiPrompt。 */
+  promptId?: string;
   /** Declarative target picker; the presenter sends the selected ids as `targets`. */
   selection?: UiActionSelection;
   /** When present, the UI must collect these fields and send them as payload. */
@@ -98,6 +176,52 @@ export interface UiAction {
    * 下一手，避免牌桌还没看清就被洗牌。时钟由驱动方掌控，内核本身无时钟。
    */
   cooldownMs?: number;
+}
+
+/** 一张实体手牌：同一 entityId 始终是同一张卡，多个动词挂在 verbs 上。 */
+export interface UiHandCard {
+  entityId: string;
+  zone: 'HAND' | 'EQUIP' | 'TABLEAU' | 'JUDGE' | 'REVEAL';
+  title: string;
+  subtitle?: string;
+  /** 卡面 data URL；presenter 可留空，HUD 用 ports.entityCardArt 补齐。 */
+  art?: string;
+  badge?: string;
+  tone?: string;
+  playable: boolean;
+  /** 只读展示牌（底牌/身份等）：可查看，但没有可执行动词。 */
+  readOnly?: boolean;
+  reason?: string;
+  selected?: boolean;
+  verbs: UiAction[];
+}
+
+/** 游戏发起的一次应答/决策。 */
+export interface UiPrompt {
+  id: string;
+  kind: 'response' | 'choice' | 'discard' | 'confirm' | 'secret';
+  title: string;
+  description?: string;
+  source?: { entityId?: string; playerId?: string; label?: string };
+  deadlineMs?: number;
+  options: UiAction[];
+  allowPass: boolean;
+  passActionId?: string;
+  secret?: boolean;
+}
+
+/** 交易/数值面板的视图模型；确认后把 value 合并回 action。 */
+export interface UiAmount {
+  actionId: string;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  unit: string;
+  marks?: { value: number; label: string }[];
+  quick?: number[];
+  affordability?: number;
 }
 
 /** One buff or debuff currently attached to a player. */
@@ -226,6 +350,8 @@ export interface UiHistoryEntry {
   turn?: number;
   actorName?: string;
   actorColor?: string;
+  /** 这条动态涉及的实体（打出的牌/摸到的牌），用于把真实卡面画进"落桌回响"。 */
+  entityId?: string;
   /** Signed magnitude for numeric effects (-2 damage / +1 heal). */
   delta?: number;
   /** Trait display name when the entry is a trait change. */
@@ -336,6 +462,19 @@ export interface GameSnapshot {
   npcs: UiNpc[];
   actions: UiAction[];
   legalCount: number;
+
+  /**
+   * 新操作面的投影（全部 optional，旧 UI / 旧客户端可忽略）：
+   * - hand/equip/reveal 是实体卡，不是动作卡；
+   * - commands 是回合指令轨；
+   * - prompt 是游戏发起的响应/决策。
+   */
+  hand?: UiHandCard[];
+  equip?: UiHandCard[];
+  reveal?: UiHandCard[];
+  commands?: UiAction[];
+  prompt?: UiPrompt;
+  amount?: UiAmount;
 
   stackDepth: number;
   stack: UiStackFrame[];
@@ -699,6 +838,14 @@ export interface PresentationPorts {
   clearRoomFocus?(): void;
   /** 3D burst + match SFX for a trait movement (damage flash, heal sparkle). */
   showTraitChange?(change: UiTraitChange): void;
+  /** Show/hide the viewer's camera-attached hand without touching board cards. */
+  setOwnHandVisible?(visible: boolean): void;
+  /**
+   * The exact face image used by the board for this entity, as a URL or data
+   * URL. Undefined when the projected entity has no visible card face. Masked
+   * entities must return the card back, never their hidden artwork.
+   */
+  entityCardArt?(entityId: string): string | undefined;
   /** Focus and isolate a specific floor ('ALL' frames the whole house). */
   setFloor?(floorId: string): void;
 }

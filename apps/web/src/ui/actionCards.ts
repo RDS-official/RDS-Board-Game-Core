@@ -1,4 +1,10 @@
-import type { ActionTone, UiAction, UiActionField, UiActionSelection } from '@rds/app/contracts';
+import type {
+  ActionTone,
+  UiAction,
+  UiActionField,
+  UiActionGroup,
+  UiActionSelection
+} from '@rds/app/contracts';
 
 /**
  * Presentation-side derivation of a UI *action* into a *card*.
@@ -48,6 +54,8 @@ export type ActionTargetMode =
 export interface ActionCard {
   id: string;
   actionType?: string;
+  /** 手牌分区：presenter 推导，UI 只按它排序与上色（缺省按命令卡处理）。 */
+  group: UiActionGroup;
   kind: ActionCardKind;
   targetMode: ActionTargetMode;
   icon: string;
@@ -108,6 +116,7 @@ export function deriveActionCard(action: UiAction): ActionCard {
   return {
     id: action.id,
     actionType: action.actionType,
+    group: action.group ?? 'command',
     kind,
     targetMode,
     icon: action.icon,

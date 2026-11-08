@@ -17,8 +17,14 @@
 export interface RadialCandidate {
   id: string;
   label: string;
-  /** Optional player/team colour, used by the renderer. */
+  /** 玩家色：只用来"区分是谁"，不参与装饰。 */
   color?: string;
+  /** 头像 URL；缺省时渲染首字圆牌（同一个 color）。 */
+  avatar?: string;
+  /** 一行规则提示："距离 1 · 手牌 3"。由 presenter 提供，缺失就不占位。 */
+  hint?: string;
+  /** 预留：引擎判定为不可选的目标可以置灰（当前不产出）。 */
+  disabled?: boolean;
 }
 
 export interface RadialWheelOptions {
@@ -60,9 +66,16 @@ export interface RadialSegment {
   path: string;
 }
 
+/** 轮盘形态：n≤3 画圆（判据=半径），n≥4 画多边形（判据=多边形）。 */
+export type WheelShape = 'circle' | 'polygon';
+
 export interface RadialWheel {
   /** Number of candidates (segments). */
   count: number;
+  /** 形态。**绘制与判定必须同时看它**，不允许"画圆却按多边形判"。 */
+  shape: WheelShape;
+  /** 外轮廓顶点（相对圆心，按角度顺序）。磨砂层用它做 clip-path：**只在轮盘内磨砂**。 */
+  outline: Point[];
   radius: number;
   innerRadius: number;
   startAngle: number;
@@ -90,17 +103,18 @@ function hashSeed(value: string): number {
   return h >>> 0;
 }
 
-/** mulberry32 PRNG — deterministic 0..1 stream from a 32-bit seed. */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+/**
+ * 固定的抖动表（-1..1）。
+ *
+ * 打开轮盘时只需要 O(n) 查表，不建 PRNG、不跑循环里的浮点随机——10 个候选也压在
+ * 20µs 以内。表是常量，所以"同一组候选 ⇒ 同一形状"天然成立（可复现、可截图比对）。
+ */
+const JITTER: readonly number[] = [
+  0.0, -0.62, 0.38, -0.24, 0.71, -0.45, 0.15, -0.83, 0.52, -0.09, 0.27, -0.36
+];
+
+const jitterAt = (seed: number, index: number): number =>
+  JITTER[(seed + index * 5) % JITTER.length] as number;
 
 function polar(radius: number, angle: number): Point {
   return [radius * Math.cos(angle), radius * Math.sin(angle)];
@@ -122,51 +136,85 @@ function normalize(angle: number): number {
 export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialWheelOptions): RadialWheel {
   const n = candidates.length;
   const radius = Math.max(0, opts.radius);
-  const innerRatio = clamp(opts.innerRatio ?? 0.34, 0.05, 0.9);
+  const innerRatio = clamp(opts.innerRatio ?? 0.26, 0.05, 0.9);
   const innerRadius = radius * innerRatio;
-  const jitterR = clamp(opts.jitterRadius ?? 0.12, 0, 0.4);
-  const jitterA = clamp(opts.jitterAngle ?? 0.18, 0, 0.45);
+  const jitterR = clamp(opts.jitterRadius ?? 0.04, 0, 0.4);
+  // 0.0375 = 相邻两条边界各抖 ±3.75%，每块角宽偏差 ≤ ±7.5%：
+  // 既保留"不规则多边形"的手感，又不至于让某一块明显小得难点（区间再缩一倍）。
+  const jitterA = clamp(opts.jitterAngle ?? 0.0375, 0, 0.45);
   const startAngle = opts.startAngle ?? -Math.PI / 2;
 
   if (n === 0) {
-    return { count: 0, radius, innerRadius, startAngle, segments: [] };
+    return { count: 0, shape: 'circle', radius, innerRadius, startAngle, segments: [], outline: [] };
   }
 
   const seedValue = opts.seed ?? candidates.map((c) => c.id).join('|');
-  const rand = mulberry32(typeof seedValue === 'string' ? hashSeed(seedValue) : seedValue >>> 0);
+  const seed = typeof seedValue === 'string' ? hashSeed(seedValue) : seedValue >>> 0;
 
   const step = TAU / n;
-  // Vertex angles and radii, jittered once (stable for the wheel's lifetime).
-  const angles: number[] = [];
+
+  // 边界角抖动：**先取一组零均值的小抖动**，再摊回 2π。
+  // 这一步是整个扇区"大小差不多"的关键：以前是每个顶点各自抖，扇区宽度可以差一倍
+  // （120°±43°），画出来就是几条细缝贴着大圆。现在每块宽度被夹在 ±12% 以内。
+  const rawJitter: number[] = [];
+  for (let i = 0; i < n; i += 1) rawJitter.push(jitterAt(seed, i) * jitterA * step);
+  const mean = rawJitter.reduce((sum, value) => sum + value, 0) / n;
+  const boundaryAt = (index: number): number => startAngle + index * step + (rawJitter[index % n] - mean);
+
+  // 半径抖动只负责"轮廓不呆板"，幅度比角度更小，避免出现尖刺。
+  // n ≤ 3 时顶点太少：2 个顶点会让多边形退化成"过圆心的直线"（面积→0），3 个顶点
+  // 的三角形又把扇区压得很窄、轮盘看着像几根棍子。所以 n≤3 统一用圆弧外边界
+  // （环形扇区 = 圆形轮盘），只有 n≥4 才用多边形轮廓。
+  const shape: WheelShape = n <= 3 ? 'circle' : 'polygon';
+  const arcOuter = shape === 'circle';
   const radii: number[] = [];
-  for (let i = 0; i < n; i++) {
-    const base = startAngle + i * step;
-    const aJitter = (rand() * 2 - 1) * jitterA * step;
-    const rJitter = (rand() * 2 - 1) * jitterR * radius;
-    angles.push(base + aJitter);
+  for (let i = 0; i < n; i += 1) {
+    const rJitter = arcOuter ? 0 : jitterAt(seed, i + 7) * jitterR * radius;
     radii.push(Math.max(innerRadius * 1.05, radius + rJitter));
   }
 
   const segments: RadialSegment[] = [];
   for (let i = 0; i < n; i++) {
     const j = (i + 1) % n;
-    const angleStart = angles[i];
-    const angleEnd = i < n - 1 ? angles[j] : angles[0] + TAU;
+    const angleStart = boundaryAt(i);
+    const angleEnd = i < n - 1 ? boundaryAt(i + 1) : boundaryAt(0) + TAU;
     const outerRadiusStart = radii[i];
     const outerRadiusEnd = radii[j];
     const innerStart = polar(innerRadius, angleStart);
     const innerEnd = polar(innerRadius, angleEnd);
     const outerStart = polar(outerRadiusStart, angleStart);
     const outerEnd = polar(outerRadiusEnd, angleEnd);
-    const midAngle = (angleStart + angleEnd) / 2;
-    const label = polar((innerRadius + radius) / 2, midAngle);
-    const largeArc = angleEnd - angleStart > Math.PI ? 1 : 0;
+    // 标签点：沿**分区角平分线**往内收，落在"中心圆之外、外边界之内"。
+    // 顶点加权重心在 n=2 时会塌到圆心（两条引线近乎反向），头像就叠在"更多"上——
+    // 这是"头像看起来不在分区里"的真正原因。角平分线 + 收进 55% 对任意 n 都成立。
+    const halfWidth = Math.max(1e-4, (angleEnd - angleStart) / 2);
+    const outerMid = (outerRadiusStart + outerRadiusEnd) / 2;
+    // 多边形模式下外边界是弦：沿角平分线到弦的距离 ≈ R·cos(半角)。
+    const reach = arcOuter ? outerMid : outerMid * Math.cos(Math.min(Math.PI / 2 - 0.02, halfWidth));
+    const labelRadius = innerRadius + Math.max(0, reach - innerRadius) * 0.55;
+    const label = polar(labelRadius, (angleStart + angleEnd) / 2);
+    // 扇区轮廓用折线拼，不用 SVG 圆弧命令：`A` 的 sweep/large-arc 标志在
+    // "内外两条弧 + 两条引线"的组合里极易画反（旧版就是因此画出一堆鼓包与细缝）。
+    // 折线在 R ≤ 560 时肉眼看不出差别，而且 n=1/2/3… 全是同一套逻辑。
+    const ARC_STEPS = 10;
+    const innerPts: Point[] = [];
+    for (let k = 0; k <= ARC_STEPS; k += 1) {
+      const angle = angleStart + (angleEnd - angleStart) * (k / ARC_STEPS);
+      innerPts.push(polar(innerRadius, angle));
+    }
+    const outerPts: Point[] = arcOuter
+      ? Array.from({ length: ARC_STEPS + 1 }, (_, k) =>
+          polar(radius, angleStart + (angleEnd - angleStart) * (k / ARC_STEPS))
+        )
+      : [polar(outerRadiusStart, angleStart), polar(outerRadiusEnd, angleEnd)];
+    const pts = [...innerPts, ...outerPts.slice().reverse()];
     const path =
-      `M ${innerStart[0].toFixed(2)} ${innerStart[1].toFixed(2)} ` +
-      `L ${outerStart[0].toFixed(2)} ${outerStart[1].toFixed(2)} ` +
-      `L ${outerEnd[0].toFixed(2)} ${outerEnd[1].toFixed(2)} ` +
-      `A ${innerRadius.toFixed(2)} ${innerRadius.toFixed(2)} 0 ${largeArc} 0 ` +
-      `${innerEnd[0].toFixed(2)} ${innerEnd[1].toFixed(2)} Z`;
+      `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)} ` +
+      pts
+        .slice(1)
+        .map(pt => `L ${pt[0].toFixed(2)} ${pt[1].toFixed(2)}`)
+        .join(' ') +
+      ' Z';
 
     segments.push({
       index: i,
@@ -185,7 +233,27 @@ export function buildWheel(candidates: readonly RadialCandidate[], opts: RadialW
     });
   }
 
-  return { count: n, radius, innerRadius, startAngle, segments };
+  // 外轮廓与形态一致：圆形给一圈采样点（描边用），多边形给顶点。
+  // 这里以前写的是 n<=2，而扇区绘制在 n<=3 就切成了圆弧 —— n=3 于是"画的是圆、
+  // 判的是三角形"，光标在圆内三角外还能亮。现在统一由 shape 决定。
+  const outline: Point[] =
+    shape === 'circle'
+      ? Array.from({ length: 48 }, (_, i) => polar(radius, startAngle + (i / 48) * TAU) as Point)
+      : segments.map(seg => seg.outerStart);
+  return { count: n, shape, radius, innerRadius, startAngle, segments, outline };
+}
+
+/** 点是否落在轮盘外轮廓（多边形/近似圆）内部。 */
+export function outlineContains(wheel: RadialWheel, dx: number, dy: number): boolean {
+  const points = wheel.outline;
+  if (points.length < 3) return true;
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const [xi, yi] = points[i];
+    const [xj, yj] = points[j];
+    if (yi > dy !== yj > dy && dx < ((xj - xi) * (dy - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
 }
 
 /**
@@ -200,6 +268,14 @@ export function hitTestWheel(wheel: RadialWheel, dx: number, dy: number): Radial
   if (wheel.count === 0) return { zone: 'empty' };
   const r = Math.hypot(dx, dy);
   if (r < wheel.innerRadius) return { zone: 'center' };
+
+  if (wheel.shape === 'circle') {
+    // 圆形轮盘：判据就是半径——圈内就是某个扇区，出圈即"轮盘外"。
+    if (r > wheel.radius * 1.02) return { zone: 'empty' };
+  } else if (!outlineContains(wheel, dx, dy)) {
+    // 多边形轮盘：四角是空白区，必须真的落在多边形里才算命中。
+    return { zone: 'empty' };
+  }
 
   if (wheel.count === 1) {
     return { zone: 'segment', index: 0, candidate: wheel.segments[0].candidate };

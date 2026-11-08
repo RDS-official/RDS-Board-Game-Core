@@ -1,5 +1,5 @@
 import './lobby/lobby.css';
-import { showGameLoading } from './gameLoading';
+import { failGameLoading, showGameLoading } from './gameLoading';
 import { canEnterNetGame, netEntryOf, stripNetParamsFromUrl } from './entryRoute.ts';
 import { html, setHtml } from './ui/dom/html';
 
@@ -144,7 +144,15 @@ async function enterGameView(rawQuery: string): Promise<void> {
   const app = document.getElementById('app');
   if (app) app.style.display = '';
   if (query) history.replaceState(null, '', '?' + query);
-  await import('./main.ts');
+  try {
+    await import('./main.ts');
+  } catch (error) {
+    // chunk 没加载下来 / main 顶层抛错：过去这里会静默 reject，玩家只看到永远转的
+    // 加载遮罩。现在把原因摆到脸上，并给一键重试。
+    console.error('[shell] failed to start the game view', error);
+    gameStarted = false;
+    failGameLoading((error as Error)?.message || String(error));
+  }
 }
 
 async function enterAdminView(): Promise<void> {

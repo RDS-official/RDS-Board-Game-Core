@@ -2073,7 +2073,7 @@
   left: 50%;
   bottom: 0;
   width: 108px;
-  height: 150px;
+  height: 162px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -2136,6 +2136,45 @@
   font-size: 11px;
   color: #ffb27a;
 }
+/* Entity actions use the very texture drawn by the 3D renderer, not a second
+   lookalike illustration. The action wording stays as a quiet footer because
+   one physical card can offer several targets or use modes. */
+.action-hand .ah-with-art .ah-face {
+  padding: 0;
+  background: #15110d;
+}
+.action-hand .ah-art {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+}
+.action-hand .ah-action-label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 2.6em;
+  padding: 14px 5px 5px;
+  overflow: hidden;
+  background: linear-gradient(transparent, rgba(5, 4, 3, 0.94) 52%);
+  color: #f3e6c8;
+  font-size: 12px;
+  line-height: 1.15;
+  text-align: center;
+  text-shadow: 0 1px 2px #000;
+}
+.action-hand .ah-with-art .ah-badge,
+.action-hand .ah-with-art .ah-cool {
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: rgba(5, 4, 3, 0.72);
+  text-shadow: 0 1px 2px #000;
+}
 .action-hand .ah-card:focus-visible {
   outline: 2px solid #d9b45b;
   outline-offset: 2px;
@@ -2161,19 +2200,50 @@
   }
 }
 
-/* ---- Radial target picker (P5) ---------------------------------------- */
+/* ---- 目标轮盘（点击小轮盘 / 拖拽大轮盘） -----------------------------
+   材质＝深色磨砂玻璃：桌面透出来但被抹糊，不跟卡牌抢注意力。
+   配色＝中性玻璃 + 玩家色（只表示"是谁"）+ 金色（只表示"更多/确认"）。
+   高亮同时用填充 + 描边 + 字重（颜色不是唯一编码，色盲安全）。 */
 .rp-layer {
   position: fixed;
   inset: 0;
   z-index: 70;
   pointer-events: none;
 }
+
+.rp-layer[data-mode='drag'] {
+  z-index: 74;
+}
+
+/* 正在拖牌时必须把**整个外壳**抬到轮盘之上（.ui-layer 默认 z=10，卡片被它困在
+   同一个层叠上下文里，只抬手牌条是抬不过 body 上的 .rp-layer 的）。 */
+.ui-layer.app-shell[data-dragging='1'] {
+  z-index: 78;
+}
+
+.app-shell > .action-hand[data-enabled='1'][data-dragging='1'] {
+  z-index: 80;
+}
+
+/* 磨砂只做在轮盘本体上（clip-path 由 overlay 按外轮廓写进内联样式）：
+   手牌区、桌面其余部分保持清晰——拖回手牌＝放回并关闭轮盘，视觉上必须看得出来。 */
+.rp-frost {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 45%, rgba(24, 30, 40, 0.28), rgba(8, 11, 15, 0.4));
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  animation: rp-fade 140ms ease-out both;
+}
+
 .rp-backdrop {
   position: absolute;
   inset: 0;
   pointer-events: auto;
   background: rgba(8, 6, 4, 0.3);
 }
+
 .rp-dialog {
   position: fixed;
   width: 320px;
@@ -2181,44 +2251,347 @@
   transform: translate(-50%, -50%);
   pointer-events: auto;
   outline: none;
-  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.55));
+  filter: drop-shadow(0 24px 70px rgba(0, 0, 0, 0.55));
 }
+
+/* 拖拽模式：轮盘不接指针（capture 在手牌条上），只做展示与命中计算。 */
+.rp-layer[data-mode='drag'] .rp-dialog {
+  pointer-events: none;
+  animation: rp-pop 140ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
 .rp-wheel {
   display: block;
   width: 100%;
   height: 100%;
 }
+
+.rp-outline {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.16);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
 .rp-seg {
-  fill: rgba(30, 26, 20, 0.92);
-  stroke: rgba(217, 180, 91, 0.55);
-  stroke-width: 1.5;
+  fill: rgba(255, 255, 255, 0.055);
+  stroke: rgba(255, 255, 255, 0.1);
+  stroke-width: 1;
   cursor: pointer;
-  transition: fill 90ms ease-out;
+  transition: fill 90ms ease-out, stroke 90ms ease-out, opacity 90ms ease-out;
 }
+
 .rp-seg.is-active {
-  fill: rgba(217, 180, 91, 0.32);
-  stroke: #f0cd7a;
-}
-.rp-center {
-  fill: rgba(16, 13, 10, 0.96);
-  stroke: rgba(217, 180, 91, 0.7);
+  fill: color-mix(in oklab, var(--seg, #9fb0c6) 26%, transparent);
+  stroke: color-mix(in oklab, var(--seg, #9fb0c6) 70%, transparent);
   stroke-width: 1.5;
+}
+
+.rp-seg[data-disabled='1'] {
+  opacity: 0.45;
+}
+
+/* 高亮时其余分区让位（压暗），视线只落在当前目标上。 */
+.rp-wheel.has-active .rp-seg:not(.is-active) {
+  opacity: 0.5;
+}
+
+.rp-center {
+  fill: rgba(14, 18, 24, 0.72);
+  stroke: rgba(217, 180, 91, 0.35);
+  stroke-width: 1.2;
   cursor: pointer;
-  transition: fill 90ms ease-out;
+  transition: fill 120ms ease-out, stroke 120ms ease-out;
 }
+
 .rp-center.is-active {
-  fill: rgba(217, 180, 91, 0.42);
+  fill: rgba(217, 180, 91, 0.26);
+  stroke: rgba(217, 180, 91, 0.8);
 }
-.rp-label {
-  fill: #f3e6c8;
-  font-size: 13px;
-  pointer-events: none;
-}
+
 .rp-center-label {
-  fill: #d9b45b;
+  fill: #e7cf92;
   font-size: 13px;
+  letter-spacing: 0.08em;
   pointer-events: none;
 }
+
+/* 分区上的"人"：头像 + 名字 + 一行提示 */
+.rp-pin {
+  pointer-events: none;
+}
+
+.rp-avatar-ring {
+  fill: rgba(10, 14, 20, 0.55);
+  stroke-width: 2;
+  transition: stroke-width 110ms ease-out;
+}
+
+.rp-avatar {
+  pointer-events: none;
+}
+
+.rp-initial {
+  fill: #e8eef6;
+  font-size: 18px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.rp-label {
+  fill: #c9d3e0;
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.rp-hint {
+  fill: #8b98ab;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.rp-pin.is-active .rp-avatar-ring {
+  stroke-width: 3;
+}
+
+.rp-pin.is-active .rp-label {
+  fill: #f7fafc;
+  font-weight: 700;
+}
+
+@keyframes rp-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rp-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rp-frost,
+  .rp-layer[data-mode='drag'] .rp-dialog {
+    animation: none;
+  }
+  .rp-seg,
+  .rp-center,
+  .rp-avatar-ring {
+    transition: none;
+  }
+}
+
+/* ---- Unified hand physics (ui/cardHand) ------------------------------
+   transform / opacity / z-index 只由 rAF 写（单写者）。这里只保留 paint-only 的
+   阴影/描边过渡——一旦给 transform 加 transition，它会和 rAF 抢同一属性，悬停就
+   会"跳一下"。 */
+.action-hand[data-physics='1'] .ah-card {
+  transition: none;
+  cursor: grab;
+}
+
+.action-hand[data-physics='1'] .ah-face {
+  transition: box-shadow 170ms cubic-bezier(0.2, 0.8, 0.2, 1), border-color 170ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* will-change 只在实际交互期间打开：30 张常驻提升图层会白白吃显存。 */
+.action-hand[data-physics='1'] .ah-card[data-active='1'] {
+  will-change: transform;
+}
+
+.action-hand[data-physics='1'] .ah-card[data-drag='1'] {
+  cursor: grabbing;
+}
+
+.action-hand[data-physics='1'] .ah-card[data-hover='1'] .ah-face {
+  border-color: rgba(217, 180, 91, 0.85);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.62);
+}
+
+/* 出牌区三态：进场（valid）/ 未命中（invalid）/ 空闲（无值）。 */
+.action-hand[data-physics='1'] .ah-card[data-drop='valid'] .ah-face {
+  border-color: #6ee7a8;
+  box-shadow: 0 18px 34px rgba(110, 231, 168, 0.35);
+}
+
+.action-hand[data-physics='1'] .ah-card[data-drop='invalid'] .ah-face {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-hand[data-physics='1'] .ah-face {
+    transition: none;
+  }
+}
+
+/* 持有牌（非动作卡：底牌 / 道具）：看得见、点得开，但拖不出去。 */
+.action-hand[data-physics='1'] .ah-card.ah-held {
+  cursor: pointer;
+}
+
+.action-hand[data-physics='1'] .ah-card.ah-held .ah-face {
+  border-color: rgba(120, 170, 255, 0.45);
+}
+
+.action-hand[data-physics='1'] .ah-card.ah-held .ah-badge {
+  color: #9fd0ff;
+}
+
+/* ---- 出牌回响：桌面上留一句"谁打了什么" --------------------------------
+   动作卡在 3D 桌面上没有实体，只靠手牌消失看不出发生了什么。回响由"本地出牌"与
+   远端历史共同驱动，所以两端看到的是同一件事。 */
+.hand-play-echo {
+  position: fixed;
+  left: var(--echo-x, 50vw);
+  top: var(--echo-y, 50vh);
+  z-index: 26;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 26px;
+  border: 1px solid rgba(217, 180, 91, 0.5);
+  border-radius: 12px;
+  background: radial-gradient(ellipse at center, rgba(20, 26, 34, 0.94), rgba(10, 13, 18, 0.78));
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+  color: #f3e6c8;
+  pointer-events: none;
+  animation: hpe-rise 2100ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+
+.hpe-actor {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: #9fd0ff;
+}
+
+.hpe-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+@keyframes hpe-rise {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translateY(14px) scale(0.82);
+  }
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -50%) translateY(0) scale(1);
+  }
+  78% {
+    opacity: 1;
+    transform: translate(-50%, -52%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -62%) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hand-play-echo {
+    animation: none;
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* ---- 手牌翻页器 ------------------------------------------------------
+   手牌不横向滚动：滚动手势会与拖拽抢同一个轴。翻页只换"当前页"，卡片位置仍由
+   弧形布局算出，拖动永远发生在页内。 */
+.hand-pager {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--shell-edge, 16px) + 178px);
+  z-index: 3000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border: 1px solid rgba(217, 180, 91, 0.35);
+  border-radius: 999px;
+  background: rgba(12, 16, 22, 0.84);
+  color: #e8edf5;
+  font-size: 11px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.hand-pager[hidden] {
+  display: none;
+}
+
+.hp-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(217, 180, 91, 0.16);
+  color: #f3e6c8;
+  font-size: 14px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+.hp-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.hp-label {
+  min-width: 44px;
+  text-align: center;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 1199px) {
+  .hand-pager {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px + 148px);
+  }
+}
+
+/* ---- 手牌分区色标（牌 / 装备 / 技能 / 命令） -------------------------
+   只改描边颜色，不靠颜色单独传达信息：卡面本身已有类别角标与文字。 */
+.action-hand[data-physics='1'] .ah-card[data-group='skill'] .ah-face {
+  border-color: rgba(160, 140, 255, 0.5);
+}
+
+.action-hand[data-physics='1'] .ah-card[data-group='equip'] .ah-face {
+  border-color: rgba(120, 200, 255, 0.5);
+}
+
+.action-hand[data-physics='1'] .ah-card[data-group='command'] .ah-face {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+/* ---- 出牌回响的真实卡面 --------------------------------------------- */
+.hand-play-echo.with-art {
+  padding: 8px 12px 10px;
+  gap: 4px;
+}
+
+.hpe-face {
+  width: 74px;
+  height: 106px;
+  object-fit: cover;
+  border: 1px solid rgba(217, 180, 91, 0.5);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
+}
+
 /* Linear listbox for keyboard / screen readers: present but visually hidden. */
 .rp-list {
   position: absolute;
@@ -2241,7 +2614,7 @@
   }
   .app-shell[data-hand='unified'] > .action-hand .ah-card {
     width: 92px;
-    height: 128px;
+    height: 138px;
   }
   .app-shell[data-hand='unified']:not([data-placement='1']) .dock-actions,
   .app-shell[data-hand='unified']:not([data-placement='1']) .dock-held {
@@ -2272,4 +2645,267 @@
   .app-shell[data-hand='unified'] > .action-hand[data-enabled='1'] {
     bottom: var(--shell-edge, 16px);
   }
+}
+
+/* ============================================================
+   新操作台（?zones）：实体手牌 + 指令轨 + 情境动作 + 应答托盘
+   ------------------------------------------------------------
+   手牌仍由 #action-hand / CardHand 绘制，但只接收 snapshot.hand
+   （实体卡）。指令、棋盘动作、应答分别占独立行，绝不混进手牌。
+   ============================================================ */
+
+.operation-deck[data-enabled='0'] {
+  display: none;
+}
+
+.operation-deck[data-enabled='1'] {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--shell-edge, 16px) + 200px);
+  transform: translateX(-50%);
+  z-index: 28;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(900px, 92vw);
+  pointer-events: none;
+}
+
+.operation-deck > * {
+  pointer-events: auto;
+}
+
+.operation-deck .op-row-label {
+  display: block;
+  margin: 0 0 3px 2px;
+  color: var(--text-tertiary, #8d94a1);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.operation-deck .op-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.operation-deck .op-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 5px 10px;
+  border: 1px solid rgba(217, 180, 91, 0.32);
+  border-radius: 999px;
+  background: rgba(18, 22, 30, 0.88);
+  color: #f3e6c8;
+  font-size: 12px;
+  line-height: 1.1;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.operation-deck .op-btn:hover {
+  border-color: rgba(217, 180, 91, 0.7);
+  background: rgba(35, 39, 50, 0.95);
+}
+
+.operation-deck .op-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.operation-deck .op-ico {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+}
+
+.operation-deck .op-ico svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.operation-deck .op-more {
+  border-style: dashed;
+  color: #d9b45b;
+}
+
+.operation-deck .op-command-btn {
+  border-color: rgba(217, 180, 91, 0.5);
+}
+
+.operation-deck .op-context-btn {
+  border-color: rgba(120, 200, 255, 0.35);
+}
+
+.operation-deck .op-cool {
+  color: #ffb27a;
+  font-size: 10px;
+}
+
+.operation-deck .op-prompt {
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 138, 101, 0.45);
+  border-left: 3px solid #ff8a65;
+  border-radius: 10px;
+  background: rgba(28, 20, 18, 0.94);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.operation-deck .op-prompt-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.operation-deck .op-prompt-head strong {
+  color: #ffd9c9;
+  font-size: 13px;
+}
+
+.operation-deck .op-prompt-desc {
+  color: #d6c7bd;
+  font-size: 11px;
+}
+
+.operation-deck .op-prompt-options {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.operation-deck .op-prompt-btn {
+  border-color: rgba(255, 138, 101, 0.55);
+  background: rgba(60, 32, 26, 0.92);
+}
+
+.operation-deck .op-equip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.operation-deck .op-equip .op-row {
+  gap: 4px;
+}
+
+.operation-deck .op-equip-chip {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border: 1px solid rgba(120, 200, 255, 0.35);
+  border-radius: 6px;
+  background: rgba(18, 26, 34, 0.85);
+  color: #d9ecff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.operation-deck .op-status {
+  color: var(--text-tertiary, #8d94a1);
+  font-size: 10px;
+  text-align: right;
+  min-height: 12px;
+}
+
+/* 新模式下旧 dock 的动作扇/手持位让位；放置模式仍保留 dock 的旋转/确认面板。 */
+.app-shell[data-hand='zones'] > .hand-slot {
+  display: none !important;
+}
+
+.app-shell[data-hand='zones']:not([data-placement='1']) > .action-dock {
+  display: none !important;
+}
+
+.app-shell[data-hand='zones'][data-placement='1'] > .action-dock {
+  bottom: calc(var(--shell-edge, 16px) + 300px);
+}
+
+@media (max-width: 1199px) {
+  .operation-deck[data-enabled='1'] {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px + 156px + 6px);
+    width: calc(100vw - 24px);
+  }
+
+  .operation-deck .op-btn {
+    min-height: 40px;
+    font-size: 12px;
+  }
+
+  .app-shell[data-hand='zones'] > #action-hand[data-enabled='1'] {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    width: calc(100vw - 24px);
+    height: 156px;
+  }
+
+  .app-shell[data-hand='zones'] > #action-hand .ah-card {
+    width: 92px;
+    height: 138px;
+  }
+
+  .app-shell[data-hand='zones'] > .hand-pager {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px + 150px);
+  }
+}
+
+/* 实体手牌：可打出/不可用状态；不可用仍然可查看。 */
+.action-hand .ah-card.ah-hand[data-playable='0'] .ah-face {
+  filter: grayscale(0.55);
+  opacity: 0.78;
+}
+
+.action-hand .ah-reason {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: 3px;
+  padding: 2px 3px;
+  border-radius: 3px;
+  background: rgba(5, 4, 3, 0.78);
+  color: #ffb27a;
+  font-size: 10px;
+  line-height: 1.1;
+  text-align: center;
+}
+
+/* 手牌动词菜单：一张实体牌有多个动词时的轻量上下文菜单。 */
+.hand-verb-menu {
+  position: fixed;
+  z-index: 6000;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 4px;
+  border: 1px solid rgba(217, 180, 91, 0.45);
+  border-radius: 8px;
+  background: rgba(14, 18, 24, 0.97);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.55);
+}
+
+.hand-verb-menu button {
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #f3e6c8;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hand-verb-menu button:hover,
+.hand-verb-menu button:focus-visible {
+  background: rgba(217, 180, 91, 0.16);
+  outline: none;
 }
