@@ -1,3 +1,4 @@
+import { assertCharterSurface } from '@rds/kernel/charter';
 import { defineDriver, defineGame, definePresentation, GameModule } from '@rds/kernel/module';
 import { GameOutcome } from '@rds/kernel/types';
 import { BETRAYAL_HOOKS } from './betrayal/hooks';
@@ -429,10 +430,17 @@ export const splendorModule: GameModule = defineGame({
   },
   // C-6：规则层守恒/边界断言，内核每次转移后调用（不阻断，只记录）。
   checkInvariants: state => checkSplendorInvariants(state),
+  // C-5：没有机器决策入口（无 isAutomated）。牌堆与储备区靠实体 visibility
+  // （HIDDEN / OWNER_ONLY）由内核投影遮罩，不另做 project()。
   // C-7：分数由 settleTableau() 从场面整表重算，不是累加收益，账本记的是增量，
   // 硬塞只会把同一分反复记一遍。到期日是复核日，不是承诺接入的日期。
   charter: {
     deviations: [
+      {
+        clause: 'C-5',
+        reason: '无机器决策入口；隐藏信息由实体 visibility 交给内核投影遮罩',
+        expires: '2027-05-08'
+      },
       {
         clause: 'C-7',
         reason: '分数由场面派生重算（settleTableau 整表求和），没有可记账的增量收益',
@@ -1049,3 +1057,6 @@ export const GAME_REGISTRY: Record<string, GameModule> = {
 };
 
 export const GAME_MODULES: GameModule[] = Object.values(GAME_REGISTRY);
+
+// 正式模组的加载期门槛。夹具不进这张表，所以不会被误伤。
+for (const gameModule of GAME_MODULES) assertCharterSurface(gameModule);

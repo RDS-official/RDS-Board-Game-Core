@@ -4,7 +4,7 @@
 
 import { UniversalGameEngine } from '@rds/kernel/engine';
 import { CognitiveObserver } from '@rds/kernel/observer';
-import { checkCharter, resolveCharter } from '@rds/kernel/charter';
+import { assertCharterSurface, checkCharter, resolveCharter } from '@rds/kernel/charter';
 import { defineDriver, definePresentation } from '@rds/kernel/module';
 import { openDecision } from '@rds/kernel/decisions';
 import type { Action, GameState, ProjectedGameState } from '@rds/kernel/types';
@@ -1078,6 +1078,37 @@ test('AR-48: the kernel flags a module that claims simultaneous moves it cannot 
     violations.some(v => /simultaneousMoves/.test(v.message)),
     `a claim with no applySimultaneous must be reported, got: ${JSON.stringify(violations.map(v => v.message))}`
   );
+});
+
+test('charter gate: a registered module without checkInvariants fails to load', () => {
+  const splendor = GAME_REGISTRY.splendor;
+  const stripped = { ...splendor, checkInvariants: undefined };
+  let message = '';
+  try {
+    assertCharterSurface(stripped);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  assert(/checkInvariants/.test(message), `loading without C-6 must throw, got: ${message}`);
+});
+
+test('charter gate: a registered module without stateSchema fails to load', () => {
+  const splendor = GAME_REGISTRY.splendor;
+  const meta = { ...splendor.meta };
+  delete meta.stateSchema;
+  let message = '';
+  try {
+    assertCharterSurface({ ...splendor, meta });
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  assert(/stateSchema/.test(message), `loading without C-9 must throw, got: ${message}`);
+});
+
+test('charter gate: every registered module declares the C-6 and C-9 surface', () => {
+  for (const gameModule of Object.values(GAME_REGISTRY)) {
+    assertCharterSurface(gameModule);
+  }
 });
 
 test('AR-48: capability derivation does not count a single-seat SIMULTANEOUS window as simultaneous moves', () => {

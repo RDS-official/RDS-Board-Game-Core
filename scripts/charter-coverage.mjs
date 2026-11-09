@@ -12,12 +12,9 @@
  *     packages/kernel/src/charter.ts 的执行器一致。
  *   - 需审计（C-3 / C-4 / C-8）：当前没有可静态判定的信号，只打印。
  *
- * 退出码按 C-7 判定：六个模组要么声明 `requiresRewardLedger`，要么在
- * `charter.deviations` 里登记 C-7 偏离，否则退出码非零。C-7 是本轮收口的
- * 条款（dune_mahjong 接入 `ctx.reward()`，splendor 与 betrayal 登记偏离）。
- *
- * 其余条款只打印不阻断：splendor 的 C-5 仍是已知缺口，由后续 PR 补投影，
- * 在那之前把它算进失败会让本脚本在 CI 里永远红。
+ * 退出码：任一可判定条款出现「无覆盖」，或登记了无理由的偏离，即非零。
+ * 偏离算覆盖（带理由与到期日），不计入失败。C-3 / C-4 / C-8 仍是审计项，
+ * 只打印，不进退出码。
  *
  * 只读模组声明，不跑对局，因此很便宜。
  */
@@ -86,7 +83,6 @@ try {
   const { GAME_MODULES } = await server.ssrLoadModule('@rds/games/registry.ts');
 
   let gaps = 0;
-  let c7Gaps = 0;
   const header = ['模组'.padEnd(14, ' '), ...CHECKABLE.map(clause => clause.id.padEnd(8, ' '))].join(' ');
   console.log('\n宪章覆盖（✓ 有断言   ~ 已登记偏离   ✗ 无覆盖）\n');
   console.log(`  ${header}`);
@@ -94,10 +90,7 @@ try {
   for (const gameModule of GAME_MODULES) {
     const cells = CHECKABLE.map(clause => {
       const status = clause.status(gameModule);
-      if (status === 'gap') {
-        gaps += 1;
-        if (clause.id === 'C-7') c7Gaps += 1;
-      }
+      if (status === 'gap') gaps += 1;
       return `${MARK[status]} ${LABEL[status]}`.padEnd(7, ' ');
     });
     console.log(`  ${String(gameModule.meta.id).padEnd(14, ' ')} ${cells.join(' ')}`);
@@ -117,9 +110,8 @@ try {
   console.log(`  ${GAME_MODULES.length} 个模组，${CHECKABLE.length} 条可判定条款，${gaps} 处无覆盖\n`);
 
   for (const item of bareDeviations) console.log(`  ✗ 偏离缺少理由：${item}`);
-  if (c7Gaps > 0) console.log('  ✗ C-7 仍有无覆盖模组，CI 失败。\n');
-  if (gaps > c7Gaps) console.log('  （其余缺口已记录，暂不阻断 CI）\n');
-  exitCode = c7Gaps === 0 && bareDeviations.length === 0 ? 0 : 1;
+  if (gaps > 0) console.log('  ✗ 仍有无覆盖模组，CI 失败。\n');
+  exitCode = gaps === 0 && bareDeviations.length === 0 ? 0 : 1;
 } catch (error) {
   console.error('覆盖报告失败:', error);
 } finally {
