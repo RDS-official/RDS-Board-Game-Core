@@ -314,6 +314,7 @@
 | C-4 随机收口 | betrayal | ~~`drawRoomCandidate()` 用 `seed + items.length + attempts * 19` 拼假随机源~~ | — | ✅ **已关闭（2026-11）**：改为读 `state.prngState` 并写回 `nextSeed`；`charter C-4` 测试覆盖全部运行期调用点（AR-46） |
 | C-4 随机收口 | poker | ~~`ai.ts` 的 `noise()` 自实现 FNV 哈希作决策抖动~~ | 不想污染 `prngState`，保持 AI 决策与状态跃迁解耦 | ✅ **已部分关闭（2026-11）**：改名 `deriveNoise(view)`，入参为投影、不再读 `prngState`；仍未走 `ctx.roll()`（AR-46） |
 | C-5 信息约束 | poker | ~~AI 用 raw `GameState` 决策~~ | 历史实现，未区分投影通道 | ✅ **已关闭（2026-11）**：`choosePokerAction` 改收 `ProjectedGameState`，`rules.ts` 经 `decisionView()` 投影后调用（AR-2） |
+| C-5 信息约束 | splendor | 无 `project()`，也无 `requiresProjection` | 没有机器决策入口（无 `isAutomated`）。牌堆为 `HIDDEN`、储备区为 `OWNER_ONLY`，由内核投影按实体可见性遮罩 | 登记偏离 `charter.deviations`（C-5，到期 2027-05-08）。若将来加入机器决策，必须先投影再决策，不能直接补一个空投影过门槛（AR-2） |
 | C-7 收益独立 | poker | ~~收益直接改状态，未记账~~ | — | ✅ **已关闭（2026-11）**：`ctx.reward()` + `state.rewards` 落地；摊牌派池 / 弃牌取胜 / 观察者低保三处均已记账，`charter C-7` 覆盖（AR-47） |
 | C-7 收益独立 | catan | ~~资源获取直接改状态，未记账~~ | — | ✅ **已关闭（2026-11）**：`grantResources()` 总闸接入 `ctx.reward()`，覆盖掷骰产出 / 港口兑换 / 强盗抢夺；`charter.requiresRewardLedger` 已声明（AR-47） |
 | C-7 收益独立 | dune_mahjong | ~~胡 / 碰 / 吃与战斗之轮胜者加分直接改 `score`~~ | — | ✅ **已关闭（2026-11）**：四处加分收口到 `awardScore()`，经 `ctx.reward()` 记账；`charter.requiresRewardLedger` 已声明（AR-47） |

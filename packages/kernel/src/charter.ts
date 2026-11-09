@@ -5,7 +5,8 @@
  * 校验的违规**。这一层刻意做得很薄：
  *
  *  - 它不改变任何规则语义，只负责"发现"；
- *  - 它不抛异常，违规以结构化事件的形式交给调用方（内核决定是拦截还是记录）；
+ *  - `checkCharter()` 不抛异常，违规以结构化事件交给调用方（内核决定拦截还是记录）；
+ *  - `assertCharterSurface()` 是例外：注册表加载期缺 C-6 / C-9 声明直接抛错；
  *  - 全部是纯函数，无状态、无 IO，因此可以安全地放进 replay。
  *
  * 目前落地的是 C-1 / C-2 / C-5 / C-6 / C-9 五条里可静态或半静态判定的部分：
@@ -206,4 +207,26 @@ function __DEV_WEAK__(value: unknown): boolean {
   const record = value as Record<string, unknown>;
   if (typeof record.viewerId !== 'string') return true;
   return record.prngState !== undefined || record.seed !== undefined;
+}
+
+/**
+ * 加载期门槛：进入 `GAME_REGISTRY` 的模组必须声明 C-6 / C-9 的表面。
+ *
+ * 测试夹具走 `defineGame()`，不经过这里，所以缺声明不会炸内核单测。
+ * 第七个正式模组缺 `checkInvariants` 或 `meta.stateSchema.globalVars` 时，
+ * 注册表一加载就抛错，而不是等到某次对局才发现。
+ */
+export function assertCharterSurface(module: GameModule): void {
+  const id = module.meta?.id ?? '<unnamed>';
+  if (typeof module.checkInvariants !== 'function') {
+    throw new Error(
+      `Game ${id} is missing checkInvariants (charter C-6); declare it before registering the module`
+    );
+  }
+  const schema = module.meta?.stateSchema;
+  if (!schema || !Array.isArray(schema.globalVars)) {
+    throw new Error(
+      `Game ${id} is missing meta.stateSchema.globalVars (charter C-9); declare the key set before registering the module`
+    );
+  }
 }

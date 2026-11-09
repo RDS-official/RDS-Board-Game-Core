@@ -257,7 +257,7 @@ handler: () => ({
 
 ## 4. 分阶段落地
 
-> **2026-11 实际进度**：阶段 0 ~ 阶段 3 的机制都已落地（含 C-8 的物理分离，`𝒦_view` / `𝒦_driver` 不再混在同一个字段上），但**覆盖并不均匀**。C-1、C-2、C-6、C-9 六个模组都有断言；C-5 缺 splendor（无投影）；C-7 的收益账本只接了 poker / catan / sanguosha，splendor / betrayal / dune 既没有账本也没有「不适用」的登记。以覆盖报告脚本的输出为准，不要以本节的叙述为准。
+> **2026-11 实际进度**：阶段 0 ~ 阶段 3 的机制都已落地（含 C-8 的物理分离，`𝒦_view` / `𝒦_driver` 不再混在同一个字段上）。C-1、C-2、C-6、C-9 六个模组都有断言；splendor 登记了 C-5 与 C-7 偏离，betrayal 登记了 C-7 偏离（见 [RULES-DEVIATIONS.md](RULES-DEVIATIONS.md) §H）。`scripts/charter-coverage.mjs` 对任一可检查条款的无覆盖直接失败；进 `GAME_REGISTRY` 的模组缺 `checkInvariants` 或 `meta.stateSchema` 在加载时抛错。以覆盖报告脚本的输出为准，不要以本节的叙述为准。
 > 内核侧新增 `packages/kernel/src/charter.ts`（宪章执行器）与
 > `packages/harness/src/suites/charter.ts`（12 条可执行断言）。
 > 下面各阶段保留原计划，✅ 标记已完成项。
