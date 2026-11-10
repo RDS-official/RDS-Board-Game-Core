@@ -1249,6 +1249,8 @@ export class UniversalSession implements GamePresenter {
       gameId: module.meta.id,
       gameName: module.meta.name,
       capabilities: { ...module.meta.capabilities },
+      // 思考时限由模块声明；服务端到点会代打，UI 的倒计时必须同源。
+      turnDeadlineMs: module.driver?.decisionDeadlineMs,
       schemaCount: Object.keys(module.actionSchemas ?? {}).length,
       dependencyErrors: this.engine.getRules().dependencyErrors(),
       // `this.scenario` is undefined while a table plays its plain setup, which

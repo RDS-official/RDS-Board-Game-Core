@@ -1810,6 +1810,41 @@
   border-color: rgba(217, 180, 91, 0.45);
 }
 
+/* 桌面道具开关：一眼看出「现在是开还是关」。 */
+.menu-switch {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-switch strong {
+  font-size: var(--type-sm);
+}
+
+.menu-switch span {
+  color: var(--text-tertiary);
+  font-size: var(--type-xs);
+  line-height: 1.25;
+}
+
+.menu-switch[aria-pressed='true'] {
+  border-color: rgba(217, 180, 91, 0.65);
+  background: var(--surface-accent-wash);
+  box-shadow: inset 0 0 16px rgba(217, 180, 91, 0.12);
+}
+
+.menu-switch:hover {
+  border-color: rgba(217, 180, 91, 0.45);
+}
+
 .menu-hand-hint {
   margin: 0;
   color: var(--text-tertiary);
@@ -2942,6 +2977,40 @@
   }
   .seat-bubble.turn {
     box-shadow: 0 0 0 3px rgba(217, 180, 91, 0.85);
+  }
+
+  /*
+   * 手机主视图上「正在行动」的座位：头像放大、金色圈改红、并挂上读秒。
+   * 读秒的秒数由 HUD 的 `paintTurnClock` 每 250ms 刷新，这里只管位置和观感。
+   */
+  .seat-bubble.turn {
+    width: 58px;
+    height: 58px;
+    margin: -29px 0 0 -29px;
+    border-color: #ef4444;
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.55), 0 6px 18px -6px rgba(239, 68, 68, 0.8);
+    font-size: 24px;
+  }
+
+  .seat-bubble.turn .sb-clock {
+    position: absolute;
+    left: 50%;
+    bottom: -10px;
+    transform: translateX(-50%);
+    min-width: 22px;
+    padding: 1px 4px;
+    border-radius: 999px;
+    border: 1px solid rgba(239, 68, 68, 0.8);
+    background: rgba(8, 10, 14, 0.94);
+    color: #ffd7d7;
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+  }
+
+  .seat-bubble.turn .sb-clock:empty {
+    display: none;
   }
   .seat-bubble.dead {
     opacity: 0.45;

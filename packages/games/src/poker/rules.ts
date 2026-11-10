@@ -847,6 +847,10 @@ export class PokerRules {
     let spent = 0;
     let raised = false;
     let reopened = false;
+    /** 这次加注比上一个注额高多少（流水里要写明；下注时为 0）。 */
+    let raiseIncrement = 0;
+    /** 本次下注/加注后的「到」额度，流水用。 */
+    let raiseTotal = 0;
     let fullRaise = false;
     let shortRaiseAccum = hand.shortRaiseAccum;
     let label: string;
@@ -886,6 +890,8 @@ export class PokerRules {
         handBets[playerId] = (handBets[playerId] ?? 0) + delta;
         const increment = target - hand.currentBet;
         raised = increment > 0;
+        raiseIncrement = increment;
+        raiseTotal = target;
         if (raised) {
           if (increment >= hand.lastRaiseSize) {
             // Full raise: the betting reopens and the minimum raise grows.
@@ -972,10 +978,18 @@ export class PokerRules {
     }
 
     if (raised) {
+      // 动态里要能读出「这手加了多少」：只给「加注到 80」还得自己减去前注。
+      // 座位牌面（上面的 `sign`）保持短句，这里另写一行只给流水用。
+      const feedTitle =
+        hand.currentBet > 0 && raiseIncrement > 0
+          ? `${nameOf(state, playerId)} 加注到 ${raiseTotal}（本次 +${spent}）`
+          : action.type === 'ALL_IN' && raiseIncrement <= 0
+            ? `${nameOf(state, playerId)} 全押 ${raiseTotal}`
+            : `${nameOf(state, playerId)} 下注 ${raiseTotal}`;
       ctx.trace({
         id: ctx.id('poker'),
         type: 'TOKEN_TRANSFER',
-        title: label,
+        title: feedTitle,
         sourceId: playerId,
         payload: { amount: streetBets[playerId] },
         durationMs: 400

@@ -105,6 +105,11 @@ export interface HUDOptions {
    * this to the renderer; the HUD itself never imports render code.
    */
   onViewportInsets?: (insets: { left: number; right: number; bottom: number; top: number }) => void;
+  /**
+   * 桌面装饰道具（筹码堆 / 牌堆）的显示开关，由组合根转给渲染层。
+   * HUD 自己不认识 Three.js，只把玩家的选择说出去。
+   */
+  onTableFurniture?: (visible: boolean) => void;
 }
 
 /**
@@ -245,6 +250,10 @@ export class BoardGameHUD {
   private heldIndex = 0;
   /** 默认操作台：实体手牌 + 指令轨 + 应答托盘；传统动作栏是兼容模式。 */
   private operationDeckEnabled = true;
+  /** 桌面筹码堆 / 牌堆是否显示；默认收起（声明了 `tableFurniture` 的玩法才有开关）。 */
+  private tableFurnitureVisible = false;
+  /** 是否已经从 localStorage 读过偏好：只读一次，避免每次快照覆盖玩家的选择。 */
+  private tableFurnitureResolved = false;
   /** 当前手牌实体（key = hand:<entityId>）；不是动作卡。 */
   private readonly zoneHandCards = new Map<string, UiHandCard>();
   /** Radial target chooser, created lazily while the shadow hand is enabled. */
@@ -378,6 +387,7 @@ export class BoardGameHUD {
       window.clearInterval(this.dockTraceTimer);
       this.dockTraceTimer = null;
     }
+    this.stopTurnClock();
 
     this.dockTraceOverlay?.remove();
     this.dockTraceOverlay = null;
@@ -1071,6 +1081,21 @@ export class BoardGameHUD {
             </div>
             <p class="menu-hand-hint">分区操作台让手牌只显示你持有的实体牌；结束回合、弃牌、跟注等动作不再伪装成手牌。</p>
           </section>
+          ${this.latest?.capabilities.tableFurniture
+            ? html`<section class="menu-section" aria-labelledby="menu-table-title">
+                <h3 class="menu-section-title" id="menu-table-title">桌面道具</h3>
+                <button
+                  class="menu-switch"
+                  type="button"
+                  data-table-furniture
+                  aria-pressed="${this.tableFurnitureVisible}"
+                >
+                  <strong>显示筹码堆与牌堆</strong>
+                  <span>${this.tableFurnitureVisible ? '已显示 · 点击收起' : '已收起 · 点击显示'}</span>
+                </button>
+                <p class="menu-hand-hint">收起后桌面只留下底池读数与座位牌面，视野更干净；牌局数据不受影响。</p>
+              </section>`
+            : ''}
           <section class="menu-section" aria-labelledby="menu-controls-title">
             <h3 class="menu-section-title" id="menu-controls-title">对局与视图</h3>
             <div class="menu-slot" data-menu-slot="controls"></div>
@@ -1097,6 +1122,15 @@ export class BoardGameHUD {
         const mode = button.dataset.handMode === 'legacy' ? 'legacy' : 'zones';
         this.setHandMode(mode);
         this.closeMenu(true);
+      });
+    });
+    // 桌面道具开关：留在菜单里连续拨（关掉再打开很常见），不自动关闭菜单。
+    layer.querySelectorAll<HTMLElement>('[data-table-furniture]').forEach(button => {
+      button.addEventListener('click', () => {
+        const next = button.getAttribute('aria-pressed') !== 'true';
+        this.setTableFurniture(next);
+        const hint = button.querySelector('span');
+        if (hint) hint.textContent = next ? '已显示 · 点击收起' : '已收起 · 点击显示';
       });
     });
 
@@ -2171,9 +2205,42 @@ export class BoardGameHUD {
     return saved === 'legacy' ? 'legacy' : 'zones';
   }
 
+  /**
+   * 桌面筹码堆 / 牌堆的开关。
+   *
+   * 默认收起：这些实体道具会压住底池读数与座位牌面，还多画几十个网格。选择记在
+   * localStorage 里，换局、刷新都保持；渲染层只是收到一个布尔值。
+   */
+  private setTableFurniture(visible: boolean): void {
+    this.tableFurnitureVisible = visible;
+    this.tableFurnitureResolved = true;
+    try {
+      safeLocalStorage()?.setItem('rds.tableFurniture', visible ? '1' : '0');
+    } catch {
+      // 存不下只影响下次打开。
+    }
+    this.options.onTableFurniture?.(visible);
+    const button = this.container.querySelector('[data-table-furniture]') as HTMLElement | null;
+    if (button) button.setAttribute('aria-pressed', visible ? 'true' : 'false');
+    if (this.latest) this.renderPlayers(this.latest);
+  }
+
+  /** 第一次遇到声明了 `tableFurniture` 的玩法时，把偏好推给渲染层。 */
+  private resolveTableFurniture(snapshot: GameSnapshot): void {
+    if (this.tableFurnitureResolved || !snapshot.capabilities.tableFurniture) return;
+    this.tableFurnitureResolved = true;
+    let stored: string | null = null;
+    try {
+      stored = safeLocalStorage()?.getItem('rds.tableFurniture') ?? null;
+    } catch {
+      stored = null;
+    }
+    this.tableFurnitureVisible = stored === '1';
+    this.options.onTableFurniture?.(this.tableFurnitureVisible);
+  }
+
   /** 菜单里的模式切换：不重载页面，保留当前牌局。 */
-  private setHandMode(mode: 'zones' | 'legacy'): void {
-    const enabled = mode === 'zones';
+  private setHandMode(mode: 'zones' | 'legacy'): void {    const enabled = mode === 'zones';
     this.operationDeckEnabled = enabled;
     this.container.dataset.hand = enabled ? 'zones' : 'legacy';
     this.ports.setOwnHandVisible?.(!enabled);
@@ -2316,6 +2383,8 @@ export class BoardGameHUD {
         <button class="hp-btn" type="button" data-page-step="1" aria-label="下一页">›</button>
       </div>
       <div class="announcement-banner" id="announce" style="display:none"></div>
+      <!-- 自己最后 10 秒的读秒：只在模块声明了思考时限时才出现。 -->
+      <div class="turn-clock-centre" id="turn-clock-centre" aria-live="assertive" aria-atomic="true"></div>
       <div class="payload-layer" id="payload-layer" style="display:none"></div>
       <div class="shell-scrim" data-shell-scrim aria-hidden="true"></div>
     `);
@@ -2562,7 +2631,9 @@ export class BoardGameHUD {
 
     this.renderViewerSelect(snapshot);
     this.renderScenarioSelect(snapshot);
+    this.resolveTableFurniture(snapshot);
     this.renderPlayers(snapshot);
+    this.syncTurnClock(snapshot);
     this.renderRoomCard(snapshot);
     this.renderMinimap(snapshot);
     this.renderChipRanking(snapshot);
@@ -3300,8 +3371,79 @@ export class BoardGameHUD {
   }
 
 
-  private renderPlayers(snapshot: GameSnapshot): void {
-    const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
+  /** 当前行动者的思考倒计时：只在模块声明了 `decisionDeadlineMs` 时存在。 */
+  private turnClock: { actorId: string; startedAt: number; deadlineMs: number } | null = null;
+  private turnClockTimer: number | null = null;
+
+  /**
+   * 行动者换人 → 倒计时重新起算；同一个人继续走，别每帧重置。
+   *
+   * 锚点是「本客户端第一次看到这个行动者」的时刻。服务器在自己的 `turnSince`
+   * 上以同样的转移为起点计时，两边差的只是一个网络往返；30 秒的计时器看不出来，
+   * 而且到点后服务器会替玩家过牌/弃牌，快照随即翻页。
+   */
+  private syncTurnClock(snapshot: GameSnapshot): void {
+    const deadlineMs = Number(snapshot.turnDeadlineMs ?? 0);
+    const actorId = snapshot.focus[0] ?? snapshot.focusActors[0];
+    if (!deadlineMs || !actorId) {
+      this.stopTurnClock();
+      return;
+    }
+    if (this.turnClock?.actorId === actorId && this.turnClock.deadlineMs === deadlineMs) return;
+    this.turnClock = { actorId, startedAt: Date.now(), deadlineMs };
+    if (this.turnClockTimer === null) {
+      this.turnClockTimer = window.setInterval(() => this.paintTurnClock(), 250);
+    }
+    this.paintTurnClock();
+  }
+
+  /** 每秒（实际 250ms 一跳，读数不跳格）刷新座位角标与屏幕正中大字。 */
+  private paintTurnClock(): void {
+    const clock = this.turnClock;
+    if (!clock) return;
+    const left = Math.max(0, clock.deadlineMs - (Date.now() - clock.startedAt));
+    const seconds = Math.ceil(left / 1000);
+    const mine = this.latest ? clock.actorId === this.latest.viewer : false;
+
+    const badge = this.container.querySelector(
+      `.pc[data-player-id="${clock.actorId}"] [data-turn-clock]`
+    ) as HTMLElement | null;
+    if (badge) badge.textContent = seconds > 0 ? `${seconds}s` : '';
+
+    // 贴边泡泡（移动端主视图）上的读秒角标。
+    const bubbleClock = this.container.querySelector(
+      `.seat-bubble[data-seat="${clock.actorId}"] [data-turn-clock-bubble]`
+    ) as HTMLElement | null;
+    if (bubbleClock) bubbleClock.textContent = seconds > 0 ? String(seconds) : '';
+
+    const centre = this.container.querySelector('#turn-clock-centre') as HTMLElement | null;
+    if (!centre) return;
+    // 自己的最后 10 秒才抢屏幕正中：别人的读秒在座位卡上，不挡桌面。
+    const urgent = mine && seconds > 0 && seconds <= 10;
+    centre.classList.toggle('on', urgent);
+    centre.textContent = urgent ? String(seconds) : '';
+  }
+
+  private stopTurnClock(): void {
+    this.turnClock = null;
+    if (this.turnClockTimer !== null) {
+      window.clearInterval(this.turnClockTimer);
+      this.turnClockTimer = null;
+    }
+    const centre = this.container.querySelector('#turn-clock-centre') as HTMLElement | null;
+    if (centre) {
+      centre.classList.remove('on');
+      centre.textContent = '';
+    }
+    this.container.querySelectorAll('[data-turn-clock]').forEach(node => {
+      node.textContent = '';
+    });
+    this.container.querySelectorAll('[data-turn-clock-bubble]').forEach(node => {
+      node.textContent = '';
+    });
+  }
+
+  private renderPlayers(snapshot: GameSnapshot): void {    const rail = this.container.querySelector('#player-rail') as HTMLElement | null;
     if (!rail) return;
 
     const playerCards = snapshot.players
@@ -3380,6 +3522,7 @@ export class BoardGameHUD {
                   ${player.roleLabel ? `<span class="pc-role ${player.roleClass ?? ''}">${player.roleLabel}</span>` : ''}
                   ${player.alive ? '' : '<span class="pc-role dead-chip" title="角色已退场，不再参与行动">☠ 已阵亡</span>'}
                   ${player.isFocus ? `<span class="pc-turn"><span class="dot"></span>决策中</span>` : ''}
+                  ${player.isFocus ? '<span class="pc-clock" data-turn-clock></span>' : ''}
                 </div>
               </div>
               <div class="pc-score"><b>${player.score}</b><span>${player.scoreLabel}</span></div>
@@ -3548,6 +3691,7 @@ export class BoardGameHUD {
             : html`<span>${player.avatar || '👤'}</span>`;
         return html`<button type="button" class="seat-bubble ${player.isFocus ? 'turn' : ''} ${player.alive ? '' : 'dead'} ${showBet ? 'bet' : ''}" data-seat="${player.id}" data-edge="${point.edge}" style="${`--seat:${player.color};--sb-x:${Math.round(entry.x)}px;--sb-y:${Math.round(entry.y)}px`}" aria-label="${player.name}">
           ${face}
+          ${player.isFocus ? '<span class="sb-clock" data-turn-clock-bubble></span>' : ''}
         </button>`;
       })}`
     );

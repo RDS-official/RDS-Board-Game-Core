@@ -38,6 +38,13 @@ export interface GameCapabilities {
   nonPlayerActors?: boolean;
   /** Module uses GameState.effects and kernel expiry. */
   effects?: boolean;
+  /**
+   * 桌面摆着「筹码堆 / 牌堆」这类纯装饰道具，可以整组收起。
+   *
+   * 声明它以后，UI 会给一个「显示桌面筹码与牌堆」的开关（默认关：这些道具
+   * 只在需要看实物时才值得占屏幕）。没声明的玩法不出现开关。
+   */
+  tableFurniture?: boolean;
   /** Short label kept for UI/back-compat; prefer topologySpec. */
   topology: 'none' | 'hex-dual' | 'graph' | 'ring' | 'grid';
   /** Structured topology contract; see TopologySpec. */

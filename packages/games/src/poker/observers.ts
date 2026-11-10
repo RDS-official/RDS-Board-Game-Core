@@ -39,8 +39,13 @@ export interface PokerObserverState {
 export const POKER_OBSERVER = {
   /** 观察者筹码低于这个数才有低保。 */
   stipendThreshold: 100,
-  /** 每次低保发放的筹码。 */
-  stipendAmount: 10,
+  /**
+   * 每次低保发放的筹码。
+   *
+   * 每 60 秒一次，也就是 **100/分钟**：被打光的人一分钟就能重新买入
+   * （门槛 100 = 一个大盲的 10 倍）。早先是 10/分钟，回桌要等十分钟。
+   */
+  stipendAmount: 100,
   /** 低保周期（秒）。 */
   stipendPeriodSeconds: 60,
   /** 重新上桌的最低买入（单位：大盲）。 */

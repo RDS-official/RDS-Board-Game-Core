@@ -747,6 +747,31 @@ export class BoardGameScene {
   private furniture = new ObjectTemplateCache();
   /** Full board rebuilds since construction (the cache's blast radius). */
   private boardRebuildCount = 0;
+  /**
+   * 桌面装饰道具（筹码堆 / 牌堆）是否显示。
+   *
+   * 声明了 `capabilities.tableFurniture` 的玩法（德州扑克）默认收起：这些道具挡住
+   * 底池与座位牌面，还多画几十个网格；开关在菜单里。其余玩法保持原样，不会因为
+   * 这条开关丢掉自己的牌堆。
+   */
+  private showTableFurniture = true;
+
+  /**
+   * 桌面道具（筹码堆 / 牌堆）总开关。下一次 `syncState` 会重搭牌面。
+   *
+   * 筹码堆与牌堆是同一组「实体手感」道具，一起收一起放：只显示其中一半，看起来
+   * 像加载失败。
+   */
+  public setTableFurnitureVisible(visible: boolean): void {
+    if (this.showTableFurniture === visible) return;
+    this.showTableFurniture = visible;
+    if (this.lastRawState) this.syncState(this.lastRawState);
+  }
+
+  /** 筹码堆（底池 / 座位 / 本街下注）是否显示。 */
+  private get showTableChips(): boolean {
+    return this.showTableFurniture;
+  }
   private lastRawState: ProjectedGameState | null = null;
   private lastState: ProjectedGameState | null = null;
   private lastPlacement?: PlacementPreview;
@@ -1899,7 +1924,9 @@ export class BoardGameScene {
     const placingSignature = displayPlacement
       ? `${displayPlacement.defId ?? displayPlacement.name}:${displayPlacement.floor}:${displayPlacement.col}:${displayPlacement.row}`
       : 'none';
-    const boardKey = `${state.gameId}:${state.viewerId}:${state.actionLog.length}:${state.clock}:${placingSignature}`;
+    // 桌面装饰道具（筹码堆 / 牌堆）的开关也是牌面的一部分：拨一下就重搭。
+    const furnitureKey = this.showTableFurniture ? 'furniture-on' : 'furniture-off';
+    const boardKey = `${state.gameId}:${state.viewerId}:${state.actionLog.length}:${state.clock}:${placingSignature}:${furnitureKey}`;
     const boardChanged = boardKey !== this.lastBoardKey;
     if (!boardChanged) {
       // Placement rotation only changes the preview mesh and connection links, not the board.
@@ -3940,6 +3967,8 @@ export class BoardGameScene {
     zone: ProjectedGameState['zones'][string],
     items: (Partial<Entity> & { isMasked?: boolean; id: string })[]
   ): void {
+    // 收起的「牌堆」= 摸牌堆本体连同它的张数标签一起消失；弃牌堆仍然照常显示。
+    if (!this.showTableFurniture && zone.type === 'DECK') return;
     const anchor = zone.anchorPosition ?? [0, 0.06, 0];
     const offset = this.deckVisualOffsets.get(zone.id) ?? { dx: 0, dz: 0 };
     const group = new THREE.Group();
@@ -5566,7 +5595,7 @@ export class BoardGameScene {
     this.boardObjectsGroup.add(potLabel);
 
     // The pot itself: a real pile of chips directly under the readout.
-    if (pot > 0) {
+    if (pot > 0 && this.showTableChips) {
       const potChips = this.furniture.obtain('poker:pot-chips', String(pot), () =>
         ChipMeshBuilder.createStack(pot)
       );
@@ -5584,7 +5613,7 @@ export class BoardGameScene {
       const chips = Number(state.players[pid]?.customProps?.chips ?? 0);
       const tangentX = -inwardZ;
       const tangentZ = inwardX;
-      if (chips > 0) {
+      if (chips > 0 && this.showTableChips) {
         const stack = this.furniture.obtain(`poker:stack:${pid}`, String(chips), () =>
           ChipMeshBuilder.createStack(chips)
         );
@@ -5598,12 +5627,30 @@ export class BoardGameScene {
 
       // Chips already committed on this street sit between the seat and the pot.
       const bet = Number(hand?.streetBets?.[pid] ?? 0);
-      if (bet > 0) {
+      if (bet > 0 && this.showTableChips) {
         const betStack = this.furniture.obtain(`poker:bet:${pid}`, String(bet), () =>
           ChipMeshBuilder.createStack(bet)
         );
         betStack.position.set(x - inwardX * 3.1, 0.03, z - inwardZ * 3.1);
         this.boardObjectsGroup.add(betStack);
+      }
+
+      // 自己的下注额单独写一行字：筹码堆只表达「有下注」，看不出是多少。
+      // 别人的注额已经在座位牌面（`lastActions`）上，这里不重复。
+      // 位置贴着筹码堆朝座位方向偏、并沿切线让开底池读数，别两个标签叠在一起。
+      if (bet > 0 && pid === state.viewerId) {
+        const betLabel = this.createLabelSprite(`已下注 ${bet}`, '#f6dc9c', 44, ZONE_LABEL_SUPERSAMPLE);
+        // 沿切线让开底池读数：底池标签压在桌子中轴，注额标签贴着筹码堆往旁边站。
+        betLabel.position.set(
+          x - inwardX * 3.1 + tangentX * 2.5,
+          0.42,
+          z - inwardZ * 3.1 + tangentZ * 2.5
+        );
+        betLabel.scale.set(1.9 * POKER_POT_LABEL_SCALE, 0.55 * POKER_POT_LABEL_SCALE, 1);
+        betLabel.userData.labelRole = 'own-bet';
+        betLabel.userData.text = `已下注 ${bet}`;
+        betLabel.userData.fontScale = POKER_POT_LABEL_SCALE;
+        this.boardObjectsGroup.add(betLabel);
       }
     });
 
