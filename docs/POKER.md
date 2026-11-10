@@ -397,6 +397,31 @@ HAND_OVER ─────────────► PREFLOP ──┬─► FLO
    - 动画对象每次同步前 `clearPokerFx` 清空，新的同步干净重置演出；`animationQueue.animate(..., delayMs)` 提供错峰。
 6. 弃牌区/牌堆沿用通用 STACK 渲染。
 
+### 10.1.2 牌桌音效
+
+音效都是 **Web Audio 程序化合成**（`render/audio.ts`，无音频文件），走 `sfxGain` 总线，
+受顶栏 `♪` 总开关控制。
+
+| 动作（`hand.lastActions` 的短句） | 声音 | 说明 |
+| --- | --- | --- |
+| `跟注 N` | `playPokerCall` | 一枚筹码落在毛毡上，80ms |
+| `加注到 N` | `playPokerRaise` | 筹码滑入 + 上行四度，~260ms |
+| `全押 N` | `playPokerAllIn` | 低频推进 + 上行扫频 + 一簇筹码，~450ms |
+| `弃牌` | `playPokerFold` | 牌面滑过毛毡的轻响 |
+| 赢下底池（自己） | `playPokerWin` | 短大三和弦，音量 0.9 |
+| 没赢下（自己） | `playPokerLose` | 下行小二度，音量 0.5 |
+| `过牌` / `小盲` / `大盲` | — | 没有筹码移动，不出声 |
+
+- **触发**：`main.ts` 把相邻两帧的 `lastActions` 做差集（`packages/app/src/betting.ts`
+  的纯函数），只给「这一帧新发生的」动作发声；重连补帧、切视角、重复快照都不会重播。
+- **音量**：自己的动作 1.0，别人的 0.45。
+- **输赢口径**：只看有没有赢下底池——赢家里有自己就响赢，否则响输（弃牌、被压都算），
+  观察席与上帝视角不响。
+- **不双响**：`animationQueue` 不再播任何声音，音频只在组合根播一次（它以前和
+  `main.ts` 各播一遍，同一事件会响两次）。
+- **可测**：`BoardGameAudio.onSfx(cb)` 回报每次发声；`window.__audioLog` 是它的环形缓冲，
+  `probe-poker-table` 据此断言「一次加注正好一条 `poker:raise`」。
+
 ### 10.1.1 思考倒计时
 
 `GameModule.driver.decisionDeadlineMs`（德州 30s）经 `GameSnapshot.turnDeadlineMs` 透给 UI，

@@ -1166,4 +1166,152 @@ export class BoardGameAudio {
       osc.stop(ctx.currentTime + 1.9);
     });
   }
+
+  /* -------------------------------------------------------------------------- */
+  /* Poker table cues                                                            */
+  /* -------------------------------------------------------------------------- */
+
+  /** 测试与诊断：每次发声回报一个名字（声音本身没法写进断言）。 */
+  private static sfxListeners = new Set<(name: string) => void>();
+
+  public static onSfx(listener: (name: string) => void): () => void {
+    this.sfxListeners.add(listener);
+    return () => {
+      this.sfxListeners.delete(listener);
+    };
+  }
+
+  private static emitSfx(name: string): void {
+    for (const listener of this.sfxListeners) {
+      try {
+        listener(name);
+      } catch {
+        // 订阅者（测试、诊断）自己抛错不该让发声失败。
+      }
+    }
+  }
+
+  /** 一次短促的金属/瓷质敲击，`peaks` 是各泛音频率。 */
+  private static clink(
+    ctx: AudioContext,
+    peaks: number[],
+    peak: number,
+    dur: number,
+    when = 0
+  ): void {
+    if (!this.sfxGain) return;
+    const at = ctx.currentTime + when;
+    peaks.forEach((freq, index) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, at);
+      gain.gain.setValueAtTime(peak / (index + 1), at);
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+      osc.connect(gain);
+      gain.connect(this.sfxGain!);
+      osc.start(at);
+      osc.stop(at + dur + 0.01);
+    });
+  }
+
+  /** 一段带包络的扫频，用来做「推筹码」「下滑」这类走向。 */
+  private static sweep(
+    ctx: AudioContext,
+    from: number,
+    to: number,
+    peak: number,
+    dur: number,
+    type: OscillatorType = 'triangle',
+    when = 0
+  ): void {
+    if (!this.sfxGain) return;
+    const at = ctx.currentTime + when;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(from, at);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, to), at + dur);
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(peak, at + dur * 0.18);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(at);
+    osc.stop(at + dur + 0.02);
+  }
+
+  /** 跟注：一枚筹码落在毛毡上，短、干、不抢耳。 */
+  public static playPokerCall(gain = 1): void {
+    this.emitSfx('poker:call');
+    const ctx = this.getContext();
+    if (!ctx) return;
+    this.clink(ctx, [3200, 4800], 0.1 * gain, 0.08);
+  }
+
+  /** 加注：筹码滑入 + 上行四度，比跟注亮、比全押轻。 */
+  public static playPokerRaise(gain = 1): void {
+    this.emitSfx('poker:raise');
+    const ctx = this.getContext();
+    if (!ctx) return;
+    this.sweep(ctx, 240, 520, 0.05 * gain, 0.14, 'triangle');
+    this.clink(ctx, [3600, 5400], 0.11 * gain, 0.09, 0.03);
+    this.sweep(ctx, 660, 880, 0.06 * gain, 0.22, 'sine', 0.05);
+  }
+
+  /** 全押：低频推进 + 上行扫频 + 一小簇筹码散落（桌上最大的动作）。 */
+  public static playPokerAllIn(gain = 1): void {
+    this.emitSfx('poker:allIn');
+    const ctx = this.getContext();
+    if (!ctx) return;
+    this.sweep(ctx, 110, 70, 0.3 * gain, 0.2, 'sine');
+    this.sweep(ctx, 180, 720, 0.11 * gain, 0.34, 'sawtooth', 0.04);
+    for (let index = 0; index < 5; index += 1) {
+      this.clink(ctx, [2800 + index * 600, 4200 + index * 700], 0.07 * gain, 0.1, 0.1 + index * 0.04);
+    }
+  }
+
+  /** 弃牌：一张牌滑过毛毡的轻响。 */
+  public static playPokerFold(gain = 1): void {
+    this.emitSfx('poker:fold');
+    const ctx = this.getContext();
+    if (!ctx || !this.sfxGain) return;
+    const at = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(900, at);
+    osc.frequency.exponentialRampToValueAtTime(420, at + 0.12);
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1400, at);
+    filter.Q.setValueAtTime(0.8, at);
+    gainNode.gain.setValueAtTime(0.0001, at);
+    gainNode.gain.exponentialRampToValueAtTime(0.07 * gain, at + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
+    osc.connect(filter);
+    filter.connect(gainNode);
+    gainNode.connect(this.sfxGain);
+    osc.start(at);
+    osc.stop(at + 0.14);
+  }
+
+  /** 赢下底池：短大三和弦上行（比告别用的 fanfare 短）。 */
+  public static playPokerWin(gain = 1): void {
+    this.emitSfx('poker:win');
+    const ctx = this.getContext();
+    if (!ctx) return;
+    [523.25, 659.25, 783.99].forEach((freq, index) => {
+      this.sweep(ctx, freq, freq * 1.001, 0.09 * gain, 0.34, 'sine', index * 0.1);
+    });
+  }
+
+  /** 没赢下底池：下行小二度，钝而短，音量压低。 */
+  public static playPokerLose(gain = 1): void {
+    this.emitSfx('poker:lose');
+    const ctx = this.getContext();
+    if (!ctx) return;
+    this.sweep(ctx, 380, 300, 0.09 * gain, 0.42, 'triangle');
+    this.sweep(ctx, 190, 150, 0.06 * gain, 0.42, 'sine', 0.02);
+  }
 }

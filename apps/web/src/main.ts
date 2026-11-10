@@ -9,6 +9,7 @@ import { isEscapeKey, isHelpKey, shouldHandleKey } from './ui/keymap';
 import { BoardGameHUD } from './ui/hud';
 import { peekView } from './ui/detailView';
 import { buildActorDetailView } from '@rds/app/inspect';
+import { bettingCueDeltas, settlementCue } from '@rds/app/betting';
 import { installDiagnostics } from './diagnostics/install';
 import { MathematicalInspectorUI } from './ui/mathInspector';
 import {
@@ -308,7 +309,8 @@ class BoardGameSimulatorApp {
         } else if (ev.type === 'BUILD_OBJECT') {
           BoardGameAudio.playBuild();
         } else if (ev.type === 'TOKEN_TRANSFER') {
-          BoardGameAudio.playChipClink();
+          // 牌桌的筹码声按动作类型单独给（见 `playBettingCues`），这里不重复叮。
+          if (!this.bettingCues.handId) BoardGameAudio.playChipClink();
         } else if (ev.type === 'STACK_PUSH' || ev.type === 'STACK_POP' || ev.type === 'STACK_CANCEL') {
           BoardGameAudio.playCardFlip();
         } else if (ev.type === 'DECISION_REVEAL' || ev.type === 'STACK_TIMEOUT') {
@@ -357,6 +359,13 @@ class BoardGameSimulatorApp {
 
     if (import.meta.env.DEV) {
       (window as unknown as Record<string, unknown>).__boardGameApp = this;
+    // 音效流水：探针用它断言「该响的响了、且只响一次」。声音本身没法进断言。
+    const audioLog: string[] = [];
+    (window as unknown as Record<string, unknown>).__audioLog = audioLog;
+    BoardGameAudio.onSfx(name => {
+      audioLog.push(name);
+      if (audioLog.length > 200) audioLog.splice(0, audioLog.length - 200);
+    });
     }
     // Available in every build: a small, read-only snapshot summary so diagnostic
     // exports from production can explain a stuck turn.
@@ -371,6 +380,72 @@ class BoardGameSimulatorApp {
    * Deliberately narrow: it must never leak hidden information (hands, deck order)
    * and must stay cheap enough to call from an error handler.
    */
+  /**
+   * 牌桌音效：跟注 / 加注 / 全押 / 弃牌 / 赢 / 输。
+   *
+   * 数据来自投影里的 `hand.lastActions`（本街每个座位做了什么）与 `hand.lastHand`
+   * （结算结果），**不新增内核事件、不往近期动态灌流水行**。用「和上一帧的差集」
+   * 驱动，所以重连补帧、切视角、重复快照都不会重播。
+   *
+   * 音量：自己的动作 1.0，别人的 0.45——听得见牌桌节奏，但不抢自己的操作。
+   * 输赢只看「是否赢下底池」：赢家里有自己就响赢，否则响输（弃牌、被压都算输）。
+   */
+  private playBettingCues(snapshot: GameSnapshot): void {
+    const hand = snapshot.board.globalVars.hand as
+      | {
+          street?: string;
+          handNo?: number;
+          lastActions?: Record<string, string>;
+        }
+      | undefined;
+    if (!hand || !hand.lastActions) {
+      this.bettingCues = { signs: new Map(), street: '', handId: '', settled: '' };
+      return;
+    }
+
+    // 手数用 `handNo`，不要用 round/turn：`turn` 每次行动都会 +1，拿它做键会把
+    // 每个动作都当成「新的一手」，于是永远走不到比较那一步（音效一声都不响）。
+    const handKey = String(hand.handNo ?? '');
+    const street = hand.street ?? '';
+    // 换手 / 换街：本街的动作表被清空，重设基线而不是把「消失」当成新动作。
+    if (handKey !== this.bettingCues.handId || street !== this.bettingCues.street) {
+      this.bettingCues = {
+        signs: new Map(Object.entries(hand.lastActions)),
+        street,
+        handId: handKey,
+        settled: ''
+      };
+      return;
+    }
+
+    const viewer = snapshot.viewer;
+    for (const { playerId, cue } of bettingCueDeltas(this.bettingCues.signs, hand.lastActions)) {
+      const gain = playerId === viewer ? 1 : 0.45;
+      if (cue === 'call') BoardGameAudio.playPokerCall(gain);
+      else if (cue === 'raise') BoardGameAudio.playPokerRaise(gain);
+      else if (cue === 'allIn') BoardGameAudio.playPokerAllIn(gain);
+      else BoardGameAudio.playPokerFold(gain);
+    }
+    this.bettingCues.signs = new Map(Object.entries(hand.lastActions));
+
+    // 结算：一手只播一次（同一手重连补帧时 `settled` 已经记过）。
+    if (street !== 'COMPLETE' || viewer === 'GOD') return;
+    if (this.bettingCues.settled === handKey) return;
+    this.bettingCues.settled = handKey;
+    const last = snapshot.board.globalVars.lastHand as
+      | { pots?: { winners?: string[] }[] }
+      | undefined;
+    const winners = (last?.pots ?? []).flatMap(pot => pot.winners ?? []);
+    if (winners.length === 0) return;
+    const seated = snapshot.players.some(player => player.id === viewer);
+    const cue = settlementCue(winners, viewer, seated);
+    if (cue === 'win') BoardGameAudio.playPokerWin(0.9);
+    else if (cue === 'lose') BoardGameAudio.playPokerLose(0.5);
+  }
+
+  /** 下注音效的上一帧基线（见 `playBettingCues`）。 */
+  private bettingCues = { signs: new Map<string, string>(), street: '', handId: '', settled: '' };
+
   private diagnosticSummary(): Record<string, unknown> {
     const snapshot = this.session?.getSnapshot?.() as
       | {
@@ -695,6 +770,9 @@ class BoardGameSimulatorApp {
         BoardGameAudio.stopSoundscape();
         this.lastRoomId = '';
       }
+
+      // 牌桌音效：下注动作与输赢都由投影差集驱动，不新增内核事件。
+      this.playBettingCues(snapshot);
 
       if (this.currentGameId === 'betrayal') {
         const focusId = snapshot.focus[0] ?? snapshot.viewer;

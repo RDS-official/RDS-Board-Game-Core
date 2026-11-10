@@ -40,8 +40,16 @@ const raiseOnce = async page =>
   page.evaluate(async () => {
     const app = window.__boardGameApp;
     const sleep = ms => new Promise(r => setTimeout(r, ms));
+    /** 每一步的音频流水：动作 → 这一动作新响的声音。 */
+    const steps = [];
+    const perform = (id, payload, label) => {
+      const before = (window.__audioLog ?? []).length;
+      const done = app.session.perform(id, payload);
+      steps.push({ action: label, cues: (window.__audioLog ?? []).slice(before) });
+      return done;
+    };
     const start = app.session.getSnapshot().actions.find(a => /发下一手|开始游戏/.test(a.label));
-    if (start) app.session.perform(start.id);
+    if (start) perform(start.id, undefined, 'start');
     await sleep(500);
     for (let step = 0; step < 24; step += 1) {
       let acted = false;
@@ -53,17 +61,17 @@ const raiseOnce = async page =>
         const raise = actions.find(a => a.label === '加注' || a.label === '下注');
         if (seat === 'p1' && raise) {
           const min = Number(raise.fields?.[0]?.min ?? raise.fields?.[0]?.minimum ?? 20);
-          const done = app.session.perform(raise.id, { amount: min + 60 });
-          return { ok: done.ok, error: done.error ?? null };
+          const done = perform(raise.id, { amount: min + 60 }, 'raise');
+          return { ok: done.ok, error: done.error ?? null, steps };
         }
         const passive = actions.find(a => /跟注|过牌/.test(a.label));
         if (passive) {
-          app.session.perform(passive.id);
+          perform(passive.id, undefined, passive.label);
           acted = true;
           break;
         }
       }
-      if (!acted) return { ok: false, error: 'table stalled before the viewer could act' };
+      if (!acted) return { ok: false, error: 'table stalled before the viewer could act', steps };
       await sleep(90);
     }
     return { ok: false, error: 'no raise action found' };
@@ -119,6 +127,25 @@ record(
   'feed',
   feed.some(title => /加注到 \d+（本次 \+\d+）/.test(title)),
   `the feed does not spell out the raise: ${feed.join(' | ')}`
+);
+
+// ---- 音效：动作各响一声，且不双响 --------------------------------------------
+// 映射本身由 core 用例守着（`packages/app/src/betting.ts` 的纯函数）；这里只验接线：
+// 真按一次加注，音频流水里正好多一条 `poker:raise`。
+const steps = raised.steps ?? [];
+const raiseStep = steps.find(step => step.action === 'raise');
+record('audio', !!raiseStep, 'no raise step was recorded');
+if (raiseStep) {
+  record(
+    'audio',
+    raiseStep.cues.length === 1 && raiseStep.cues[0] === 'poker:raise',
+    `a raise should ring exactly once as poker:raise, got ${JSON.stringify(raiseStep.cues)}`
+  );
+}
+record(
+  'audio',
+  steps.every(step => step.cues.length <= 1),
+  `some action rang twice: ${JSON.stringify(steps.filter(step => step.cues.length > 1))}`
 );
 
 // ---- 开关：真的把道具放回桌面 ------------------------------------------------
