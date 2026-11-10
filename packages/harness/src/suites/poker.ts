@@ -1276,6 +1276,7 @@ test('poker: a split pot credits each winner only their own share', async () => 
 
   const moment = pokerSettlementMoment(state);
   assert(!!moment, 'a completed hand declares a settlement moment');
+  assertEqual(moment!.title, 'A / B 平分底池 100', 'an even split reports split pot rather than claiming either won');
   const rows = moment!.ledger ?? [];
   assertEqual(rows.length, 2, 'one row per seat');
   const netSum = rows.reduce((sum, row) => sum + Number(row.value ?? 0), 0);
@@ -1284,6 +1285,58 @@ test('poker: a split pot credits each winner only their own share', async () => 
     assertEqual(row.value, '0', `${row.name} nets zero in an even split`);
     assertEqual(row.tone, 'neutral', `${row.name} is neither a win nor a loss`);
   }
+});
+
+test('poker: settlement moment deducts winners invested chips from title', async () => {
+  const { pokerSettlementMoment, pokerMissionLine } = await import('@rds/games/poker/presentation');
+  // 模拟真实对局场景：底池 1415，赢家投入 690，对手累计投入 725，赢家净赢 725。
+  const state = {
+    globalVars: {
+      hand: {
+        handNo: 4,
+        street: 'COMPLETE',
+        handBets: { zooter: 690, zhaoyun: 690, zhangfei: 5, guanyu: 30 },
+        awarded: { zooter: 1415 },
+        folded: ['zhangfei', 'guanyu']
+      },
+      lastHand: {
+        handNo: 4,
+        endedBy: 'SHOWDOWN',
+        pots: [{ amount: 1415, winners: ['zooter'], label: '顺子' }],
+        showdown: [
+          { playerId: 'zooter', label: '顺子', cards: ['5♦', '6♦'] },
+          { playerId: 'zhaoyun', label: '一对', cards: ['4♦', '2♦'] }
+        ],
+        players: [
+          { playerId: 'zooter', wonAmount: 1415, invested: 690, won: true },
+          { playerId: 'zhaoyun', wonAmount: 0, invested: 690, won: false },
+          { playerId: 'zhangfei', wonAmount: 0, invested: 5, won: false },
+          { playerId: 'guanyu', wonAmount: 0, invested: 30, won: false }
+        ]
+      }
+    },
+    playerOrder: ['zooter', 'zhaoyun', 'zhangfei', 'guanyu'],
+    players: {
+      zooter: { name: 'zooter' },
+      zhaoyun: { name: '中级 AI · 赵云' },
+      zhangfei: { name: '中级 AI · 张飞' },
+      guanyu: { name: '中级 AI · 关羽' }
+    },
+    seats: [
+      { playerId: 'zooter', name: 'zooter', cards: ['5♦', '6♦'] },
+      { playerId: 'zhaoyun', name: '中级 AI · 赵云', cards: ['4♦', '2♦'] },
+      { playerId: 'zhangfei', name: '中级 AI · 张飞', cards: [] },
+      { playerId: 'guanyu', name: '中级 AI · 关羽', cards: [] }
+    ]
+  } as unknown as Parameters<typeof pokerSettlementMoment>[0];
+
+  const moment = pokerSettlementMoment(state);
+  assert(!!moment, 'declares settlement moment');
+  // 必须扣除赢家自己出的 690 筹码，显示净赢 725，不能把本金也算作赢得（不显示 1415）
+  assertEqual(moment!.title, 'zooter 赢得 725', 'settlement title excludes winner self-invested chips');
+
+  const mission = pokerMissionLine(state as unknown as Parameters<typeof pokerMissionLine>[0]);
+  assert(mission.includes('上一手：zooter 赢得 725'), 'mission line also reflects net won chips');
 });
 test('poker: a settlement offers continue and leave, and never leaks a folded hand', () => {
   const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 71, { scenario: 'seats_4' });
