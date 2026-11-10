@@ -3691,7 +3691,7 @@ export class BoardGameHUD {
             : html`<span>${player.avatar || '👤'}</span>`;
         return html`<button type="button" class="seat-bubble ${player.isFocus ? 'turn' : ''} ${player.alive ? '' : 'dead'} ${showBet ? 'bet' : ''}" data-seat="${player.id}" data-edge="${point.edge}" style="${`--seat:${player.color};--sb-x:${Math.round(entry.x)}px;--sb-y:${Math.round(entry.y)}px`}" aria-label="${player.name}">
           ${face}
-          ${player.isFocus ? '<span class="sb-clock" data-turn-clock-bubble></span>' : ''}
+          ${player.isFocus ? html`<span class="sb-clock" data-turn-clock-bubble></span>` : ''}
         </button>`;
       })}`
     );
