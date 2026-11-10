@@ -787,8 +787,7 @@ test('poker: each seat board records what it did on this street', () => {
   assertEqual(Object.keys(hand(flop).lastActions).length, 0, 'the signs clear with the street');
 });
 
-test('poker: the activity feed spells out how much a raise added', () => {
-  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 53, { scenario: 'seats_4' });
+test('poker: the activity feed spells out how much a raise added', () => {  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 53, { scenario: 'seats_4' });
   const titles: string[] = [];
   const unsubscribe = engine.onVisualEvent(events => {
     for (const event of events) titles.push(event.title);
@@ -803,6 +802,47 @@ test('poker: the activity feed spells out how much a raise added', () => {
   // 只看「加注到 40」还得自己减去前注，所以流水里同时给出这次下了多少筹码。
   assert(raise!.includes('40'), `the feed names the total: ${raise}`);
   assert(raise!.includes('+40'), `the feed names this action's chips: ${raise}`);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Table sound cues                                                            */
+/* -------------------------------------------------------------------------- */
+
+test('poker: table cues follow the betting action, not the raw diff', async () => {
+  const { bettingCueFor, bettingCueDeltas, settlementCue } = await import('@rds/app/betting');
+
+  // 座位牌面上的四种动作各对应一声；盲注与过牌不出声。
+  assertEqual(bettingCueFor('跟注 10'), 'call', 'a call has its own cue');
+  assertEqual(bettingCueFor('加注到 40'), 'raise', 'a raise has its own cue');
+  assertEqual(bettingCueFor('全押 120'), 'allIn', 'an all-in has its own cue');
+  assertEqual(bettingCueFor('弃牌'), 'fold', 'a fold has its own cue');
+  assertEqual(bettingCueFor('过牌'), null, 'a check is silent');
+  assertEqual(bettingCueFor('小盲 5'), null, 'a posted blind is silent');
+
+  // 差集：只有「这帧新发生的」才响，重复快照不会重播。
+  const previous = new Map([
+    ['p1', '加注到 40'],
+    ['p2', '跟注 10']
+  ]);
+  const deltas = bettingCueDeltas(previous, {
+    p1: '加注到 40',
+    p2: '跟注 10',
+    p3: '弃牌',
+    p4: '跟注 40'
+  });
+  assertEqual(deltas.length, 2, 'only the seats that acted again ring');
+  assertEqual(
+    deltas.map(entry => `${entry.playerId}:${entry.cue}`).join(','),
+    'p3:fold,p4:call',
+    'the diff reports each new action once'
+  );
+  assertEqual(bettingCueDeltas(undefined, { p1: '加注到 40' }).length, 1, 'a first paint still cues the visible action');
+
+  // 输赢只看「有没有赢下底池」：赢了响赢，没赢（哪怕只输一点）响输，观察席不响。
+  assertEqual(settlementCue(['p1'], 'p1', true), 'win', 'winning the pot rings win');
+  assertEqual(settlementCue(['p2'], 'p1', true), 'lose', 'losing the pot rings lose');
+  assertEqual(settlementCue(['p2'], 'p1', false), null, 'an observer hears nothing');
+  assertEqual(settlementCue(['p1'], 'GOD', true), null, 'the god view hears nothing');
 });
 
 /* -------------------------------------------------------------------------- */

@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { VisualTraceEvent } from '@rds/kernel/types';
-import { BoardGameAudio } from './audio';
 
 export interface ActiveTween {
   update: (progress: number, linearProgress: number) => void;
@@ -91,39 +90,17 @@ export class TransactionalAnimationQueue {
       this.onEventStartCallback(event);
     }
 
-    // Play appropriate sound & trigger visual effect
+    // Screen shake belongs to the animation; **sound does not**: the composition
+    // root (`main.ts`) already maps this same event stream to audio the moment it
+    // arrives. Playing here as well made every event ring twice — the queue runs
+    // seconds later, so it read as a stray echo rather than a second cue.
     switch (event.type) {
-      case 'CARD_DRAW':
-      case 'CARD_PLAY':
-      case 'CARD_DISCARD':
-        BoardGameAudio.playCardDraw();
-        break;
-
-      case 'DICE_ROLL':
-        BoardGameAudio.playDiceRoll();
-        break;
-
-      case 'TOKEN_TRANSFER':
-        BoardGameAudio.playChipClink();
-        break;
-
-      case 'BUILD_OBJECT':
-        BoardGameAudio.playBuild();
-        break;
-
       case 'RULE_MUTATE':
-        BoardGameAudio.playHauntAlarm();
         this.triggerScreenShake(event.durationMs || 800);
         break;
 
       case 'DAMAGE_EFFECT':
         this.triggerScreenShake(300);
-        break;
-
-      case 'ANNOUNCEMENT':
-        if (event.title.includes('HU!') || event.title.includes('Winner')) {
-          BoardGameAudio.playVictoryFanfare();
-        }
         break;
     }
 
