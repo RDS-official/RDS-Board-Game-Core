@@ -216,6 +216,26 @@ if (mobile.active) {
   record('mobile', /\d+s/.test(mobile.clock), `the acting card has no countdown: "${mobile.clock}"`);
 }
 
+// ---- 贴边泡泡：放大后的读秒角标必须是元素，不是被转义出来的字面量 ----------------
+// 泡泡的标记走 `html` 模板（不是 innerHTML 字符串），普通字符串插值会被转义成
+// 文本——头像放大后用户看到的就是一串 `<span ...>`。
+const bubbleMarkup = await phone.evaluate(() => {
+  const layer = document.querySelector('#seat-bubbles');
+  if (!layer) return { present: false, leaked: '' };
+  const leaked = /<span|<div|<button/i.exec(layer.textContent ?? '')?.[0] ?? '';
+  const clock = layer.querySelector('.seat-bubble .sb-clock');
+  return {
+    present: layer.childElementCount > 0,
+    leaked,
+    clockIsElement: !!clock,
+    clockStyle: clock ? getComputedStyle(clock).position : ''
+  };
+});
+if (bubbleMarkup.present) {
+  record('bubble', !bubbleMarkup.leaked, `markup leaked into the seat bubble as text: "${bubbleMarkup.leaked}"`);
+  record('bubble', bubbleMarkup.clockIsElement !== false, 'the bubble clock is not a real element');
+}
+
 console.log(`\nPoker table probe: ${checks} checks`);
 if (failures.length) {
   console.log(`\nFAILURES (${failures.length}):`);
