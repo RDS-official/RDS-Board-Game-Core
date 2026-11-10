@@ -864,6 +864,8 @@ export const pokerModule: GameModule = defineGame({
       hiddenInformation: true,
       interruptStack: false,
       dynamicRules: false,
+      // 筹码堆与牌堆是装饰道具：默认收起，菜单里可以整组打开。
+      tableFurniture: true,
       topology: 'ring',
       topologySpec: { kind: 'ring', adjacency: 'neighbors', geometry: 'ring' }
     },

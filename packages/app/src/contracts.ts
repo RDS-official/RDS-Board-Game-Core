@@ -390,6 +390,8 @@ export interface UiCapabilities {
   interruptStack: boolean;
   dynamicRules: boolean;
   nonPlayerActors?: boolean;
+  /** 桌面装饰道具（筹码堆 / 牌堆）可整组收起，UI 因此给一个开关。 */
+  tableFurniture?: boolean;
   topology: string;
   topologySpec?: {
     kind: string;
@@ -469,6 +471,15 @@ export interface GameSnapshot {
   npcs: UiNpc[];
   actions: UiAction[];
   legalCount: number;
+
+  /**
+   * 当前行动者的思考时限（毫秒），来自 `GameModule.driver.decisionDeadlineMs`。
+   *
+   * presenter 只把「模块声明的时长」透出来，不判断谁该看：UI 拿它画倒计时，
+   * 服务端到点会替玩家过牌/弃牌，所以这个数字必须和权威侧同源。
+   * 没有声明时限的玩法（绝大多数）没有这个字段，UI 也就不画计时器。
+   */
+  turnDeadlineMs?: number;
 
   /**
    * 新操作面的投影（全部 optional，旧 UI / 旧客户端可忽略）：

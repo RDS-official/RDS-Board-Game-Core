@@ -519,17 +519,31 @@ test('poker: an observer draws a stipend and takes a random AI seat back', () =>
 
   assertEqual(engine.getLegalActions('p4').length, 0, 'a broke observer cannot sit back down');
 
-  // 三拍心跳 = 一分钟 → 低保 +10。
+  // 低保是每分钟 100：半分钟不够一个周期，什么都不发。
+  engine.dispatch({ type: 'OBSERVER_TICK', playerId: 'p4', payload: { seconds: 30 } });
+  assertEqual(
+    engine.getRawState().players.p4.customProps.chips,
+    0,
+    'a partial period pays nothing yet'
+  );
+  // 三拍心跳 = 一分钟 → 低保 +100（被打光的人一分钟就能重新买入）。
   const tick = engine.dispatch({
     type: 'OBSERVER_TICK',
     playerId: 'p4',
-    payload: { seconds: 60 }
+    payload: { seconds: 30 }
   });
   assert(tick.ok, `the stipend tick is accepted: ${tick.error ?? ''}`);
   assertEqual(
     engine.getRawState().players.p4.customProps.chips,
-    10,
-    'one minute of welfare pays ten chips'
+    100,
+    'one minute of welfare pays a hundred chips'
+  );
+  // 到门槛就停：观察者已经攒够买入，不该继续白拿。
+  engine.dispatch({ type: 'OBSERVER_TICK', playerId: 'p4', payload: { seconds: 60 } });
+  assertEqual(
+    engine.getRawState().players.p4.customProps.chips,
+    100,
+    'the stipend stops once the observer can afford a seat'
   );
   assert(
     engine.getLegalActions('p4').some(action => action.type === 'OBSERVER_REJOIN'),
@@ -550,7 +564,7 @@ test('poker: an observer draws a stipend and takes a random AI seat back', () =>
     0,
     'the observer bench is empty again'
   );
-  assertEqual(state.players.p4.customProps.chips, 10, 'the returning player keeps the bankroll');
+  assertEqual(state.players.p4.customProps.chips, 100, 'the returning player keeps the bankroll');
 });
 
 test('poker: a raise keeps the street open until every seat has matched it', () => {
@@ -771,6 +785,24 @@ test('poker: each seat board records what it did on this street', () => {
   const flop = engine.getRawState();
   assertEqual(hand(flop).street, 'FLOP', 'the street advanced');
   assertEqual(Object.keys(hand(flop).lastActions).length, 0, 'the signs clear with the street');
+});
+
+test('poker: the activity feed spells out how much a raise added', () => {
+  const engine = new UniversalGameEngine(GAME_REGISTRY.poker, 53, { scenario: 'seats_4' });
+  const titles: string[] = [];
+  const unsubscribe = engine.onVisualEvent(events => {
+    for (const event of events) titles.push(event.title);
+  });
+  startHand(engine);
+  callAround(engine, 1); // p4 calls 10
+  act(engine, 'RAISE', { amount: 40 }); // p1 raises 10 → 40
+  unsubscribe();
+
+  const raise = titles.find(title => title.includes('加注到'));
+  assert(!!raise, `a raise reaches the feed: ${titles.join(' / ')}`);
+  // 只看「加注到 40」还得自己减去前注，所以流水里同时给出这次下了多少筹码。
+  assert(raise!.includes('40'), `the feed names the total: ${raise}`);
+  assert(raise!.includes('+40'), `the feed names this action's chips: ${raise}`);
 });
 
 /* -------------------------------------------------------------------------- */

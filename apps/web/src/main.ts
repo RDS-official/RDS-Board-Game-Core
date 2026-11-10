@@ -119,7 +119,9 @@ class BoardGameSimulatorApp {
       onSwitchScenario: scenarioId => this.restartScenario(scenarioId),
       // The UI measures its own overlay boxes; the renderer only ever sees the
       // four plain edges. Keeping this wiring here preserves ui → contracts.
-      onViewportInsets: insets => this.scene.setViewportInsets(insets)
+      onViewportInsets: insets => this.scene.setViewportInsets(insets),
+      // 桌面道具开关只传一个布尔值；渲染层不认识「筹码/牌堆」是什么玩法的东西。
+      onTableFurniture: visible => this.scene.setTableFurnitureVisible(visible)
     });
     // 视野外的立柱头像收成贴边泡泡。场景只给像素落点，画在哪由 HUD 决定。
     this.scene.onSeatScreenPoints(points => this.hud.renderSeatBubbles(points));
