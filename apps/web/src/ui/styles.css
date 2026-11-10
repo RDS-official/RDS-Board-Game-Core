@@ -3863,6 +3863,18 @@ select.pf-control {
   52% { opacity: 0.95; }
 }
 
+.mc-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
 .mc-caption {
   margin-top: 18px;
   font-size: var(--type-xs);

@@ -1993,7 +1993,7 @@ export class BoardGameHUD {
     setHtml(layer, html`
       <div class="mc-vignette"></div>
       <div class="mc-inner" tabindex="-1">
-        <div class="mc-live" aria-live="assertive" aria-atomic="true">${moment.title}</div>
+        <div class="mc-live sr-only" aria-live="assertive" aria-atomic="true">${moment.title}</div>
         ${raw(moment.kicker ? `<div class="mc-kicker">${escHtml(moment.kicker)}</div>` : '')}
         ${raw(moment.caption ? `<div class="mc-caption">${escHtml(moment.caption)}</div>` : '')}
         <h1 class="mc-title" id="mc-title">${moment.title}</h1>

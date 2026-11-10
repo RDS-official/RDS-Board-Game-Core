@@ -96,6 +96,39 @@ function ledgerOf(state: MomentPresentationState, hand: SettlementHand, last: Se
   return rows.sort((a, b) => rank(b) - rank(a) || Number(b.value ?? 0) - Number(a.value ?? 0));
 }
 
+function settlementTitle(
+  winners: string[],
+  name: (pid: string) => string,
+  hand: SettlementHand,
+  last: SettlementResult,
+  total: number
+): string {
+  if (winners.length === 0) return `底池 ${total}`;
+  const winnerNets = winners.map(pid => ({
+    pid,
+    name: name(pid),
+    net: netOf(hand, last, pid)
+  }));
+
+  if (winnerNets.length === 1) {
+    const { name: winnerName, net } = winnerNets[0];
+    // 赢家扣除自己出的筹码后：净赢为正时显示净赢筹码，避免把本金也算作赢得。
+    return net > 0 ? `${winnerName} 赢得 ${net}` : `${winnerName} 赢得底池 ${total}`;
+  }
+
+  const allSameNet = winnerNets.every(w => w.net === winnerNets[0].net);
+  if (allSameNet) {
+    if (winnerNets[0].net > 0) {
+      return `${winnerNets.map(w => w.name).join(' / ')} 各赢得 ${winnerNets[0].net}`;
+    }
+    return `${winnerNets.map(w => w.name).join(' / ')} 平分底池 ${total}`;
+  }
+
+  return winnerNets
+    .map(w => (w.net > 0 ? `${w.name} 赢得 ${w.net}` : `${w.name} 平分底池`))
+    .join(' / ');
+}
+
 export function pokerSettlementMoment(state: MomentPresentationState): MomentPresentationHints | null {
   const hand = state.globalVars.hand as SettlementHand | undefined;
   const last = state.globalVars.lastHand as SettlementResult | undefined;
@@ -115,7 +148,7 @@ export function pokerSettlementMoment(state: MomentPresentationState): MomentPre
     key: `poker:settle:${last.handNo}:${last.endedBy}`,
     kicker: `第 ${last.handNo} 手 · 结算`,
     caption: showdown ? '摊牌' : '弃牌结束',
-    title: `${winners.map(name).join(' / ')} 赢得 ${total}`,
+    title: settlementTitle(winners, name, hand, last, total),
     story: pots || undefined,
     cast: winners.map(pid => ({ label: '赢家', name: name(pid) })),
     ledger: ledgerOf(state, hand, last),
@@ -193,7 +226,11 @@ export function pokerMissionLine(state: ProjectedGameState): string {
     | { startingStack?: number; smallBlind?: number; bigBlind?: number }
     | undefined;
   const last = state.globalVars.lastHand as
-    | { pots?: { amount: number; winners: string[] }[]; endedBy?: string }
+    | {
+        pots?: { amount: number; winners: string[] }[];
+        endedBy?: string;
+        players?: { playerId: string; wonAmount: number; invested: number; won: boolean }[];
+      }
     | null
     | undefined;
   const buttonId = state.playerOrder[Number(hand?.buttonSeat ?? 0)];
@@ -205,9 +242,35 @@ export function pokerMissionLine(state: ProjectedGameState): string {
   ].filter(Boolean) as string[];
   const pots = last?.pots ?? [];
   if (pots.length > 0) {
-    const winners = [...new Set(pots.flatMap(pot => pot.winners.map(pid => state.players[pid]?.name ?? pid)))];
-    const total = pots.reduce((sum, pot) => sum + Number(pot.amount ?? 0), 0);
-    bits.push(`上一手：${winners.join(' / ')} 赢得 ${total}`);
+    const facts = last?.players ?? [];
+    const winnerFacts = facts.filter(f => f.won);
+    if (winnerFacts.length === 1) {
+      const winner = winnerFacts[0];
+      const wName = state.players[winner.playerId]?.name ?? winner.playerId;
+      const net = winner.wonAmount - winner.invested;
+      bits.push(`上一手：${wName} 赢得 ${net > 0 ? net : winner.wonAmount}`);
+    } else if (winnerFacts.length > 1) {
+      const allSameNet = winnerFacts.every(
+        f => f.wonAmount - f.invested === winnerFacts[0].wonAmount - winnerFacts[0].invested
+      );
+      const net = winnerFacts[0].wonAmount - winnerFacts[0].invested;
+      const names = winnerFacts.map(f => state.players[f.playerId]?.name ?? f.playerId).join(' / ');
+      if (allSameNet && net > 0) {
+        bits.push(`上一手：${names} 各赢得 ${net}`);
+      } else if (allSameNet && net === 0) {
+        const total = pots.reduce((sum, pot) => sum + Number(pot.amount ?? 0), 0);
+        bits.push(`上一手：${names} 平分底池 ${total}`);
+      } else {
+        const parts = winnerFacts.map(
+          f => `${state.players[f.playerId]?.name ?? f.playerId} 赢得 ${f.wonAmount - f.invested}`
+        );
+        bits.push(`上一手：${parts.join(' / ')}`);
+      }
+    } else {
+      const winners = [...new Set(pots.flatMap(pot => pot.winners.map(pid => state.players[pid]?.name ?? pid)))];
+      const total = pots.reduce((sum, pot) => sum + Number(pot.amount ?? 0), 0);
+      bits.push(`上一手：${winners.join(' / ')} 赢得底池 ${total}`);
+    }
   }
   return bits.join(' · ');
 }
