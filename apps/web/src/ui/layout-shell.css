@@ -2928,14 +2928,14 @@
 
 .operation-deck .op-status:not(:empty) {
   align-self: flex-end;
-  padding: 2px 8px;
+  padding: 1px 6px;
   border-radius: 999px;
   background: rgba(8, 10, 14, 0.72);
   color: #d9c7a2;
-  font-size: 11px;
-  letter-spacing: 0.02em;
+  font-size: 10px;
+  letter-spacing: 0em;
   text-align: right;
-  min-height: 16px;
+  min-height: 14px;
 }
 /* 视野外的玩家头像泡泡。桌面不显示：立柱的 3D 头像贴片自己在画。 */
 .seat-bubbles {
