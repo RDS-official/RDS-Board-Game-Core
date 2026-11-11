@@ -4,6 +4,7 @@ import { getGames, getRooms, createRoom, joinRoom, leaveRoom, setRoomStatus, get
 import { showToast } from './toast.ts';
 import { localToken, stripNetParamsFromUrl } from '../entryRoute.ts';
 import { html, raw, setHtml } from '../ui/dom/html';
+import { getPokerViewMode, setPokerViewMode } from '../ui/pokerPreference.ts';
 
 /**
  * 大厅 2.0（Phase B）：游戏货架 + 快速加入 + 创建模态 + 座位/就绪/聊天 + ws 实时。
@@ -608,6 +609,20 @@ function profileModalHtml() {
         </div>
 
         <div style="border-top: 1px solid var(--line); margin: 8px 0;"></div>
+        <div class="lob-pref-section" style="padding: 2px 0;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-weight: 600; color: var(--gold); font-size: 14px;">德州扑克极简模式 (2D 俯视)</div>
+              <div class="lob-muted" style="font-size: 12px; margin-top: 2px;">开启后使用极简 2D 俯视牌桌替代 3D 渲染，轻量流畅</div>
+            </div>
+            <label class="lob-switch" title="切换 2D 俯视 / 3D 拟真" style="margin-left: 12px;">
+              <input type="checkbox" id="pf-poker-2d-switch" ${getPokerViewMode() === '2d' ? 'checked' : ''} />
+              <span class="lob-switch-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div style="border-top: 1px solid var(--line); margin: 8px 0;"></div>
         <details class="lob-pass-details" style="cursor: pointer;">
           <summary style="font-weight: 600; color: var(--gold); font-size: 14px; user-select: none;">修改登录密码</summary>
           <div class="lob-stack" style="gap: 8px; margin-top: 10px;">
@@ -849,8 +864,15 @@ function bind() {
     nameInput.value = displayNameOf(user);
     setHtml($('pf-avatar-wrap'), raw(avatarChipHtml(user)));
     pendingAvatar = null;
+    const pSwitch = $('pf-poker-2d-switch') as HTMLInputElement | null;
+    if (pSwitch) pSwitch.checked = getPokerViewMode() === '2d';
     ($('profile-modal') as HTMLElement).hidden = false;
     nameInput.focus();
+  });
+  $('pf-poker-2d-switch')?.addEventListener('change', e => {
+    const is2D = (e.target as HTMLInputElement).checked;
+    setPokerViewMode(is2D ? '2d' : '3d');
+    showToast(is2D ? '已启用德州扑克极简 2D 俯视模式' : '已切换为德州扑克 3D 拟真模式', 'info');
   });
   $('pf-cancel')?.addEventListener('click', () => { ($('profile-modal') as HTMLElement).hidden = true; });
   $('profile-modal')?.addEventListener('click', ev => { if (ev.target === $('profile-modal')) ($('profile-modal') as HTMLElement).hidden = true; });

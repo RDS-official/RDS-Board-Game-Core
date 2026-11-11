@@ -25,6 +25,8 @@ import { NetSession, NetSessionOptions } from '@rds/app/netSession';
 import { UniversalSession } from '@rds/app/session';
 import type { InteractiveObjectData } from './render/raycaster';
 import { html, setHtml } from './ui/dom/html';
+import { Poker2DView } from './ui/poker2d/poker2d';
+import { getPokerViewMode, setPokerViewMode } from './ui/pokerPreference';
 
 /**
  * Composition root only.
@@ -61,6 +63,7 @@ class BoardGameSimulatorApp {
   /** True once the canvas webfont can be used; gates the first board paint. */
   private fontsReady = false;
   private pendingSnapshot?: GameSnapshot;
+  private poker2dView?: Poker2DView;
 
   constructor() {
     this.installViewportHeight();
@@ -130,6 +133,24 @@ class BoardGameSimulatorApp {
     this.inspector = new MathematicalInspectorUI(inspectorContainer, this.session, {
       onClose: () => this.hud.setInspectorActive(false)
     });
+
+    if (this.currentGameId === 'poker') {
+      const appEl = document.getElementById('app')!;
+      this.poker2dView = new Poker2DView(appEl, this.session, {
+        onSwitchMode: mode => {
+          setPokerViewMode(mode);
+          this.applyPokerViewMode(mode);
+        },
+        onLeaveTable: () => {
+          void this.leaveTable();
+        },
+        isSoundOn: () => BoardGameAudio.isSoundEnabled(),
+        toggleSound: () => {
+          BoardGameAudio.toggleSound();
+        }
+      });
+      this.applyPokerViewMode(getPokerViewMode());
+    }
 
     // 「退出牌桌」由装配根决定去哪：联机回大厅（房主负责关房），单机回入口页。
     // 规则层只认识「离开」这个能力，不认识大厅或 URL。
@@ -774,6 +795,10 @@ class BoardGameSimulatorApp {
       // 牌桌音效：下注动作与输赢都由投影差集驱动，不新增内核事件。
       this.playBettingCues(snapshot);
 
+      if (this.currentGameId === 'poker' && this.poker2dView) {
+        this.poker2dView.update(snapshot);
+      }
+
       if (this.currentGameId === 'betrayal') {
         const focusId = snapshot.focus[0] ?? snapshot.viewer;
         const player = snapshot.board.players[focusId];
@@ -912,6 +937,33 @@ class BoardGameSimulatorApp {
     this.hud.syncCamera('iso');
     this.applyDefaultView();
 
+    if (gameId === 'poker') {
+      const appEl = document.getElementById('app')!;
+      this.poker2dView = new Poker2DView(appEl, this.session, {
+        onSwitchMode: mode => {
+          setPokerViewMode(mode);
+          this.applyPokerViewMode(mode);
+        },
+        onLeaveTable: () => {
+          void this.leaveTable();
+        },
+        isSoundOn: () => BoardGameAudio.isSoundEnabled(),
+        toggleSound: () => {
+          BoardGameAudio.toggleSound();
+        }
+      });
+      this.applyPokerViewMode(getPokerViewMode());
+    } else if (this.poker2dView) {
+      this.poker2dView.destroy();
+      this.poker2dView = undefined;
+      const canvasContainer = document.getElementById('canvas-container');
+      const hudContainer = document.getElementById('hud-container');
+      const vignette = document.querySelector('.stage-vignette') as HTMLElement | null;
+      if (canvasContainer) canvasContainer.style.display = '';
+      if (hudContainer) hudContainer.style.display = '';
+      if (vignette) vignette.style.display = '';
+    }
+
     try {
       const url = new URL(window.location.href);
       url.searchParams.set('game', gameId);
@@ -921,6 +973,50 @@ class BoardGameSimulatorApp {
     } catch {}
 
     this.hud.showAnnouncement(`已载入 · ${module.meta.name}`);
+  }
+
+  private applyPokerViewMode(mode: '2d' | '3d'): void {
+    const canvasContainer = document.getElementById('canvas-container');
+    const hudContainer = document.getElementById('hud-container');
+    const vignette = document.querySelector('.stage-vignette') as HTMLElement | null;
+
+    if (mode === '2d') {
+      if (canvasContainer) canvasContainer.style.display = 'none';
+      if (hudContainer) hudContainer.style.display = 'none';
+      if (vignette) vignette.style.display = 'none';
+      this.poker2dView?.show();
+      const snap = this.session.getSnapshot();
+      this.poker2dView?.update(snap);
+      hideGameLoading();
+    } else {
+      if (canvasContainer) canvasContainer.style.display = '';
+      if (hudContainer) hudContainer.style.display = '';
+      if (vignette) vignette.style.display = '';
+      this.poker2dView?.hide();
+      window.dispatchEvent(new Event('resize'));
+      const snap = this.session.getSnapshot();
+      this.scene.syncState(snap.board, snap.placement, layoutForGame(this.currentGameId));
+      this.inject3dModePoker2dButton();
+    }
+  }
+
+  private inject3dModePoker2dButton(): void {
+    if (this.currentGameId !== 'poker') return;
+    if (document.getElementById('btn-poker-switch-2d')) return;
+    const topbar = document.querySelector('.app-shell > .topbar') ?? document.querySelector('.topbar');
+    if (topbar) {
+      const btn = document.createElement('button');
+      btn.id = 'btn-poker-switch-2d';
+      btn.className = 'shell-toggle';
+      btn.style.cssText = 'display: inline-flex !important; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 6px; background: rgba(217, 180, 91, 0.18); border: 1px solid #d9b45b; color: #f5d061; font-weight: 700; font-size: 13px; cursor: pointer; margin-left: 8px; z-index: 100;';
+      btn.textContent = '🔄 2D极简';
+      btn.title = '切换为极简 2D 俯视牌桌';
+      btn.addEventListener('click', () => {
+        setPokerViewMode('2d');
+        this.applyPokerViewMode('2d');
+      });
+      topbar.append(btn);
+    }
   }
 
   /**
