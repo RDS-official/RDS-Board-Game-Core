@@ -42,6 +42,8 @@ export class Poker2DView {
   private currentActivePlayerId: string | null = null;
   private showSettlementModal = true;
   private lastSettledHandNo = -1;
+  /** 右侧筹码排行的页签：本局（这一手净额）/ 全局（当前筹码）。 */
+  private rankTab: 'hand' | 'global' = 'global';
 
   constructor(container: HTMLElement, session: GamePresenter, options: Poker2DViewOptions) {
     this.container = container;
@@ -150,6 +152,14 @@ export class Poker2DView {
         return;
       }
 
+      // 筹码排行页签：本局 / 全局
+      const rankTabBtn = target.closest<HTMLElement>('[data-p2d-rank-tab]');
+      if (rankTabBtn?.dataset.p2dRankTab === 'hand' || rankTabBtn?.dataset.p2dRankTab === 'global') {
+        this.rankTab = rankTabBtn.dataset.p2dRankTab;
+        this.render();
+        return;
+      }
+
       // 关闭结算弹窗
       if (target.closest('[data-p2d-close-settle]')) {
         this.showSettlementModal = false;
@@ -225,6 +235,8 @@ export class Poker2DView {
       community?: string[];
       currentBet?: number;
       streetBets?: Record<string, number>;
+      /** 本手累计投入（含已收进底池的部分），「本局」排行用它。 */
+      handBets?: Record<string, number>;
       lastActions?: Record<string, string>;
       folded?: string[];
       allIn?: string[];
@@ -256,17 +268,21 @@ export class Poker2DView {
     const htmlString = `
       ${this.renderTopBar(hand)}
       <div class="p2d-stage">
-        <div class="p2d-table-rail">
-          <div class="p2d-felt">
-            <div class="p2d-felt-watermark">TEXAS HOLD'EM</div>
-            ${this.renderCenterArea(hand, totalPot, lastHand)}
+        ${this.renderPlayersPanel(snap, hand)}
+        <div class="p2d-table-area">
+          <div class="p2d-table-rail">
+            <div class="p2d-felt">
+              <div class="p2d-felt-watermark">TEXAS HOLD'EM</div>
+              ${this.renderCenterArea(hand, totalPot, lastHand)}
+            </div>
+            <div class="p2d-seats-layer">
+              ${seatLayouts.map(seat => this.renderSeatHtml(seat)).join('')}
+            </div>
           </div>
-          <div class="p2d-seats-layer">
-            ${seatLayouts.map(seat => this.renderSeatHtml(seat)).join('')}
-          </div>
+          ${heroHandEval ? `<div class="p2d-hero-hand-eval">👑 当前牌型：<b>${heroHandEval}</b></div>` : ''}
+          ${this.showSettlementModal && lastHand ? this.renderSettlementModalHtml(lastHand, hand.community ?? []) : ''}
         </div>
-        ${heroHandEval ? `<div class="p2d-hero-hand-eval">👑 当前牌型：<b>${heroHandEval}</b></div>` : ''}
-        ${this.showSettlementModal && lastHand ? this.renderSettlementModalHtml(lastHand) : ''}
+        ${this.renderSidePanel(snap, hand, lastHand)}
       </div>
       ${this.renderActionBar(snap, hand, totalPot)}
     `;
@@ -631,7 +647,9 @@ export class Poker2DView {
       pots?: { amount: number; winners: string[]; label: string }[];
       showdown?: { playerId: string; label: string; cards: string[] }[];
       players?: { playerId: string; wonAmount: number; invested: number; won: boolean }[];
-    }
+    },
+    /** 本手发出的公共牌（结算瞬间内核仍保留在 hand.community 里）。 */
+    community: string[]
   ): string {
     const pots = lastHand.pots ?? [];
     const mainPot = pots[0];
@@ -646,10 +664,23 @@ export class Poker2DView {
 
     const showdown = new Map((lastHand.showdown ?? []).map(line => [line.playerId, line]));
     const snap = this.latestSnapshot;
+    // 顶部固定五格：发到几张画几张，没发到的留空位，方便一眼看出是翻牌圈还是打到河牌。
+    const boardFaces = [0, 1, 2, 3, 4]
+      .map(index => {
+        const cardId = community[index];
+        return cardId
+          ? this.renderCardHtml(cardId, true)
+          : '<div class="p2d-card p2d-card-mini p2d-card-empty"></div>';
+      })
+      .join('');
 
     return `
       <div class="p2d-settlement-modal">
         <div class="p2d-settlement-title">🏆 ${titleText}</div>
+        <div class="p2d-settlement-board">
+          <span class="p2d-settlement-board-label">公共牌</span>
+          <div class="p2d-settlement-board-cards">${boardFaces}</div>
+        </div>
         <div class="p2d-settlement-list">
           ${(lastHand.players ?? []).map(pItem => {
             const player = snap?.players.find(pl => pl.id === pItem.playerId);
@@ -682,6 +713,141 @@ export class Poker2DView {
         </div>
       </div>
     `;
+  }
+
+  /** 左侧玩家状态栏：每人一行——位置徽标、筹码、本街下注与当前状态。 */
+  private renderPlayersPanel(
+    snap: GameSnapshot,
+    hand: {
+      folded?: string[];
+      allIn?: string[];
+      streetBets?: Record<string, number>;
+      lastActions?: Record<string, string>;
+      buttonSeat?: number;
+      sbSeat?: number;
+      bbSeat?: number;
+    }
+  ): string {
+    const seats = (snap.board.globalVars.seats ?? []) as { playerId: string; isAi: boolean }[];
+    const folded = new Set(hand.folded ?? []);
+    const allIn = new Set(hand.allIn ?? []);
+    const activeId = snap.board.activePlayerId ?? null;
+    const rows = snap.players.map(player => {
+      const seatIndex = seats.findIndex(seat => seat.playerId === player.id);
+      const pos = seatIndex < 0
+        ? ''
+        : seatIndex === hand.buttonSeat
+          ? 'D'
+          : seatIndex === hand.sbSeat
+            ? 'SB'
+            : seatIndex === hand.bbSeat
+              ? 'BB'
+              : '';
+      const bet = Number(hand.streetBets?.[player.id] ?? 0);
+      const lastAction = hand.lastActions?.[player.id];
+      const state = folded.has(player.id)
+        ? { cls: 'folded', text: '已弃牌' }
+        : !player.alive
+          ? { cls: 'out', text: '已出局' }
+          : allIn.has(player.id)
+            ? { cls: 'allin', text: '全押' }
+            : player.id === activeId
+              ? { cls: 'active', text: '行动中' }
+              : bet > 0
+                ? { cls: 'bet', text: `已下 ${bet}` }
+                : { cls: 'wait', text: lastAction || '等待' };
+      return `
+        <div class="p2d-pl-row ${state.cls}${player.id === snap.viewer ? ' self' : ''}">
+          <span class="p2d-pl-dot" style="background:${player.color}"></span>
+          <span class="p2d-pl-name" title="${player.name}">${player.name}</span>
+          <span class="p2d-pl-chips">$${player.score}</span>
+          <span class="p2d-pl-meta">
+            ${pos ? `<span class="p2d-pl-pos">${pos}</span>` : ''}
+            <span class="p2d-pl-state">${state.text}</span>
+          </span>
+        </div>
+      `;
+    }).join('');
+    return `
+      <aside class="p2d-panel p2d-players">
+        <div class="p2d-panel-title">玩家状态</div>
+        <div class="p2d-pl-list">${rows}</div>
+      </aside>
+    `;
+  }
+
+  /** 右侧：筹码排行（本局/全局）+ 操作记录（内核 globalVars.log 的流水）。 */
+  private renderSidePanel(
+    snap: GameSnapshot,
+    hand: { street?: string; handBets?: Record<string, number> },
+    lastHand?: { players?: { playerId: string; wonAmount: number; invested: number }[] }
+  ): string {
+    const rows = this.rankRows(snap, hand, lastHand);
+    const list = rows
+      .map((row, index) => `
+        <li class="p2d-rank-row${row.self ? ' self' : ''}">
+          <span class="p2d-rank-no">${index + 1}</span>
+          <span class="p2d-rank-name" title="${row.name}">${row.name}</span>
+          <span class="p2d-rank-val ${row.tone}">${row.text}</span>
+        </li>
+      `)
+      .join('');
+    const feed = ((snap.board.globalVars.log as string[] | undefined) ?? []).slice(-60).reverse();
+    const feedList = feed.length
+      ? feed.map(line => `<li class="p2d-feed-line">${line}</li>`).join('')
+      : '<li class="p2d-feed-line empty">暂无操作记录</li>';
+    const tab = (key: 'hand' | 'global', label: string): string =>
+      `<button type="button" class="p2d-rank-tab${this.rankTab === key ? ' active' : ''}" data-p2d-rank-tab="${key}">${label}</button>`;
+    return `
+      <aside class="p2d-side">
+        <section class="p2d-panel p2d-rank">
+          <div class="p2d-panel-head">
+            <span class="p2d-panel-title">筹码排行</span>
+            <div class="p2d-rank-tabs">${tab('hand', '本局')}${tab('global', '全局')}</div>
+          </div>
+          <ol class="p2d-rank-list">${list}</ol>
+        </section>
+        <section class="p2d-panel p2d-feed">
+          <div class="p2d-panel-title">操作记录</div>
+          <ul class="p2d-feed-list">${feedList}</ul>
+        </section>
+      </aside>
+    `;
+  }
+
+  private rankRows(
+    snap: GameSnapshot,
+    hand: { street?: string; handBets?: Record<string, number> },
+    lastHand?: { players?: { playerId: string; wonAmount: number; invested: number }[] }
+  ): { name: string; text: string; tone: string; self: boolean; sort: number }[] {
+    const players = snap.players.map(player => ({
+      id: player.id,
+      name: player.name,
+      chips: Number(player.score) || 0,
+      self: player.id === snap.viewer
+    }));
+    if (this.rankTab === 'global') {
+      return players
+        .map(player => ({ name: player.name, text: `$${player.chips}`, tone: 'chips', self: player.self, sort: player.chips }))
+        .sort((a, b) => b.sort - a.sort || a.name.localeCompare(b.name));
+    }
+    // 本局：牌局结束按这一手的净输赢；进行中按已经投进池里的钱（负数表示还压在池里）
+    const settled = hand.street === 'COMPLETE' ? (lastHand?.players ?? []) : [];
+    const netByPlayer = new Map(settled.map(item => [item.playerId, item.wonAmount - item.invested]));
+    return players
+      .map(player => {
+        const net = netByPlayer.get(player.id);
+        const invested = Number(hand.handBets?.[player.id] ?? 0);
+        const value = net ?? -invested;
+        const text = net === undefined
+          ? invested > 0
+            ? `-$${invested}`
+            : '—'
+          : `${net > 0 ? '+' : ''}${net}`;
+        const tone = value > 0 ? 'gain' : value < 0 ? 'loss' : 'flat';
+        return { name: player.name, text, tone, self: player.self, sort: value };
+      })
+      .sort((a, b) => b.sort - a.sort || a.name.localeCompare(b.name));
   }
 
   private renderCardHtml(cardStr: string, isMini = false): string {
