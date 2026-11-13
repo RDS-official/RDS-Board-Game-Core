@@ -308,6 +308,7 @@ export class Poker2DView {
   private computeSeatLayouts(
     snap: GameSnapshot,
     hand: {
+      handNo?: number;
       buttonSeat?: number;
       sbSeat?: number;
       bbSeat?: number;
@@ -317,7 +318,7 @@ export class Poker2DView {
       allIn?: string[];
     },
     seats: { playerId: string; isAi: boolean }[],
-    lastHand: { pots?: { winners: string[] }[]; showdown?: { playerId: string; cards: string[] }[] } | undefined,
+    lastHand: { handNo?: number; pots?: { winners: string[] }[]; showdown?: { playerId: string; cards: string[] }[] } | undefined,
     /** 本人底牌：在手时来自快照，弃牌/结束后是记住的那两张。 */
     heroCards: string[]
   ): SeatLayoutInfo[] {
@@ -335,6 +336,13 @@ export class Poker2DView {
 
     const winnersSet = new Set(lastHand?.pots?.flatMap(p => p.winners) ?? []);
     const foldedSet = new Set(hand.folded ?? []);
+    // 摊牌亮牌只对「屏幕上这一手」有效：lastHand 会一直留在 globalVars 里，
+    // 少一次手号比对，下一手翻牌前就会把上一手亮过的牌继续摆在别人座位上。
+    const revealed = new Map<string, string[]>(
+      typeof hand.handNo === 'number' && lastHand?.handNo === hand.handNo
+        ? (lastHand.showdown ?? []).map(line => [line.playerId, line.cards] as [string, string[]])
+        : []
+    );
 
     return players.map((player, origIdx) => {
       // 旋转使得 Hero 对应 displayIndex = 0 (正下方)
@@ -361,11 +369,10 @@ export class Poker2DView {
       if (isHero) {
         cards = heroCards;
       } else {
-        // 摊牌阶段若在 showdown 列表中有牌则亮出
-        const sdItem = lastHand?.showdown?.find(s => s.playerId === player.id);
-        if (sdItem && sdItem.cards && sdItem.cards.length > 0) {
-          // showdown 牌是 'A♠' 格式，转为 entityId 或直接携带
-          cards = sdItem.cards;
+        // showdown 牌是 'A♠' 格式，renderCardHtml 两种写法都认
+        const sdCards = revealed.get(player.id);
+        if (sdCards && sdCards.length > 0) {
+          cards = sdCards;
         } else {
           // 普通阶段在玩玩家两张暗牌
           const zone = snap.board.zones[`zone_hand_${player.id}`];
