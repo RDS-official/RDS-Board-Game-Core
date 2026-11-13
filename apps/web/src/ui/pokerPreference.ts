@@ -31,8 +31,8 @@ export function getPokerViewMode(): PokerViewMode {
     if (stored === '2d') return '2d';
   } catch {}
 
-  // 3. 正常大厅/联机对局默认使用新实现的极简 2D 俯视视图
-  return '2d';
+  // 3. 默认走 3D 拟真桌面：极简 2D 由玩家在个人资料设置里显式开启
+  return '3d';
 }
 
 export function setPokerViewMode(mode: PokerViewMode): void {
