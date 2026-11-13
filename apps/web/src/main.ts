@@ -144,10 +144,7 @@ class BoardGameSimulatorApp {
         onLeaveTable: () => {
           void this.leaveTable();
         },
-        isSoundOn: () => BoardGameAudio.isSoundEnabled(),
-        toggleSound: () => {
-          BoardGameAudio.toggleSound();
-        }
+        getChromeTop: () => this.poker2dChromeTop()
       });
       this.applyPokerViewMode(getPokerViewMode());
     }
@@ -947,10 +944,7 @@ class BoardGameSimulatorApp {
         onLeaveTable: () => {
           void this.leaveTable();
         },
-        isSoundOn: () => BoardGameAudio.isSoundEnabled(),
-        toggleSound: () => {
-          BoardGameAudio.toggleSound();
-        }
+        getChromeTop: () => this.poker2dChromeTop()
       });
       this.applyPokerViewMode(getPokerViewMode());
     } else if (this.poker2dView) {
@@ -960,7 +954,10 @@ class BoardGameSimulatorApp {
       const hudContainer = document.getElementById('hud-container');
       const vignette = document.querySelector('.stage-vignette') as HTMLElement | null;
       if (canvasContainer) canvasContainer.style.display = '';
-      if (hudContainer) hudContainer.style.display = '';
+      if (hudContainer) {
+        hudContainer.style.display = '';
+        hudContainer.classList.remove('poker-2d-chrome');
+      }
       if (vignette) vignette.style.display = '';
     }
 
@@ -975,6 +972,12 @@ class BoardGameSimulatorApp {
     this.hud.showAnnouncement(`已载入 · ${module.meta.name}`);
   }
 
+  /** 极简 2D 里牌桌要让出 HUD 顶栏的高度；顶栏换行长高时 2D 视图自己在 resize 上重测。 */
+  private poker2dChromeTop(): number {
+    const topbar = document.querySelector('#hud-container .topbar') as HTMLElement | null;
+    return topbar ? topbar.getBoundingClientRect().height : 0;
+  }
+
   private applyPokerViewMode(mode: '2d' | '3d'): void {
     const canvasContainer = document.getElementById('canvas-container');
     const hudContainer = document.getElementById('hud-container');
@@ -982,7 +985,12 @@ class BoardGameSimulatorApp {
 
     if (mode === '2d') {
       if (canvasContainer) canvasContainer.style.display = 'none';
-      if (hudContainer) hudContainer.style.display = 'none';
+      // 极简 2D 保留顶栏：主菜单、游戏切换、音效这些全局入口在 2D 里一样要用。
+      // 其余面板（角色栏/信息栏/指令轨/过场幕布）会盖住牌桌，由 .poker-2d-chrome 收起。
+      if (hudContainer) {
+        hudContainer.style.display = '';
+        hudContainer.classList.add('poker-2d-chrome');
+      }
       if (vignette) vignette.style.display = 'none';
       this.poker2dView?.show();
       const snap = this.session.getSnapshot();
@@ -990,7 +998,10 @@ class BoardGameSimulatorApp {
       hideGameLoading();
     } else {
       if (canvasContainer) canvasContainer.style.display = '';
-      if (hudContainer) hudContainer.style.display = '';
+      if (hudContainer) {
+        hudContainer.style.display = '';
+        hudContainer.classList.remove('poker-2d-chrome');
+      }
       if (vignette) vignette.style.display = '';
       this.poker2dView?.hide();
       window.dispatchEvent(new Event('resize'));

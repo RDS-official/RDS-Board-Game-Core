@@ -6,8 +6,8 @@ import './poker2d.css';
 export interface Poker2DViewOptions {
   onSwitchMode: (mode: '2d' | '3d') => void;
   onLeaveTable: () => void;
-  isSoundOn: () => boolean;
-  toggleSound: () => void;
+  /** HUD 顶栏高度：极简 2D 保留菜单栏，牌桌必须从它下面开始。 */
+  getChromeTop?: () => number;
 }
 
 interface SeatLayoutInfo {
@@ -53,10 +53,22 @@ export class Poker2DView {
     this.container.appendChild(this.rootEl);
 
     this.bindEvents();
+    window.addEventListener('resize', this.onWindowResize, { passive: true });
+  }
+
+  /** 顶栏换行/缩放会改高度，2D 视图每次窗口变化重新让位。 */
+  private readonly onWindowResize = (): void => {
+    if (this.rootEl.style.display !== 'none') this.applyChromeTop();
+  };
+
+  private applyChromeTop(): void {
+    const top = Math.max(0, Math.round(this.options.getChromeTop?.() ?? 0));
+    this.rootEl.style.setProperty('--p2d-top-inset', `${top}px`);
   }
 
   public show(): void {
     this.rootEl.style.display = 'flex';
+    this.applyChromeTop();
   }
 
   public hide(): void {
@@ -64,6 +76,7 @@ export class Poker2DView {
   }
 
   public destroy(): void {
+    window.removeEventListener('resize', this.onWindowResize);
     if (this.timerInterval !== null) {
       clearInterval(this.timerInterval);
       this.timerInterval = null;
@@ -128,13 +141,6 @@ export class Poker2DView {
       // 切换到 3D 视图
       if (target.closest('[data-p2d-switch-3d]')) {
         this.options.onSwitchMode('3d');
-        return;
-      }
-
-      // 音效开关
-      if (target.closest('[data-p2d-toggle-sound]')) {
-        this.options.toggleSound();
-        this.render();
         return;
       }
 
@@ -248,7 +254,7 @@ export class Poker2DView {
 
     // 渲染整体界面
     const htmlString = `
-      ${this.renderTopBar(snap, hand)}
+      ${this.renderTopBar(hand)}
       <div class="p2d-stage">
         <div class="p2d-table-rail">
           <div class="p2d-felt">
@@ -368,26 +374,16 @@ export class Poker2DView {
     return label || null;
   }
 
-  private renderTopBar(
-    _snap: GameSnapshot,
-    hand: { handNo?: number; street?: string }
-  ): string {
-    const soundOn = this.options.isSoundOn();
+  private renderTopBar(hand: { handNo?: number; street?: string }): string {
     const handNo = hand.handNo ?? 1;
 
     return `
       <div class="p2d-topbar">
         <div class="p2d-topbar-left">
-          <div class="p2d-game-pill">
-            <span>♠ 德州扑克</span>
-            <span class="p2d-2d-badge">2D 极简</span>
-          </div>
+          <span class="p2d-2d-badge">2D 极简</span>
           <div class="p2d-table-meta">第 ${handNo} 手 · 盲注 5/10</div>
         </div>
         <div class="p2d-topbar-right">
-          <button class="p2d-btn p2d-btn-ghost" data-p2d-toggle-sound title="切换音效">
-            ${soundOn ? '🔊 音效开' : '🔇 静音'}
-          </button>
           <button class="p2d-btn p2d-btn-switch" data-p2d-switch-3d title="切换为 3D 拟真桌面">
             🔄 切换 3D
           </button>
@@ -628,12 +624,15 @@ export class Poker2DView {
     `;
   }
 
-  private renderSettlementModalHtml(lastHand: {
-    handNo?: number;
-    endedBy?: string;
-    pots?: { amount: number; winners: string[]; label: string }[];
-    players?: { playerId: string; wonAmount: number; invested: number; won: boolean }[];
-  }): string {
+  private renderSettlementModalHtml(
+    lastHand: {
+      handNo?: number;
+      endedBy?: string;
+      pots?: { amount: number; winners: string[]; label: string }[];
+      showdown?: { playerId: string; label: string; cards: string[] }[];
+      players?: { playerId: string; wonAmount: number; invested: number; won: boolean }[];
+    }
+  ): string {
     const pots = lastHand.pots ?? [];
     const mainPot = pots[0];
     const winnerNames = (mainPot?.winners ?? []).map(pid => {
@@ -645,19 +644,34 @@ export class Poker2DView {
       ? `${winnerNames} 获胜（其他玩家弃牌）`
       : `${winnerNames} 以【${mainPot?.label || '高牌'}】赢得底池 $${mainPot?.amount ?? 0}`;
 
+    const showdown = new Map((lastHand.showdown ?? []).map(line => [line.playerId, line]));
+    const snap = this.latestSnapshot;
+
     return `
       <div class="p2d-settlement-modal">
         <div class="p2d-settlement-title">🏆 ${titleText}</div>
         <div class="p2d-settlement-list">
           ${(lastHand.players ?? []).map(pItem => {
-            const player = this.latestSnapshot?.players.find(pl => pl.id === pItem.playerId);
+            const player = snap?.players.find(pl => pl.id === pItem.playerId);
             const name = player?.name ?? pItem.playerId;
             const net = pItem.wonAmount - pItem.invested;
             const netStr = net > 0 ? `+${net}` : String(net);
             const netClass = net > 0 ? 'p2d-settlement-gain' : net < 0 ? 'p2d-settlement-loss' : 'p2d-settlement-neutral';
+            // 只有摊牌真亮出的牌才展示牌面与牌型；弃牌结束、或对手没亮牌时一律背面朝上——
+            // 结算不能替别人翻开手牌，牌局结束瞬间本人底牌也已从状态里清掉。
+            const line = showdown.get(pItem.playerId);
+            const holeCards = (line?.cards ?? []).map(id => parseCard(id)).filter((card): card is PokerCard => !!card);
+            const bestLabel = line?.label ?? '';
+            const faces = holeCards.length > 0
+              ? holeCards.map(card => this.renderCardHtml(`card_${card.suit}${card.rank}`, true)).join('')
+              : this.renderCardBackHtml(true) + this.renderCardBackHtml(true);
             return `
               <div class="p2d-settlement-row">
-                <span class="p2d-settlement-name">${name}</span>
+                <div class="p2d-settlement-id">
+                  <span class="p2d-settlement-name">${name}</span>
+                  ${bestLabel ? `<span class="p2d-settlement-hand" title="本手最大牌型">${bestLabel}</span>` : ''}
+                </div>
+                <div class="p2d-settlement-cards">${faces}</div>
                 <span class="${netClass}">${netStr} 筹码</span>
               </div>
             `;
@@ -683,11 +697,8 @@ export class Poker2DView {
 
     return `
       <div class="p2d-card ${colorClass} ${sizeClass}">
-        <div class="p2d-card-corner">
-          <span class="p2d-card-rank">${rankStr}</span>
-          <span class="p2d-card-suit-sm">${suitSym}</span>
-        </div>
-        <div class="p2d-card-center-suit">${suitSym}</div>
+        <span class="p2d-card-rank">${rankStr}</span>
+        <span class="p2d-card-center-suit">${suitSym}</span>
       </div>
     `;
   }

@@ -17,6 +17,8 @@
   /* 牌面尺寸跟着视口长高走：牌桌铺满屏幕后，52px 的牌会显得像邮票 */
   --p2d-card-w: clamp(48px, 6vh, 70px);
   --p2d-card-h: calc(var(--p2d-card-w) * 1.42);
+  /* 极简 2D 保留 HUD 菜单栏，牌桌从它下面开始（高度由 Poker2DView 实测写入） */
+  padding-top: var(--p2d-top-inset, 0px);
 }
 
 /* ---------------- 顶部状态栏 ---------------- */
@@ -233,8 +235,10 @@
 
 /* 扑克单张卡牌 */
 .p2d-card {
-  width: var(--p2d-card-w);
-  height: var(--p2d-card-h);
+  /* 单张牌自己的宽度：座位上的小牌、结算里的复盘牌都靠它缩放点数与花色 */
+  --p2d-face-w: var(--p2d-card-w);
+  width: var(--p2d-face-w);
+  height: calc(var(--p2d-face-w) * 1.42);
   background: #ffffff;
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
@@ -255,29 +259,20 @@
   color: #1e293b;
 }
 
-.p2d-card-corner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+.p2d-card-rank {
+  align-self: flex-start;
+  font-weight: 800;
+  font-size: calc(var(--p2d-face-w) * 0.3);
   line-height: 1;
 }
 
-.p2d-card-rank {
-  font-weight: 800;
-  font-size: 15px;
-}
-
-.p2d-card-suit-sm {
-  font-size: 12px;
-  margin-top: 1px;
-}
-
+/* 一张牌只放一个花色，放大了看：小牌面也能一眼认出红黑与花色 */
 .p2d-card-center-suit {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 26px;
+  font-size: calc(var(--p2d-face-w) * 0.72);
   line-height: 1;
 }
 
@@ -505,15 +500,13 @@
 }
 
 .p2d-seat-cards .p2d-card-mini {
-  width: 38px;
-  height: 54px;
+  --p2d-face-w: 38px;
   border-radius: 4px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 
 .p2d-seat-cards .p2d-card-hero {
-  width: 54px;
-  height: 78px;
+  --p2d-face-w: 54px;
 }
 
 /* ---------------- 玩家本人的牌力提示 ---------------- */
@@ -731,7 +724,7 @@
   border: 1px solid rgba(217, 180, 91, 0.4);
   border-radius: 12px;
   padding: 24px;
-  max-width: 520px;
+  max-width: 720px;
   width: 90%;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
   z-index: 60;
@@ -751,23 +744,59 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 240px;
+  /* 满桌 10 人要能一次读完，不再挤在 240px 里滚动 */
+  max-height: min(64vh, 560px);
   overflow-y: auto;
 }
 
 .p2d-settlement-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
   padding: 8px 10px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
+}
+
+.p2d-settlement-id {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .p2d-settlement-name {
   font-weight: 600;
   font-size: 13px;
   color: #e5e7eb;
+}
+
+/* 本手最大牌型：与牌面同一行，牌面不看数字也能读出"凭什么赢" */
+.p2d-settlement-hand {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: 1px solid rgba(217, 180, 91, 0.32);
+  border-radius: 999px;
+  background: rgba(217, 180, 91, 0.14);
+  color: #f5d061;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.p2d-settlement-cards {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.p2d-settlement-cards .p2d-card {
+  --p2d-face-w: 42px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 
 .p2d-settlement-gain {
@@ -786,4 +815,36 @@
   font-weight: 600;
   font-size: 13px;
   color: #9ca3af;
+}
+
+/* ---------------- 极简 2D 里的 HUD 顶栏 ---------------- */
+/* #hud-container 平时在 .ui-layer 的 z-index:10，被 2D 视图（z-index:40）整片盖住。
+   只保留顶栏时把它抬到 2D 视图之上：顶栏与 ☰ 主菜单弹窗都要能点得到。 */
+#hud-container.poker-2d-chrome {
+  z-index: 60;
+}
+
+/* 顶栏背景只铺它自己的内容宽度（206px），在 2D 里会留下一条突兀的硬边 */
+#hud-container.poker-2d-chrome .topbar {
+  width: 100%;
+}
+
+/* 2D 模式下 #hud-container 不再整体隐藏：菜单栏（☰ 主菜单 / 游戏切换 / 音效 / 关于）
+   是全局入口，没有它玩家在极简牌桌上换不了游戏。其余面板都是给 3D 桌面定位的浮层，
+   压在 2D 牌桌上会挡住牌桌与操作按钮，统一收起。 */
+#hud-container.poker-2d-chrome .seat-bubbles,
+#hud-container.poker-2d-chrome .player-rail,
+#hud-container.poker-2d-chrome .side-column,
+#hud-container.poker-2d-chrome .action-dock,
+#hud-container.poker-2d-chrome .hand-slot,
+#hud-container.poker-2d-chrome .operation-deck,
+#hud-container.poker-2d-chrome .action-hand,
+#hud-container.poker-2d-chrome .hand-pager,
+#hud-container.poker-2d-chrome .announcement-banner,
+#hud-container.poker-2d-chrome .turn-clock-centre,
+#hud-container.poker-2d-chrome #moment-cine,
+#hud-container.poker-2d-chrome .card-sheet-layer,
+#hud-container.poker-2d-chrome #hover-hint,
+#hud-container.poker-2d-chrome .shell-scrim {
+  display: none !important;
 }
