@@ -7,14 +7,18 @@ name: update-contributors-stats
 #   users/github-actions/update-contributors-stats，开 PR 后显式 dispatch ci.yml，
 #   等 gate 通过再 squash 合并，全程不需要人工。
 #
-# 为什么手动 dispatch ci：
-#   GITHUB_TOKEN 创建的 PR 不会触发 pull_request workflow，必须在这里补一次
-#   gate；否则分支保护会一直拦着合并。
+# 为什么只在必要时 dispatch ci：
+#   用 README_STATS_TOKEN（PAT）推的分支会自己触发 pull_request 的 ci，这里先等
+#   那次运行即可；只有 GITHUB_TOKEN 推的分支（不触发 pull_request workflow）才补
+#   一次 dispatch，且 dispatch 失败只记警告——仓库/组织没开
+#   "Allow GitHub Actions to create and approve pull requests" 时服务端会返回
+#   422，把它当硬错误会让整条定时任务莫名其妙变红。
 #
-# 前提：
-#   仓库设置 Actions → General → Workflow permissions 需要允许
-#   "Allow GitHub Actions to create and approve pull requests"，或者提供
-#   README_STATS_TOKEN（PAT）secret。否则 gh pr create 会明确失败。
+# 前提（二选一即可，推荐前者：PAT 权限面更小）：
+#   1. 仓库 Secrets 里放 README_STATS_TOKEN（PAT，contents/pull-requests/actions 写）；
+#   2. 或让组织所有者打开 Org Settings → Actions → General → Workflow permissions
+#      的 "Allow GitHub Actions to create and approve pull requests"。该开关在组织
+#      名下时，仓库页只做展示，灰掉说明组织层没开。
 
 on:
   schedule:
@@ -115,19 +119,44 @@ jobs:
           HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
         run: |
           set -euo pipefail
+
+          # 某个 commit 上已有的 ci 运行（本仓库的 ci 只有一条 workflow，取最新一条）。
+          find_run() {
+            gh run list --workflow ci.yml --branch "$BRANCH" --limit 30 \
+              --json databaseId,headSha \
+              --jq "[.[] | select(.headSha == \"$1\")][0].databaseId // empty"
+          }
+
+          # 等这条运行出现，最多 $2 秒；到点没出现就返回空串。
+          wait_run() {
+            local id=""
+            for _ in $(seq 1 $(($2 / 5))); do
+              id=$(find_run "$1")
+              if [ -n "$id" ]; then
+                echo "$id"
+                return 0
+              fi
+              sleep 5
+            done
+            echo ""
+          }
+
           attempt=1
           while [ "$attempt" -le 3 ]; do
             echo "::group::attempt $attempt — CI for $HEAD_SHA"
 
-            gh workflow run ci.yml --ref "$BRANCH"
-            run_id=""
-            for _ in $(seq 1 60); do
-              run_id=$(gh run list --workflow ci.yml --branch "$BRANCH" --limit 20 \
-                --json databaseId,headSha \
-                --jq "[.[] | select(.headSha == \"$HEAD_SHA\")][0].databaseId // empty")
-              [ -n "$run_id" ] && break
-              sleep 5
-            done
+            # 用 PAT 推的分支会自己触发 pull_request 的 ci，先等它，别再 dispatch 一次。
+            run_id=$(wait_run "$HEAD_SHA" 60)
+            if [ -z "$run_id" ]; then
+              # 走到这里说明分支是用 GITHUB_TOKEN 推的（它不会触发 pull_request
+              # workflow）。这条 dispatch 在仓库/组织没开
+              # "Allow GitHub Actions to create and approve pull requests" 时会被
+              # 服务端 422 拒掉，所以只记警告，让下面的等待决定成败。
+              if ! dispatch_err=$(gh workflow run ci.yml --ref "$BRANCH" 2>&1); then
+                echo "::warning::dispatch ci.yml 失败：$(echo "$dispatch_err" | tr '\n' ' ' | cut -c1-200)"
+              fi
+              run_id=$(wait_run "$HEAD_SHA" 120)
+            fi
             if [ -z "$run_id" ]; then
               echo "找不到 $HEAD_SHA 的 ci 运行"
               exit 1
