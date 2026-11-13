@@ -44,6 +44,14 @@ export class Poker2DView {
   private lastSettledHandNo = -1;
   /** 右侧筹码排行的页签：本局（这一手净额）/ 全局（当前筹码）。 */
   private rankTab: 'hand' | 'global' = 'global';
+  /**
+   * 记住自己已经看到的底牌。
+   *
+   * 内核在弃牌（`rules.ts` 的 FOLD 分支把牌挪进 `zone_muck` 并置 HIDDEN）和本手结束时
+   * 都会把底牌从 `snap.hand` 里收走，所以「自己的牌一直看得见」只能靠界面记住：
+   * 状态里它们依然是隐藏的，这里只是不忘记玩家本人早就知道的那两张。
+   */
+  private heroCards: { handNo: number | null; cards: string[] } = { handNo: null, cards: [] };
 
   constructor(container: HTMLElement, session: GamePresenter, options: Poker2DViewOptions) {
     this.container = container;
@@ -258,8 +266,14 @@ export class Poker2DView {
     const streetBetsTotal = Object.values(hand.streetBets ?? {}).reduce((s, b) => s + (Number(b) || 0), 0);
     const totalPot = (Number(hand.pot) || 0) + streetBetsTotal;
 
+    // 自己的底牌：弃牌或本手结束后状态里已经收走，这里回放记住的那两张。
+    const heroCards = this.heroCardsFor(
+      typeof hand.handNo === 'number' ? hand.handNo : null,
+      (snap.hand ?? []).map(c => c.entityId)
+    );
+
     // 解析座位几何排布
-    const seatLayouts = this.computeSeatLayouts(snap, hand, seats, lastHand);
+    const seatLayouts = this.computeSeatLayouts(snap, hand, seats, lastHand, heroCards);
 
     // 计算 Hero 的当前牌型
     const heroHandEval = this.computeHeroHandEval(snap, hand);
@@ -303,7 +317,9 @@ export class Poker2DView {
       allIn?: string[];
     },
     seats: { playerId: string; isAi: boolean }[],
-    lastHand?: { pots?: { winners: string[] }[]; showdown?: { playerId: string; cards: string[] }[] }
+    lastHand: { pots?: { winners: string[] }[]; showdown?: { playerId: string; cards: string[] }[] } | undefined,
+    /** 本人底牌：在手时来自快照，弃牌/结束后是记住的那两张。 */
+    heroCards: string[]
   ): SeatLayoutInfo[] {
     const players = snap.players;
     const count = players.length;
@@ -343,7 +359,7 @@ export class Poker2DView {
       // 底牌获取
       let cards: string[] = [];
       if (isHero) {
-        cards = (snap.hand ?? []).map(c => c.entityId);
+        cards = heroCards;
       } else {
         // 摊牌阶段若在 showdown 列表中有牌则亮出
         const sdItem = lastHand?.showdown?.find(s => s.playerId === player.id);
@@ -375,6 +391,26 @@ export class Poker2DView {
         cards
       };
     });
+  }
+
+  /**
+   * 自己的底牌：手还在打就用快照里的，弃牌 / 结束后回放同一手记住的那两张。
+   * 新的一手一旦发牌（`live` 非空）就覆盖旧的，所以不会串到上一手。
+   */
+  private heroCardsFor(handNo: number | null, live: string[]): string[] {
+    if (live.length > 0) {
+      this.heroCards = { handNo, cards: live };
+      return live;
+    }
+    return this.rememberedHeroCards(handNo);
+  }
+
+  /** 记住的底牌；两边都有手数且对不上时说明已经换手，不能回放。 */
+  private rememberedHeroCards(handNo: number | null): string[] {
+    const remembered = this.heroCards;
+    if (remembered.cards.length === 0) return [];
+    if (handNo !== null && remembered.handNo !== null && remembered.handNo !== handNo) return [];
+    return remembered.cards;
   }
 
   /** 计算 Hero 的当前最佳牌力文本 */
@@ -688,14 +724,19 @@ export class Poker2DView {
             const net = pItem.wonAmount - pItem.invested;
             const netStr = net > 0 ? `+${net}` : String(net);
             const netClass = net > 0 ? 'p2d-settlement-gain' : net < 0 ? 'p2d-settlement-loss' : 'p2d-settlement-neutral';
-            // 只有摊牌真亮出的牌才展示牌面与牌型；弃牌结束、或对手没亮牌时一律背面朝上——
-            // 结算不能替别人翻开手牌，牌局结束瞬间本人底牌也已从状态里清掉。
+            // 对手：只有摊牌真亮出的牌才展示牌面与牌型（结算不能替别人翻开手牌）。
+            // 本人：状态里已经收走，用这一手记住的底牌还原，弃牌了也照样看得见。
             const line = showdown.get(pItem.playerId);
             const holeCards = (line?.cards ?? []).map(id => parseCard(id)).filter((card): card is PokerCard => !!card);
             const bestLabel = line?.label ?? '';
+            const ownCards = pItem.playerId === snap?.viewer
+              ? this.rememberedHeroCards(typeof lastHand.handNo === 'number' ? lastHand.handNo : null)
+              : [];
             const faces = holeCards.length > 0
               ? holeCards.map(card => this.renderCardHtml(`card_${card.suit}${card.rank}`, true)).join('')
-              : this.renderCardBackHtml(true) + this.renderCardBackHtml(true);
+              : ownCards.length > 0
+                ? ownCards.map(id => this.renderCardHtml(id, true)).join('')
+                : this.renderCardBackHtml(true) + this.renderCardBackHtml(true);
             return `
               <div class="p2d-settlement-row">
                 <div class="p2d-settlement-id">
