@@ -2011,8 +2011,10 @@ export class BoardGameHUD {
           </button>`
       )
       .join('');
+    // 有锁时给倒计时按钮；hold 的幕布没有锁也要有一个明确的「关闭」：
+    // 玩家可能看不出「点空白处」也算关闭。
     const closeButton =
-      lockMs > 0
+      lockMs > 0 || moment.hold
         ? `<button type="button" class="mc-btn mc-close" id="mc-close" data-lock-until="${this.momentLockUntil}"${
             locked ? ' disabled' : ''
           }>${locked ? `${Math.ceil((this.momentLockUntil - Date.now()) / 1000)}s 后可关闭` : '关闭'}</button>`

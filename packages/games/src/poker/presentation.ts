@@ -165,10 +165,8 @@ export function pokerSettlementMoment(state: MomentPresentationState): MomentPre
       // 「退出牌桌」不是内核动作：交给宿主（回大厅 / 回入口页）。
       { id: 'leave-table', label: '退出牌桌', leave: true, tone: 'danger' }
     ],
-    durationMs: 4200,
-    // 一手的结果至少留 10 秒给所有座位读完；期间任何手动关闭都不生效。
-    closeLockMs: 10000,
-    // 结算要读到玩家自己按按钮为止：没有 20 秒冷却时也要停留，不能自己消失。
+    // 结算不设关闭锁、不设自动消失时限：结果一出现就能关（「关闭」/空白处/Esc
+    // 均可），但撤下幕布只能由真人点一下，或由游戏推进到下一手时收回。
     hold: true
   };
 }
