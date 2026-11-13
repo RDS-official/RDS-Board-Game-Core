@@ -154,7 +154,8 @@ export function joinRoom(userId: string, roomId: string, code?: string): HubRoom
     // 最小空闲号，且把**已离开玩家保留的号**也算作占用 —— 否则新人会拿到别人的
     // 号，等对方回来就被挤到别的座位，所有人跟着错位。
     r.seatIndex = seatNumbers(r);
-    rooms.update(roomId, { players: r.players, readyPlayers: r.readyPlayers ?? [] });
+    // seatIndex 必须随行落盘：存储层按行写 JSON，返回的是副本，原地赋值不会持久化。
+    rooms.update(roomId, { players: r.players, readyPlayers: r.readyPlayers ?? [], seatIndex: r.seatIndex });
   }
   return changed(r, { includeCode: userId === r.hostId });
 }

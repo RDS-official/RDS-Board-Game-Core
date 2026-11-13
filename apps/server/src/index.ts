@@ -32,16 +32,17 @@ interface AppEnv {
 
 export const app = new Hono<AppEnv>();
 
-// hub.json 损坏时进入只读降级（issue #202）：读请求照常（大厅列表为空、登录仍可用），
-// 写请求一律 503，避免「内存里改成功、重启就消失」的假成功。
+// 存储不可用（迁移源 hub.json 损坏，或 DATA_DIR/hub.sqlite 打不开）时进入只读降级
+// （issue #202）：读请求照常（大厅列表为空、登录仍可用），写请求一律 503，
+// 避免「内存里改成功、重启就消失」的假成功。
 app.use('*', async (c, next) => {
   if (hubStorageHealth().ok) return next();
   const method = c.req.method.toUpperCase();
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return next();
   return c.json(
     {
-      error: '数据库文件损坏，服务处于只读降级状态（已备份）',
-      hint: '请联系管理员从 hub.json.corrupt.* 备份恢复后重启'
+      error: '数据库不可用，服务处于只读降级状态（已尽量备份）',
+      hint: '请联系管理员检查 DATA_DIR/hub.sqlite（或从 hub.json.corrupt.* 备份恢复后重启）'
     },
     503
   );

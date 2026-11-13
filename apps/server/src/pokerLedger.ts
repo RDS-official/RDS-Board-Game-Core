@@ -1,22 +1,20 @@
 /**
- * 德州扑克的账号账本：筹码余额（buy-in 钱包）与生涯战绩。
+ * 德州扑克的账号账本：筹码余额（buy-in 钱包）与生涯战绩，落在 SQLite
+ * （`DATA_DIR/hub.sqlite` 的 `poker_accounts` 表，见 `db.ts`）。
  *
- * 与 `hub.json`（用户 / 房间）分开落一个文件，理由有三：
- *  1. 账本写入极其频繁（每手一次），和房间列表共用一次 `JSON.stringify` 会把
- *     整份房间表重复写盘；
- *  2. 账本损坏时只该影响「战绩」，不该连登录都被 `process.exit` 带走；
- *  3. 删除账号时账本是独立一份，可以按 userId 直接清理，不牵动用户表结构。
+ * 历史上它单独一份 `poker-ledger.json`，理由是账本每手都写、不该和房间表共用一次
+ * 全量序列化。换成 SQLite 后这条理由消失：一次改动只写一行，也不必再靠「分文件」
+ * 把写入频率隔开。
  *
- * 接口保持和 `storage.ts` 一样的同步 KV 风格，将来换 SQLite 时替换实现即可。
- *
- * 并发安全：Node 单线程 + 同步读写，同一 tick 内不会交错；写入走 temp + rename，
- * 崩溃时只会丢掉最后一次更新，不会留下半截 JSON。
+ * 降级语义（issue #187 方案 A）保持不变：迁移源损坏时备份后从空账本继续、记 degraded，
+ * 写接口统一 503，等运维从备份恢复（`isLedgerDegraded()`）。
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import type { PokerCareer } from '@rds/games/poker/stats';
 import { EMPTY_POKER_CAREER } from '@rds/games/poker/stats';
 import { DATA_DIR } from './config.ts';
+import { stmt, txn } from './db.ts';
 
 /** 一名账号的扑克账本。 */
 export interface PokerAccount {
@@ -53,7 +51,8 @@ export const MIN_BUY_IN = 100;
 /** 新账号的默认筹码：够玩几轮标准买入，又不至于让排行榜全是同一个数。 */
 export const STARTING_BANKROLL = 5000;
 
-const FILE = path.join(DATA_DIR, 'poker-ledger.json');
+/** 旧版整份文件；只用于一次性迁移。 */
+const LEGACY_FILE = path.join(DATA_DIR, 'poker-ledger.json');
 
 function emptyAccount(userId: string): PokerAccount {
   return {
@@ -65,6 +64,7 @@ function emptyAccount(userId: string): PokerAccount {
   };
 }
 
+/** 旧 JSON 的容错解析：缺字段按默认值补齐（迁移用）。 */
 function normalize(raw: unknown): PokerLedgerShape {
   const shape = raw as Partial<PokerLedgerShape> | null;
   if (!shape || typeof shape !== 'object' || !shape.accounts || typeof shape.accounts !== 'object') {
@@ -90,32 +90,6 @@ function normalize(raw: unknown): PokerLedgerShape {
   }
   return { version: 1, accounts };
 }
-
-function load(): PokerLedgerShape {
-  let text: string;
-  try {
-    text = fs.readFileSync(FILE, 'utf-8');
-  } catch {
-    return { version: 1, accounts: {} }; // 首次启动：还没有账本
-  }
-  try {
-    return normalize(JSON.parse(text));
-  } catch (error) {
-    // 与 hub.json 不同，账本损坏不该挡住开服：先备份，再从空账本继续，
-    // 玩家的生涯战绩可以重算，站点不可用不行。
-    const backup = `${FILE}.corrupt.${Date.now()}`;
-    try {
-      fs.copyFileSync(FILE, backup);
-    } catch {
-      /* 只读文件系统等极端情况：仍然继续，只是没留备份 */
-    }
-    console.error('[poker-ledger] 账本损坏，已备份并重置（备份 → ' + backup + '）：', String(error));
-    degraded = { backup, error: String(error) };
-    return { version: 1, accounts: {} };
-  }
-}
-
-let ledger: PokerLedgerShape = load();
 
 /**
  * 账本是否在启动时损坏过。损坏会备份原文件并从空账本继续（站点可用优先），
@@ -148,22 +122,80 @@ export function __resetLedgerDegradedForTest(): void {
   degraded = null;
 }
 
-function save(): void {
-  // 降级期间不落盘：内存里的改动只用于本次请求的展示，重启即丢。
-  if (degraded) return;
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(ledger, null, 1));
-  fs.renameSync(tmp, FILE);
+function accountFromRow(row: { json: string }): PokerAccount {
+  return JSON.parse(row.json) as PokerAccount;
+}
+
+function writeAccount(account: PokerAccount): void {
+  stmt('INSERT INTO poker_accounts(user_id, chips, peak_chips, json) VALUES(?, ?, ?, ?) ' +
+    'ON CONFLICT(user_id) DO UPDATE SET chips = excluded.chips, peak_chips = excluded.peak_chips, json = excluded.json').run(
+    account.userId,
+    Math.round(Number(account.chips) || 0),
+    Math.round(Number(account.peakChips) || 0),
+    JSON.stringify(account)
+  );
+}
+
+function readAccount(userId: string): PokerAccount | undefined {
+  const row = stmt('SELECT json FROM poker_accounts WHERE user_id = ?').get(userId) as { json: string } | undefined;
+  return row ? accountFromRow(row) : undefined;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 旧 poker-ledger.json → SQLite（只在账本为空时执行一次）                         */
+/* -------------------------------------------------------------------------- */
+function importLegacyLedger(): void {
+  if (!fs.existsSync(LEGACY_FILE)) return;
+  const row = stmt('SELECT COUNT(*) AS n FROM poker_accounts').get() as { n: number } | undefined;
+  if (Number(row?.n ?? 0) > 0) return; // 已经迁过
+
+  let text: string;
+  try {
+    text = fs.readFileSync(LEGACY_FILE, 'utf-8');
+  } catch (error) {
+    degraded = { backup: '', error: String(error) };
+    console.error('[poker-ledger] 读取旧账本失败，进入只读降级：', String(error));
+    return;
+  }
+  try {
+    const shape = normalize(JSON.parse(text));
+    txn(() => {
+      for (const account of Object.values(shape.accounts)) writeAccount(account);
+    });
+    const done = LEGACY_FILE + '.imported.' + Date.now();
+    try {
+      fs.renameSync(LEGACY_FILE, done);
+      console.log('[poker-ledger] 已把旧账本导入 SQLite（' + Object.keys(shape.accounts).length + ' 条），旧文件改名 → ' + done);
+    } catch (error) {
+      console.error('[poker-ledger] 导入成功但旧账本改名失败，下次启动不会重复导入：', String(error));
+    }
+  } catch (error) {
+    // 与 hub.json 不同，账本损坏不该挡住开服：先备份，再从空账本继续，
+    // 玩家的生涯战绩可以重算，站点不可用不行。
+    const backup = LEGACY_FILE + '.corrupt.' + Date.now();
+    try {
+      fs.copyFileSync(LEGACY_FILE, backup);
+    } catch {
+      /* 只读文件系统等极端情况：仍然继续，只是没留备份 */
+    }
+    console.error('[poker-ledger] 账本损坏，已备份并重置（备份 → ' + backup + '）：', String(error));
+    degraded = { backup, error: String(error) };
+  }
+}
+
+try {
+  importLegacyLedger();
+} catch (error) {
+  degraded = { backup: '', error: String(error) };
+  console.error('[poker-ledger] 账本初始化失败，进入只读降级：', String(error));
 }
 
 /** 取得账号账本；账号还没有记录时按默认余额开一个（并落盘）。 */
 export function accountOf(userId: string): PokerAccount {
-  const existing = ledger.accounts[userId];
+  const existing = readAccount(userId);
   if (existing) return existing;
   const created = emptyAccount(userId);
-  ledger.accounts[userId] = created;
-  save();
+  if (!degraded) writeAccount(created);
   return created;
 }
 
@@ -202,11 +234,12 @@ export function tryGrantAiRelief(userId: string, now = Date.now()): { granted: b
 
 /** 只读查询：没有记录时返回默认账本，但**不写盘**（排行榜轮询走这条路径）。 */
 export function peekAccount(userId: string): PokerAccount {
-  return ledger.accounts[userId] ?? emptyAccount(userId);
+  return readAccount(userId) ?? emptyAccount(userId);
 }
 
 export function allAccounts(): PokerAccount[] {
-  return Object.values(ledger.accounts);
+  if (degraded) return [];
+  return (stmt('SELECT json FROM poker_accounts').all() as { json: string }[]).map(accountFromRow);
 }
 
 export function updateAccount(userId: string, patch: (account: PokerAccount) => PokerAccount): PokerAccount {
@@ -218,20 +251,25 @@ export function updateAccount(userId: string, patch: (account: PokerAccount) => 
     atTable: { ...current.atTable }
   });
   next.peakChips = Math.max(Number(next.peakChips ?? 0), Number(next.chips ?? 0));
-  ledger.accounts[userId] = next;
-  save();
+  // 降级期间不落盘：内存里的改动只用于本次请求的展示，重启即丢。
+  if (!degraded) writeAccount(next);
   return next;
 }
 
 /** 账号被删除时清掉它的账本（管理员删号路径调用）。 */
 export function removeAccount(userId: string): boolean {
-  if (!ledger.accounts[userId]) return false;
-  delete ledger.accounts[userId];
-  save();
+  const existing = readAccount(userId);
+  if (!existing) return false;
+  if (!degraded) stmt('DELETE FROM poker_accounts WHERE user_id = ?').run(userId);
   return true;
 }
 
-/** 测试用：把文件内容灌回去（不落盘）。 */
+/** 测试用：把整本账替换成给定内容（不落盘，只影响本次进程的读写）。 */
 export function resetLedgerForTests(shape: PokerLedgerShape = { version: 1, accounts: {} }): void {
-  ledger = normalize(shape);
+  const normalized = normalize(shape);
+  if (degraded) return;
+  txn(() => {
+    stmt('DELETE FROM poker_accounts').run();
+    for (const account of Object.values(normalized.accounts)) writeAccount(account);
+  });
 }
