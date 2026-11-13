@@ -309,8 +309,28 @@ export class ServerMatch {
     if (seat) this.room.leave(seat);
   }
 
+  /**
+   * 撤销一名用户的座位：座位表里删掉、断开投影连接。
+   *
+   * 玩家被请离 / 主动离开仍在进行中的房间时调用（issue #185）：只 detach 的话
+   * `this.seats` 还留着旧映射，旧连接仍能拿到含自己底牌的投影并继续提交动作。
+   * 撤销后 `snapshotFor` / `deltaFor` / `submit` 统一返回「你不在本局座位表中」。
+   */
+  public revokeSeat(userId: string): boolean {
+    const seat = this.seats.get(userId);
+    if (!seat) return false;
+    this.detach(userId);
+    this.seats.delete(userId);
+    return true;
+  }
+
   public attachedUsers(): string[] {
     return [...this.attached];
+  }
+
+  /** 座位表里的全部真人账号（撤销座位用；与是否在线无关）。 */
+  public seatOwners(): string[] {
+    return [...this.seats.keys()];
   }
 
   public snapshotFor(userId: string): RoomUpdate | { error: string } {
