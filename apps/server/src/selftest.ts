@@ -11,6 +11,18 @@ process.env.HUB_DATA_DIR ||= fs.mkdtempSync(path.join(os.tmpdir(), 'rds-selftest
 // 既跑通登录链路，又顺带证明默认口令即使存在也不再被信任（issue #228）。
 const ADMIN_PASSWORD = crypto.randomBytes(9).toString('base64url');
 process.env.ADMIN_PASSWORD = ADMIN_PASSWORD;
+// ---- 旧版 JSON 迁移夹具：必须在「导入业务模块」之前落盘，迁移才会在导入时执行 ----
+const legacyDir = process.env.HUB_DATA_DIR!;
+const legacyUser = { id: 'u_legacy_probe', name: 'legacy_probe', passHash: 'x', salt: 'y', createdAt: 1 };
+const legacyRoom = {
+  id: 'r_legacy_probe', name: '旧房间', gameId: 'poker', hostId: 'u_legacy_probe',
+  status: 'open', maxPlayers: 4, players: [], createdAt: 1
+};
+fs.writeFileSync(path.join(legacyDir, 'hub.json'), JSON.stringify({ users: [legacyUser], rooms: [legacyRoom] }));
+fs.writeFileSync(
+  path.join(legacyDir, 'poker-ledger.json'),
+  JSON.stringify({ version: 1, accounts: { u_legacy_probe: { userId: 'u_legacy_probe', chips: 777, peakChips: 900, career: {} } } })
+);
 const {
   register, login, verifyJwt, userFromAuthHeader, createUser, isAdminUser, changeOwnPassword,
   adminListUsers, adminUpdateUser, adminResetPassword, adminDeleteUser, profileOf
@@ -28,6 +40,26 @@ const { settleSanguosha } = await import('./sanguoshaSettle.ts');
 
 let failed = 0;
 const ok = (cond: boolean, name: string) => { if (!cond) { failed++; console.error('FAIL', name); } else console.log('ok -', name); };
+
+/* -------------------------------------------------------------------------- */
+/* 旧版 JSON（hub.json / poker-ledger.json）→ SQLite 一次性迁移                    */
+/* -------------------------------------------------------------------------- */
+{
+  const storage = await import('./storage.ts');
+  const ledger = await import('./pokerLedger.ts');
+  ok(storage.users.byId('u_legacy_probe')?.name === 'legacy_probe', 'legacy hub.json users land in SQLite');
+  ok(storage.rooms.byId('r_legacy_probe')?.name === '旧房间', 'legacy hub.json rooms land in SQLite');
+  ok(ledger.peekAccount('u_legacy_probe').chips === 777, 'legacy poker-ledger.json accounts land in SQLite');
+  ok(fs.existsSync(path.join(legacyDir, 'hub.sqlite')), 'the database file lives in DATA_DIR');
+  const leftovers = fs
+    .readdirSync(legacyDir)
+    .filter(f => f.startsWith('hub.json.imported.') || f.startsWith('poker-ledger.json.imported.'));
+  ok(leftovers.length === 2, 'the legacy json files are renamed (kept as backup), not deleted');
+  // 清场：夹具不能污染后面的账号 / 房间 / 排行榜断言。
+  storage.users.remove('u_legacy_probe');
+  storage.rooms.remove('r_legacy_probe');
+  ledger.removeAccount('u_legacy_probe');
+}
 
 // ---- 管理员自检：口令来自 env 里的随机值，不是仓库里的默认值 ----
 const adminLogin: any = await login('rds', ADMIN_PASSWORD);
@@ -844,7 +876,7 @@ ok(deleteRes.ok === true, 'adminDeleteUser works');
 }
 
 /* -------------------------------------------------------------------------- */
-/* #201：房间写入合并成一次落盘，用户写入仍然立即生效                              */
+/* #201：房间写入按行落盘，不再整库重写                                            */
 /* -------------------------------------------------------------------------- */
 {
   const storage = await import('./storage.ts');
@@ -860,15 +892,17 @@ ok(deleteRes.ok === true, 'adminDeleteUser works');
     createdAt: Date.now()
   };
   storage.rooms.add(burstRoom);
-  for (let i = 0; i < 60; i++) storage.rooms.update(burstRoom.id, { lastActivity: Date.now() + i });
-  ok(storage.hasPendingStorageWrite(), 'room writes are queued');
-  ok(storage.storageWriteCount() === baseCount, 'a burst of room writes does not hit the disk');
-
-  storage.flushStorage();
-  ok(storage.storageWriteCount() === baseCount + 1, 'the whole burst is written once');
-  ok(!storage.hasPendingStorageWrite(), 'nothing is left pending after the flush');
+  let lastActivity = 0;
+  for (let i = 0; i < 60; i++) {
+    lastActivity = Date.now() + i;
+    storage.rooms.update(burstRoom.id, { lastActivity });
+  }
+  ok(storage.storageWriteCount() === baseCount + 61, 'each room change writes exactly one row');
+  const rows = storage.rooms.all().filter(r => r.id === burstRoom.id);
+  ok(rows.length === 1, 'a burst of updates never duplicates the room row');
+  ok(rows[0]?.lastActivity === lastActivity, 'the last update is the one that persists');
   storage.rooms.remove(burstRoom.id);
-  storage.flushStorage();
+  ok(storage.rooms.byId(burstRoom.id) === undefined, 'removing a room deletes its row');
 }
 
 console.log(failed ? failed + ' FAILURES' : 'ALL PASS');

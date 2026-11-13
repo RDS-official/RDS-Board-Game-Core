@@ -26,8 +26,8 @@
 | ID | 问题 | 证据 | 建议 | 状态 |
 | --- | --- | --- | --- | --- |
 | AR-5 | 内核 / 游戏层与 Node 平台耦合 | `tsconfig.json` 用绝对 `paths`；`packages/games/src/splendor/pokemonData.json` 内嵌 2777 行资源；`apps/server/src/storage.ts` / `config.ts` 的 `node:fs` / `process.env` 经 registry 反向侵入 games 包 | kernel 只允许 `import type` + 自研纯函数；资源外置 `data/`；`tsconfig` 改相对 paths 或拆包级 `package.json` | 待修 |
-| AR-6 | 持久化是全量 JSON 同步写，用户与房间共用 `hub.json` | `apps/server/src/storage.ts` 每次 `update()` 都 `JSON.stringify` 整个 DB 并 `writeFileSync`；`ecosystem.config.cjs` 写死 `instances:1` | SQLite（`better-sqlite3` / `node:sqlite`）单表 upsert；过渡期拆文件 + 异步写队列 + fsync | 待修 |
-| AR-7 | `hub.json` 解析失败直接 `process.exit(1)` | `apps/server/src/storage.ts` 的 `load()` catch 分支 | 备份后进只读模式 + 健康检查 / 恢复入口；原子写保证不出现半截 JSON | 待修 |
+| AR-6 | ~~持久化是全量 JSON 同步写，用户与房间共用 `hub.json`~~ | ✅ **已修复（2026-11）**：三份数据（`users` / `rooms` / `poker_accounts`）迁进 `DATA_DIR/hub.sqlite`（内置 `node:sqlite`，WAL，单表按行 upsert），每次改动只写一行；旧 `hub.json` / `poker-ledger.json` 首启一次性导入后改名 `.imported.<ts>` | SQLite（`better-sqlite3` / `node:sqlite`）单表 upsert；过渡期拆文件 + 异步写队列 + fsync | 已修复 |
+| AR-7 | ~~`hub.json` 解析失败直接 `process.exit(1)`~~ | ✅ **已修复（2026-11）**：迁移源损坏先备份 `.corrupt.<ts>` 再进只读降级（`/healthz` degraded、写请求 503），不再退出进程；SQLite 本身打不开时同样降级。写路径由 SQLite 事务保证不会出现半截文件 | 备份后进只读模式 + 健康检查 / 恢复入口；原子写保证不出现半截 JSON | 已修复 |
 | AR-8 | 登录限速非原子，且 `scryptSync` 阻塞事件循环 | `apps/server/src/index.ts` 的 `loginFails`（读→`login()`→写回），`storage.ts` / `auth.ts` 的 `scryptSync` | `crypto.scrypt` 异步版；限速改令牌桶 + LRU；Per-IP 登录并发闸 | 待修 |
 | AR-9 | `ServerMatch` 直接改写权威状态（昵称 / 头像） | `apps/server/src/match.ts:155` 的 `target.name = ...` | 改走 `globalVars.roster` 或独立展示层，在投影阶段合成 | 待修 |
 | AR-10 | 扑克账本无事务（扣款 → 构造 → 失败补偿） | `apps/server/src/match.ts` 的 `MatchManager.ensure()` / `fundSeats()` / `refundBuyIns()`，`ServerMatch.dispose()` 的 `refundTableStakes()` | append-only ledger + 幂等 key（roomId + seat + handNo + kind），启动对账 | 待修 |

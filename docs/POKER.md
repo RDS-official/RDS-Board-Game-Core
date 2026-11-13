@@ -796,6 +796,10 @@ lastHand.players[]     // 每座位的 PokerHandFact
 
 ### 18.5 账本落盘
 
-`DATA_DIR/poker-ledger.json`，与 `hub.json` 分开：账本每手都写，混进房间表会让
-整份房间列表反复落盘；损坏时只重置战绩、不阻断开服（先备份为 `.corrupt.<ts>`）。
+账号余额与生涯战绩存在 `DATA_DIR/hub.sqlite` 的 `poker_accounts` 表（与 `users` /
+`rooms` 同库，内置 `node:sqlite` + WAL）。每次改动只 upsert 一行，不再整份重写，
+账本每手都写也不会拖着房间列表一起落盘；`peak_chips` 取历史最大。
+旧版 `poker-ledger.json` 首次启动一次性导入，导入后改名成 `.imported.<ts>` 保留备份；
+迁移源损坏时只重置战绩、不阻断开服（先备份为 `.corrupt.<ts>`，`/healthz` 报
+`pokerLedger` degraded）。
 删除账号时 `removeAccount` 一并清账，同名新账号不会继承旧战绩。
