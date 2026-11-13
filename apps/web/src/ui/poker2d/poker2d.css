@@ -121,16 +121,291 @@
   border-color: #ef4444;
 }
 
-/* ---------------- 桌面主体舞台 ---------------- */
+/* ---------------- 桌面主体舞台：左玩家栏 + 牌桌 + 右排行/流水 ---------------- */
 .p2d-stage {
   flex: 1;
+  min-height: 0;
   position: relative;
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr) 268px;
+  gap: 14px;
+  align-items: stretch;
+  padding: 12px 18px 174px 18px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* 牌桌自己的定位上下文：结算浮层与「当前牌型」都以牌桌为基准居中 */
+.p2d-table-area {
+  position: relative;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px 24px 180px 24px;
+}
+
+/* ---------------- 左右侧栏 ---------------- */
+.p2d-panel {
+  background: rgba(13, 17, 23, 0.82);
+  border: 1px solid rgba(217, 180, 91, 0.18);
+  border-radius: 12px;
+  padding: 10px 12px;
   box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   overflow: hidden;
+}
+
+.p2d-panel-title {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #d9b45b;
+}
+
+.p2d-players {
+  gap: 8px;
+}
+
+.p2d-pl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.p2d-pl-row {
+  /* 两行：上行「色点 + 名字 + 筹码」，下行「位置徽标 + 状态」，名字才不会被挤成省略号 */
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  grid-template-areas:
+    'dot name chips'
+    'dot meta meta';
+  align-items: center;
+  gap: 3px 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid transparent;
+  font-size: 12px;
+}
+
+.p2d-pl-row.self {
+  border-color: rgba(217, 180, 91, 0.45);
+  background: rgba(217, 180, 91, 0.1);
+}
+
+.p2d-pl-row.active {
+  border-color: rgba(90, 200, 140, 0.55);
+  background: rgba(90, 200, 140, 0.12);
+}
+
+.p2d-pl-row.folded,
+.p2d-pl-row.out {
+  opacity: 0.45;
+}
+
+.p2d-pl-row.allin .p2d-pl-state {
+  color: #f5d061;
+}
+
+.p2d-pl-dot {
+  grid-area: dot;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.p2d-pl-pos {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  color: #0d1117;
+  background: #d9b45b;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+.p2d-pl-name {
+  grid-area: name;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.p2d-pl-chips {
+  grid-area: chips;
+  color: #9fd7b4;
+  font-variant-numeric: tabular-nums;
+}
+
+.p2d-pl-meta {
+  grid-area: meta;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.p2d-pl-state {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #8b949e;
+}
+
+.p2d-pl-row.active .p2d-pl-state {
+  color: #4ade80;
+}
+
+/* 右侧：筹码排行 + 操作记录 */
+.p2d-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.p2d-panel-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.p2d-rank {
+  /* 排行按内容撑开，最多占半屏；超出部分在列表内部滚动，不被操作记录挤扁 */
+  flex: 0 0 auto;
+  max-height: 46%;
+}
+
+.p2d-rank-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.p2d-rank-tab {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #9fb8c8;
+}
+
+.p2d-rank-tab.active {
+  background: rgba(217, 180, 91, 0.22);
+  border-color: rgba(217, 180, 91, 0.55);
+  color: #f5d061;
+  font-weight: 700;
+}
+
+.p2d-rank-list,
+.p2d-feed-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.p2d-rank-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.p2d-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 12px;
+}
+
+.p2d-rank-row.self {
+  background: rgba(217, 180, 91, 0.12);
+}
+
+.p2d-rank-no {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  font-size: 11px;
+  color: #6e7b8a;
+  font-variant-numeric: tabular-nums;
+}
+
+.p2d-rank-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.p2d-rank-val {
+  flex: none;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.p2d-rank-val.chips { color: #9fd7b4; }
+.p2d-rank-val.gain { color: #4ade80; }
+.p2d-rank-val.loss { color: #f87171; }
+.p2d-rank-val.flat { color: #8b949e; }
+
+.p2d-feed {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.p2d-feed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.p2d-feed-line {
+  color: #a8b6c4;
+  padding-bottom: 3px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+}
+
+.p2d-feed-line.empty {
+  color: #6e7b8a;
+  border-bottom: none;
+}
+
+@media (max-width: 1180px) {
+  .p2d-stage {
+    grid-template-columns: minmax(0, 1fr) 232px;
+  }
+  .p2d-players {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .p2d-stage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .p2d-side {
+    display: none;
+  }
 }
 
 /* 牌桌外壳（皮质扶手） */
@@ -511,8 +786,9 @@
 
 /* ---------------- 玩家本人的牌力提示 ---------------- */
 .p2d-hero-hand-eval {
+  /* 定位基准是牌桌而不是整页：负偏移让提示条落在牌桌下沿、底部控制栏上方的空白带里 */
   position: absolute;
-  bottom: 128px;
+  bottom: -46px;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(13, 17, 23, 0.88);
@@ -738,6 +1014,38 @@
   font-weight: 700;
   color: #f5d061;
   text-align: center;
+}
+
+/* 结算顶部公共牌：固定五格，未发出的留空位 */
+.p2d-settlement-board {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.p2d-settlement-board-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: #8b949e;
+}
+
+.p2d-settlement-board-cards {
+  display: flex;
+  gap: 6px;
+}
+
+.p2d-settlement-board-cards .p2d-card {
+  --p2d-face-w: 46px;
+}
+
+.p2d-card-empty {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  box-shadow: none;
 }
 
 .p2d-settlement-list {
