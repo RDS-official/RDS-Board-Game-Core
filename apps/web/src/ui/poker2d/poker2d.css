@@ -1156,3 +1156,290 @@
 #hud-container.poker-2d-chrome .shell-scrim {
   display: none !important;
 }
+
+/* ---------------- 手机竖屏（≤560px） ----------------
+   手机宽度下 3D 桌面那套尺寸全部超载：座位卡 133px 宽在 rx=44% 的椭圆上必然
+   互相压住（相邻座位只剩 ~127px 间距），公共牌 51px 高会盖到座位，操作栏四个
+   按钮也挤不下。这一档只压尺寸、不改几何：座位中心仍在 12%/50%/88%，箱宽收到
+   80px 后 393px 视口里最外侧仍落在 rail 内。 */
+@media (max-width: 560px) {
+  #poker-2d-root {
+    --p2d-card-w: clamp(28px, 8.6vw, 38px);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+
+  /* 顶栏：一行放下「2D 极简 + 第 N 手 + 两个按钮」 */
+  .p2d-topbar {
+    height: 44px;
+    min-height: 44px;
+    padding: 0 10px;
+    gap: 8px;
+  }
+
+  .p2d-topbar-left {
+    min-width: 0;
+    flex: 1 1 auto;
+    gap: 8px;
+  }
+
+  .p2d-2d-badge {
+    font-size: 10px;
+    padding: 0 5px;
+  }
+
+  .p2d-table-meta {
+    font-size: 11px;
+    padding-left: 8px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .p2d-topbar-right {
+    flex: 0 0 auto;
+    gap: 6px;
+  }
+
+  .p2d-btn {
+    font-size: 11px;
+    padding: 5px 8px;
+    gap: 4px;
+    white-space: nowrap;
+  }
+
+  .p2d-stage {
+    padding: 8px 8px 174px 8px;
+    gap: 8px;
+  }
+
+  .p2d-table-rail {
+    border-width: 6px;
+  }
+
+  .p2d-felt {
+    inset: 6px;
+  }
+
+  .p2d-felt-watermark {
+    font-size: 26px;
+  }
+
+  /* 桌心：底池 / 街名 / 公共牌 */
+  .p2d-center-area {
+    gap: 5px;
+  }
+
+  .p2d-pot-badge {
+    font-size: 12px;
+    padding: 2px 10px;
+  }
+
+  .p2d-street-badge {
+    font-size: 9px;
+    padding: 1px 7px;
+  }
+
+  .p2d-community-cards {
+    gap: 4px;
+  }
+
+  /* 座位：箱宽 80（hero 88），箱高 ~47 */
+  .p2d-seat-box {
+    min-width: 80px;
+    padding: 5px 6px;
+    border-radius: 8px;
+  }
+
+  .p2d-seat-box.is-hero {
+    min-width: 88px;
+  }
+
+  .p2d-seat-head {
+    gap: 3px;
+  }
+
+  .p2d-seat-avatar {
+    width: 16px;
+    height: 16px;
+    font-size: 9px;
+  }
+
+  /* 10px 一行放不下「中级 AI · 周瑜」，允许折两行，总比只剩「中级 AI · …」好认 */
+  .p2d-seat-name {
+    font-size: 10px;
+    max-width: 48px;
+    white-space: normal;
+    line-height: 1.15;
+  }
+
+  .p2d-seat-chips {
+    font-size: 11px;
+    margin-top: 1px;
+  }
+
+  .p2d-dealer-btn {
+    width: 16px;
+    height: 16px;
+    font-size: 9px;
+    top: -5px;
+    right: -5px;
+  }
+
+  .p2d-blind-tag {
+    font-size: 8px;
+    padding: 0 3px;
+    top: -5px;
+    left: -5px;
+  }
+
+  .p2d-seat-cards {
+    gap: 2px;
+    margin-top: 3px;
+  }
+
+  .p2d-seat-cards .p2d-card-mini {
+    --p2d-face-w: 24px;
+    border-radius: 3px;
+  }
+
+  .p2d-seat-cards .p2d-card-hero {
+    --p2d-face-w: 36px;
+  }
+
+  .p2d-action-bubble {
+    font-size: 9px;
+    padding: 2px 6px;
+    bottom: calc(100% + 4px);
+  }
+
+  .p2d-seat-bet {
+    font-size: 10px;
+    padding: 1px 6px;
+  }
+
+  /* 手机上操作栏最高约 134px，提示条压到牌桌下沿 28px 才不会顶到栏里 */
+  .p2d-hero-hand-eval {
+    bottom: -28px;
+    font-size: 11px;
+    padding: 3px 10px;
+    max-width: calc(100% - 16px);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 操作栏：四个主按钮同排（88px 一个），底部让出 home indicator */
+  .p2d-action-bar {
+    gap: 8px;
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom)) 10px;
+  }
+
+  /* 六个倍率按钮在 393 宽里一行放不下：横滑一行，别换行把操作栏顶高 */
+  .p2d-raise-controls {
+    gap: 6px;
+  }
+
+  .p2d-raise-presets {
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .p2d-raise-presets::-webkit-scrollbar {
+    display: none;
+  }
+
+  .p2d-preset-btn {
+    flex: 0 0 auto;
+    font-size: 11px;
+    padding: 3px 8px;
+    white-space: nowrap;
+  }
+
+  .p2d-step-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  .p2d-raise-val {
+    font-size: 13px;
+    min-width: 48px;
+  }
+
+  .p2d-main-actions {
+    gap: 6px;
+  }
+
+  .p2d-act-btn {
+    padding: 6px 4px;
+    font-size: 13px;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .p2d-act-sub {
+    font-size: 9px;
+  }
+
+  .p2d-waiting-banner {
+    font-size: 12px;
+    min-height: 36px;
+  }
+
+  /* 结算：720px 宽弹窗在 393 里会横向溢出 */
+  .p2d-settlement-modal {
+    width: calc(100% - 12px);
+    max-width: none;
+    padding: 10px;
+  }
+
+  .p2d-settlement-title {
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+
+  .p2d-settlement-board-cards .p2d-card {
+    --p2d-face-w: 30px;
+  }
+
+  .p2d-settlement-list {
+    max-height: 46vh;
+  }
+
+  .p2d-settlement-row {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 5px 0;
+  }
+
+  .p2d-settlement-id {
+    font-size: 11px;
+  }
+
+  .p2d-settlement-hand {
+    font-size: 10px;
+    padding: 1px 6px;
+  }
+
+  .p2d-settlement-cards .p2d-card {
+    --p2d-face-w: 28px;
+  }
+
+  .p2d-settlement-gain,
+  .p2d-settlement-loss,
+  .p2d-settlement-neutral {
+    font-size: 12px;
+  }
+
+  /* 收起复盘按钮在手机上要够大才点得准 */
+  .p2d-settlement-modal .p2d-btn {
+    min-height: 44px;
+    padding: 10px 20px;
+    font-size: 14px;
+  }
+}
