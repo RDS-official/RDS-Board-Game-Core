@@ -440,24 +440,24 @@ server {
 <p align="center">
   <img src="https://img.shields.io/github/commit-activity/m/RDS-official/RDS-Board-Game-Core?label=Monthly%20Commits&color=d9b45b" alt="Commit Activity" />
   <img src="https://img.shields.io/github/contributors/RDS-official/RDS-Board-Game-Core?label=Contributors&color=4ade80" alt="Contributors Count" />
-  <img src="https://img.shields.io/badge/Total%20Commits-542-blue" alt="Total Commits" />
+  <img src="https://img.shields.io/badge/Total%20Commits-543-blue" alt="Total Commits" />
 </p>
 
 数据由 `scripts/update-readme-stats.mjs` 从 Git 历史自动生成（每 4 小时刷新一次）。提交次数含合并提交；增删行数不含合并提交与二进制文件。
 
 | 贡献者 (GitHub ID) | 提交次数 (Commits) | 贡献占比 | 代码增删行数 (Lines Changed) |
 | :--- | :---: | :---: | :---: |
-| **[@Xhopo-hk](https://github.com/Xhopo-hk)** | **180 次** | 33.2% | +65,478 / -32,329 |
-| **[@Xhopo](https://github.com/Xhopo)** | **164 次** | 30.3% | +30,971 / -4,536 |
-| **[@1368129224](https://github.com/1368129224)** | **134 次** | 24.7% | +27,669 / -2,503 |
+| **[@Xhopo-hk](https://github.com/Xhopo-hk)** | **180 次** | 33.1% | +65,478 / -32,329 |
+| **[@Xhopo](https://github.com/Xhopo)** | **164 次** | 30.2% | +30,971 / -4,536 |
+| **[@1368129224](https://github.com/1368129224)** | **135 次** | 24.9% | +27,674 / -2,508 |
 | **[@QSanSi](https://github.com/QSanSi)** | **47 次** | 8.7% | +15,699 / -8,703 |
 | **AI Developer**（本地智能体，未关联 GitHub） | **17 次** | 3.1% | +44,801 / -1,332 |
 
 ### 11.3 仓库规模概览 (Repository Overview)
 
-- **总提交次数**：542 次（含 133 次合并提交）
+- **总提交次数**：543 次（含 133 次合并提交）
 - **贡献者**：5 位（4 位已关联 GitHub 账号）
-- **代码增删总计**：+184,618 / -49,403 行
+- **代码增删总计**：+184,623 / -49,408 行
 - **工程结构**：Monorepo 多包架构（`packages/kernel` 核心内核、`packages/games` 六款游戏夹具、`packages/app` 应用状态桥接、`packages/net` 联机信令、`apps/web` Three.js 3D 渲染与 Web 调试器、`apps/server` 独立服务大厅）
 - **语言与规范**：100% 严格类型 TypeScript + ESM 模块规范，无外部框架依赖的纯函数内核与严格状态隔离
 - **实时图表**：可前往 [GitHub 官方贡献图表页面](https://github.com/RDS-official/RDS-Board-Game-Core/graphs/contributors) 查看更多维度的代码增删行数与周期统计。
